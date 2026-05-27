@@ -2205,7 +2205,7 @@ function renderProductVariantDetailRow(id, product = {}) {
         volume: 'ปริมาณ'
     }[product.soldBy || (product.soldByWeight ? 'weight' : 'each')] || 'แต่ละ / ชิ้น';
     const visibility = [
-        product.showOnWebsite !== false ? 'แสดงบนเว็บ' : 'ซ่อนจากเว็บ',
+        product.showOnWebsite !== false ? 'แสดงในเมนูเว็บ' : 'ซ่อนจากเมนูเว็บ',
         product.showInShop ? 'แสดงในร้านค้า' : 'ไม่แสดงในร้านค้า',
         product.showOnPos !== false ? 'แสดงบน POS' : 'ซ่อนจาก POS',
         product.taxEnabled !== false ? 'ภาษี 7%' : 'ไม่คิดภาษี'
