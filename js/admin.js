@@ -295,6 +295,7 @@ const MENU_AVAILABLE_COLUMN = `Available for sale [${MENU_LOCATION_NAME}]`;
 const MENU_TAX_COLUMN = 'Tax - "eden cafe" (7%)';
 const MENU_SHOW_POS_COLUMN = 'Show on POS';
 const MENU_SHOW_WEBSITE_COLUMN = 'Show on Website';
+const MENU_SHOW_SHOP_COLUMN = 'Show in Shop';
 const MENU_VARIANTS_COLUMN = 'Variants JSON';
 
 const MENU_TEMPLATE_ROW = {
@@ -322,6 +323,7 @@ const MENU_TEMPLATE_ROW = {
     [MENU_TAX_COLUMN]: 'Yes',
     [MENU_SHOW_POS_COLUMN]: 'Yes',
     [MENU_SHOW_WEBSITE_COLUMN]: 'Yes',
+    [MENU_SHOW_SHOP_COLUMN]: 'No',
     Color: '#4caf50',
     Shape: 'rounded',
     [MENU_VARIANTS_COLUMN]: '[{"name":"เย็น","price":95,"cost":35,"sku":"MENU-COF-001-COLD","availableForSale":true},{"name":"ร้อน","price":85,"cost":32,"sku":"MENU-COF-001-HOT","availableForSale":true},{"name":"ปั่น","price":110,"cost":42,"sku":"MENU-COF-001-FRAPPE","availableForSale":true}]'
@@ -469,6 +471,7 @@ function normalizeMenuTemplateRow(row) {
         availableForSale: parseMenuBoolean(row[MENU_AVAILABLE_COLUMN] ?? row.availableForSale, true),
         showOnPos: parseMenuBoolean(row[MENU_SHOW_POS_COLUMN] ?? row.showOnPos, true),
         showOnWebsite: parseMenuBoolean(row[MENU_SHOW_WEBSITE_COLUMN] ?? row.showOnWebsite, true),
+        showInShop: parseMenuBoolean(row[MENU_SHOW_SHOP_COLUMN] ?? row.showInShop, false),
         price,
         stock,
         lowStock,
@@ -526,6 +529,7 @@ function menuProductToTemplateRow(product = {}) {
         [MENU_TAX_COLUMN]: boolToMenuText(product.taxEnabled),
         [MENU_SHOW_POS_COLUMN]: boolToMenuText(product.showOnPos),
         [MENU_SHOW_WEBSITE_COLUMN]: boolToMenuText(product.showOnWebsite),
+        [MENU_SHOW_SHOP_COLUMN]: boolToMenuText(product.showInShop),
         Color: product.color || '',
         Shape: product.shape || '',
         [MENU_VARIANTS_COLUMN]: variants.length ? JSON.stringify(variants) : ''
@@ -538,7 +542,7 @@ const XLSX_CATEGORY_CONFIG = {
         collection: 'products',
         permission: 'products',
         numberFields: ['price', 'order', 'cost', 'stock', 'lowStock', 'includedItemQuantity', 'taxRate'],
-        booleanFields: ['isSignature', 'soldByWeight', 'trackStock', 'availableForSale', 'taxEnabled', 'showOnPos', 'showOnWebsite'],
+        booleanFields: ['isSignature', 'soldByWeight', 'trackStock', 'availableForSale', 'taxEnabled', 'showOnPos', 'showOnWebsite', 'showInShop'],
         arrayFields: [],
         template: MENU_TEMPLATE_ROW,
         importRow: normalizeMenuTemplateRow,
@@ -2042,6 +2046,7 @@ function renderProductVariantDetailRow(id, product = {}) {
     }[product.soldBy || (product.soldByWeight ? 'weight' : 'each')] || 'แต่ละ / ชิ้น';
     const visibility = [
         product.showOnWebsite !== false ? 'แสดงบนเว็บ' : 'ซ่อนจากเว็บ',
+        product.showInShop ? 'แสดงในร้านค้า' : 'ไม่แสดงในร้านค้า',
         product.showOnPos !== false ? 'แสดงบน POS' : 'ซ่อนจาก POS',
         product.taxEnabled !== false ? 'ภาษี 7%' : 'ไม่คิดภาษี'
     ].join(' · ');
@@ -2546,6 +2551,7 @@ window.openProductModal = () => {
     setProductCheckboxValue('productTrackStock', false);
     setProductCheckboxValue('productTaxEnabled', true);
     setProductCheckboxValue('productShowOnWebsite', true);
+    setProductCheckboxValue('productShowInShop', false);
     setProductCheckboxValue('productShowOnPos', true);
     setProductCheckboxValue('productSignature', false);
     renderProductVariantRows(defaultProductVariants());
@@ -2589,6 +2595,7 @@ window.editProduct = (id) => {
     setProductCheckboxValue('productTrackStock', !!product.trackStock);
     setProductCheckboxValue('productTaxEnabled', product.taxEnabled !== false);
     setProductCheckboxValue('productShowOnWebsite', product.showOnWebsite !== false);
+    setProductCheckboxValue('productShowInShop', !!product.showInShop);
     setProductCheckboxValue('productShowOnPos', product.showOnPos !== false);
     document.getElementById('productSignature').checked = !!product.isSignature;
     renderProductVariantRows(productVariantsForDisplay(product));
@@ -2654,6 +2661,7 @@ productForm.addEventListener('submit', async (e) => {
             trackStock: getProductCheckboxValue('productTrackStock'),
             availableForSale: getProductCheckboxValue('productAvailableForSale', true),
             showOnWebsite: getProductCheckboxValue('productShowOnWebsite', true),
+            showInShop: getProductCheckboxValue('productShowInShop', false),
             showOnPos: getProductCheckboxValue('productShowOnPos', true),
             taxName: 'eden cafe',
             taxRate: 7,

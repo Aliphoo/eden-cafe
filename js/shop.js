@@ -30,19 +30,36 @@ function safeImageURL(value) {
     return /^https?:\/\//i.test(url) || url.startsWith('Images/') || url.startsWith('Hero/') ? url : 'Images/Logo.webp';
 }
 
+function parseShopBoolean(value, fallback = false) {
+    if (value === undefined || value === null || String(value).trim() === '') return fallback;
+    if (typeof value === 'boolean') return value;
+    const text = String(value).trim().toLowerCase();
+    return ['true', '1', 'yes', 'y', 'available', 'sale', 'on', '\u0e40\u0e1b\u0e34\u0e14', '\u0e02\u0e32\u0e22', '\u0e43\u0e0a\u0e48'].includes(text);
+}
+
 function normalizeProduct(product, categoryMap = {}) {
+    const source = product.source || 'shop';
+    const rawId = product.id || product.slug || product.name || crypto.randomUUID?.() || String(Date.now());
     const categoryId = product.category || product.categoryId || 'other';
     const category = categoryMap[categoryId] || {};
     const en = isEnglishPage();
+    const variants = Array.isArray(product.variants) ? product.variants : [];
+    const activeVariant = variants.find(variant => parseShopBoolean(variant.availableForSale, true)) || variants[0] || null;
+    const trackStock = parseShopBoolean(product.trackStock, source === 'shop');
+    const stock = Number(product.stock);
     return {
-        id: product.id || product.slug || product.name || crypto.randomUUID?.() || String(Date.now()),
+        id: source === 'menu' ? `menu-${rawId}` : rawId,
+        source,
         category: categoryId,
         categoryName: product.categoryName || category.name || (en ? product.categoryNameEn : product.categoryNameTh) || (en ? 'Products' : 'สินค้า'),
         name: product.name || (en ? product.nameEn : product.nameTh) || 'Eden Product',
         description: product.description || (en ? product.descriptionEn : product.descriptionTh) || '',
-        price: Number(product.price) || 0,
+        price: Number(activeVariant?.price ?? product.price) || 0,
         imageUrl: product.imageUrl || product.image || 'Images/Logo.webp',
-        stock: typeof product.stock === 'number' ? product.stock : 99
+        stock: trackStock ? (Number.isFinite(stock) ? stock : 0) : (Number.isFinite(stock) && stock > 0 ? stock : 99),
+        availableForSale: parseShopBoolean(product.availableForSale, true),
+        showInShop: parseShopBoolean(product.showInShop, source === 'shop'),
+        variants
     };
 }
 
@@ -132,12 +149,26 @@ function setupTabs() {
 async function fetchProductsFromCloud() {
     if (!db) return [];
 
-    const catSnap = await getDocs(query(collection(db, 'shop_categories')));
-    const categoryMap = {};
-    catSnap.forEach(docSnap => { categoryMap[docSnap.id] = docSnap.data(); });
+    const [shopCatSnap, shopProdSnap, menuCatSnap, menuProdSnap] = await Promise.all([
+        getDocs(query(collection(db, 'shop_categories'))),
+        getDocs(query(collection(db, 'shop_products'))),
+        getDocs(query(collection(db, 'categories'))),
+        getDocs(query(collection(db, 'products')))
+    ]);
+    const shopCategoryMap = {};
+    const menuCategoryMap = {};
+    shopCatSnap.forEach(docSnap => { shopCategoryMap[docSnap.id] = docSnap.data(); });
+    menuCatSnap.forEach(docSnap => { menuCategoryMap[docSnap.id] = docSnap.data(); });
 
-    const prodSnap = await getDocs(query(collection(db, 'shop_products')));
-    return prodSnap.docs.map(docSnap => normalizeProduct({ id: docSnap.id, ...docSnap.data() }, categoryMap));
+    const shopProducts = shopProdSnap.docs
+        .map(docSnap => normalizeProduct({ id: docSnap.id, source: 'shop', ...docSnap.data() }, shopCategoryMap))
+        .filter(product => product.availableForSale !== false);
+
+    const menuProductsForShop = menuProdSnap.docs
+        .map(docSnap => normalizeProduct({ id: docSnap.id, source: 'menu', ...docSnap.data() }, menuCategoryMap))
+        .filter(product => product.availableForSale !== false && product.showInShop);
+
+    return [...shopProducts, ...menuProductsForShop];
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
