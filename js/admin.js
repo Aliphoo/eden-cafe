@@ -280,15 +280,174 @@ let ordersUnsubscribe = null;
 let bookingsUnsubscribe = null;
 let memberFiltersBound = false;
 
+
+const MENU_LOCATION_NAME = 'EDEN CAFE AND ETHNIC RESTAURANT.Co.,Ltd';
+const MENU_PRICE_COLUMN = `Price [${MENU_LOCATION_NAME}]`;
+const MENU_STOCK_COLUMN = `In stock [${MENU_LOCATION_NAME}]`;
+const MENU_LOW_STOCK_COLUMN = `Low stock [${MENU_LOCATION_NAME}]`;
+const MENU_AVAILABLE_COLUMN = `Available for sale [${MENU_LOCATION_NAME}]`;
+const MENU_TAX_COLUMN = 'Tax - "eden cafe" (7%)';
+
+const MENU_TEMPLATE_ROW = {
+    Handle: 'eden-iced-latte',
+    SKU: 'MENU-COF-001',
+    Name: 'Eden Iced Latte',
+    Category: 'coffee',
+    Description: 'Signature iced latte with Eden house blend.',
+    'Sold by weight': 'No',
+    'Option 1 name': 'Size',
+    'Option 1 value': 'Regular',
+    'Option 2 name': 'Sweetness',
+    'Option 2 value': '50%',
+    'Option 3 name': 'Milk',
+    'Option 3 value': 'Fresh milk',
+    Cost: 35,
+    Barcode: '8850000000012',
+    'SKU of included item': '',
+    'Quantity of included item': 1,
+    'Track stock': 'Yes',
+    [MENU_AVAILABLE_COLUMN]: 'Yes',
+    [MENU_PRICE_COLUMN]: 95,
+    [MENU_STOCK_COLUMN]: 50,
+    [MENU_LOW_STOCK_COLUMN]: 5,
+    [MENU_TAX_COLUMN]: 'Yes'
+};
+
+function cleanMenuCell(value) {
+    return String(value ?? '').trim();
+}
+
+function parseMenuNumber(value) {
+    if (value === undefined || value === null || cleanMenuCell(value) === '') return undefined;
+    const parsed = Number(String(value).replace(/,/g, '').trim());
+    return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseMenuBoolean(value, fallback = false) {
+    if (value === undefined || value === null || cleanMenuCell(value) === '') return fallback;
+    const text = cleanMenuCell(value).toLowerCase();
+    return ['true', '1', 'yes', 'y', 'available', 'sale', 'on', '\u0e40\u0e1b\u0e34\u0e14', '\u0e02\u0e32\u0e22', '\u0e43\u0e0a\u0e48'].includes(text);
+}
+
+function boolToMenuText(value) {
+    return value === false ? 'No' : 'Yes';
+}
+
+function slugifyMenuHandle(value) {
+    return cleanMenuCell(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9\u0e00-\u0e7f]+/gi, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+}
+
+function menuOptionsFromRow(row) {
+    const options = [];
+    [1, 2, 3].forEach((index) => {
+        const name = cleanMenuCell(row[`Option ${index} name`] ?? row[`option${index}Name`]);
+        const value = cleanMenuCell(row[`Option ${index} value`] ?? row[`option${index}Value`]);
+        if (name || value) options.push({ name, value });
+    });
+    return options;
+}
+
+function normalizeMenuCategory(value) {
+    return slugifyMenuHandle(value || 'other') || 'other';
+}
+
+function normalizeMenuTemplateRow(row) {
+    const name = cleanMenuCell(row.Name ?? row.name);
+    const sku = cleanMenuCell(row.SKU ?? row.sku);
+    const handle = slugifyMenuHandle(row.Handle ?? row.handle ?? name ?? sku);
+    const price = parseMenuNumber(row[MENU_PRICE_COLUMN] ?? row.Price ?? row.price) ?? 0;
+    const stock = parseMenuNumber(row[MENU_STOCK_COLUMN] ?? row.stock ?? row.inStock) ?? 0;
+    const lowStock = parseMenuNumber(row[MENU_LOW_STOCK_COLUMN] ?? row.lowStock) ?? 0;
+    const cost = parseMenuNumber(row.Cost ?? row.cost);
+    const includedQty = parseMenuNumber(row['Quantity of included item'] ?? row.includedItemQuantity);
+    const options = menuOptionsFromRow(row);
+
+    const normalized = {
+        id: handle || sku || slugifyMenuHandle(name),
+        handle: handle || undefined,
+        sku: sku || undefined,
+        name: name || sku || handle || 'Eden Menu',
+        category: normalizeMenuCategory(row.Category ?? row.category),
+        description: cleanMenuCell(row.Description ?? row.description),
+        soldByWeight: parseMenuBoolean(row['Sold by weight'] ?? row.soldByWeight),
+        option1Name: cleanMenuCell(row['Option 1 name'] ?? row.option1Name),
+        option1Value: cleanMenuCell(row['Option 1 value'] ?? row.option1Value),
+        option2Name: cleanMenuCell(row['Option 2 name'] ?? row.option2Name),
+        option2Value: cleanMenuCell(row['Option 2 value'] ?? row.option2Value),
+        option3Name: cleanMenuCell(row['Option 3 name'] ?? row.option3Name),
+        option3Value: cleanMenuCell(row['Option 3 value'] ?? row.option3Value),
+        options,
+        barcode: cleanMenuCell(row.Barcode ?? row.barcode),
+        includedItemSku: cleanMenuCell(row['SKU of included item'] ?? row.includedItemSku),
+        trackStock: parseMenuBoolean(row['Track stock'] ?? row.trackStock),
+        availableForSale: parseMenuBoolean(row[MENU_AVAILABLE_COLUMN] ?? row.availableForSale, true),
+        price,
+        stock,
+        lowStock,
+        taxName: 'eden cafe',
+        taxRate: 7,
+        taxEnabled: parseMenuBoolean(row[MENU_TAX_COLUMN] ?? row.taxEnabled, true)
+    };
+
+    if (cost !== undefined) normalized.cost = cost;
+    if (includedQty !== undefined) normalized.includedItemQuantity = includedQty;
+    if (row.imageUrl || row.Image || row.image) normalized.imageUrl = cleanMenuCell(row.imageUrl ?? row.Image ?? row.image);
+    if (row.isSignature !== undefined) normalized.isSignature = parseMenuBoolean(row.isSignature);
+
+    Object.keys(normalized).forEach((key) => {
+        if (normalized[key] === undefined || normalized[key] === '') delete normalized[key];
+        if (Array.isArray(normalized[key]) && !normalized[key].length) delete normalized[key];
+    });
+    return normalized;
+}
+
+function menuProductToTemplateRow(product = {}) {
+    const option = (index, key) => {
+        const optionItem = Array.isArray(product.options) ? product.options[index - 1] : null;
+        return product[`option${index}${key}`] ?? optionItem?.[key.toLowerCase()] ?? '';
+    };
+
+    return {
+        Handle: product.handle || product.id || slugifyMenuHandle(product.name || product.sku || ''),
+        SKU: product.sku || '',
+        Name: product.name || '',
+        Category: product.category || '',
+        Description: product.description || '',
+        'Sold by weight': boolToMenuText(product.soldByWeight),
+        'Option 1 name': option(1, 'Name'),
+        'Option 1 value': option(1, 'Value'),
+        'Option 2 name': option(2, 'Name'),
+        'Option 2 value': option(2, 'Value'),
+        'Option 3 name': option(3, 'Name'),
+        'Option 3 value': option(3, 'Value'),
+        Cost: product.cost ?? '',
+        Barcode: product.barcode || '',
+        'SKU of included item': product.includedItemSku || '',
+        'Quantity of included item': product.includedItemQuantity ?? '',
+        'Track stock': boolToMenuText(product.trackStock),
+        [MENU_AVAILABLE_COLUMN]: boolToMenuText(product.availableForSale),
+        [MENU_PRICE_COLUMN]: product.price ?? '',
+        [MENU_STOCK_COLUMN]: product.stock ?? '',
+        [MENU_LOW_STOCK_COLUMN]: product.lowStock ?? '',
+        [MENU_TAX_COLUMN]: boolToMenuText(product.taxEnabled)
+    };
+}
+
 const XLSX_CATEGORY_CONFIG = {
     products: {
-        label: 'เมนูร้าน (products)',
+        label: '\u0e40\u0e21\u0e19\u0e39\u0e23\u0e49\u0e32\u0e19 (products)',
         collection: 'products',
         permission: 'products',
-        numberFields: ['price', 'order'],
-        booleanFields: ['isSignature'],
+        numberFields: ['price', 'order', 'cost', 'stock', 'lowStock', 'includedItemQuantity', 'taxRate'],
+        booleanFields: ['isSignature', 'soldByWeight', 'trackStock', 'availableForSale', 'taxEnabled'],
         arrayFields: [],
-        template: { id: 'espresso', name: 'Espresso', description: 'Coffee shot', category: 'coffee', price: 80, imageUrl: 'https://example.com/espresso.webp', isSignature: true, order: 1 }
+        template: MENU_TEMPLATE_ROW,
+        importRow: normalizeMenuTemplateRow,
+        exportRow: menuProductToTemplateRow
     },
     categories: {
         label: 'หมวดเมนูร้าน (categories)',
@@ -413,9 +572,10 @@ async function downloadCategoryDataAsXLSX(categoryKey) {
 
     const snapshot = await getDocs(query(collection(db, cfg.collection)));
     const rows = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+    const exportRows = typeof cfg.exportRow === 'function' ? rows.map(row => cfg.exportRow(row)) : rows;
     const XLSX = window.XLSX;
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheetFromData(rows), 'data');
+    XLSX.utils.book_append_sheet(workbook, worksheetFromData(exportRows), 'data');
     XLSX.writeFile(workbook, xlsxFileName('data', categoryKey));
 }
 
@@ -449,7 +609,7 @@ async function uploadCategoryDataFromXLSX(categoryKey, file) {
     let created = 0;
     let updated = 0;
     for (const row of rows) {
-        const normalized = normalizeRowForUpload(row, cfg);
+        const normalized = typeof cfg.importRow === 'function' ? cfg.importRow(row) : normalizeRowForUpload(row, cfg);
         const idValue = String(normalized.id || normalized.uid || '').trim();
         delete normalized.id;
         if (!Object.keys(normalized).length) continue;
@@ -1539,7 +1699,7 @@ function setupRealtimeProducts() {
         productsData = {};
         
         if (snapshot.empty) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">ไม่มีข้อมูลเมนูสินค้า</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">ไม่มีข้อมูลเมนูสินค้า</td></tr>';
             return;
         }
 
@@ -1555,15 +1715,20 @@ function setupRealtimeProducts() {
             }
 
             const tr = document.createElement('tr');
+            const availableForSale = product.availableForSale !== false;
+            const stockText = product.trackStock ? String(product.stock ?? 0) : '-';
             tr.innerHTML = `
                 <td><img loading="lazy" src="${safeImageURL(product.imageUrl)}" alt="${escapeHTML(product.name)}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 5px;"></td>
-                <td><strong>${escapeHTML(product.name)}</strong></td>
+                <td><strong>${escapeHTML(product.sku || product.handle || id)}</strong></td>
+                <td><strong>${escapeHTML(product.name)}</strong><br><small style="color:#789;">${escapeHTML(product.handle || id)}</small></td>
                 <td>${escapeHTML(catName)}</td>
-                <td>฿${escapeHTML(product.price)}</td>
-                <td>${product.isSignature ? '<span style="color: green;"> แนะนำ</span>' : '-'}</td>
+                <td>&#3647;${escapeHTML(product.price)}</td>
+                <td>${escapeHTML(stockText)}</td>
+                <td>${availableForSale ? '<span style="color: green;">Yes</span>' : '<span style="color:#d32f2f;">No</span>'}</td>
+                <td>${product.isSignature ? '<span style="color: green;">Yes</span>' : '-'}</td>
                 <td>
-                    <button class="btn-action btn-edit" onclick="editProduct('${escapeJSString(id)}')"> แก้ไข</button>
-                    <button class="btn-action btn-delete" onclick="deleteProduct('${escapeJSString(id)}')"> ลบ</button>
+                    <button class="btn-action btn-edit" onclick="editProduct('${escapeJSString(id)}')">Edit</button>
+                    <button class="btn-action btn-delete" onclick="deleteProduct('${escapeJSString(id)}')">Delete</button>
                 </td>
             `;
             tbody.appendChild(tr);
@@ -1577,10 +1742,53 @@ function setupRealtimeProducts() {
 const productModal = document.getElementById('productModal');
 const productForm = document.getElementById('productForm');
 
+function setProductInputValue(id, value = '') {
+    const el = document.getElementById(id);
+    if (el) el.value = value ?? '';
+}
+
+function getProductInputValue(id, fallback = '') {
+    const el = document.getElementById(id);
+    const value = el ? String(el.value ?? '').trim() : '';
+    return value || fallback;
+}
+
+function setProductCheckboxValue(id, value = false) {
+    const el = document.getElementById(id);
+    if (el) el.checked = !!value;
+}
+
+function getProductCheckboxValue(id, fallback = false) {
+    const el = document.getElementById(id);
+    return el ? !!el.checked : fallback;
+}
+
+function getProductNumberValue(id, fallback = 0) {
+    const value = Number(getProductInputValue(id));
+    return Number.isFinite(value) ? value : fallback;
+}
+
+function collectProductOptionsFromForm() {
+    const options = [];
+    [1, 2, 3].forEach((index) => {
+        const name = getProductInputValue('productOption' + index + 'Name');
+        const value = getProductInputValue('productOption' + index + 'Value');
+        if (name || value) options.push({ name, value });
+    });
+    return options;
+}
+
 window.openProductModal = () => {
     productForm.reset();
     document.getElementById('productId').value = '';
     document.getElementById('productImageFile').value = '';
+    setProductInputValue('productStock', 0);
+    setProductInputValue('productLowStock', 0);
+    setProductInputValue('productIncludedItemQuantity', 1);
+    setProductCheckboxValue('productAvailableForSale', true);
+    setProductCheckboxValue('productTrackStock', false);
+    setProductCheckboxValue('productSoldByWeight', false);
+    setProductCheckboxValue('productTaxEnabled', true);
     document.getElementById('modal-title').innerText = 'เพิ่มเมนูใหม่';
     productModal.style.display = 'block';
 };
@@ -1600,6 +1808,24 @@ window.editProduct = (id) => {
     document.getElementById('productImage').value = product.imageUrl || '';
     document.getElementById('productImageFile').value = '';
     document.getElementById('productCategory').value = product.category || 'coffee';
+    setProductInputValue('productHandle', product.handle || id);
+    setProductInputValue('productSku', product.sku || '');
+    setProductInputValue('productCost', product.cost ?? '');
+    setProductInputValue('productStock', product.stock ?? 0);
+    setProductInputValue('productLowStock', product.lowStock ?? 0);
+    setProductInputValue('productOption1Name', product.option1Name || product.options?.[0]?.name || '');
+    setProductInputValue('productOption1Value', product.option1Value || product.options?.[0]?.value || '');
+    setProductInputValue('productOption2Name', product.option2Name || product.options?.[1]?.name || '');
+    setProductInputValue('productOption2Value', product.option2Value || product.options?.[1]?.value || '');
+    setProductInputValue('productOption3Name', product.option3Name || product.options?.[2]?.name || '');
+    setProductInputValue('productOption3Value', product.option3Value || product.options?.[2]?.value || '');
+    setProductInputValue('productBarcode', product.barcode || '');
+    setProductInputValue('productIncludedItemSku', product.includedItemSku || '');
+    setProductInputValue('productIncludedItemQuantity', product.includedItemQuantity ?? 1);
+    setProductCheckboxValue('productAvailableForSale', product.availableForSale !== false);
+    setProductCheckboxValue('productTrackStock', !!product.trackStock);
+    setProductCheckboxValue('productSoldByWeight', !!product.soldByWeight);
+    setProductCheckboxValue('productTaxEnabled', product.taxEnabled !== false);
     document.getElementById('productSignature').checked = !!product.isSignature;
     
     document.getElementById('modal-title').innerText = 'แก้ไขเมนูสินค้า';
@@ -1642,20 +1868,49 @@ productForm.addEventListener('submit', async (e) => {
             throw new Error("กรุณาอัปโหลดรูปภาพ หรือใส่ลิงก์รูปภาพ");
         }
 
+        const optionList = collectProductOptionsFromForm();
+        const productName = document.getElementById('productName').value;
+        const productHandle = getProductInputValue('productHandle') || slugifyMenuHandle(productName);
         const productData = {
-            name: document.getElementById('productName').value,
+            handle: productHandle,
+            sku: getProductInputValue('productSku'),
+            name: productName,
             description: document.getElementById('productDesc').value,
             price: Number(document.getElementById('productPrice').value),
+            cost: getProductNumberValue('productCost', 0),
+            stock: getProductNumberValue('productStock', 0),
+            lowStock: getProductNumberValue('productLowStock', 0),
             imageUrl: finalImageUrl,
             category: document.getElementById('productCategory').value,
-            isSignature: document.getElementById('productSignature').checked
+            soldByWeight: getProductCheckboxValue('productSoldByWeight'),
+            trackStock: getProductCheckboxValue('productTrackStock'),
+            availableForSale: getProductCheckboxValue('productAvailableForSale', true),
+            taxName: 'eden cafe',
+            taxRate: 7,
+            taxEnabled: getProductCheckboxValue('productTaxEnabled', true),
+            option1Name: getProductInputValue('productOption1Name'),
+            option1Value: getProductInputValue('productOption1Value'),
+            option2Name: getProductInputValue('productOption2Name'),
+            option2Value: getProductInputValue('productOption2Value'),
+            option3Name: getProductInputValue('productOption3Name'),
+            option3Value: getProductInputValue('productOption3Value'),
+            options: optionList,
+            barcode: getProductInputValue('productBarcode'),
+            includedItemSku: getProductInputValue('productIncludedItemSku'),
+            includedItemQuantity: getProductNumberValue('productIncludedItemQuantity', 1),
+            isSignature: document.getElementById('productSignature').checked,
+            updatedAt: new Date().toISOString()
         };
         
         if (id) {
             // Update existing
             await updateDoc(doc(db, "products", id), productData);
+        } else if (productData.handle) {
+            productData.createdAt = new Date().toISOString();
+            await setDoc(doc(db, "products", productData.handle), productData, { merge: true });
         } else {
             // Add new
+            productData.createdAt = new Date().toISOString();
             await addDoc(collection(db, "products"), productData);
         }
         closeProductModal();

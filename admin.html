@@ -688,16 +688,21 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>รูปภาพ</th>
-                                <th>ชื่อเมนู</th>
-                                <th>หมวดหมู่</th>
-                                <th>ราคา</th>
-                                <th>เมนูแนะนำ</th>
-                                <th>จัดการ</th>
+                                
+                                
+                                <th>Image</th>
+                                <th>SKU</th>
+                                <th>Name</th>
+                                <th>Category</th>
+                                <th>Price</th>
+                                <th>Stock</th>
+                                <th>Available</th>
+                                <th>Signature</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody id="products-table-body">
-                            <tr><td colspan="6" style="text-align: center;">กำลังโหลดข้อมูล...</td></tr>
+                            <tr><td colspan="9" style="text-align: center;">กำลังโหลดข้อมูล...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -938,6 +943,16 @@
             <h2 id="modal-title" style="margin-bottom: 20px;">เพิ่มเมนูใหม่</h2>
             <form id="productForm">
                 <input type="hidden" id="productId">
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
+                    <div class="form-group">
+                        <label>Handle</label>
+                        <input type="text" id="productHandle" placeholder="eden-iced-latte">
+                    </div>
+                    <div class="form-group">
+                        <label>SKU</label>
+                        <input type="text" id="productSku" placeholder="MENU-COF-001">
+                    </div>
+                </div>
                 <div class="form-group">
                     <label>ชื่อเมนู</label>
                     <input type="text" id="productName" required>
@@ -946,9 +961,23 @@
                     <label>คำอธิบาย</label>
                     <textarea id="productDesc" required></textarea>
                 </div>
-                <div class="form-group">
-                    <label>ราคา (บาท)</label>
-                    <input type="number" id="productPrice" required>
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">
+                    <div class="form-group">
+                        <label>Price [EDEN CAFE AND ETHNIC RESTAURANT.Co.,Ltd]</label>
+                        <input type="number" id="productPrice" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Cost</label>
+                        <input type="number" id="productCost" min="0" step="0.01" placeholder="0">
+                    </div>
+                    <div class="form-group">
+                        <label>In stock</label>
+                        <input type="number" id="productStock" min="0" step="1" placeholder="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Low stock</label>
+                        <input type="number" id="productLowStock" min="0" step="1" placeholder="0">
+                    </div>
                 </div>
                 <div class="form-group">
                     <label for="productImageFile">อัปโหลดรูปภาพ (Image File)</label>
@@ -961,10 +990,25 @@
                         <option value="">-- เลือกหมวดหมู่ --</option>
                     </select>
                 </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="productSignature"> เป็นเมนูแนะนำ (แสดงหน้าแรก)
-                    </label>
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
+                    <div class="form-group"><label>Option 1 name</label><input type="text" id="productOption1Name" placeholder="Size"></div>
+                    <div class="form-group"><label>Option 1 value</label><input type="text" id="productOption1Value" placeholder="Regular"></div>
+                    <div class="form-group"><label>Option 2 name</label><input type="text" id="productOption2Name" placeholder="Sweetness"></div>
+                    <div class="form-group"><label>Option 2 value</label><input type="text" id="productOption2Value" placeholder="50%"></div>
+                    <div class="form-group"><label>Option 3 name</label><input type="text" id="productOption3Name" placeholder="Milk"></div>
+                    <div class="form-group"><label>Option 3 value</label><input type="text" id="productOption3Value" placeholder="Fresh milk"></div>
+                </div>
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
+                    <div class="form-group"><label>Barcode</label><input type="text" id="productBarcode" placeholder="885..."></div>
+                    <div class="form-group"><label>SKU of included item</label><input type="text" id="productIncludedItemSku"></div>
+                    <div class="form-group"><label>Quantity of included item</label><input type="number" id="productIncludedItemQuantity" min="0" step="1" placeholder="1"></div>
+                </div>
+                <div class="form-group" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px;">
+                    <label><input type="checkbox" id="productAvailableForSale" checked> Available for sale</label>
+                    <label><input type="checkbox" id="productTrackStock"> Track stock</label>
+                    <label><input type="checkbox" id="productSoldByWeight"> Sold by weight</label>
+                    <label><input type="checkbox" id="productTaxEnabled" checked> Tax - "eden cafe" (7%)</label>
+                    <label><input type="checkbox" id="productSignature"> Signature menu</label>
                 </div>
                 <button type="submit" class="btn-submit">บันทึกข้อมูล</button>
             </form>
@@ -1249,7 +1293,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=24"></script>
+    <script type="module" src="js/admin.js?v=25"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {
