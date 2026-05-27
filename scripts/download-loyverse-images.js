@@ -1,5 +1,7 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const SCRAPE_PATH = path.join(__dirname, '..', 'backups', 'loyverse-image-scrape-live.json');
 const IMPORT_PATH = path.join(__dirname, '..', 'backups', 'loyverse-products-import-ready-2026-05-27T13-54-11-923Z.json');
@@ -7,6 +9,41 @@ const OUT_DIR = path.join(__dirname, '..', 'Images', 'loyverse', 'menu');
 const MAP_PATH = path.join(OUT_DIR, 'image-map.json');
 
 const CONCURRENCY = 8;
+
+function findPython() {
+  const candidates = [
+    process.env.PYTHON,
+    path.join(os.homedir(), '.cache', 'codex-runtimes', 'codex-primary-runtime', 'dependencies', 'python', process.platform === 'win32' ? 'python.exe' : 'bin/python'),
+    process.platform === 'win32' ? 'py' : null,
+    'python3',
+    'python',
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const result = spawnSync(candidate, ['--version'], { encoding: 'utf8', shell: false });
+    if (result.status === 0) return candidate;
+  }
+  return null;
+}
+
+function convertMapToWebp() {
+  if (process.argv.includes('--skip-webp')) return { skipped: true, reason: 'skip-webp flag' };
+
+  const python = findPython();
+  if (!python) {
+    throw new Error('Python with Pillow is required to auto-convert Loyverse images to WebP.');
+  }
+
+  const scriptPath = path.join(__dirname, 'convert-loyverse-images-to-webp.py');
+  const result = spawnSync(python, [scriptPath, '--map', MAP_PATH, '--delete-originals'], {
+    cwd: path.join(__dirname, '..'),
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) {
+    throw new Error(`WebP conversion failed: ${result.stderr || result.stdout}`);
+  }
+  return JSON.parse(result.stdout || '{}');
+}
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -119,10 +156,13 @@ async function main() {
   };
 
   fs.writeFileSync(MAP_PATH, JSON.stringify(map, null, 2), 'utf8');
+  const webp = convertMapToWebp();
+
   console.log(JSON.stringify({
     totalCandidates: candidates.length,
     downloaded: ok.length,
     failed: failed.length,
+    webp,
     mapPath: MAP_PATH,
   }, null, 2));
   if (failed.length) process.exitCode = 1;
