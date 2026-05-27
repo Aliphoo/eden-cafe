@@ -1,11 +1,14 @@
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { onRequest } = require('firebase-functions/v2/https');
+const { defineSecret } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 
 admin.initializeApp();
 
 const db = admin.firestore();
+const CLOUDFLARE_ACCOUNT_ID = defineSecret('CLOUDFLARE_ACCOUNT_ID');
+const CLOUDFLARE_IMAGES_API_TOKEN = defineSecret('CLOUDFLARE_IMAGES_API_TOKEN');
 
 const PLACE_ID = 'ChIJVTN6cGwB1zAR66OQ_OBKRkM';
 const PLACE_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
@@ -68,6 +71,41 @@ async function requireAdminUid(req) {
   return decoded.uid || '';
 }
 
+async function requireAdminAccess(req, permission = '') {
+  const header = req.get('authorization') || '';
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match) {
+    const error = new Error('Missing Authorization token');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  const decoded = await admin.auth().verifyIdToken(match[1]);
+  const email = String(decoded.email || '').trim().toLowerCase();
+  if (ADMIN_EMAILS.has(email)) return decoded;
+
+  const accessSnap = await db.collection('admin_users').doc(decoded.uid).get();
+  if (!accessSnap.exists) {
+    const error = new Error('Admin permission required');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const access = accessSnap.data() || {};
+  if (access.status !== 'active') {
+    const error = new Error('Admin access is not active');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  if (access.role === 'owner' || access.role === 'head_manager') return decoded;
+  if (permission && access.permissions && access.permissions[permission] === true) return decoded;
+
+  const error = new Error('Admin permission required');
+  error.statusCode = 403;
+  throw error;
+}
+
 function authMemberCode(uid) {
   const source = String(uid || '000000').replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase().padStart(6, '0');
   return 'ED-' + source;
@@ -107,6 +145,66 @@ function authUserToMemberDoc(userRecord) {
 
 function cleanString(value, maxLength) {
   return String(value ?? '').trim().slice(0, maxLength);
+}
+
+function permissionFromImageFolder(folder) {
+  const value = cleanString(folder, 40).toLowerCase();
+  if (value === 'shop_products') return 'shop';
+  if (value === 'blogs') return 'blogs';
+  if (value === 'rooms') return 'rooms';
+  return 'products';
+}
+
+function normalizeImagePayload(raw) {
+  const folder = cleanString(raw.folder || 'uploads', 40).replace(/[^a-z0-9_-]/gi, '_').toLowerCase();
+  const fileName = cleanString(raw.fileName || `eden-${Date.now()}.webp`, 120).replace(/[^\w.-]/g, '_');
+  const mimeType = cleanString(raw.mimeType || 'image/webp', 60);
+  const imageBase64 = String(raw.imageBase64 || '').replace(/^data:[^;]+;base64,/, '');
+
+  if (!/^image\/(webp|jpeg|png|gif)$/i.test(mimeType)) throw new Error('Unsupported image type');
+  if (!imageBase64) throw new Error('Missing image data');
+
+  const buffer = Buffer.from(imageBase64, 'base64');
+  if (!buffer.length) throw new Error('Invalid image data');
+  if (buffer.length > 10 * 1024 * 1024) throw new Error('Image is too large. Maximum size is 10 MB');
+
+  return { folder, fileName, mimeType, buffer };
+}
+
+async function uploadToCloudflareImages({ folder, fileName, mimeType, buffer }) {
+  const accountId = CLOUDFLARE_ACCOUNT_ID.value();
+  const apiToken = CLOUDFLARE_IMAGES_API_TOKEN.value();
+  const accountHash = process.env.CLOUDFLARE_IMAGES_ACCOUNT_HASH || '';
+  if (!accountId || !apiToken) throw new Error('Cloudflare Images secrets are not configured');
+
+  const imageId = `${folder}/${Date.now()}-${fileName.replace(/\.[^.]+$/, '')}`.replace(/\/+/g, '/');
+  const form = new FormData();
+  form.append('file', new Blob([buffer], { type: mimeType }), fileName);
+  form.append('id', imageId);
+  form.append('metadata', JSON.stringify({ source: 'eden-admin', folder, originalFileName: fileName }));
+  form.append('requireSignedURLs', 'false');
+
+  const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiToken}` },
+    body: form,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) {
+    const message = Array.isArray(data.errors) && data.errors.length
+      ? data.errors.map(item => item.message || item.code).join(', ')
+      : `Cloudflare upload failed with HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  const result = data.result || {};
+  const variants = Array.isArray(result.variants) ? result.variants : [];
+  const url = variants[0] || (accountHash ? `https://imagedelivery.net/${accountHash}/${result.id || imageId}/public` : '');
+  return {
+    id: result.id || imageId,
+    url,
+    variants,
+  };
 }
 
 function isISODate(value) {
@@ -389,6 +487,49 @@ exports.createBooking = onRequest(
   }
 );
 
+exports.uploadCloudflareImage = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [
+      CLOUDFLARE_ACCOUNT_ID,
+      CLOUDFLARE_IMAGES_API_TOKEN,
+    ],
+    timeoutSeconds: 60,
+    memory: '512MiB',
+  },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const payload = normalizeImagePayload(req.body || {});
+      await requireAdminAccess(req, permissionFromImageFolder(payload.folder));
+      const uploaded = await uploadToCloudflareImages(payload);
+      logger.info('Image uploaded to Cloudflare Images', {
+        imageId: uploaded.id,
+        folder: payload.folder,
+        byteLength: payload.buffer.length,
+      });
+      res.status(201).json({
+        ok: true,
+        provider: 'cloudflare_images',
+        id: uploaded.id,
+        url: uploaded.url,
+        variants: uploaded.variants,
+      });
+    } catch (error) {
+      const status = error.statusCode || (/Missing|Invalid|Unsupported|large|configured/i.test(error.message) ? 400 : 500);
+      logger.warn('Cloudflare image upload failed', { message: error.message, status });
+      res.status(status).json({ error: error.message || 'Cloudflare image upload failed' });
+    }
+  }
+);
+
 exports.syncAuthUsersToFirestore = onRequest(
   { region: 'asia-southeast1' },
   async (req, res) => {
@@ -435,4 +576,3 @@ exports.syncAuthUsersToFirestore = onRequest(
     }
   }
 );
-

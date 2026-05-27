@@ -51,6 +51,48 @@ function compressToWebP(file, quality = 0.8) {
     });
 }
 
+function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+        reader.onerror = error => reject(error);
+        reader.readAsDataURL(blob);
+    });
+}
+
+async function uploadImageToCloudflare(blob, folder, fileName) {
+    const token = await auth.currentUser?.getIdToken(true);
+    if (!token) throw new Error('Please sign in as admin before uploading images');
+
+    const response = await fetch(FUNCTIONS_BASE_URL + '/uploadCloudflareImage', {
+        method: 'POST',
+        headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            folder,
+            fileName,
+            mimeType: blob.type || 'image/webp',
+            imageBase64: await blobToBase64(blob)
+        })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.url) throw new Error(result.error || 'Cloudflare image upload failed');
+    return result.url;
+}
+
+async function uploadAdminImage(blob, folder, fileName) {
+    try {
+        return await uploadImageToCloudflare(blob, folder, fileName);
+    } catch (cloudflareError) {
+        console.warn('Cloudflare upload unavailable, falling back to Firebase Storage:', cloudflareError);
+        const storageRef = ref(storage, `${folder}/${fileName}`);
+        const snapshot = await uploadBytes(storageRef, blob);
+        return await getDownloadURL(snapshot.ref);
+    }
+}
+
 const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
 const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net';
 const ADMIN_COLLECTION = 'admin_users';
@@ -1172,9 +1214,7 @@ roomForm.addEventListener('submit', async (e) => {
             submitBtn.innerText = 'กำลังแปลงรูปภาพ...';
             const webpBlob = await compressToWebP(file, 0.8);
             submitBtn.innerText = 'กำลังอัปโหลดรูปภาพ...';
-            const storageRef = ref(storage, `rooms/${code}_${Date.now()}.webp`);
-            const snapshot = await uploadBytes(storageRef, webpBlob);
-            finalImageUrl = await getDownloadURL(snapshot.ref);
+            finalImageUrl = await uploadAdminImage(webpBlob, 'rooms', code + '_' + Date.now() + '.webp');
         }
 
         const roomData = {
@@ -1310,9 +1350,7 @@ productForm.addEventListener('submit', async (e) => {
             submitBtn.innerText = 'กำลังแปลงรูปภาพ...';
             const webpBlob = await compressToWebP(imageFile, 0.8);
             submitBtn.innerText = 'กำลังอัปโหลดรูปภาพ...';
-            const storageRef = ref(storage, 'products/' + Date.now() + '_image.webp');
-            const snapshot = await uploadBytes(storageRef, webpBlob);
-            finalImageUrl = await getDownloadURL(snapshot.ref);
+            finalImageUrl = await uploadAdminImage(webpBlob, 'products', Date.now() + '_image.webp');
         }
 
         if (!finalImageUrl) {
@@ -1503,9 +1541,7 @@ blogForm?.addEventListener('submit', async (e) => {
             submitBtn.innerText = 'กำลังแปลงรูปภาพ...';
             const webpBlob = await compressToWebP(file, 0.8);
             submitBtn.innerText = 'กำลังอัปโหลดรูปภาพ...';
-            const storageRef = ref(storage, `blogs/${Date.now()}.webp`);
-            const snapshot = await uploadBytes(storageRef, webpBlob);
-            imageUrl = await getDownloadURL(snapshot.ref);
+            imageUrl = await uploadAdminImage(webpBlob, 'blogs', Date.now() + '.webp');
         }
 
         const blogData = {
@@ -1849,9 +1885,7 @@ shopProductForm.addEventListener('submit', async (e) => {
             submitBtn.innerText = 'กำลังแปลงรูปภาพ...';
             const webpBlob = await compressToWebP(imageFile, 0.8);
             submitBtn.innerText = 'กำลังอัปโหลดรูปภาพ...';
-            const storageRef = ref(storage, 'shop_products/' + Date.now() + '_image.webp');
-            const snapshot = await uploadBytes(storageRef, webpBlob);
-            finalImageUrl = await getDownloadURL(snapshot.ref);
+            finalImageUrl = await uploadAdminImage(webpBlob, 'shop_products', Date.now() + '_image.webp');
         }
 
         if (!finalImageUrl) {
@@ -2620,6 +2654,7 @@ onAuthStateChanged(auth, (user) => {
         if(typeof fetchFaqsFromCloud === 'function') fetchFaqsFromCloud();
     }
 });
+
 
 
 
