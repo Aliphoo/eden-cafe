@@ -168,6 +168,8 @@ function normalizeImagePayload(raw) {
 
   if (!/^image\/(webp|jpeg|png|gif)$/i.test(mimeType)) throw new Error('Unsupported image type');
   if (!imageBase64) throw new Error('Missing image data');
+  if (imageBase64.length > 14 * 1024 * 1024) throw new Error('Image is too large. Maximum size is 10 MB');
+  if (!/^[A-Za-z0-9+/=]+$/.test(imageBase64)) throw new Error('Invalid image data');
 
   const buffer = Buffer.from(imageBase64, 'base64');
   if (!buffer.length) throw new Error('Invalid image data');
@@ -516,8 +518,8 @@ exports.uploadSpaceshipImage = onRequest(
     }
 
     try {
+      await requireAdminAccess(req, permissionFromImageFolder(req.body?.folder));
       const payload = normalizeImagePayload(req.body || {});
-      await requireAdminAccess(req, permissionFromImageFolder(payload.folder));
       const uploaded = await uploadToSpaceshipHosting(payload);
       logger.info('Image uploaded to Spaceship hosting', {
         path: uploaded.path,

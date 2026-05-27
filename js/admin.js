@@ -3,6 +3,9 @@ import { getMemberTier, getTierBenefits } from './membership.js';
 import { signInWithPopup, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
+const ADMIN_IMAGE_MAX_FILE_SIZE = 8 * 1024 * 1024;
+const ADMIN_IMAGE_MAX_EDGE = 1800;
+
 function escapeHTML(value) {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -29,6 +32,15 @@ function escapeJSString(str) {
 
 function compressToWebP(file, quality = 0.8) {
     return new Promise((resolve, reject) => {
+        if (!file || !/^image\//i.test(file.type || '')) {
+            reject(new Error('กรุณาเลือกไฟล์รูปภาพเท่านั้น'));
+            return;
+        }
+        if (file.size > ADMIN_IMAGE_MAX_FILE_SIZE) {
+            reject(new Error('รูปภาพใหญ่เกินไป กรุณาใช้ไฟล์ไม่เกิน 8MB'));
+            return;
+        }
+
         const reader = new FileReader();
         reader.readAsDataURL(file);
         reader.onload = event => {
@@ -37,10 +49,15 @@ function compressToWebP(file, quality = 0.8) {
             img.onload = () => {
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
-                canvas.width = img.width;
-                canvas.height = img.height;
+                const scale = Math.min(1, ADMIN_IMAGE_MAX_EDGE / Math.max(img.width, img.height));
+                canvas.width = Math.max(1, Math.round(img.width * scale));
+                canvas.height = Math.max(1, Math.round(img.height * scale));
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                 canvas.toBlob((blob) => {
+                    if (!blob) {
+                        reject(new Error('แปลงรูปภาพไม่สำเร็จ'));
+                        return;
+                    }
                     resolve(blob);
                 }, 'image/webp', quality);
             };
