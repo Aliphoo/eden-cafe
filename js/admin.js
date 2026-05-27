@@ -274,6 +274,7 @@ let productCurrentPage = 1;
 let productPageSize = 10;
 let productControlsBound = false;
 const selectedProductIds = new Set();
+const expandedProductIds = new Set();
 let categoriesData = {};
 let shopProductsData = {};
 let shopCategoriesData = {};
@@ -292,6 +293,9 @@ const MENU_STOCK_COLUMN = `In stock [${MENU_LOCATION_NAME}]`;
 const MENU_LOW_STOCK_COLUMN = `Low stock [${MENU_LOCATION_NAME}]`;
 const MENU_AVAILABLE_COLUMN = `Available for sale [${MENU_LOCATION_NAME}]`;
 const MENU_TAX_COLUMN = 'Tax - "eden cafe" (7%)';
+const MENU_SHOW_POS_COLUMN = 'Show on POS';
+const MENU_SHOW_WEBSITE_COLUMN = 'Show on Website';
+const MENU_VARIANTS_COLUMN = 'Variants JSON';
 
 const MENU_TEMPLATE_ROW = {
     Handle: 'eden-iced-latte',
@@ -315,7 +319,12 @@ const MENU_TEMPLATE_ROW = {
     [MENU_PRICE_COLUMN]: 95,
     [MENU_STOCK_COLUMN]: 50,
     [MENU_LOW_STOCK_COLUMN]: 5,
-    [MENU_TAX_COLUMN]: 'Yes'
+    [MENU_TAX_COLUMN]: 'Yes',
+    [MENU_SHOW_POS_COLUMN]: 'Yes',
+    [MENU_SHOW_WEBSITE_COLUMN]: 'Yes',
+    Color: '#4caf50',
+    Shape: 'rounded',
+    [MENU_VARIANTS_COLUMN]: '[{"name":"เย็น","price":95,"cost":35,"sku":"MENU-COF-001-COLD","availableForSale":true},{"name":"ร้อน","price":85,"cost":32,"sku":"MENU-COF-001-HOT","availableForSale":true},{"name":"ปั่น","price":110,"cost":42,"sku":"MENU-COF-001-FRAPPE","availableForSale":true}]'
 };
 
 function cleanMenuCell(value) {
@@ -356,6 +365,73 @@ function menuOptionsFromRow(row) {
     return options;
 }
 
+function parseMenuJSON(value, fallback = null) {
+    const text = cleanMenuCell(value);
+    if (!text) return fallback;
+    try {
+        return JSON.parse(text);
+    } catch (error) {
+        console.warn('Invalid menu JSON:', error);
+        return fallback;
+    }
+}
+
+function variantIdFromName(name, index = 0) {
+    return slugifyMenuHandle(name || `variant-${index + 1}`) || `variant-${index + 1}`;
+}
+
+function normalizeProductVariant(variant = {}, index = 0, baseProduct = {}) {
+    const name = cleanMenuCell(variant.name ?? variant.variant ?? variant.value ?? variant.optionValue ?? variant.title ?? `ตัวแปร ${index + 1}`);
+    const price = parseMenuNumber(variant.price ?? variant.salePrice ?? variant[MENU_PRICE_COLUMN]) ?? safeNumber(baseProduct.price, 0);
+    const cost = parseMenuNumber(variant.cost ?? variant.Cost) ?? safeNumber(baseProduct.cost, 0);
+    const stock = parseMenuNumber(variant.stock ?? variant.inStock ?? variant[MENU_STOCK_COLUMN]) ?? safeNumber(baseProduct.stock, 0);
+    const lowStock = parseMenuNumber(variant.lowStock ?? variant[MENU_LOW_STOCK_COLUMN]) ?? safeNumber(baseProduct.lowStock, 0);
+    return {
+        id: cleanMenuCell(variant.id) || variantIdFromName(name, index),
+        name,
+        availableForSale: parseMenuBoolean(variant.availableForSale ?? variant.available ?? variant.enabled, true),
+        price,
+        cost,
+        sku: cleanMenuCell(variant.sku ?? variant.SKU ?? variant.article),
+        stock,
+        lowStock
+    };
+}
+
+function productVariantsFromRow(row, baseProduct = {}) {
+    const variantsJson = parseMenuJSON(row[MENU_VARIANTS_COLUMN] ?? row.variants, null);
+    if (Array.isArray(variantsJson)) {
+        return variantsJson.map((variant, index) => normalizeProductVariant(variant, index, baseProduct)).filter(variant => variant.name);
+    }
+
+    const singleVariantName = cleanMenuCell(row['Variant name'] ?? row.variantName);
+    if (singleVariantName) {
+        return [normalizeProductVariant({
+            name: singleVariantName,
+            price: row['Variant price'] ?? row.variantPrice ?? row[MENU_PRICE_COLUMN],
+            cost: row['Variant cost'] ?? row.variantCost ?? row.Cost,
+            sku: row['Variant SKU'] ?? row.variantSku ?? row.SKU,
+            stock: row['Variant stock'] ?? row.variantStock ?? row[MENU_STOCK_COLUMN],
+            lowStock: row['Variant low stock'] ?? row.variantLowStock ?? row[MENU_LOW_STOCK_COLUMN],
+            availableForSale: row['Variant available'] ?? row.variantAvailable ?? row[MENU_AVAILABLE_COLUMN]
+        }, 0, baseProduct)];
+    }
+
+    const optionVariants = menuOptionsFromRow(row)
+        .filter(option => option.value)
+        .map((option, index) => normalizeProductVariant({
+            id: variantIdFromName(option.value, index),
+            name: option.value,
+            price: baseProduct.price,
+            cost: baseProduct.cost,
+            sku: index === 0 ? baseProduct.sku : '',
+            stock: baseProduct.stock,
+            lowStock: baseProduct.lowStock,
+            availableForSale: baseProduct.availableForSale
+        }, index, baseProduct));
+    return optionVariants;
+}
+
 function normalizeMenuCategory(value) {
     return slugifyMenuHandle(value || 'other') || 'other';
 }
@@ -379,6 +455,7 @@ function normalizeMenuTemplateRow(row) {
         category: normalizeMenuCategory(row.Category ?? row.category),
         description: cleanMenuCell(row.Description ?? row.description),
         soldByWeight: parseMenuBoolean(row['Sold by weight'] ?? row.soldByWeight),
+        soldBy: cleanMenuCell(row['Sold by'] ?? row.soldBy) || (parseMenuBoolean(row['Sold by weight'] ?? row.soldByWeight) ? 'weight' : 'each'),
         option1Name: cleanMenuCell(row['Option 1 name'] ?? row.option1Name),
         option1Value: cleanMenuCell(row['Option 1 value'] ?? row.option1Value),
         option2Name: cleanMenuCell(row['Option 2 name'] ?? row.option2Name),
@@ -390,14 +467,20 @@ function normalizeMenuTemplateRow(row) {
         includedItemSku: cleanMenuCell(row['SKU of included item'] ?? row.includedItemSku),
         trackStock: parseMenuBoolean(row['Track stock'] ?? row.trackStock),
         availableForSale: parseMenuBoolean(row[MENU_AVAILABLE_COLUMN] ?? row.availableForSale, true),
+        showOnPos: parseMenuBoolean(row[MENU_SHOW_POS_COLUMN] ?? row.showOnPos, true),
+        showOnWebsite: parseMenuBoolean(row[MENU_SHOW_WEBSITE_COLUMN] ?? row.showOnWebsite, true),
         price,
         stock,
         lowStock,
         taxName: 'eden cafe',
         taxRate: 7,
-        taxEnabled: parseMenuBoolean(row[MENU_TAX_COLUMN] ?? row.taxEnabled, true)
+        taxEnabled: parseMenuBoolean(row[MENU_TAX_COLUMN] ?? row.taxEnabled, true),
+        color: cleanMenuCell(row.Color ?? row.color) || '#4caf50',
+        shape: cleanMenuCell(row.Shape ?? row.shape) || 'rounded'
     };
 
+    const variants = productVariantsFromRow(row, normalized);
+    if (variants.length) normalized.variants = variants;
     if (cost !== undefined) normalized.cost = cost;
     if (includedQty !== undefined) normalized.includedItemQuantity = includedQty;
     if (row.imageUrl || row.Image || row.image) normalized.imageUrl = cleanMenuCell(row.imageUrl ?? row.Image ?? row.image);
@@ -415,6 +498,7 @@ function menuProductToTemplateRow(product = {}) {
         const optionItem = Array.isArray(product.options) ? product.options[index - 1] : null;
         return product[`option${index}${key}`] ?? optionItem?.[key.toLowerCase()] ?? '';
     };
+    const variants = Array.isArray(product.variants) ? product.variants : [];
 
     return {
         Handle: product.handle || product.id || slugifyMenuHandle(product.name || product.sku || ''),
@@ -422,6 +506,7 @@ function menuProductToTemplateRow(product = {}) {
         Name: product.name || '',
         Category: product.category || '',
         Description: product.description || '',
+        'Sold by': product.soldBy || (product.soldByWeight ? 'weight' : 'each'),
         'Sold by weight': boolToMenuText(product.soldByWeight),
         'Option 1 name': option(1, 'Name'),
         'Option 1 value': option(1, 'Value'),
@@ -438,7 +523,12 @@ function menuProductToTemplateRow(product = {}) {
         [MENU_PRICE_COLUMN]: product.price ?? '',
         [MENU_STOCK_COLUMN]: product.stock ?? '',
         [MENU_LOW_STOCK_COLUMN]: product.lowStock ?? '',
-        [MENU_TAX_COLUMN]: boolToMenuText(product.taxEnabled)
+        [MENU_TAX_COLUMN]: boolToMenuText(product.taxEnabled),
+        [MENU_SHOW_POS_COLUMN]: boolToMenuText(product.showOnPos),
+        [MENU_SHOW_WEBSITE_COLUMN]: boolToMenuText(product.showOnWebsite),
+        Color: product.color || '',
+        Shape: product.shape || '',
+        [MENU_VARIANTS_COLUMN]: variants.length ? JSON.stringify(variants) : ''
     };
 }
 
@@ -448,7 +538,7 @@ const XLSX_CATEGORY_CONFIG = {
         collection: 'products',
         permission: 'products',
         numberFields: ['price', 'order', 'cost', 'stock', 'lowStock', 'includedItemQuantity', 'taxRate'],
-        booleanFields: ['isSignature', 'soldByWeight', 'trackStock', 'availableForSale', 'taxEnabled'],
+        booleanFields: ['isSignature', 'soldByWeight', 'trackStock', 'availableForSale', 'taxEnabled', 'showOnPos', 'showOnWebsite'],
         arrayFields: [],
         template: MENU_TEMPLATE_ROW,
         importRow: normalizeMenuTemplateRow,
@@ -1733,7 +1823,8 @@ function productSearchHaystack(row) {
         product.handle,
         product.barcode,
         product.category,
-        categoryNameForProduct(product)
+        categoryNameForProduct(product),
+        ...productVariantsForDisplay(product).flatMap(variant => [variant.name, variant.sku])
     ].filter(Boolean).join(' ').toLowerCase();
 }
 
@@ -1765,6 +1856,83 @@ function productMargin(product = {}) {
         text: margin.toFixed(2) + '%',
         className: margin >= 45 ? 'menu-margin-good' : 'menu-margin-warn'
     };
+}
+
+function productVariantsForDisplay(product = {}) {
+    if (Array.isArray(product.variants) && product.variants.length) {
+        return product.variants.map((variant, index) => normalizeProductVariant(variant, index, product));
+    }
+    const optionVariants = Array.isArray(product.options)
+        ? product.options.filter(option => option?.value).map((option, index) => normalizeProductVariant({
+            id: variantIdFromName(option.value, index),
+            name: option.value,
+            price: product.price,
+            cost: product.cost,
+            sku: index === 0 ? product.sku : '',
+            stock: product.stock,
+            lowStock: product.lowStock,
+            availableForSale: product.availableForSale
+        }, index, product))
+        : [];
+    return optionVariants;
+}
+
+function productVariantSummaryText(product = {}) {
+    const variants = productVariantsForDisplay(product);
+    return variants.length ? ` | ${variants.length} variants` : '';
+}
+
+function renderProductVariantDetailRow(id, product = {}) {
+    const variants = productVariantsForDisplay(product);
+    const soldByLabel = {
+        each: 'แต่ละ / ชิ้น',
+        weight: 'น้ำหนัก',
+        volume: 'ปริมาณ'
+    }[product.soldBy || (product.soldByWeight ? 'weight' : 'each')] || 'แต่ละ / ชิ้น';
+    const visibility = [
+        product.showOnWebsite !== false ? 'แสดงบนเว็บ' : 'ซ่อนจากเว็บ',
+        product.showOnPos !== false ? 'แสดงบน POS' : 'ซ่อนจาก POS',
+        product.taxEnabled !== false ? 'ภาษี 7%' : 'ไม่คิดภาษี'
+    ].join(' · ');
+    const variantRows = variants.length ? variants.map((variant) => {
+        const statusClass = variant.availableForSale === false ? 'menu-status-off' : 'menu-status-on';
+        const statusText = variant.availableForSale === false ? 'ปิดขาย' : 'เปิดขาย';
+        return `
+            <tr>
+                <td><span class="menu-status-pill ${statusClass}">${statusText}</span></td>
+                <td><strong>${escapeHTML(variant.name)}</strong></td>
+                <td>${productMoney(variant.price)}</td>
+                <td>${productMoney(variant.cost)}</td>
+                <td>${escapeHTML(variant.sku || '-')}</td>
+                <td>${Number.isFinite(Number(variant.stock)) ? safeNumber(variant.stock).toLocaleString('th-TH') : '-'}</td>
+                <td>${Number.isFinite(Number(variant.lowStock)) ? safeNumber(variant.lowStock).toLocaleString('th-TH') : '-'}</td>
+            </tr>
+        `;
+    }).join('') : '<tr><td colspan="7" class="menu-muted">ยังไม่มีตัวแปรสินค้า กด Edit เพื่อเพิ่มตัวแปรแบบ เย็น/ร้อน/ปั่น ได้เลย</td></tr>';
+
+    return `
+        <tr class="menu-variant-detail-row" data-detail-for="${escapeHTML(id)}">
+            <td colspan="8">
+                <div class="menu-variant-panel">
+                    <h4>รายละเอียดเพิ่มเติม: ${escapeHTML(soldByLabel)} · ${escapeHTML(visibility)}</h4>
+                    <table class="menu-variant-mini-table">
+                        <thead>
+                            <tr>
+                                <th>สถานะ</th>
+                                <th>ตัวแปร</th>
+                                <th>ราคาขาย</th>
+                                <th>ต้นทุน</th>
+                                <th>SKU</th>
+                                <th>สต็อก</th>
+                                <th>สต็อกต่ำ</th>
+                            </tr>
+                        </thead>
+                        <tbody>${variantRows}</tbody>
+                    </table>
+                </div>
+            </td>
+        </tr>
+    `;
 }
 
 function productCategoryOptions(currentCategory = '') {
@@ -1855,16 +2023,22 @@ function renderProductsTable() {
             const margin = productMargin(product);
             const available = product.availableForSale !== false;
             const itemName = product.name || product.nameTh || product.nameEn || id;
-            return `
+            const isExpanded = expandedProductIds.has(id);
+            const hiddenNotes = [
+                available ? '' : 'Hidden from sale',
+                product.showOnWebsite === false ? 'Hidden from website' : '',
+                product.showOnPos === false ? 'Hidden from POS' : ''
+            ].filter(Boolean).join(' | ');
+            const mainRow = `
                 <tr>
                     <td class="menu-check-cell"><input type="checkbox" class="product-row-check" data-id="${escapeHTML(id)}" ${selectedProductIds.has(id) ? 'checked' : ''}></td>
                     <td>
                         <div class="menu-item-name">
-                            <span class="menu-row-toggle">⌄</span>
+                            <button class="menu-row-toggle" type="button" data-id="${escapeHTML(id)}" aria-label="Toggle variants">${isExpanded ? '⌃' : '⌄'}</button>
                             <img loading="lazy" class="menu-item-thumb" src="${safeImageURL(product.imageUrl)}" alt="${escapeHTML(itemName)}">
                             <span class="menu-item-title">
                                 <strong>${escapeHTML(itemName)}</strong>
-                                <small>${escapeHTML(product.sku || product.handle || id)}${available ? '' : ' | Hidden from sale'}</small>
+                                <small>${escapeHTML(product.sku || product.handle || id)}${escapeHTML(productVariantSummaryText(product))}${hiddenNotes ? ' | ' + escapeHTML(hiddenNotes) : ''}</small>
                             </span>
                         </div>
                     </td>
@@ -1883,6 +2057,7 @@ function renderProductsTable() {
                     </td>
                 </tr>
             `;
+            return mainRow + (isExpanded ? renderProductVariantDetailRow(id, product) : '');
         }).join('');
     }
 
@@ -1963,6 +2138,15 @@ function bindProductManagerControls() {
             if (categorySelect) {
                 updateProductCategoryInline(categorySelect.dataset.id, categorySelect.value, categorySelect);
             }
+        });
+        tbody.addEventListener('click', event => {
+            const toggle = event.target.closest('.menu-row-toggle');
+            if (!toggle) return;
+            const id = toggle.dataset.id;
+            if (!id) return;
+            if (expandedProductIds.has(id)) expandedProductIds.delete(id);
+            else expandedProductIds.add(id);
+            renderProductsTable();
         });
     }
     if (upload) {
@@ -2087,6 +2271,116 @@ function collectProductOptionsFromForm() {
     return options;
 }
 
+function getProductSelectValue(id, fallback = '') {
+    const el = document.getElementById(id);
+    return el ? String(el.value || fallback) : fallback;
+}
+
+function getProductFormBaseValues() {
+    return {
+        price: getProductNumberValue('productPrice', 0),
+        cost: getProductNumberValue('productCost', 0),
+        sku: getProductInputValue('productSku'),
+        stock: getProductNumberValue('productStock', 0),
+        lowStock: getProductNumberValue('productLowStock', 0),
+        availableForSale: getProductCheckboxValue('productAvailableForSale', true)
+    };
+}
+
+function defaultProductVariants(base = getProductFormBaseValues()) {
+    const skuRoot = cleanMenuCell(base.sku);
+    return [
+        { name: 'เย็น', suffix: 'COLD' },
+        { name: 'ร้อน', suffix: 'HOT' },
+        { name: 'ปั่น', suffix: 'FRAPPE' }
+    ].map((item, index) => normalizeProductVariant({
+        name: item.name,
+        price: base.price,
+        cost: base.cost,
+        sku: skuRoot ? `${skuRoot}-${item.suffix}` : '',
+        stock: base.stock,
+        lowStock: base.lowStock,
+        availableForSale: index < 2 ? base.availableForSale : false
+    }, index, base));
+}
+
+function productVariantRowTemplate(variant = {}, index = 0) {
+    const normalized = normalizeProductVariant(variant, index, getProductFormBaseValues());
+    return `
+        <tr>
+            <td style="text-align:center;"><input type="checkbox" class="product-variant-available" ${normalized.availableForSale === false ? '' : 'checked'}></td>
+            <td><input type="text" class="product-variant-name" value="${escapeHTML(normalized.name)}" placeholder="เย็น"></td>
+            <td><input type="number" class="product-variant-price" min="0" step="0.01" value="${escapeHTML(normalized.price)}"></td>
+            <td><input type="number" class="product-variant-cost" min="0" step="0.01" value="${escapeHTML(normalized.cost)}"></td>
+            <td><input type="text" class="product-variant-sku" value="${escapeHTML(normalized.sku || '')}" placeholder="SKU"></td>
+            <td><input type="number" class="product-variant-stock" min="0" step="1" value="${escapeHTML(normalized.stock)}"></td>
+            <td><input type="number" class="product-variant-low-stock" min="0" step="1" value="${escapeHTML(normalized.lowStock)}"></td>
+            <td><button type="button" class="variant-remove-btn" aria-label="Remove variant">ลบ</button></td>
+        </tr>
+    `;
+}
+
+function renderProductVariantRows(variants = []) {
+    const tbody = document.getElementById('productVariantsBody');
+    if (!tbody) return;
+    const rows = Array.isArray(variants) && variants.length ? variants : defaultProductVariants();
+    tbody.innerHTML = rows.map((variant, index) => productVariantRowTemplate(variant, index)).join('');
+}
+
+window.addProductVariantRow = (variant = {}) => {
+    const tbody = document.getElementById('productVariantsBody');
+    if (!tbody) return;
+    const index = tbody.querySelectorAll('tr').length;
+    const base = getProductFormBaseValues();
+    const rowVariant = Object.keys(variant || {}).length ? variant : {
+        name: '',
+        price: base.price,
+        cost: base.cost,
+        sku: '',
+        stock: base.stock,
+        lowStock: base.lowStock,
+        availableForSale: true
+    };
+    tbody.insertAdjacentHTML('beforeend', productVariantRowTemplate(rowVariant, index));
+};
+
+window.seedDefaultProductVariants = () => {
+    renderProductVariantRows(defaultProductVariants());
+};
+
+function collectProductVariantsFromForm() {
+    const tbody = document.getElementById('productVariantsBody');
+    const base = getProductFormBaseValues();
+    if (!tbody) return defaultProductVariants(base);
+    const variants = Array.from(tbody.querySelectorAll('tr')).map((row, index) => {
+        const name = row.querySelector('.product-variant-name')?.value?.trim() || '';
+        const price = Number(row.querySelector('.product-variant-price')?.value);
+        const cost = Number(row.querySelector('.product-variant-cost')?.value);
+        const stock = Number(row.querySelector('.product-variant-stock')?.value);
+        const lowStock = Number(row.querySelector('.product-variant-low-stock')?.value);
+        return normalizeProductVariant({
+            id: variantIdFromName(name, index),
+            name,
+            price: Number.isFinite(price) ? price : base.price,
+            cost: Number.isFinite(cost) ? cost : base.cost,
+            sku: row.querySelector('.product-variant-sku')?.value?.trim() || '',
+            stock: Number.isFinite(stock) ? stock : base.stock,
+            lowStock: Number.isFinite(lowStock) ? lowStock : base.lowStock,
+            availableForSale: !!row.querySelector('.product-variant-available')?.checked
+        }, index, base);
+    }).filter(variant => variant.name);
+    return variants.length ? variants : defaultProductVariants(base);
+}
+
+const productVariantsBody = document.getElementById('productVariantsBody');
+if (productVariantsBody) {
+    productVariantsBody.addEventListener('click', (event) => {
+        const removeBtn = event.target.closest('.variant-remove-btn');
+        if (!removeBtn) return;
+        removeBtn.closest('tr')?.remove();
+    });
+}
+
 window.openProductModal = () => {
     productForm.reset();
     document.getElementById('productId').value = '';
@@ -2094,10 +2388,16 @@ window.openProductModal = () => {
     setProductInputValue('productStock', 0);
     setProductInputValue('productLowStock', 0);
     setProductInputValue('productIncludedItemQuantity', 1);
+    setProductInputValue('productColor', '#4caf50');
+    setProductInputValue('productShape', 'rounded');
+    setProductInputValue('productSoldBy', 'each');
     setProductCheckboxValue('productAvailableForSale', true);
     setProductCheckboxValue('productTrackStock', false);
-    setProductCheckboxValue('productSoldByWeight', false);
     setProductCheckboxValue('productTaxEnabled', true);
+    setProductCheckboxValue('productShowOnWebsite', true);
+    setProductCheckboxValue('productShowOnPos', true);
+    setProductCheckboxValue('productSignature', false);
+    renderProductVariantRows(defaultProductVariants());
     document.getElementById('modal-title').innerText = 'เพิ่มเมนูใหม่';
     productModal.style.display = 'block';
 };
@@ -2131,11 +2431,16 @@ window.editProduct = (id) => {
     setProductInputValue('productBarcode', product.barcode || '');
     setProductInputValue('productIncludedItemSku', product.includedItemSku || '');
     setProductInputValue('productIncludedItemQuantity', product.includedItemQuantity ?? 1);
+    setProductInputValue('productSoldBy', product.soldBy || (product.soldByWeight ? 'weight' : 'each'));
+    setProductInputValue('productColor', product.color || '#4caf50');
+    setProductInputValue('productShape', product.shape || 'rounded');
     setProductCheckboxValue('productAvailableForSale', product.availableForSale !== false);
     setProductCheckboxValue('productTrackStock', !!product.trackStock);
-    setProductCheckboxValue('productSoldByWeight', !!product.soldByWeight);
     setProductCheckboxValue('productTaxEnabled', product.taxEnabled !== false);
+    setProductCheckboxValue('productShowOnWebsite', product.showOnWebsite !== false);
+    setProductCheckboxValue('productShowOnPos', product.showOnPos !== false);
     document.getElementById('productSignature').checked = !!product.isSignature;
+    renderProductVariantRows(productVariantsForDisplay(product));
     
     document.getElementById('modal-title').innerText = 'แก้ไขเมนูสินค้า';
     productModal.style.display = 'block';
@@ -2178,8 +2483,10 @@ productForm.addEventListener('submit', async (e) => {
         }
 
         const optionList = collectProductOptionsFromForm();
+        const variantList = collectProductVariantsFromForm();
         const productName = document.getElementById('productName').value;
         const productHandle = getProductInputValue('productHandle') || slugifyMenuHandle(productName);
+        const soldBy = getProductSelectValue('productSoldBy', 'each');
         const productData = {
             handle: productHandle,
             sku: getProductInputValue('productSku'),
@@ -2191,12 +2498,17 @@ productForm.addEventListener('submit', async (e) => {
             lowStock: getProductNumberValue('productLowStock', 0),
             imageUrl: finalImageUrl,
             category: document.getElementById('productCategory').value,
-            soldByWeight: getProductCheckboxValue('productSoldByWeight'),
+            soldBy,
+            soldByWeight: soldBy === 'weight',
             trackStock: getProductCheckboxValue('productTrackStock'),
             availableForSale: getProductCheckboxValue('productAvailableForSale', true),
+            showOnWebsite: getProductCheckboxValue('productShowOnWebsite', true),
+            showOnPos: getProductCheckboxValue('productShowOnPos', true),
             taxName: 'eden cafe',
             taxRate: 7,
             taxEnabled: getProductCheckboxValue('productTaxEnabled', true),
+            color: getProductInputValue('productColor', '#4caf50'),
+            shape: getProductSelectValue('productShape', 'rounded'),
             option1Name: getProductInputValue('productOption1Name'),
             option1Value: getProductInputValue('productOption1Value'),
             option2Name: getProductInputValue('productOption2Name'),
@@ -2208,6 +2520,7 @@ productForm.addEventListener('submit', async (e) => {
             includedItemSku: getProductInputValue('productIncludedItemSku'),
             includedItemQuantity: getProductNumberValue('productIncludedItemQuantity', 1),
             isSignature: document.getElementById('productSignature').checked,
+            variants: variantList,
             updatedAt: new Date().toISOString()
         };
         

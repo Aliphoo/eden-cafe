@@ -161,6 +161,17 @@
         .menu-margin-warn { color: #ef6c00; font-weight: 600; }
         .menu-stock-low { color: #ef6c00; font-weight: 600; }
         .menu-stock-out { color: #d32f2f; font-weight: 600; }
+        .menu-row-toggle { border: 0; background: transparent; color: #777; cursor: pointer; padding: 4px; font-size: 1rem; }
+        .menu-row-toggle:hover { color: var(--accent-color); }
+        .menu-variant-detail-row td { background: #fbfffb; padding: 0 24px 18px 90px; white-space: normal; }
+        .menu-variant-panel { border: 1px solid #e2eee4; border-radius: 14px; padding: 14px; background: #fff; box-shadow: inset 0 1px 0 rgba(76,175,80,0.06); }
+        .menu-variant-panel h4 { color: #2c3e50; margin-bottom: 10px; }
+        .menu-variant-mini-table { width: 100%; border-collapse: collapse; }
+        .menu-variant-mini-table th, .menu-variant-mini-table td { padding: 8px 10px; border-bottom: 1px solid #edf2ef; white-space: nowrap; }
+        .menu-variant-mini-table th { font-size: 0.82rem; color: #6b746f; background: #f8fbf8; }
+        .menu-status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; }
+        .menu-status-on { background: #e8f5e9; color: #2e7d32; }
+        .menu-status-off { background: #fff3e0; color: #ef6c00; }
         .menu-pos-footer { display: flex; align-items: center; justify-content: flex-end; gap: 18px; padding: 18px 24px 22px; border-top: 1px solid #edf1ed; color: #4b5651; flex-wrap: wrap; }
         .menu-page-btn { border: 1px solid #e0e0e0; background: #fff; width: 44px; height: 40px; border-radius: 3px; cursor: pointer; font-size: 1.2rem; color: #607d8b; }
         .menu-page-btn:disabled { opacity: 0.35; cursor: not-allowed; }
@@ -274,6 +285,7 @@
         /* Modal Styles */
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); backdrop-filter: blur(5px); }
         .modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border-radius: 10px; width: 80%; max-width: 500px; }
+        .modal-content.product-detail-modal { max-width: 1080px; width: 92%; margin: 3% auto; max-height: 90vh; overflow-y: auto; padding: 26px; }
         .close-modal { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
         .close-modal:hover { color: black; }
         .form-group { margin-bottom: 15px; }
@@ -281,6 +293,24 @@
         .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
         .form-group textarea { resize: vertical; min-height: 80px; }
         .btn-submit { width: 100%; padding: 10px; background: var(--primary-color); color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1rem; }
+        .product-form-section { border: 1px solid #e5eee6; border-radius: 16px; padding: 18px; margin-bottom: 18px; background: #fff; }
+        .product-form-section h3 { font-size: 1rem; margin-bottom: 14px; color: #24352d; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .product-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+        .product-toggle-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+        .product-toggle-grid label { display: flex; align-items: center; gap: 8px; border: 1px solid #e3ece5; border-radius: 12px; padding: 10px 12px; background: #fbfffb; cursor: pointer; }
+        .product-toggle-grid input { width: auto; accent-color: var(--accent-color); }
+        .product-variant-toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+        .product-variant-help { color: #667; font-size: 0.88rem; }
+        .product-variant-table-wrap { overflow-x: auto; border: 1px solid #e4ece6; border-radius: 12px; }
+        .product-variant-table { min-width: 860px; width: 100%; border-collapse: collapse; }
+        .product-variant-table th { background: #f8fbf8; font-size: 0.82rem; color: #5f6d66; }
+        .product-variant-table td, .product-variant-table th { padding: 9px; border-bottom: 1px solid #edf2ef; }
+        .product-variant-table input { width: 100%; padding: 8px; border: 1px solid #dfe8e1; border-radius: 8px; }
+        .product-variant-table input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent-color); }
+        .product-variant-table tr:last-child td { border-bottom: 0; }
+        .variant-remove-btn { border: 0; border-radius: 8px; background: #ffebee; color: #c62828; padding: 8px 10px; cursor: pointer; }
+        .variant-remove-btn:hover { background: #ffcdd2; }
+        @media (max-width: 760px) { .modal-content.product-detail-modal { width: 96%; padding: 18px; } .menu-variant-detail-row td { padding-left: 16px; } }
         
         /* Content Sections */
         .content-section { display: none; }
@@ -1037,77 +1067,143 @@
 
     <!-- Product Modal -->
     <div id="productModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content product-detail-modal">
             <span class="close-modal" onclick="closeProductModal()">&times;</span>
             <h2 id="modal-title" style="margin-bottom: 20px;">เพิ่มเมนูใหม่</h2>
             <form id="productForm">
                 <input type="hidden" id="productId">
-                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
-                    <div class="form-group">
-                        <label>Handle</label>
-                        <input type="text" id="productHandle" placeholder="eden-iced-latte">
+                <div class="product-form-section">
+                    <h3>ข้อมูลหลักสินค้า</h3>
+                    <div class="product-form-grid">
+                        <div class="form-group">
+                            <label>Handle</label>
+                            <input type="text" id="productHandle" placeholder="eden-iced-latte">
+                        </div>
+                        <div class="form-group">
+                            <label>SKU หลัก</label>
+                            <input type="text" id="productSku" placeholder="MENU-COF-001">
+                        </div>
+                        <div class="form-group">
+                            <label>หมวดหมู่</label>
+                            <select id="productCategory" required>
+                                <option value="">-- เลือกหมวดหมู่ --</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="form-group">
-                        <label>SKU</label>
-                        <input type="text" id="productSku" placeholder="MENU-COF-001">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>ชื่อเมนู</label>
-                    <input type="text" id="productName" required>
-                </div>
-                <div class="form-group">
-                    <label>คำอธิบาย</label>
-                    <textarea id="productDesc" required></textarea>
-                </div>
-                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">
-                    <div class="form-group">
-                        <label>Price [EDEN CAFE AND ETHNIC RESTAURANT.Co.,Ltd]</label>
-                        <input type="number" id="productPrice" required>
+                        <label>ชื่อเมนู</label>
+                        <input type="text" id="productName" required>
                     </div>
                     <div class="form-group">
-                        <label>Cost</label>
-                        <input type="number" id="productCost" min="0" step="0.01" placeholder="0">
+                        <label>คำอธิบาย</label>
+                        <textarea id="productDesc" required placeholder="รายละเอียดสินค้า เช่น รสชาติ วัตถุดิบ หรือคำอธิบายสำหรับลูกค้า"></textarea>
                     </div>
+                    <div class="product-form-grid">
+                        <div class="form-group">
+                            <label>ราคาขายหลัก</label>
+                            <input type="number" id="productPrice" min="0" step="0.01" required>
+                        </div>
+                        <div class="form-group">
+                            <label>ต้นทุนหลัก</label>
+                            <input type="number" id="productCost" min="0" step="0.01" placeholder="0">
+                        </div>
+                        <div class="form-group">
+                            <label>อยู่ในคลัง</label>
+                            <input type="number" id="productStock" min="0" step="1" placeholder="0">
+                        </div>
+                        <div class="form-group">
+                            <label>แจ้งเตือนสต็อกต่ำ</label>
+                            <input type="number" id="productLowStock" min="0" step="1" placeholder="0">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="product-form-section">
+                    <h3>การขายและการแสดงผล</h3>
+                    <div class="product-form-grid">
+                        <div class="form-group">
+                            <label>ขายโดย</label>
+                            <select id="productSoldBy">
+                                <option value="each">แต่ละ / ชิ้น</option>
+                                <option value="weight">น้ำหนัก</option>
+                                <option value="volume">ปริมาณ</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>สีสินค้าในหลังบ้าน</label>
+                            <input type="color" id="productColor" value="#4caf50">
+                        </div>
+                        <div class="form-group">
+                            <label>รูปทรงปุ่มสินค้า</label>
+                            <select id="productShape">
+                                <option value="rounded">สี่เหลี่ยมมน</option>
+                                <option value="circle">วงกลม</option>
+                                <option value="square">สี่เหลี่ยม</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="product-toggle-grid">
+                        <label><input type="checkbox" id="productAvailableForSale" checked> เปิดขาย</label>
+                        <label><input type="checkbox" id="productShowOnWebsite" checked> แสดงบนเว็บ</label>
+                        <label><input type="checkbox" id="productShowOnPos" checked> แสดงบน POS</label>
+                        <label><input type="checkbox" id="productTrackStock"> ติดตามสต็อก</label>
+                        <label><input type="checkbox" id="productTaxEnabled" checked> ภาษี eden cafe 7%</label>
+                        <label><input type="checkbox" id="productSignature"> Signature menu</label>
+                    </div>
+                </div>
+
+                <div class="product-form-section">
+                    <h3>
+                        ตัวแปรสินค้า
+                        <button type="button" class="btn-action" style="padding:8px 14px;" onclick="addProductVariantRow()">+ เพิ่มตัวแปร</button>
+                    </h3>
+                    <div class="product-variant-toolbar">
+                        <p class="product-variant-help">ตัวอย่าง: เย็น / ร้อน / ปั่น แต่ละตัวแปรตั้งราคา ต้นทุน SKU และสถานะเปิดขายแยกกันได้</p>
+                        <button type="button" class="menu-pos-link" onclick="seedDefaultProductVariants()">ใช้ค่าเริ่มต้น เย็น/ร้อน/ปั่น</button>
+                    </div>
+                    <div class="product-variant-table-wrap">
+                        <table class="product-variant-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:70px;">เปิดขาย</th>
+                                    <th>ตัวแปร</th>
+                                    <th>ราคาขาย</th>
+                                    <th>ต้นทุน</th>
+                                    <th>SKU</th>
+                                    <th>สต็อก</th>
+                                    <th>สต็อกต่ำ</th>
+                                    <th style="width:70px;">ลบ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="productVariantsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="product-form-section">
+                    <h3>รูปภาพและข้อมูลเสริม</h3>
                     <div class="form-group">
-                        <label>In stock</label>
-                        <input type="number" id="productStock" min="0" step="1" placeholder="0">
+                        <label for="productImageFile">อัปโหลดรูปภาพ (Image File)</label>
+                        <input type="file" id="productImageFile" accept="image/*">
+                        <small>หรือใส่ลิงก์รูปภาพ (Image URL): <input type="url" id="productImage" placeholder="https://..." style="margin-top: 5px; width: 100%; box-sizing: border-box;"></small>
                     </div>
-                    <div class="form-group">
-                        <label>Low stock</label>
-                        <input type="number" id="productLowStock" min="0" step="1" placeholder="0">
+                    <div class="product-form-grid">
+                        <div class="form-group"><label>Barcode</label><input type="text" id="productBarcode" placeholder="885..."></div>
+                        <div class="form-group"><label>SKU of included item</label><input type="text" id="productIncludedItemSku"></div>
+                        <div class="form-group"><label>Quantity of included item</label><input type="number" id="productIncludedItemQuantity" min="0" step="1" placeholder="1"></div>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label for="productImageFile">อัปโหลดรูปภาพ (Image File)</label>
-                    <input type="file" id="productImageFile" accept="image/*">
-                    <small>หรือใส่ลิงก์รูปภาพ (Image URL): <input type="url" id="productImage" placeholder="https://..." style="margin-top: 5px; width: 100%; box-sizing: border-box;"></small>
-                </div>
-                <div class="form-group">
-                    <label>หมวดหมู่</label>
-                    <select id="productCategory" required>
-                        <option value="">-- เลือกหมวดหมู่ --</option>
-                    </select>
-                </div>
-                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
-                    <div class="form-group"><label>Option 1 name</label><input type="text" id="productOption1Name" placeholder="Size"></div>
-                    <div class="form-group"><label>Option 1 value</label><input type="text" id="productOption1Value" placeholder="Regular"></div>
-                    <div class="form-group"><label>Option 2 name</label><input type="text" id="productOption2Name" placeholder="Sweetness"></div>
-                    <div class="form-group"><label>Option 2 value</label><input type="text" id="productOption2Value" placeholder="50%"></div>
-                    <div class="form-group"><label>Option 3 name</label><input type="text" id="productOption3Name" placeholder="Milk"></div>
-                    <div class="form-group"><label>Option 3 value</label><input type="text" id="productOption3Value" placeholder="Fresh milk"></div>
-                </div>
-                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
-                    <div class="form-group"><label>Barcode</label><input type="text" id="productBarcode" placeholder="885..."></div>
-                    <div class="form-group"><label>SKU of included item</label><input type="text" id="productIncludedItemSku"></div>
-                    <div class="form-group"><label>Quantity of included item</label><input type="number" id="productIncludedItemQuantity" min="0" step="1" placeholder="1"></div>
-                </div>
-                <div class="form-group" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px;">
-                    <label><input type="checkbox" id="productAvailableForSale" checked> Available for sale</label>
-                    <label><input type="checkbox" id="productTrackStock"> Track stock</label>
-                    <label><input type="checkbox" id="productSoldByWeight"> Sold by weight</label>
-                    <label><input type="checkbox" id="productTaxEnabled" checked> Tax - "eden cafe" (7%)</label>
-                    <label><input type="checkbox" id="productSignature"> Signature menu</label>
+
+                <div class="product-form-section">
+                    <h3>ตัวเลือกสำหรับเทมเพลตนำเข้า/ส่งออก</h3>
+                    <div class="product-form-grid">
+                        <div class="form-group"><label>Option 1 name</label><input type="text" id="productOption1Name" placeholder="ประเภท"></div>
+                        <div class="form-group"><label>Option 1 value</label><input type="text" id="productOption1Value" placeholder="เย็น"></div>
+                        <div class="form-group"><label>Option 2 name</label><input type="text" id="productOption2Name" placeholder="Sweetness"></div>
+                        <div class="form-group"><label>Option 2 value</label><input type="text" id="productOption2Value" placeholder="50%"></div>
+                        <div class="form-group"><label>Option 3 name</label><input type="text" id="productOption3Name" placeholder="Milk"></div>
+                        <div class="form-group"><label>Option 3 value</label><input type="text" id="productOption3Value" placeholder="Fresh milk"></div>
+                    </div>
                 </div>
                 <button type="submit" class="btn-submit">บันทึกข้อมูล</button>
             </form>
@@ -1392,7 +1488,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=28"></script>
+    <script type="module" src="js/admin.js?v=29"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {
