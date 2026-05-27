@@ -1,0 +1,183 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return isSignedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.matches('(?i)^(admin@edencafe\\.com|phoo1236@gmail\\.com|sonsawan\\.1231@gmail\\.com)$');
+    }
+    function isShortString(value, maxLength) {
+      return value is string && value.size() > 0 && value.size() <= maxLength;
+    }
+    function optionalUserMatchesAuth() {
+      return !request.resource.data.keys().hasAny(['uid'])
+        || (isSignedIn() && request.resource.data.uid == request.auth.uid);
+    }
+    function ownsResource() {
+      return isSignedIn()
+        && resource.data.keys().hasAny(['uid'])
+        && resource.data.uid == request.auth.uid;
+    }
+    
+    // Publicly readable collections (content)
+    match /shop_products/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /shop_categories/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /tables/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /rooms/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /blogs/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /faqs/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /categories/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /products/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /google_reviews/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /users/{userId} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow write: if isAdmin();
+      allow create: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly([
+          'uid', 'displayName', 'email', 'photoURL', 'phone',
+          'shippingAddress', 'birthDate', 'allergies', 'healthNote',
+          'lineId', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll(['uid', 'displayName', 'email', 'updatedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && isShortString(request.resource.data.displayName, 120)
+        && isShortString(request.resource.data.email, 180)
+        && (!request.resource.data.keys().hasAny(['photoURL']) || (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 500))
+        && (!request.resource.data.keys().hasAny(['phone']) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['shippingAddress']) || (request.resource.data.shippingAddress is string && request.resource.data.shippingAddress.size() <= 500))
+        && (!request.resource.data.keys().hasAny(['birthDate']) || (request.resource.data.birthDate is string && request.resource.data.birthDate.size() <= 20))
+        && (!request.resource.data.keys().hasAny(['allergies']) || (request.resource.data.allergies is string && request.resource.data.allergies.size() <= 200))
+        && (!request.resource.data.keys().hasAny(['healthNote']) || (request.resource.data.healthNote is string && request.resource.data.healthNote.size() <= 500))
+        && (!request.resource.data.keys().hasAny(['lineId']) || (request.resource.data.lineId is string && request.resource.data.lineId.size() <= 80))
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'displayName', 'email', 'photoURL', 'phone',
+          'shippingAddress', 'birthDate', 'allergies', 'healthNote',
+          'lineId', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'uid', 'displayName', 'email', 'photoURL', 'phone',
+          'shippingAddress', 'birthDate', 'allergies', 'healthNote',
+          'lineId', 'memberCode', 'tier', 'points', 'totalSpent',
+          'visitCount', 'orderCount', 'bookingCount', 'cartItemCount',
+          'status', 'adminNote', 'adminTags',
+          'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && isShortString(request.resource.data.displayName, 120)
+        && isShortString(request.resource.data.email, 180)
+        && (!request.resource.data.keys().hasAny(['photoURL']) || (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 500))
+        && (!request.resource.data.keys().hasAny(['phone']) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['shippingAddress']) || (request.resource.data.shippingAddress is string && request.resource.data.shippingAddress.size() <= 500))
+        && (!request.resource.data.keys().hasAny(['birthDate']) || (request.resource.data.birthDate is string && request.resource.data.birthDate.size() <= 20))
+        && (!request.resource.data.keys().hasAny(['allergies']) || (request.resource.data.allergies is string && request.resource.data.allergies.size() <= 200))
+        && (!request.resource.data.keys().hasAny(['healthNote']) || (request.resource.data.healthNote is string && request.resource.data.healthNote.size() <= 500))
+        && (!request.resource.data.keys().hasAny(['lineId']) || (request.resource.data.lineId is string && request.resource.data.lineId.size() <= 80))
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isAdmin();
+    }
+    
+    // User data (orders, bookings)
+    match /orders/{docId} {
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly([
+          'id', 'date', 'items', 'total', 'totalAmount', 'uid', 'timestamp',
+          'customerName', 'phone', 'address', 'status'
+        ])
+        && request.resource.data.keys().hasAll(['id', 'date', 'items', 'uid', 'timestamp'])
+        && request.resource.data.uid == request.auth.uid
+        && isShortString(request.resource.data.id, 40)
+        && isShortString(request.resource.data.date, 40)
+        && request.resource.data.items is list
+        && request.resource.data.items.size() <= 50
+        && (!request.resource.data.keys().hasAny(['total']) || (request.resource.data.total is number && request.resource.data.total >= 0 && request.resource.data.total <= 1000000))
+        && (!request.resource.data.keys().hasAny(['totalAmount']) || (request.resource.data.totalAmount is number && request.resource.data.totalAmount >= 0 && request.resource.data.totalAmount <= 1000000))
+        && request.resource.data.timestamp == request.time;
+      allow read: if isAdmin() || ownsResource();
+      allow update, delete: if isAdmin();
+    }
+    match /bookings/{docId} {
+      allow create: if request.resource.data.keys().hasOnly([
+          'bookingType', 'name', 'phone', 'guests', 'date', 'roomType',
+          'tableZone', 'tableNo', 'tableIds', 'arrivalTime', 'startTime',
+          'endTime', 'hours', 'price', 'addons', 'note', 'status',
+          'uid', 'timestamp'
+        ])
+        && request.resource.data.keys().hasAll(['bookingType', 'name', 'phone', 'date', 'timestamp'])
+        && request.resource.data.bookingType in ['table', 'room']
+        && isShortString(request.resource.data.name, 120)
+        && isShortString(request.resource.data.phone, 40)
+        && isShortString(request.resource.data.date, 40)
+        && (!request.resource.data.keys().hasAny(['status']) || request.resource.data.status == 'pending')
+        && (!request.resource.data.keys().hasAny(['note']) || (request.resource.data.note is string && request.resource.data.note.size() <= 300))
+        && (!request.resource.data.keys().hasAny(['guests']) || (request.resource.data.guests is number && request.resource.data.guests >= 1 && request.resource.data.guests <= 99))
+        && (!request.resource.data.keys().hasAny(['arrivalTime']) || (request.resource.data.arrivalTime is string && request.resource.data.arrivalTime.size() <= 10))
+        && (!request.resource.data.keys().hasAny(['startTime']) || (request.resource.data.startTime is string && request.resource.data.startTime.size() <= 10))
+        && (!request.resource.data.keys().hasAny(['endTime']) || (request.resource.data.endTime is string && request.resource.data.endTime.size() <= 10))
+        && (!request.resource.data.keys().hasAny(['tableNo']) || isShortString(request.resource.data.tableNo, 80))
+        && (!request.resource.data.keys().hasAny(['tableZone']) || isShortString(request.resource.data.tableZone, 120))
+        && (!request.resource.data.keys().hasAny(['tableIds']) || (request.resource.data.tableIds is list && request.resource.data.tableIds.size() <= 3))
+        && (!request.resource.data.keys().hasAny(['addons']) || (request.resource.data.addons is list && request.resource.data.addons.size() <= 20))
+        && optionalUserMatchesAuth()
+        && request.resource.data.timestamp == request.time;
+      allow read: if isAdmin() || ownsResource();
+      allow update, delete: if isAdmin();
+    }
+    match /table_availability/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /stats/pageViews {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['totalViews', 'dailyViews', 'lastUpdateDate'])
+        && request.resource.data.totalViews is number
+        && request.resource.data.dailyViews is number
+        && request.resource.data.totalViews >= 0
+        && request.resource.data.dailyViews >= 0;
+      allow update: if request.resource.data.keys().hasOnly(['totalViews', 'dailyViews', 'lastUpdateDate'])
+        && request.resource.data.totalViews is number
+        && request.resource.data.dailyViews is number
+        && request.resource.data.totalViews >= resource.data.totalViews
+        && request.resource.data.totalViews <= resource.data.totalViews + 1
+        && request.resource.data.dailyViews >= 0;
+    }
+
+    // Deny all by default
+    match /{document=**} {
+      allow read, write: if false; 
+    }
+  }
+}

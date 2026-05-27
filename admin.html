@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eden Cafe - Admin Dashboard</title>
+    <link rel="icon" href="Images/Logo.webp" type="image/webp">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.js" integrity="sha384-zYPBGXwO4633CABX/5Spf6emCKUJCfoOkhOMYyxMsatqQZPnDblmmOewfjsIVWCM" crossorigin="anonymous"></script>
+    <!-- Quill.js for Rich Text -->
+    <link href="https://cdn.jsdelivr.net/npm/quill@1.3.6/dist/quill.snow.css" rel="stylesheet" integrity="sha384-07UbSXbd8HpaOfxZsiO6Y8H1HTX6v0J96b5qP6PKSpYEuSZSYD4GFFHlLRjvjVrL" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/quill@1.3.6/dist/quill.js" integrity="sha384-0zm5QqnR2gL4GY5AwreU3xp5AEGWqkdbamrRLeXwWwepp4JqmPRawLJFD8Cm802W" crossorigin="anonymous"></script>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #e8f5e9;
+            --accent-color: #4caf50;
+            --text-color: #333;
+            --bg-color: #f4f7f6;
+            --white: #ffffff;
+            --danger: #f44336;
+            --warning: #ff9800;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Kanit', sans-serif; }
+        body { background-color: var(--bg-color); color: var(--text-color); display: flex; height: 100vh; overflow: hidden; }
+
+        /* Login Screen */
+        #admin-login {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.95); backdrop-filter: blur(10px);
+            display: flex; justify-content: center; align-items: center; z-index: 9999;
+        }
+        .login-box {
+            background: var(--white); padding: 40px; border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1); text-align: center; max-width: 400px; width: 100%;
+        }
+        .login-box h2 { margin-bottom: 20px; color: var(--primary-color); }
+        .google-btn {
+            background: var(--white); border: 1px solid #ddd; padding: 10px 20px;
+            border-radius: 8px; cursor: pointer; font-size: 1rem; display: inline-flex; align-items: center; gap: 10px;
+            transition: 0.3s; width: 100%; justify-content: center;
+        }
+        .google-btn:hover { background: #f1f1f1; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .login-form-group { text-align: left; margin-bottom: 16px; }
+        .login-form-group label { display: block; font-size: 0.85rem; font-weight: 500; color: #555; margin-bottom: 6px; }
+        .login-form-group input {
+            width: 100%; padding: 11px 14px; border: 1px solid #ddd; border-radius: 8px;
+            font-size: 0.95rem; font-family: 'Kanit', sans-serif; transition: 0.2s;
+            outline: none; color: var(--text-color);
+        }
+        .login-form-group input:focus { border-color: var(--accent-color); box-shadow: 0 0 0 3px rgba(76,175,80,0.15); }
+        .email-login-btn {
+            width: 100%; padding: 11px; background: var(--accent-color); color: white;
+            border: none; border-radius: 8px; font-size: 1rem; font-family: 'Kanit', sans-serif;
+            font-weight: 500; cursor: pointer; transition: 0.2s;
+        }
+        .email-login-btn:hover { background: #388e3c; box-shadow: 0 4px 12px rgba(76,175,80,0.3); }
+        .email-login-btn:disabled { background: #a5d6a7; cursor: not-allowed; }
+        .login-divider { display: flex; align-items: center; gap: 10px; margin: 20px 0; color: #aaa; font-size: 0.85rem; }
+        .login-divider::before, .login-divider::after { content: ''; flex: 1; height: 1px; background: #eee; }
+        .login-box-header { display: flex; flex-direction: column; align-items: center; margin-bottom: 28px; }
+        .login-box-header .logo-text { font-family: 'Playfair Display', serif; font-size: 1.8rem; color: var(--accent-color); }
+        .login-box-header p { color: #888; font-size: 0.9rem; margin-top: 4px; }
+
+        /* Sidebar */
+        .sidebar {
+            width: 250px; background: var(--white); height: 100%; padding: 20px 0;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.05); display: flex; flex-direction: column;
+        }
+        .sidebar-header { padding: 0 20px 20px; border-bottom: 1px solid #eee; text-align: center; }
+        .sidebar-header h2 { color: var(--accent-color); font-family: 'Playfair Display', serif; }
+        .sidebar-menu { list-style: none; margin-top: 20px; flex: 1; }
+        .sidebar-menu li { padding: 15px 20px; cursor: pointer; border-left: 4px solid transparent; transition: 0.3s; }
+        .sidebar-menu li:hover, .sidebar-menu li.active {
+            background: var(--secondary-color); border-left-color: var(--accent-color); color: var(--accent-color); font-weight: 500;
+        }
+        .sidebar-footer { padding: 20px; border-top: 1px solid #eee; }
+        .logout-btn { color: var(--danger); cursor: pointer; display: block; text-align: center; padding: 10px; background: #ffebee; border-radius: 5px; }
+
+        /* Main Content */
+        .main-content { flex: 1; padding: 30px; overflow-y: auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+        .admin-profile { display: flex; align-items: center; gap: 10px; }
+        .admin-profile img { width: 40px; height: 40px; border-radius: 50%; }
+
+        /* Dashboard Cards */
+        .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .card { background: var(--white); padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); }
+        .card h3 { font-size: 0.9rem; color: #666; margin-bottom: 10px; }
+        .card .value { font-size: 1.8rem; font-weight: 600; color: var(--primary-color); }
+        .card .icon { float: right; font-size: 2rem; opacity: 0.2; }
+
+        /* Charts & Tables Section */
+        .section-container { background: var(--white); padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); margin-bottom: 30px; }
+        .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #fafafa; color: #666; font-weight: 500; }
+        tbody tr:hover { background: #f9f9f9; }
+
+        .status-badge { padding: 5px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: 500; }
+        .status-pending { background: #fff3e0; color: var(--warning); }
+        .status-processing { background: #e3f2fd; color: #2196f3; }
+        .status-completed { background: #e8f5e9; color: var(--accent-color); }
+        .status-cancelled { background: #ffebee; color: var(--danger); }
+
+        .btn-action { padding: 5px 10px; border: none; border-radius: 5px; cursor: pointer; font-size: 0.8rem; background: var(--accent-color); color: white; }
+        .btn-view { background: #2196f3; }
+        .btn-delete { background: var(--danger); }
+        .btn-edit { background: var(--warning); }
+
+
+        /* Manual Table Map Designer */
+        .map-admin-grid { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 20px; align-items: start; }
+        .map-admin-help { background: #f2fbf3; border: 1px solid #d9efdc; border-radius: 12px; padding: 14px 16px; color: #345; font-size: 0.92rem; line-height: 1.6; margin-bottom: 16px; }
+        .map-admin-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+        .map-admin-preview-card { background: #fbfff8; border: 1px solid #e0eadc; border-radius: 14px; padding: 14px; position: sticky; top: 20px; }
+        .admin-map-stage { position: relative; width: 100%; aspect-ratio: 1.35 / 1; min-height: 310px; overflow: hidden; border-radius: 18px; background: linear-gradient(135deg, #063b29, #0b5b3a 58%, #103c2d); border: 1px solid rgba(0,0,0,0.08); touch-action: none; user-select: none; }
+        .admin-map-zone { position: absolute; border: 1px solid rgba(255,255,255,0.18); border-radius: 18px; background: rgba(255,255,255,0.12); color: white; padding: 10px; font-size: 0.76rem; overflow: hidden; cursor: grab; touch-action: none; }
+        .admin-map-zone strong { display: block; letter-spacing: 0.14em; text-transform: uppercase; }
+        .admin-map-zone small { color: rgba(255,255,255,0.72); }
+        .admin-map-table { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2px solid #0b5b3a; background: #fffdf6; color: #123f2b; font-size: 0.68rem; font-weight: 700; box-shadow: 0 6px 14px rgba(0,0,0,0.12); cursor: grab; touch-action: none; }
+        .admin-map-zone.is-dragging, .admin-map-table.is-dragging { cursor: grabbing; outline: 2px solid rgba(255,255,255,0.85); outline-offset: 3px; z-index: 20; }
+        .admin-map-table.shape-round { width: 44px; height: 44px; border-radius: 999px; }
+        .admin-map-table.shape-rect { width: 66px; height: 42px; border-radius: 14px; }
+        .admin-map-table.shape-wide { width: 88px; height: 42px; border-radius: 14px; }
+        .admin-map-table.is-booked { background: #ded9d0; border-color: #c8c1b5; color: #8a8174; }
+        .admin-map-table.is-unavailable { background: #f9d1d0; border-color: #e89490; color: #8b2d2a; }
+        .map-admin-mini { color: #789; font-size: 0.82rem; margin-top: 10px; }
+        .map-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+        .map-form-grid .full { grid-column: 1 / -1; }
+        .modal-content.map-modal { max-width: 760px; margin: 4% auto; }
+        .map-admin-pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 9px; font-size: 0.78rem; font-weight: 500; background: #eef6f0; color: #2e7d32; }
+        .map-admin-pill.zone { background: #e3f2fd; color: #1565c0; }
+        @media (max-width: 1100px) { .map-admin-grid { grid-template-columns: 1fr; } .map-admin-preview-card { position: static; } }
+        @media (max-width: 640px) { .map-form-grid { grid-template-columns: 1fr; } }
+
+
+        /* Member Management */
+        .member-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 18px; }
+        .member-summary-card { background: linear-gradient(135deg, #ffffff, #f6fbf7); border: 1px solid #e3efe5; border-radius: 16px; padding: 16px; box-shadow: 0 8px 20px rgba(44, 62, 80, 0.05); }
+        .member-summary-card small { display: block; color: #708078; font-weight: 500; margin-bottom: 6px; }
+        .member-summary-card strong { font-size: 1.65rem; color: var(--primary-color); }
+        .member-toolbar { display: grid; grid-template-columns: minmax(240px, 1fr) 170px 170px auto; gap: 12px; align-items: center; margin-bottom: 16px; }
+        .member-toolbar input, .member-toolbar select { width: 100%; padding: 10px 12px; border: 1px solid #dde7df; border-radius: 10px; background: white; font-size: 0.92rem; }
+        .member-table-avatar { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; border: 2px solid #e8f5e9; background: #f5f5f5; }
+        .member-name-cell { display: flex; align-items: center; gap: 12px; min-width: 220px; }
+        .member-name-cell strong { display: block; color: var(--primary-color); }
+        .member-name-cell small { color: #768178; }
+        .tier-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 82px; padding: 5px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; }
+        .tier-badge.silver { background: #eef1f5; color: #465160; }
+        .tier-badge.gold { background: #fff2bf; color: #8a6500; }
+        .tier-badge.platinum { background: #e0f4ec; color: #0b5b43; }
+        .member-status-badge { display: inline-flex; align-items: center; padding: 5px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 600; background: #edf6ee; color: #2e7d32; }
+        .member-status-vip { background: #fff3cd; color: #8a6500; }
+        .member-status-suspended { background: #ffebee; color: #c62828; }
+        .member-status-review { background: #e3f2fd; color: #1565c0; }
+        .member-mini-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }
+        .member-mini-card { background: #f8fbf8; border: 1px solid #e1ece3; border-radius: 14px; padding: 12px; }
+        .member-mini-card small { display: block; color: #728077; margin-bottom: 5px; }
+        .member-mini-card strong { color: var(--primary-color); font-size: 1.15rem; }
+        .member-detail-head { display: flex; gap: 16px; align-items: center; margin-bottom: 14px; }
+        .member-detail-head img { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; border: 3px solid #e8f5e9; }
+        .member-detail-head h3 { margin: 0; color: var(--primary-color); }
+        .member-detail-head p { margin: 4px 0 0; color: #667; }
+        .member-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+        .member-detail-item { background: #fff; border: 1px solid #edf0ed; border-radius: 12px; padding: 12px; }
+        .member-detail-item small { display: block; color: #79857b; margin-bottom: 4px; }
+        .member-detail-item span { color: #263238; font-weight: 500; word-break: break-word; }
+        .member-activity-list { display: grid; gap: 8px; margin-top: 10px; max-height: 220px; overflow: auto; }
+        .member-activity-item { display: flex; justify-content: space-between; gap: 12px; border: 1px solid #edf0ed; border-radius: 12px; padding: 10px 12px; background: #fff; }
+        .member-activity-item small { color: #78857d; }
+        .member-note-box { background: #fbfff8; border: 1px solid #dfeee1; border-radius: 14px; padding: 14px; margin-top: 14px; }
+        .member-note-box textarea { min-height: 110px; }
+        .member-empty-state { padding: 24px; text-align: center; color: #7b887f; background: #fbfffb; border: 1px dashed #d8e7db; border-radius: 14px; }
+        @media (max-width: 920px) { .member-toolbar { grid-template-columns: 1fr; } .member-detail-grid, .member-mini-grid { grid-template-columns: 1fr; } }
+
+        /* Modal Styles */
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); backdrop-filter: blur(5px); }
+        .modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border-radius: 10px; width: 80%; max-width: 500px; }
+        .close-modal { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .close-modal:hover { color: black; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: 500; }
+        .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+        .form-group textarea { resize: vertical; min-height: 80px; }
+        .btn-submit { width: 100%; padding: 10px; background: var(--primary-color); color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1rem; }
+        
+        /* Content Sections */
+        .content-section { display: none; }
+        .content-section.active { display: block; }
+    </style>
+</head>
+<body>
+
+    <!-- Login Screen -->
+    <div id="admin-login" style="display: none;">
+        <div class="login-box" style="max-width: 420px;">
+            <div class="login-box-header">
+                <div class="logo-text">Eden Admin</div>
+                <p>ระบบจัดการร้านกาแฟ Eden Cafe</p>
+            </div>
+
+            <!-- Email / Password Form -->
+            <form id="email-login-form">
+                <div class="login-form-group">
+                    <label for="admin-email">อีเมล (Email)</label>
+                    <input type="email" id="admin-email" placeholder="admin@edencafe.com" required autocomplete="email">
+                </div>
+                <div class="login-form-group">
+                    <label for="admin-password">รหัสผ่าน (Password)</label>
+                    <input type="password" id="admin-password" placeholder="รหัสผ่านของคุณ" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="email-login-btn" id="btn-email-login">🔐 เข้าสู่ระบบ</button>
+            </form>
+
+            <div class="login-divider">หรือเข้าสู่ระบบด้วย</div>
+
+            <!-- Google Login -->
+            <button class="google-btn" id="btn-admin-login">
+                <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                Sign in with Google
+            </button>
+
+            <div id="login-error" style="color: #e53935; background: #ffebee; border-radius: 8px; padding: 10px 14px; margin-top: 16px; font-size: 0.88rem; display: none;"></div>
+        </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h2>Eden Admin</h2>
+        </div>
+        <ul class="sidebar-menu">
+            <li class="active" onclick="switchTab('dashboard', this)">📊 ภาพรวม (Dashboard)</li>
+            <li onclick="switchTab('members', this)">👥 จัดการสมาชิก (Members)</li>
+            <li onclick="switchTab('orders', this)">🛍️ ออเดอร์สินค้า (Orders)</li>
+            <li onclick="switchTab('bookings', this)">📅 คิวจองโต๊ะ (Table Bookings)</li>
+            <li onclick="switchTab('room-bookings', this)">📅 คิวจองห้องรับรอง (Room Bookings)</li>
+            <li onclick="switchTab('tables', this)">🪑 จัดการโต๊ะ (Tables)</li>
+            <li onclick="switchTab('rooms', this)">🛋️ จัดการห้องรับรอง (Rooms)</li>
+            <li onclick="switchTab('products', this)">🍽️ จัดการเมนู (Menu)</li>
+            <li onclick="switchTab('categories', this)">📂 หมวดหมู่เมนู (Categories)</li>
+            <li onclick="switchTab('shop-products', this)">🛒 จัดการสินค้า Shop</li>
+            <li onclick="switchTab('shop-categories', this)">📦 หมวดหมู่ Shop</li>
+            <li onclick="switchTab('blogs', this)">📝 จัดการบทความ (Blogs)</li>
+            <li onclick="switchTab('faqs', this)">❓ คำถามที่พบบ่อย (FAQ)</li>
+        </ul>
+        <div class="sidebar-footer">
+            <div class="logout-btn" id="btn-admin-logout">🚪 ออกจากระบบ</div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <div class="header">
+            <h1 id="page-title">ภาพรวมระบบ</h1>
+            <div class="admin-profile">
+                <span id="admin-name">Admin Name</span>
+                <img id="admin-avatar" src="Images/Logo.webp" alt="Avatar">
+            </div>
+        </div>
+
+        <!-- Dashboard Section -->
+        <div id="dashboard" class="content-section active">
+            <div class="cards-grid">
+                <div class="card">
+                    <div class="icon">💰</div>
+                    <h3>ยอดขายวันนี้</h3>
+                    <div class="value" id="stat-revenue">฿0</div>
+                </div>
+                <div class="card">
+                    <div class="icon">🛍️</div>
+                    <h3>ออเดอร์วันนี้</h3>
+                    <div class="value" id="stat-orders">0</div>
+                </div>
+                <div class="card">
+                    <div class="icon">👥</div>
+                    <h3>ยอดเข้าชมเว็บวันนี้</h3>
+                    <div class="value" id="stat-views-daily">0</div>
+                </div>
+                <div class="card">
+                    <div class="icon">📅</div>
+                    <h3>คิวจองโต๊ะวันนี้</h3>
+                    <div class="value" id="stat-bookings">0</div>
+                </div>
+            </div>
+
+            <div class="section-container" style="max-width: 800px;">
+                <div class="section-header">
+                    <h2>สถิติยอดผู้เข้าชม 7 วันล่าสุด</h2>
+                </div>
+                <canvas id="viewsChart" height="100"></canvas>
+            </div>
+        </div>
+
+        <!-- Members Section -->
+        <div id="members" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <div>
+                        <h2>จัดการสมาชิกทั้งหมด (Members)</h2>
+                        <p style="color:#667; margin-top:4px;">ดูข้อมูลสมาชิก ค้นหา กรองระดับสมาชิก และบันทึกหมายเหตุหลังบ้าน</p>
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button class="btn-action btn-edit" onclick="syncMembersFromAuth()">ซิงก์จาก Firebase Auth</button>
+                        <button class="btn-action btn-view" onclick="exportMembersCSV()">Export CSV</button>
+                        <button class="btn-action" onclick="refreshMembers()">รีเฟรชข้อมูล</button>
+                    </div>
+                </div>
+
+                <div class="member-summary-grid">
+                    <div class="member-summary-card"><small>สมาชิกทั้งหมด</small><strong id="member-stat-total">0</strong></div>
+                    <div class="member-summary-card"><small>Silver</small><strong id="member-stat-silver">0</strong></div>
+                    <div class="member-summary-card"><small>Gold</small><strong id="member-stat-gold">0</strong></div>
+                    <div class="member-summary-card"><small>Platinum</small><strong id="member-stat-platinum">0</strong></div>
+                    <div class="member-summary-card"><small>สมาชิกใหม่เดือนนี้</small><strong id="member-stat-new-month">0</strong></div>
+                </div>
+
+                <div class="member-toolbar">
+                    <input type="search" id="member-search" placeholder="ค้นหาชื่อ อีเมล เบอร์โทร LINE ID หรือรหัสสมาชิก">
+                    <select id="member-tier-filter">
+                        <option value="all">ทุกระดับสมาชิก</option>
+                        <option value="Silver">Silver</option>
+                        <option value="Gold">Gold</option>
+                        <option value="Platinum">Platinum</option>
+                    </select>
+                    <select id="member-status-filter">
+                        <option value="all">ทุกสถานะ</option>
+                        <option value="active">ปกติ</option>
+                        <option value="vip">VIP</option>
+                        <option value="review">ต้องตรวจสอบ</option>
+                        <option value="suspended">ระงับใช้งาน</option>
+                    </select>
+                    <span id="member-filter-count" style="color:#667; white-space:nowrap;">0 รายการ</span>
+                </div>
+
+                <div style="overflow-x:auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>สมาชิก</th>
+                                <th>เบอร์ / LINE</th>
+                                <th>Tier</th>
+                                <th>คะแนน</th>
+                                <th>ยอดใช้จ่าย</th>
+                                <th>ใช้บริการ</th>
+                                <th>สถานะ</th>
+                                <th>ล่าสุด</th>
+                                <th>จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="members-table-body">
+                            <tr><td colspan="9" style="text-align:center;">กำลังโหลดข้อมูลสมาชิก...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Orders Section -->
+        <div id="orders" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <h2>รายการสั่งซื้อทั้งหมด</h2>
+                    <button class="btn-action" onclick="fetchOrders()">รีเฟรชข้อมูล</button>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>รหัสสั่งซื้อ</th>
+                                <th>ลูกค้า</th>
+                                <th>ยอดรวม</th>
+                                <th>เวลา</th>
+                                <th>สถานะ</th>
+                                <th>จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="orders-table-body">
+                            <tr><td colspan="6" style="text-align: center;">กำลังโหลดข้อมูล...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bookings Section -->
+        <div id="bookings" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <h2>รายการจองโต๊ะทั่วไป</h2>
+                    <button class="btn-action" onclick="fetchBookings()">รีเฟรชข้อมูล</button>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ชื่อลูกค้า</th>
+                                <th>เบอร์โทร</th>
+                                <th>จำนวนคน</th>
+                                <th>วันที่-เวลา</th>
+                                <th>เลขโต๊ะ</th>
+                                <th>สถานะ</th>
+                                <th>จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bookings-table-body">
+                            <tr><td colspan="7" style="text-align: center;">กำลังโหลดข้อมูล...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Room Bookings Section -->
+        <div id="room-bookings" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <h2>รายการจองห้องรับรอง</h2>
+                    <button class="btn-action" onclick="fetchRoomBookings()">รีเฟรชข้อมูล</button>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ชื่อลูกค้า</th>
+                                <th>เบอร์โทร</th>
+                                <th>จำนวนคน</th>
+                                <th>วันที่-เวลา</th>
+                                <th>ห้องที่จอง</th>
+                                <th>รวมเงิน</th>
+                                <th>สถานะ</th>
+                                <th>จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="room-bookings-table-body">
+                            <tr><td colspan="8" style="text-align: center;">กำลังโหลดข้อมูล...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tables Section -->
+        <div id="tables" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <div>
+                        <h2>ตัวจัดการแผนผังโต๊ะ / โซน</h2>
+                        <p style="color:#667; margin-top:4px;">แก้แบบแมนนวล: ใส่ตำแหน่ง X/Y เป็นเปอร์เซ็นต์ แล้วดูตัวอย่างด้านขวาได้ทันที</p>
+                    </div>
+                    <div class="map-admin-actions">
+                        <button class="btn-action" onclick="openZoneModal()">+ เพิ่มโซน</button>
+                        <button class="btn-action" onclick="openTableModal()">+ เพิ่มโต๊ะ</button>
+                        <button class="btn-action btn-view" onclick="seedDefaultTableMap()">ใช้แผนผังเริ่มต้น</button>
+                    </div>
+                </div>
+
+                <div class="map-admin-help">
+                    <strong>วิธีใช้แบบง่าย:</strong> สร้างโซนก่อน เช่น Indoor / Garden แล้วสร้างโต๊ะโดยเลือกโซน ใส่ X/Y เพื่อวางตำแหน่งบนแผนที่ ค่า 0 คือซ้าย/บนสุด และ 100 คือขวา/ล่างสุด หากอยากปิดโต๊ะชั่วคราวให้เปลี่ยนสถานะเป็น “ปิดใช้งาน”
+                </div>
+
+                <div class="map-admin-grid">
+                    <div style="overflow-x:auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ประเภท</th>
+                                    <th>รหัส/ชื่อ</th>
+                                    <th>โซน/สถานะ</th>
+                                    <th>ตำแหน่ง</th>
+                                    <th>ขนาด/ที่นั่ง</th>
+                                    <th>จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tables-table-body">
+                                <tr><td colspan="6" style="text-align:center;">กำลังโหลดข้อมูล...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <aside class="map-admin-preview-card">
+                        <h3 style="margin-bottom:10px; color:var(--primary-color);">Preview แผนผัง</h3>
+                        <div id="admin-table-map-preview" class="admin-map-stage"></div>
+                        <p id="admin-table-map-summary" class="map-admin-mini">ยังไม่มีข้อมูลแผนผัง</p>
+                        <p class="map-admin-mini" style="color:#2e7d32;">ลากโซนหรือโต๊ะใน Preview เพื่อย้ายตำแหน่ง แล้วปล่อยเมาส์เพื่อบันทึกอัตโนมัติ</p>
+                    </aside>
+                </div>
+            </div>
+        </div>
+
+        <!-- Rooms Section -->
+        <div id="rooms" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <h2>รายการห้องรับรองทั้งหมด</h2>
+                    <button class="btn-action" onclick="openRoomModal()">+ เพิ่มห้องรับรอง</button>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>รูปภาพ</th>
+                                <th>ชื่อห้อง</th>
+                                <th>ความจุ</th>
+                                <th>ราคา/ชม.</th>
+                                <th>จำนวนห้อง</th>
+                                <th>จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rooms-table-body">
+                            <tr><td colspan="6" style="text-align: center;">กำลังโหลดข้อมูล...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Products/Menu Section -->
+        <div id="products" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <h2>รายการเมนูสินค้าทั้งหมด</h2>
+                    <button class="btn-action" onclick="openProductModal()">+ เพิ่มเมนูใหม่</button>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>รูปภาพ</th>
+                                <th>ชื่อเมนู</th>
+                                <th>หมวดหมู่</th>
+                                <th>ราคา</th>
+                                <th>เมนูแนะนำ</th>
+                                <th>จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="products-table-body">
+                            <tr><td colspan="6" style="text-align: center;">กำลังโหลดข้อมูล...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Categories Section -->
+        <div id="categories" class="content-section">
+            <div class="section-container" style="max-width: 600px;">
+                <div class="section-header">
+                    <h2>หมวดหมู่สินค้าทั้งหมด</h2>
+                    <button class="btn-action" onclick="openCategoryModal()">+ เพิ่มหมวดหมู่</button>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>รหัส (ID)</th>
+                                <th>ชื่อหมวดหมู่</th>
+                                <th>จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="categories-table-body">
+                            <tr><td colspan="3" style="text-align: center;">กำลังโหลดข้อมูล...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Shop Products Section -->
+        <div id="shop-products" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <h2>รายการสินค้า Shopทั้งหมด</h2>
+                    <button class="btn-action" onclick="openShopProductModal()">+ เพิ่มสินค้า Shop</button>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>รูปภาพ</th>
+                                <th>ชื่อสินค้า</th>
+                                <th>หมวดหมู่</th>
+                                <th>ราคา</th>
+                                <th>สต็อก</th>
+                                <th>แนะนำ</th>
+                                <th>จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="shop-products-table-body">
+                            <tr><td colspan="7" style="text-align: center;">กำลังโหลดข้อมูล...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Shop Categories Section -->
+        <div id="shop-categories" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <h2>หมวดหมู่สินค้า Shop</h2>
+                    <button class="btn-action" onclick="openShopCategoryModal()">+ เพิ่มหมวดหมู่ใหม่</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ชื่อหมวดหมู่</th>
+                            <th>วันที่สร้าง</th>
+                            <th>จัดการ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="shop-categories-table-body">
+                        <!-- Data injected via JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Blogs Section -->
+        <div id="blogs" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <h2>จัดการบทความ (Blogs)</h2>
+                    <button class="btn-action" onclick="openBlogModal()">+ เพิ่มบทความใหม่</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>รูปหน้าปก</th>
+                            <th>หัวข้อ</th>
+                            <th>หมวดหมู่</th>
+                            <th>สถานะ</th>
+                            <th>วันที่สร้าง</th>
+                            <th>จัดการ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="blogs-table-body">
+                        <!-- Data injected via JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- FAQs Section -->
+        <div id="faqs" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <h2>จัดการคำถามที่พบบ่อย (FAQ)</h2>
+                    <button class="btn-action" onclick="openFaqModal()">+ เพิ่มคำถามใหม่</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ลำดับ</th>
+                            <th style="width: 30%">คำถาม</th>
+                            <th style="width: 40%">คำตอบ</th>
+                            <th>จัดการ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="faqs-table-body">
+                        <!-- Data injected via JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Product Modal -->
+    <div id="productModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeProductModal()">&times;</span>
+            <h2 id="modal-title" style="margin-bottom: 20px;">เพิ่มเมนูใหม่</h2>
+            <form id="productForm">
+                <input type="hidden" id="productId">
+                <div class="form-group">
+                    <label>ชื่อเมนู</label>
+                    <input type="text" id="productName" required>
+                </div>
+                <div class="form-group">
+                    <label>คำอธิบาย</label>
+                    <textarea id="productDesc" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label>ราคา (บาท)</label>
+                    <input type="number" id="productPrice" required>
+                </div>
+                <div class="form-group">
+                    <label for="productImageFile">อัปโหลดรูปภาพ (Image File)</label>
+                    <input type="file" id="productImageFile" accept="image/*">
+                    <small>หรือใส่ลิงก์รูปภาพ (Image URL): <input type="url" id="productImage" placeholder="https://..." style="margin-top: 5px; width: 100%; box-sizing: border-box;"></small>
+                </div>
+                <div class="form-group">
+                    <label>หมวดหมู่</label>
+                    <select id="productCategory" required>
+                        <option value="">-- เลือกหมวดหมู่ --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="productSignature"> เป็นเมนูแนะนำ (แสดงหน้าแรก)
+                    </label>
+                </div>
+                <button type="submit" class="btn-submit">บันทึกข้อมูล</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Category Modal -->
+    <div id="categoryModal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <span class="close-modal" onclick="closeCategoryModal()">&times;</span>
+            <h2 id="cat-modal-title" style="margin-bottom: 20px;">เพิ่มหมวดหมู่ใหม่</h2>
+            <form id="categoryForm">
+                <input type="hidden" id="categoryId">
+                <div class="form-group">
+                    <label>รหัสหมวดหมู่ (ภาษาอังกฤษตัวเล็ก เช่น coffee)</label>
+                    <input type="text" id="catIdInput" required>
+                </div>
+                <div class="form-group">
+                    <label>ชื่อหมวดหมู่ (เช่น กาแฟ)</label>
+                    <input type="text" id="catNameInput" required>
+                </div>
+                <button type="submit" class="btn-submit">บันทึกหมวดหมู่</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Table / Zone Map Modal -->
+    <div id="tableModal" class="modal">
+        <div class="modal-content map-modal">
+            <span class="close-modal" onclick="closeTableModal()">&times;</span>
+            <h2 id="table-modal-title" style="margin-bottom: 8px;">เพิ่มโต๊ะ</h2>
+            <p style="color:#667; margin-bottom:18px;">กรอกตำแหน่งแบบเปอร์เซ็นต์เพื่อจัดวางบนแผนผัง ใช้ง่ายกว่า drag/drop และแก้ซ้ำได้แม่นกว่า</p>
+            <form id="tableForm">
+                <input type="hidden" id="tableId">
+                <input type="hidden" id="mapItemKind" value="table">
+                <div class="map-form-grid">
+                    <div class="form-group">
+                        <label>รหัส (เช่น IN-01 หรือ zone-indoor)</label>
+                        <input type="text" id="tableCode" required>
+                    </div>
+                    <div class="form-group">
+                        <label>ชื่อแสดงผล</label>
+                        <input type="text" id="tableName" required>
+                    </div>
+                    <div class="form-group table-only-field">
+                        <label>โซนของโต๊ะ</label>
+                        <input type="text" id="tableZone" list="table-zone-list" placeholder="Indoor">
+                        <datalist id="table-zone-list"></datalist>
+                    </div>
+                    <div class="form-group table-only-field">
+                        <label>จำนวนที่นั่ง</label>
+                        <input type="number" id="tableSeats" min="1" max="30" value="4">
+                    </div>
+                    <div class="form-group table-only-field">
+                        <label>ทรงโต๊ะ</label>
+                        <select id="tableShape">
+                            <option value="rect">สี่เหลี่ยม</option>
+                            <option value="round">วงกลม</option>
+                            <option value="wide">โต๊ะยาว</option>
+                        </select>
+                    </div>
+                    <div class="form-group table-only-field">
+                        <label>สถานะ</label>
+                        <select id="tableStatus">
+                            <option value="available">ว่าง</option>
+                            <option value="booked">จองแล้ว</option>
+                            <option value="unavailable">ปิดใช้งาน</option>
+                        </select>
+                    </div>
+                    <div class="form-group zone-only-field">
+                        <label>คำอธิบายโซน</label>
+                        <input type="text" id="zoneHint" placeholder="Quiet AC seating">
+                    </div>
+                    <div class="form-group">
+                        <label>ตำแหน่ง X (%)</label>
+                        <input type="number" id="tableX" min="0" max="100" step="1" value="10" required>
+                    </div>
+                    <div class="form-group">
+                        <label>ตำแหน่ง Y (%)</label>
+                        <input type="number" id="tableY" min="0" max="100" step="1" value="10" required>
+                    </div>
+                    <div class="form-group zone-only-field">
+                        <label>ความกว้างโซน (%)</label>
+                        <input type="number" id="zoneW" min="5" max="100" step="1" value="35">
+                    </div>
+                    <div class="form-group zone-only-field">
+                        <label>ความสูงโซน (%)</label>
+                        <input type="number" id="zoneH" min="5" max="100" step="1" value="30">
+                    </div>
+                </div>
+                <button type="submit" class="btn-submit" id="tableSubmitBtn">บันทึก</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Room Modal -->
+    <div id="roomModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeRoomModal()">&times;</span>
+            <h2 id="room-modal-title" style="margin-bottom: 20px;">เพิ่มห้องรับรอง</h2>
+            <form id="roomForm">
+                <input type="hidden" id="roomId">
+                <div class="form-group">
+                    <label>รหัสห้อง (ภาษาอังกฤษตัวเล็ก เช่น meeting, coworking)</label>
+                    <input type="text" id="roomCode" required>
+                </div>
+                <div class="form-group">
+                    <label>ชื่อห้องรับรอง (เช่น Meeting Room)</label>
+                    <input type="text" id="roomName" required>
+                </div>
+                <div class="form-group">
+                    <label>ความจุ (เช่น 3-6 ท่าน)</label>
+                    <input type="text" id="roomCapacity" required>
+                </div>
+                <div class="form-group">
+                    <label>ราคาต่อชั่วโมง (บาท)</label>
+                    <input type="number" id="roomPrice" required>
+                </div>
+                <div class="form-group">
+                    <label>จำนวนห้องที่มี (ห้อง)</label>
+                    <input type="number" id="roomAmount" required>
+                </div>
+                <div class="form-group">
+                    <label>รูปภาพประกอบ (.webp, .jpg, .png)</label>
+                    <input type="file" id="roomImageFile" accept="image/webp, image/jpeg, image/png">
+                    <p style="font-size: 0.8rem; color: #888; margin-top: 5px;">* หากไม่อัปโหลดรูปภาพใหม่ ระบบจะใช้รูปภาพเดิม</p>
+                    <input type="hidden" id="roomImageUrl">
+                </div>
+                <button type="submit" class="btn-submit" id="roomSubmitBtn">บันทึกข้อมูลห้อง</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Shop Product Modal -->
+    <div id="shopProductModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeShopProductModal()">&times;</span>
+            <h2 id="shop-modal-title" style="margin-bottom: 20px;">เพิ่มสินค้า Shop</h2>
+            <form id="shopProductForm">
+                <input type="hidden" id="shopProductId">
+                <div class="form-group">
+                    <label>ชื่อสินค้า</label>
+                    <input type="text" id="shopProductName" required>
+                </div>
+                <div class="form-group">
+                    <label>คำอธิบาย</label>
+                    <textarea id="shopProductDesc" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label>ราคา (บาท)</label>
+                    <input type="number" id="shopProductPrice" required>
+                </div>
+                <div class="form-group">
+                    <label>จำนวนสต็อก (Stock)</label>
+                    <input type="number" id="shopProductStock" value="0" required>
+                </div>
+                <div class="form-group">
+                    <label for="shopProductImageFile">อัปโหลดรูปภาพ (Image File)</label>
+                    <input type="file" id="shopProductImageFile" accept="image/*">
+                    <small>หรือใส่ลิงก์รูปภาพ (Image URL): <input type="url" id="shopProductImage" placeholder="https://..." style="margin-top: 5px; width: 100%; box-sizing: border-box;"></small>
+                </div>
+                <div class="form-group">
+                    <label>หมวดหมู่</label>
+                    <select id="shopProductCategory" required>
+                        <option value="">-- เลือกหมวดหมู่ --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="shopProductFeatured"> เป็นสินค้าแนะนำ (isFeatured)
+                    </label>
+                </div>
+                <button type="submit" class="btn-submit">บันทึกข้อมูล</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Shop Category Modal -->
+    <div id="shopCategoryModal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <span class="close-modal" onclick="closeShopCategoryModal()">&times;</span>
+            <h2 id="shop-cat-modal-title" style="margin-bottom: 20px;">เพิ่มหมวดหมู่ Shop</h2>
+            <form id="shopCategoryForm">
+                <input type="hidden" id="shopCategoryId">
+                <div class="form-group">
+                    <label>รหัสหมวดหมู่ (ภาษาอังกฤษตัวเล็ก เช่น coffee_bean)</label>
+                    <input type="text" id="shopCatIdInput" required>
+                </div>
+                <div class="form-group">
+                    <label>ชื่อหมวดหมู่ (เช่น เมล็ดกาแฟ)</label>
+                    <input type="text" id="shopCatNameInput" required>
+                </div>
+                <div class="form-group">
+                    <label>หมวดหมู่หลัก (Parent Category) - เลือกได้</label>
+                    <select id="shopCatParentInput">
+                        <option value="">-- ไม่มีหมวดหมู่หลัก --</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn-submit">บันทึกหมวดหมู่</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Blog Modal -->
+    <div id="blogModal" class="modal">
+        <div class="modal-content" style="max-width: 800px; width: 90%;">
+            <span class="close-modal" onclick="closeBlogModal()">&times;</span>
+            <h2 id="blogModalTitle">เพิ่มบทความใหม่</h2>
+            <form id="blogForm">
+                <input type="hidden" id="blogId">
+                <div class="form-group">
+                    <label for="blogTitle">หัวข้อบทความ (Title)</label>
+                    <input type="text" id="blogTitle" required>
+                </div>
+                <div class="form-group">
+                    <label for="blogCategory">หมวดหมู่</label>
+                    <select id="blogCategory">
+                        <option value="ความรู้เรื่องกาแฟ">ความรู้เรื่องกาแฟ</option>
+                        <option value="ข่าวสารและกิจกรรม">ข่าวสารและกิจกรรม</option>
+                        <option value="ไลฟ์สไตล์">ไลฟ์สไตล์</option>
+                        <option value="อื่นๆ">อื่นๆ</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="blogStatus">สถานะ</label>
+                    <select id="blogStatus">
+                        <option value="draft">ฉบับร่าง (Draft)</option>
+                        <option value="published">เผยแพร่ (Published)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="blogExcerpt">คำโปรย (Excerpt)</label>
+                    <textarea id="blogExcerpt" rows="2" placeholder="คำอธิบายสั้นๆ ก่อนกดอ่านเพิ่มเติม"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="blogImageFile">รูปภาพหน้าปก (Cover Image)</label>
+                    <input type="file" id="blogImageFile" accept="image/*">
+                    <small>หรือใช้ลิงก์รูปภาพ: <input type="url" id="blogImageUrl" placeholder="https://..." style="margin-top: 5px;"></small>
+                </div>
+                <div class="form-group" style="margin-bottom: 50px;">
+                    <label>เนื้อหาบทความ (Content)</label>
+                    <div id="blogContentEditor" style="height: 300px; background: white;"></div>
+                </div>
+                <button type="submit" class="btn-submit" id="btn-submit-blog">บันทึกบทความ</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- FAQ Modal -->
+    <div id="faqModal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <span class="close-modal" onclick="closeFaqModal()">&times;</span>
+            <h2 id="faqModalTitle">เพิ่มคำถามที่พบบ่อย</h2>
+            <form id="faqForm">
+                <input type="hidden" id="faqId">
+                <div class="form-group">
+                    <label for="faqQuestion">คำถาม (Question)</label>
+                    <input type="text" id="faqQuestion" required>
+                </div>
+                <div class="form-group">
+                    <label for="faqAnswer">คำตอบ (Answer)</label>
+                    <textarea id="faqAnswer" rows="4" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="faqOrder">ลำดับการแสดงผล (ตัวเลข)</label>
+                    <input type="number" id="faqOrder" value="0" required>
+                </div>
+                <button type="submit" class="btn-submit">บันทึกข้อมูล</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Member Detail Modal -->
+    <div id="memberModal" class="modal">
+        <div class="modal-content" style="max-width: 920px; width: 92%; margin: 4% auto;">
+            <span class="close-modal" onclick="closeMemberModal()">&times;</span>
+            <div id="member-detail-content">
+                <div class="member-empty-state">เลือกสมาชิกจากตารางเพื่อดูรายละเอียด</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase Scripts -->
+    <script type="module" src="js/admin.js?v=18"></script>
+    <script>
+        function switchTab(tabId, el) {
+            // Update Menu Active
+            document.querySelectorAll('.sidebar-menu li').forEach(li => li.classList.remove('active'));
+            el.classList.add('active');
+            
+            // Update Content
+            document.querySelectorAll('.content-section').forEach(sec => sec.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+
+            // Update Title
+            document.getElementById('page-title').innerText = el.innerText.split(' ').slice(1).join(' ');
+        }
+    </script>
+</body>
+</html>
+
+
