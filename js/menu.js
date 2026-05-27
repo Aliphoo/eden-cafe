@@ -61,19 +61,24 @@ function normalizeMenuItem(item) {
     const en = isEnglishPage();
     const category = item.category || 'other';
     const categoryLabel = CATEGORY_LABELS[category] || CATEGORY_LABELS.other;
+    const categoryMeta = item.categoryMeta || {};
     const trackStock = parseMenuBool(item.trackStock, false);
     const stock = Number(item.stock ?? item.inStock ?? 0);
     const availableForSale = parseMenuBool(item.availableForSale, true);
+    const categoryOrder = Number(categoryMeta.order ?? item.categoryOrder ?? 999);
+    const order = Number(item.order ?? 999999);
 
     return {
         id: item.id || item.handle || item.sku || item.slug || item.name || String(Date.now()),
         handle: item.handle || item.id || '',
         sku: item.sku || '',
         category,
-        categoryName: item.categoryName || (en ? item.categoryNameEn : item.categoryNameTh) || (en ? categoryLabel.en : categoryLabel.th),
+        categoryName: categoryMeta.name || item.categoryName || (en ? item.categoryNameEn : item.categoryNameTh) || (en ? categoryLabel.en : categoryLabel.th),
         name: item.name || (en ? item.nameEn : item.nameTh) || 'Eden Menu',
         description: item.description || (en ? item.descriptionEn : item.descriptionTh) || '',
         price: Number(item.price) || 0,
+        order: Number.isFinite(order) ? order : 999999,
+        categoryOrder: Number.isFinite(categoryOrder) ? categoryOrder : 999,
         imageUrl: item.imageUrl || item.image || 'Images/Logo.webp',
         soldByWeight: parseMenuBool(item.soldByWeight, false),
         options: normalizeMenuOptions(item),
@@ -90,21 +95,66 @@ function fallbackMenu() {
     return FALLBACK_MENU.map(normalizeMenuItem);
 }
 
-async function fetchMenuFromCloud() {
-    if (!db) return [];
-    const snap = await getDocs(query(collection(db, 'products')));
-    return snap.docs
-        .map(docSnap => normalizeMenuItem({ id: docSnap.id, ...docSnap.data() }))
-        .filter(item => item.availableForSale);
+function normalizeMenuCategory(id, data = {}) {
+    const en = isEnglishPage();
+    const fallback = CATEGORY_LABELS[id] || CATEGORY_LABELS.other;
+    const displayName = data.name || (en ? data.nameEn : data.nameTh) || (en ? fallback.en : fallback.th);
+    const order = Number(data.order ?? 999);
+    return {
+        id,
+        name: displayName,
+        order: Number.isFinite(order) ? order : 999
+    };
 }
 
-function renderMenu(container, items, note = '') {
-    const en = isEnglishPage();
-    const fallbackMode = Boolean(note);
-    const grouped = items.reduce((acc, item) => {
-        if (!acc[item.category]) acc[item.category] = item.categoryName;
+function sortMenuItems(items) {
+    return [...items].sort((a, b) => {
+        const categoryOrder = (a.categoryOrder ?? 999) - (b.categoryOrder ?? 999);
+        if (categoryOrder !== 0) return categoryOrder;
+        const itemOrder = (a.order ?? 999999) - (b.order ?? 999999);
+        if (itemOrder !== 0) return itemOrder;
+        return String(a.name || '').localeCompare(String(b.name || ''), 'th');
+    });
+}
+
+function buildCategoryFilters(items, categories = []) {
+    const usedCategoryIds = new Set(items.map(item => item.category));
+    const fromCategories = categories
+        .filter(category => usedCategoryIds.has(category.id))
+        .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+    const knownIds = new Set(fromCategories.map(category => category.id));
+    const fromItems = items.reduce((acc, item) => {
+        if (!knownIds.has(item.category) && !acc.some(category => category.id === item.category)) {
+            acc.push({ id: item.category, name: item.categoryName, order: item.categoryOrder ?? 999 });
+        }
+        return acc;
+    }, []).sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+    return [...fromCategories, ...fromItems];
+}
+
+async function fetchMenuFromCloud() {
+    if (!db) return [];
+    const [categorySnap, productSnap] = await Promise.all([
+        getDocs(query(collection(db, 'categories'))),
+        getDocs(query(collection(db, 'products')))
+    ]);
+    const categories = categorySnap.docs
+        .map(docSnap => normalizeMenuCategory(docSnap.id, { id: docSnap.id, ...docSnap.data() }))
+        .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+    const categoryMeta = categories.reduce((acc, category) => {
+        acc[category.id] = category;
         return acc;
     }, {});
+    const items = productSnap.docs
+        .map(docSnap => normalizeMenuItem({ id: docSnap.id, ...docSnap.data(), categoryMeta: categoryMeta[docSnap.data().category] }))
+        .filter(item => item.availableForSale);
+    return { items: sortMenuItems(items), categories };
+}
+
+function renderMenu(container, items, note = '', categories = []) {
+    const en = isEnglishPage();
+    const fallbackMode = Boolean(note);
+    const categoryFilters = buildCategoryFilters(items, categories);
 
     const cardsHTML = items.map(item => {
         const disabled = fallbackMode || !item.canSell;
@@ -131,7 +181,7 @@ function renderMenu(container, items, note = '') {
     container.innerHTML = (note ? '<div class="shop-data-note" style="background:#fff8e1; border:1px solid #f1d58a; color:#6b4f00; padding:12px 16px; border-radius:12px; margin-bottom:18px;">' + escapeHTML(note) + '</div>' : '')
         + '<div class="category-filters menu-category-filters">'
         + '<button class="filter-btn active" data-filter="all">' + (en ? 'All' : '\u0e17\u0e31\u0e49\u0e07\u0e2b\u0e21\u0e14') + '</button>'
-        + Object.entries(grouped).map(([categoryId, label]) => '<button class="filter-btn" data-filter="cat-' + escapeHTML(categoryId) + '">' + escapeHTML(label) + '</button>').join('')
+        + categoryFilters.map(category => '<button class="filter-btn" data-filter="cat-' + escapeHTML(category.id) + '">' + escapeHTML(category.name) + '</button>').join('')
         + '</div><div class="shop-grid shop-grid-online menu-grid-online">' + cardsHTML + '</div>';
 
     const buttons = container.querySelectorAll('.filter-btn');
@@ -156,8 +206,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     container.innerHTML = '<div style="text-align:center; padding:40px;">' + (en ? 'Loading menu...' : '\u0e01\u0e33\u0e25\u0e31\u0e07\u0e42\u0e2b\u0e25\u0e14\u0e40\u0e21\u0e19\u0e39...') + '</div>';
 
     try {
-        const items = await fetchMenuFromCloud();
-        if (items.length) renderMenu(container, items);
+        const result = await fetchMenuFromCloud();
+        const items = Array.isArray(result) ? result : result.items;
+        const categories = Array.isArray(result?.categories) ? result.categories : [];
+        if (items.length) renderMenu(container, items, '', categories);
         else renderMenu(container, fallbackMenu(), en ? 'Showing sample menu while the live menu is empty.' : '\u0e41\u0e2a\u0e14\u0e07\u0e40\u0e21\u0e19\u0e39\u0e15\u0e31\u0e27\u0e2d\u0e22\u0e48\u0e32\u0e07\u0e23\u0e30\u0e2b\u0e27\u0e48\u0e32\u0e07\u0e23\u0e2d\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e08\u0e32\u0e01\u0e2b\u0e25\u0e31\u0e07\u0e1a\u0e49\u0e32\u0e19');
     } catch (error) {
         console.error('Error loading menu:', error);
