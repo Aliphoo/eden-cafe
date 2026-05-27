@@ -1,4 +1,4 @@
-import { auth, provider, db, storage } from './firebase-config.js';
+﻿import { auth, provider, db, storage } from './firebase-config.js';
 import { getMemberTier, getTierBenefits } from './membership.js';
 import { signInWithPopup, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -148,8 +148,21 @@ async function loadAdminAccess(user) {
     if (!user) return null;
     if (isAdminUser(user)) return buildBootstrapOwnerAccess(user);
 
-    const snap = await getDoc(doc(db, ADMIN_COLLECTION, user.uid));
-    if (!snap.exists()) return null;
+    let snap;
+    try {
+        snap = await getDoc(doc(db, ADMIN_COLLECTION, user.uid));
+    } catch (error) {
+        console.error('Unable to read admin access document:', error);
+        if (loginError) {
+            loginError.innerText = 'Cannot verify admin permission: ' + error.message;
+            loginError.style.display = 'block';
+        }
+        return null;
+    }
+    if (!snap.exists()) {
+        console.warn('No admin access document for UID:', user.uid, 'email:', user.email);
+        return null;
+    }
 
     const data = snap.data();
     if (data.status !== 'active') return null;
@@ -2042,6 +2055,11 @@ async function saveAdminAccessFromForm() {
         alert('กรุณากรอก Firebase UID และอีเมล');
         return;
     }
+    if (uid.includes('@')) {
+        alert('Firebase UID ต้องไม่ใช่อีเมลครับ ให้ใช้ User UID จาก Firebase Authentication หรือเลือกจาก dropdown สมาชิก');
+        return;
+    }
+
 
     const permissions = normalizePermissions(role, getSelectedAdminPermissions());
     const existing = adminAccessData[uid];
@@ -2059,10 +2077,16 @@ async function saveAdminAccessFromForm() {
         payload.createdAt = serverTimestamp();
         payload.createdBy = auth.currentUser?.uid || '';
     }
-
-    await setDoc(doc(db, ADMIN_COLLECTION, uid), payload, { merge: true });
-    alert('บันทึกสิทธิ์ผู้จัดการเรียบร้อย');
-    resetAdminAccessForm();
+    try {
+        await setDoc(doc(db, ADMIN_COLLECTION, uid), payload, { merge: true });
+        adminAccessData[uid] = { ...payload, updatedAt: new Date().toISOString() };
+        renderAdminAccessTable();
+        alert('บันทึกสิทธิ์ผู้จัดการเรียบร้อยแล้ว\n\nถ้าผู้จัดการยังเข้าไม่ได้ ให้เช็กว่า UID ตรงกับ Firebase Authentication ของบัญชีนั้น');
+        resetAdminAccessForm();
+    } catch (error) {
+        console.error('Unable to save admin access:', error);
+        alert('บันทึกสิทธิ์ผู้จัดการไม่สำเร็จ: ' + error.message);
+    }
 }
 
 window.editAdminAccess = (uid) => {
@@ -2596,6 +2620,7 @@ onAuthStateChanged(auth, (user) => {
         if(typeof fetchFaqsFromCloud === 'function') fetchFaqsFromCloud();
     }
 });
+
 
 
 
