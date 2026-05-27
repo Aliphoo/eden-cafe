@@ -953,6 +953,48 @@ footer p {
     margin-bottom: 10px;
 }
 
+#menu-products .menu-variant-field {
+    flex: 0 0 auto;
+    margin: 10px 0 12px;
+}
+
+#menu-products .menu-variant-label {
+    color: #496655;
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+}
+
+#menu-products .menu-variant-select {
+    appearance: auto;
+    background: linear-gradient(135deg, #fbfff8 0%, #eef7ed 100%);
+    border: 1px solid #cfe0cf;
+    border-radius: 12px;
+    color: #173f2b;
+    cursor: pointer;
+    font-family: 'Prompt', sans-serif;
+    font-size: 0.84rem;
+    font-weight: 600;
+    outline: none;
+    padding: 9px 11px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    width: 100%;
+}
+
+#menu-products .menu-variant-select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(31, 122, 61, 0.12);
+}
+
+#menu-products .menu-variant-select:disabled {
+    background: #f2f2f2;
+    color: #888;
+    cursor: not-allowed;
+}
+
 #menu-products .menu-grid-online .shop-action {
     align-items: flex-start;
     flex-direction: column;

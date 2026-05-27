@@ -57,6 +57,35 @@ function normalizeMenuOptions(item) {
         .filter(option => option.name || option.value);
 }
 
+function normalizeMenuVariant(variant, index, item, basePrice) {
+    const rawName = String(variant?.name ?? variant?.id ?? variant?.option ?? '').trim();
+    const price = Number(variant?.price ?? basePrice ?? 0);
+    const stock = Number(variant?.stock ?? variant?.inStock ?? 0);
+    const trackStock = parseMenuBool(variant?.trackStock, false);
+    const availableForSale = parseMenuBool(variant?.availableForSale, true);
+    const id = String(variant?.id ?? variant?.sku ?? rawName ?? index).trim() || String(index);
+    const name = rawName || (isEnglishPage() ? 'Option ' + (index + 1) : '\u0e15\u0e31\u0e27\u0e40\u0e25\u0e37\u0e2d\u0e01 ' + (index + 1));
+
+    return {
+        id,
+        name,
+        price: Number.isFinite(price) ? price : 0,
+        sku: String(variant?.sku ?? '').trim(),
+        barcode: String(variant?.barcode ?? '').trim(),
+        stock: Number.isFinite(stock) ? stock : 0,
+        lowStock: Number(variant?.lowStock ?? 0) || 0,
+        availableForSale,
+        canSell: availableForSale && (!trackStock || stock > 0)
+    };
+}
+
+function normalizeMenuVariants(item, basePrice) {
+    if (!Array.isArray(item.variants)) return [];
+    return item.variants
+        .map((variant, index) => normalizeMenuVariant(variant, index, item, basePrice))
+        .filter(variant => variant.name || variant.sku || variant.id);
+}
+
 function normalizeMenuItem(item) {
     const en = isEnglishPage();
     const category = item.category || 'other';
@@ -67,6 +96,10 @@ function normalizeMenuItem(item) {
     const availableForSale = parseMenuBool(item.availableForSale, true);
     const categoryOrder = Number(categoryMeta.order ?? item.categoryOrder ?? 999);
     const order = Number(item.order ?? 999999);
+    const price = Number(item.price) || 0;
+    const variants = normalizeMenuVariants(item, price);
+    const hasSellableVariant = variants.some(variant => variant.canSell);
+    const canSell = availableForSale && (variants.length ? hasSellableVariant : (!trackStock || stock > 0));
 
     return {
         id: item.id || item.handle || item.sku || item.slug || item.name || String(Date.now()),
@@ -76,17 +109,18 @@ function normalizeMenuItem(item) {
         categoryName: categoryMeta.name || item.categoryName || (en ? item.categoryNameEn : item.categoryNameTh) || (en ? categoryLabel.en : categoryLabel.th),
         name: item.name || (en ? item.nameEn : item.nameTh) || 'Eden Menu',
         description: item.description || (en ? item.descriptionEn : item.descriptionTh) || '',
-        price: Number(item.price) || 0,
+        price,
         order: Number.isFinite(order) ? order : 999999,
         categoryOrder: Number.isFinite(categoryOrder) ? categoryOrder : 999,
         imageUrl: item.imageUrl || item.image || 'Images/Logo.webp',
         soldByWeight: parseMenuBool(item.soldByWeight, false),
         options: normalizeMenuOptions(item),
+        variants,
         trackStock,
         stock: Number.isFinite(stock) ? stock : 0,
         lowStock: Number(item.lowStock ?? 0) || 0,
         availableForSale,
-        canSell: availableForSale && (!trackStock || stock > 0),
+        canSell,
         taxEnabled: parseMenuBool(item.taxEnabled, true)
     };
 }
@@ -132,6 +166,96 @@ function buildCategoryFilters(items, categories = []) {
     return [...fromCategories, ...fromItems];
 }
 
+function getDefaultVariant(item) {
+    const variants = Array.isArray(item.variants) ? item.variants : [];
+    if (!variants.length) return null;
+    return variants.find(variant => variant.canSell) || variants[0];
+}
+
+function getVariantCartId(item, variant) {
+    return variant ? String(item.id) + '::' + String(variant.id) : String(item.id);
+}
+
+function getVariantCartName(item, variant) {
+    return variant ? item.name + ' - ' + variant.name : item.name;
+}
+
+function formatMenuPrice(value) {
+    const price = Number(value) || 0;
+    return '\u0e3f' + price.toLocaleString('en-US');
+}
+
+function variantControlId(item) {
+    return 'menu-variant-' + String(item.id || item.name || 'item').replace(/[^a-z0-9_-]+/gi, '-');
+}
+
+function renderVariantSelector(item, disabled, en) {
+    const variants = Array.isArray(item.variants) ? item.variants : [];
+    if (variants.length <= 1) return '';
+    const selectedVariant = getDefaultVariant(item);
+    const label = en ? 'Option' : '\u0e15\u0e31\u0e27\u0e40\u0e25\u0e37\u0e2d\u0e01';
+    const soldOut = en ? 'Sold out' : '\u0e2b\u0e21\u0e14';
+    const selectId = variantControlId(item);
+
+    const optionsHTML = variants.map((variant, index) => {
+        const isSelected = selectedVariant && variant.id === selectedVariant.id;
+        const optionText = variant.name + ' - ' + formatMenuPrice(variant.price) + (!variant.canSell ? ' (' + soldOut + ')' : '');
+        return '<option value="' + index + '"'
+            + (isSelected ? ' selected' : '')
+            + (!variant.canSell ? ' disabled' : '')
+            + ' data-variant-id="' + escapeHTML(variant.id) + '"'
+            + ' data-variant-name="' + escapeHTML(variant.name) + '"'
+            + ' data-price="' + variant.price + '"'
+            + ' data-sku="' + escapeHTML(variant.sku) + '"'
+            + ' data-available="' + (variant.canSell ? 'true' : 'false') + '">'
+            + escapeHTML(optionText)
+            + '</option>';
+    }).join('');
+
+    return '<div class="menu-variant-field">'
+        + '<label class="menu-variant-label" for="' + escapeHTML(selectId) + '">' + label + '</label>'
+        + '<select class="menu-variant-select" id="' + escapeHTML(selectId) + '"'
+        + (disabled ? ' disabled' : '')
+        + ' data-base-id="' + escapeHTML(item.id) + '"'
+        + ' data-base-name="' + escapeHTML(item.name) + '">'
+        + optionsHTML
+        + '</select>'
+        + '</div>';
+}
+
+function syncVariantSelection(select, en) {
+    const selectedOption = select.selectedOptions?.[0];
+    const card = select.closest('.menu-card');
+    const button = card?.querySelector('.btn-add-cart');
+    const priceEl = card?.querySelector('.menu-item-price');
+    if (!selectedOption || !button) return;
+
+    const locked = button.dataset.menuLocked === 'true';
+    const available = selectedOption.dataset.available !== 'false' && !selectedOption.disabled;
+    const price = Number(selectedOption.dataset.price) || 0;
+    const baseId = select.dataset.baseId || button.dataset.baseId || button.dataset.id || '';
+    const baseName = select.dataset.baseName || button.dataset.baseName || button.dataset.name || '';
+    const variantId = selectedOption.dataset.variantId || selectedOption.value;
+    const variantName = selectedOption.dataset.variantName || selectedOption.textContent || '';
+
+    if (priceEl) priceEl.textContent = formatMenuPrice(price);
+    button.dataset.id = baseId + '::' + variantId;
+    button.dataset.name = baseName + ' - ' + variantName;
+    button.dataset.price = String(price);
+    button.dataset.variantName = variantName;
+    button.dataset.sku = selectedOption.dataset.sku || '';
+
+    if (locked || !available) {
+        button.disabled = true;
+        button.style.background = '#ccc';
+        button.textContent = en ? 'Sold out' : '\u0e2b\u0e21\u0e14';
+    } else {
+        button.disabled = false;
+        button.style.background = '';
+        button.textContent = en ? 'Add to Cart' : '\u0e40\u0e1e\u0e34\u0e48\u0e21\u0e25\u0e07\u0e15\u0e30\u0e01\u0e23\u0e49\u0e32';
+    }
+}
+
 async function fetchMenuFromCloud() {
     if (!db) return [];
     const [categorySnap, productSnap] = await Promise.all([
@@ -158,7 +282,12 @@ function renderMenu(container, items, note = '', categories = []) {
 
     const cardsHTML = items.map(item => {
         const disabled = fallbackMode || !item.canSell;
-        const optionText = item.options.length ? item.options.map(option => (option.name + (option.name && option.value ? ': ' : '') + option.value)).join(' / ') : '';
+        const defaultVariant = getDefaultVariant(item);
+        const displayPrice = defaultVariant ? defaultVariant.price : item.price;
+        const cartId = getVariantCartId(item, defaultVariant);
+        const cartName = getVariantCartName(item, defaultVariant);
+        const variantSelector = renderVariantSelector(item, disabled, en);
+        const optionText = !item.variants.length && item.options.length ? item.options.map(option => (option.name + (option.name && option.value ? ': ' : '') + option.value)).join(' / ') : '';
         const stockText = item.trackStock ? (en ? 'Stock: ' + item.stock : '\u0e40\u0e2b\u0e25\u0e37\u0e2d ' + item.stock) : '';
         const buttonText = fallbackMode
             ? (en ? 'Unavailable' : '\u0e22\u0e31\u0e07\u0e44\u0e21\u0e48\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e02\u0e32\u0e22')
@@ -171,10 +300,11 @@ function renderMenu(container, items, note = '', categories = []) {
             + '<h3>' + escapeHTML(item.name) + '</h3>'
             + '<p>' + escapeHTML(item.description) + '</p>'
             + (optionText ? '<p style="font-size:0.85rem; color:#607466; margin-top:8px;">' + escapeHTML(optionText) + '</p>' : '')
+            + variantSelector
             + (stockText ? '<p style="font-size:0.85rem; color:' + (item.canSell ? '#0f7a3d' : '#b91c1c') + '; margin-top:6px;">' + escapeHTML(stockText) + '</p>' : '')
             + '<div class="shop-action">'
-            + '<span class="shop-price">&#3647;' + item.price.toLocaleString('en-US') + '</span>'
-            + '<button class="btn btn-add-cart" ' + (disabled ? 'disabled style="background:#ccc;"' : '') + ' data-id="' + escapeHTML(item.id) + '" data-name="' + escapeHTML(item.name) + '" data-price="' + item.price + '">' + buttonText + '</button>'
+            + '<span class="shop-price menu-item-price">' + formatMenuPrice(displayPrice) + '</span>'
+            + '<button class="btn btn-add-cart" ' + (disabled ? 'disabled style="background:#ccc;"' : '') + ' data-menu-locked="' + (disabled ? 'true' : 'false') + '" data-base-id="' + escapeHTML(item.id) + '" data-base-name="' + escapeHTML(item.name) + '" data-id="' + escapeHTML(cartId) + '" data-name="' + escapeHTML(cartName) + '" data-price="' + displayPrice + '">' + buttonText + '</button>'
             + '</div></div></div>';
     }).join('');
 
@@ -195,6 +325,11 @@ function renderMenu(container, items, note = '', categories = []) {
                 card.style.display = filter === 'all' || card.dataset.category === filter ? 'flex' : 'none';
             });
         });
+    });
+
+    container.querySelectorAll('.menu-variant-select').forEach(select => {
+        syncVariantSelection(select, en);
+        select.addEventListener('change', () => syncVariantSelection(select, en));
     });
 }
 
