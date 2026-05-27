@@ -142,6 +142,21 @@
         .menu-item-title strong { display: block; color: #111; font-size: 1rem; }
         .menu-item-title small { color: #789; }
         .menu-muted { color: #999; }
+        .menu-inline-category {
+            min-width: 190px;
+            max-width: 260px;
+            border: 0;
+            background: transparent;
+            color: #333;
+            font: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 8px 24px 8px 0;
+            outline: none;
+            border-bottom: 1px solid transparent;
+        }
+        .menu-inline-category:hover, .menu-inline-category:focus { border-bottom-color: var(--accent-color); color: var(--accent-color); }
+        .menu-inline-category.is-saving { opacity: 0.55; cursor: wait; }
         .menu-margin-good { color: #2e7d32; font-weight: 600; }
         .menu-margin-warn { color: #ef6c00; font-weight: 600; }
         .menu-stock-low { color: #ef6c00; font-weight: 600; }
@@ -1377,7 +1392,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=27"></script>
+    <script type="module" src="js/admin.js?v=28"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {

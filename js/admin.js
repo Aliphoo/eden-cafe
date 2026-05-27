@@ -1767,6 +1767,25 @@ function productMargin(product = {}) {
     };
 }
 
+function productCategoryOptions(currentCategory = '') {
+    const knownIds = new Set(Object.keys(categoriesData));
+    const options = [];
+    if (currentCategory && !knownIds.has(currentCategory)) {
+        options.push(`<option value="${escapeHTML(currentCategory)}">${escapeHTML(currentCategory)} (current)</option>`);
+    }
+    Object.entries(categoriesData)
+        .sort(([, a], [, b]) => {
+            const aOrder = Number(a.order || 999);
+            const bOrder = Number(b.order || 999);
+            if (aOrder !== bOrder) return aOrder - bOrder;
+            return String(a.name || '').localeCompare(String(b.name || ''), 'th');
+        })
+        .forEach(([id, cat]) => {
+            options.push(`<option value="${escapeHTML(id)}" ${id === currentCategory ? 'selected' : ''}>${escapeHTML(cat.name || id)}</option>`);
+        });
+    return options.join('');
+}
+
 function productMoney(value) {
     const amount = safeNumber(value);
     return amount ? '&#3647;' + amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-';
@@ -1849,7 +1868,11 @@ function renderProductsTable() {
                             </span>
                         </div>
                     </td>
-                    <td>${escapeHTML(catName)} <span class="menu-muted">⌄</span></td>
+                    <td>
+                        <select class="menu-inline-category" data-id="${escapeHTML(id)}" aria-label="Change category for ${escapeHTML(itemName)}">
+                            ${productCategoryOptions(product.category || '')}
+                        </select>
+                    </td>
                     <td>${productMoney(product.price)}</td>
                     <td>${productMoney(product.cost)}</td>
                     <td><span class="${margin.className}">${escapeHTML(margin.text)}</span></td>
@@ -1929,10 +1952,17 @@ function bindProductManagerControls() {
     if (tbody) {
         tbody.addEventListener('change', event => {
             const checkbox = event.target.closest('.product-row-check');
-            if (!checkbox) return;
-            if (checkbox.checked) selectedProductIds.add(checkbox.dataset.id);
-            else selectedProductIds.delete(checkbox.dataset.id);
-            updateProductSelectionUI(filteredProductRows().slice((productCurrentPage - 1) * productPageSize, productCurrentPage * productPageSize));
+            if (checkbox) {
+                if (checkbox.checked) selectedProductIds.add(checkbox.dataset.id);
+                else selectedProductIds.delete(checkbox.dataset.id);
+                updateProductSelectionUI(filteredProductRows().slice((productCurrentPage - 1) * productPageSize, productCurrentPage * productPageSize));
+                return;
+            }
+
+            const categorySelect = event.target.closest('.menu-inline-category');
+            if (categorySelect) {
+                updateProductCategoryInline(categorySelect.dataset.id, categorySelect.value, categorySelect);
+            }
         });
     }
     if (upload) {
@@ -1949,6 +1979,32 @@ function bindProductManagerControls() {
         });
     }
     productControlsBound = true;
+}
+
+async function updateProductCategoryInline(productId, categoryId, selectEl) {
+    if (!productId || !categoryId) return;
+    const product = productsData[productId];
+    const previousValue = product?.category || '';
+    if (previousValue === categoryId) return;
+    try {
+        if (selectEl) {
+            selectEl.disabled = true;
+            selectEl.classList.add('is-saving');
+        }
+        await updateDoc(doc(db, "products", productId), {
+            category: categoryId,
+            updatedAt: new Date().toISOString()
+        });
+        if (productsData[productId]) productsData[productId].category = categoryId;
+    } catch (error) {
+        if (selectEl) selectEl.value = previousValue;
+        alert('Update category failed: ' + error.message);
+    } finally {
+        if (selectEl) {
+            selectEl.disabled = false;
+            selectEl.classList.remove('is-saving');
+        }
+    }
 }
 
 window.downloadProductDataXLSX = async () => {
