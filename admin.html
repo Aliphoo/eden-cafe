@@ -199,6 +199,8 @@
         .btn-view { background: #2196f3; }
         .btn-delete { background: var(--danger); }
         .btn-edit { background: var(--warning); }
+        .admin-refresh-btn { background: #607d8b; white-space: nowrap; }
+        .admin-refresh-btn:disabled { opacity: 0.65; cursor: wait; }
 
 
         /* Manual Table Map Designer */
@@ -1489,7 +1491,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=32"></script>
+    <script type="module" src="js/admin.js?v=33"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {
@@ -1508,6 +1510,16 @@
 
             // Update Title
             if (el) document.getElementById('page-title').innerText = el.innerText.split(' ').slice(1).join(' ');
+
+            // Remember the current admin page so browser refresh returns here instead of Dashboard.
+            try {
+                localStorage.setItem('edenAdminActiveTab', tabId);
+                const url = new URL(window.location.href);
+                url.hash = tabId;
+                window.history.replaceState(null, '', url.toString());
+            } catch (error) {
+                console.warn('Unable to save current admin tab:', error);
+            }
         }
     </script>
 </body>

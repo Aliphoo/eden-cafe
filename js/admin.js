@@ -284,7 +284,18 @@ let membersData = {};
 let membersUnsubscribe = null;
 let ordersUnsubscribe = null;
 let bookingsUnsubscribe = null;
+let categoriesUnsubscribe = null;
+let productsUnsubscribe = null;
+let tablesUnsubscribe = null;
+let roomsUnsubscribe = null;
+let shopCategoriesUnsubscribe = null;
+let shopProductsUnsubscribe = null;
+let blogsUnsubscribe = null;
+let faqsUnsubscribe = null;
 let memberFiltersBound = false;
+let viewsChart = null;
+
+const ADMIN_ACTIVE_TAB_STORAGE_KEY = 'edenAdminActiveTab';
 
 
 const MENU_LOCATION_NAME = 'EDEN CAFE AND ETHNIC RESTAURANT.Co.,Ltd';
@@ -919,9 +930,148 @@ function initializeAdminModules() {
     if (canAdmin('members')) setupRealtimeMembers();
     if (isOwnerAccess()) setupRealtimeAdminAccess();
     initXLSXTools();
+    installAdminRefreshButtons();
     // Keep production data stable: run seed/migration manually from console only.
     // window.migrateProducts() remains available for first-time setup.
 }
+
+function adminTabIdFromMenuItem(li) {
+    const match = String(li?.getAttribute('onclick') || '').match(/switchTab\('([^']+)'/);
+    return match ? match[1] : '';
+}
+
+function adminMenuItemForTab(tabId) {
+    return Array.from(document.querySelectorAll('.sidebar-menu li'))
+        .find(li => adminTabIdFromMenuItem(li) === tabId && li.style.display !== 'none');
+}
+
+function getPreferredAdminTabId() {
+    if (hasLoyverseImportMode()) return 'dashboard';
+
+    const hash = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).replace(/^tab=/, '');
+    if (hash && document.getElementById(hash)) return hash;
+
+    const fromQuery = new URLSearchParams(window.location.search).get('tab');
+    if (fromQuery && document.getElementById(fromQuery)) return fromQuery;
+
+    try {
+        const saved = localStorage.getItem(ADMIN_ACTIVE_TAB_STORAGE_KEY);
+        if (saved && document.getElementById(saved)) return saved;
+    } catch (error) {
+        console.warn('Unable to read saved admin tab:', error);
+    }
+    return '';
+}
+
+function restoreAdminActiveTab() {
+    const preferredTab = getPreferredAdminTabId();
+    if (preferredTab && window.canAccessAdminTab(preferredTab)) {
+        const preferredMenu = adminMenuItemForTab(preferredTab);
+        if (preferredMenu) {
+            window.switchTab(preferredTab, preferredMenu);
+            return;
+        }
+    }
+
+    const active = document.querySelector('.content-section.active');
+    if (active && window.canAccessAdminTab(active.id)) {
+        const activeMenu = adminMenuItemForTab(active.id);
+        if (activeMenu) window.switchTab(active.id, activeMenu);
+        return;
+    }
+
+    const firstAllowedMenu = Array.from(document.querySelectorAll('.sidebar-menu li'))
+        .find(li => li.style.display !== 'none');
+    if (firstAllowedMenu) {
+        const tabId = adminTabIdFromMenuItem(firstAllowedMenu);
+        if (tabId) window.switchTab(tabId, firstAllowedMenu);
+    }
+}
+
+function installAdminRefreshButtons() {
+    document.querySelectorAll('.content-section').forEach(section => {
+        const toolbar = section.querySelector('.section-header > div:last-child, .section-header, .menu-pos-actions');
+        if (!toolbar || toolbar.querySelector('.admin-refresh-btn')) return;
+        const existingRefresh = Array.from(toolbar.querySelectorAll('button'))
+            .some(button => /รีเฟรช|โหลดข้อมูลปัจจุบัน/.test(button.textContent || ''));
+        if (existingRefresh) return;
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn-action btn-view admin-refresh-btn';
+        button.textContent = '⟳ รีเฟรช';
+        button.addEventListener('click', () => window.refreshAdminSection(section.id, button));
+        toolbar.appendChild(button);
+    });
+}
+
+window.refreshAdminSection = async (tabId, button = null) => {
+    if (!tabId) return;
+    const label = button?.textContent || '';
+    if (button) {
+        button.disabled = true;
+        button.textContent = 'กำลังรีเฟรช...';
+    }
+    try {
+        switch (tabId) {
+            case 'dashboard':
+                await fetchStats();
+                break;
+            case 'members':
+                setupRealtimeMembers();
+                break;
+            case 'admin-access':
+                setupRealtimeAdminAccess();
+                break;
+            case 'orders':
+                setupRealtimeOrders();
+                break;
+            case 'bookings':
+            case 'room-bookings':
+                setupRealtimeBookings();
+                break;
+            case 'tables':
+                setupRealtimeTables();
+                break;
+            case 'rooms':
+                setupRealtimeRooms();
+                break;
+            case 'products':
+                setupRealtimeCategories();
+                setupRealtimeProducts();
+                break;
+            case 'categories':
+                setupRealtimeCategories();
+                break;
+            case 'shop-products':
+                setupRealtimeShopCategories();
+                setupRealtimeShopProducts();
+                break;
+            case 'shop-categories':
+                setupRealtimeShopCategories();
+                break;
+            case 'blogs':
+                if (typeof window.fetchBlogsFromCloud === 'function') window.fetchBlogsFromCloud();
+                break;
+            case 'faqs':
+                if (typeof window.fetchFaqsFromCloud === 'function') window.fetchFaqsFromCloud();
+                break;
+            case 'footer-settings':
+                if (typeof window.loadFooterSettings === 'function') await window.loadFooterSettings();
+                break;
+            default:
+                console.warn('No refresh handler for admin tab:', tabId);
+        }
+    } catch (error) {
+        console.error('Unable to refresh admin section:', error);
+        alert('รีเฟรชข้อมูลไม่สำเร็จ: ' + error.message);
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = label || '⟳ รีเฟรช';
+        }
+    }
+};
 
 function hasLoyverseImportMode() {
     return new URLSearchParams(window.location.search).has('menu-import');
@@ -1071,18 +1221,7 @@ function applyAdminAccessUI() {
         section.dataset.accessAllowed = allowed ? 'true' : 'false';
     });
 
-    const active = document.querySelector('.content-section.active');
-    if (active && window.canAccessAdminTab(active.id)) {
-        updateXLSXToolsState();
-        return;
-    }
-
-    const firstAllowedMenu = Array.from(document.querySelectorAll('.sidebar-menu li'))
-        .find(li => li.style.display !== 'none');
-    if (firstAllowedMenu) {
-        const match = String(firstAllowedMenu.getAttribute('onclick') || '').match(/switchTab\('([^']+)'/);
-        if (match) window.switchTab(match[1], firstAllowedMenu);
-    }
+    restoreAdminActiveTab();
     updateXLSXToolsState();
 }
 
@@ -1097,14 +1236,23 @@ async function fetchStats() {
         }
         
         // Mock Chart Data for 7 days
-        const ctx = document.getElementById('viewsChart').getContext('2d');
-        new Chart(ctx, {
+        const canvas = document.getElementById('viewsChart');
+        if (!canvas) return;
+        const chartData = [120, 150, 180, 142, 200, 250, snap.exists() ? snap.data().dailyViews : 142];
+        if (viewsChart) {
+            viewsChart.data.datasets[0].data = chartData;
+            viewsChart.update();
+            return;
+        }
+
+        const ctx = canvas.getContext('2d');
+        viewsChart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
                 datasets: [{
                     label: 'ยอดผู้เข้าชม (Views)',
-                    data: [120, 150, 180, 142, 200, 250, snap.exists() ? snap.data().dailyViews : 142],
+                    data: chartData,
                     borderColor: '#4caf50',
                     backgroundColor: 'rgba(76, 175, 80, 0.1)',
                     borderWidth: 2,
@@ -1327,8 +1475,12 @@ function getStatusBadgeHTML(status, type) {
 
 // Real-time Categories Listener
 function setupRealtimeCategories() {
+    if (categoriesUnsubscribe) {
+        categoriesUnsubscribe();
+        categoriesUnsubscribe = null;
+    }
     const q = query(collection(db, "categories"));
-    onSnapshot(q, (snapshot) => {
+    categoriesUnsubscribe = onSnapshot(q, (snapshot) => {
         const tbody = document.getElementById('categories-table-body');
         const select = document.getElementById('productCategory');
         tbody.innerHTML = '';
@@ -1681,8 +1833,12 @@ function renderTablesManager(snapshot) {
 }
 
 function setupRealtimeTables() {
+    if (tablesUnsubscribe) {
+        tablesUnsubscribe();
+        tablesUnsubscribe = null;
+    }
     const q = query(collection(db, 'tables'));
-    onSnapshot(q, renderTablesManager, (error) => {
+    tablesUnsubscribe = onSnapshot(q, renderTablesManager, (error) => {
         console.error('Error listening to table map:', error);
         const tbody = document.getElementById('tables-table-body');
         if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:red;">โหลดข้อมูลแผนผังไม่สำเร็จ</td></tr>';
@@ -1827,8 +1983,12 @@ tableForm.addEventListener('submit', async (e) => {
 
 // Real-time Rooms Listener
 function setupRealtimeRooms() {
+    if (roomsUnsubscribe) {
+        roomsUnsubscribe();
+        roomsUnsubscribe = null;
+    }
     const q = query(collection(db, "rooms"), orderBy("price"));
-    onSnapshot(q, (snapshot) => {
+    roomsUnsubscribe = onSnapshot(q, (snapshot) => {
         const tbody = document.getElementById('rooms-table-body');
         tbody.innerHTML = '';
         roomsData = {};
@@ -2357,8 +2517,12 @@ window.downloadProductDataXLSX = async () => {
 
 // Real-time Products Listener
 function setupRealtimeProducts() {
+    if (productsUnsubscribe) {
+        productsUnsubscribe();
+        productsUnsubscribe = null;
+    }
     const q = query(collection(db, "products"), orderBy("category"));
-    onSnapshot(q, (snapshot) => {
+    productsUnsubscribe = onSnapshot(q, (snapshot) => {
         const tbody = document.getElementById('products-table-body');
         if (tbody) tbody.innerHTML = '';
         productsData = {};
@@ -2760,8 +2924,12 @@ const blogModal = document.getElementById('blogModal');
 const blogForm = document.getElementById('blogForm');
 
 window.fetchBlogsFromCloud = function() {
+    if (blogsUnsubscribe) {
+        blogsUnsubscribe();
+        blogsUnsubscribe = null;
+    }
     const q = query(collection(db, "blogs"), orderBy("createdAt", "desc"));
-    onSnapshot(q, (snapshot) => {
+    blogsUnsubscribe = onSnapshot(q, (snapshot) => {
         const tbody = document.getElementById('blogs-table-body');
         if (!tbody) return;
         
@@ -2984,8 +3152,12 @@ async function migrateProducts() {
 
 // --- Shop Management Logic ---
 function setupRealtimeShopCategories() {
+    if (shopCategoriesUnsubscribe) {
+        shopCategoriesUnsubscribe();
+        shopCategoriesUnsubscribe = null;
+    }
     const q = query(collection(db, "shop_categories"));
-    onSnapshot(q, (snapshot) => {
+    shopCategoriesUnsubscribe = onSnapshot(q, (snapshot) => {
         const tbody = document.getElementById('shop-categories-table-body');
         const selectCat = document.getElementById('shopProductCategory');
         const selectParent = document.getElementById('shopCatParentInput');
@@ -3032,8 +3204,12 @@ function setupRealtimeShopCategories() {
 }
 
 function setupRealtimeShopProducts() {
+    if (shopProductsUnsubscribe) {
+        shopProductsUnsubscribe();
+        shopProductsUnsubscribe = null;
+    }
     const q = query(collection(db, "shop_products"));
-    onSnapshot(q, (snapshot) => {
+    shopProductsUnsubscribe = onSnapshot(q, (snapshot) => {
         const tbody = document.getElementById('shop-products-table-body');
         tbody.innerHTML = '';
         shopProductsData = {};
@@ -3476,10 +3652,7 @@ window.resetAdminAccessForm = () => {
     renderAdminPermissionInputs(adminRoleDefaults('manager'));
 };
 
-window.refreshAdminAccess = () => {
-    renderAdminAccessTable();
-    renderAdminUserOptions();
-};
+window.refreshAdminAccess = () => window.refreshAdminSection('admin-access');
 
 function setupRealtimeAdminAccess() {
     bindAdminAccessForm();
@@ -3674,7 +3847,7 @@ function setupRealtimeMembers() {
     });
 }
 
-window.refreshMembers = () => renderMembersTable();
+window.refreshMembers = () => window.refreshAdminSection('members');
 
 function csvEscape(value) {
     const text = String(value ?? '');
@@ -3879,8 +4052,12 @@ const faqModal = document.getElementById('faqModal');
 const faqForm = document.getElementById('faqForm');
 
 window.fetchFaqsFromCloud = function() {
+    if (faqsUnsubscribe) {
+        faqsUnsubscribe();
+        faqsUnsubscribe = null;
+    }
     const q = query(collection(db, "faqs"), orderBy("order", "asc"));
-    onSnapshot(q, (snapshot) => {
+    faqsUnsubscribe = onSnapshot(q, (snapshot) => {
         const tbody = document.getElementById('faqs-table-body');
         if (!tbody) return;
         
