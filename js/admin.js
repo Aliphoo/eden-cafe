@@ -17,7 +17,9 @@ function escapeHTML(value) {
 
 function safeImageURL(value, fallback = 'Images/Logo.webp') {
     const url = String(value ?? '').trim();
-    return /^https?:\/\//i.test(url) ? url : fallback;
+    if (/^https?:\/\//i.test(url)) return url;
+    if (/^\/?(Images|Hero)\//i.test(url)) return url;
+    return fallback;
 }
 
 function safeNumber(value, fallback = 0) {
@@ -271,6 +273,8 @@ let roomsData = {};
 let tablesData = {};
 let membersData = {};
 let membersUnsubscribe = null;
+let ordersUnsubscribe = null;
+let bookingsUnsubscribe = null;
 let memberFiltersBound = false;
 
 // DOM Elements
@@ -382,7 +386,8 @@ function initializeAdminModules() {
     }
     if (canAdmin('members')) setupRealtimeMembers();
     if (isOwnerAccess()) setupRealtimeAdminAccess();
-    if (canAdmin('products') || canAdmin('shop')) migrateProducts();
+    // Keep production data stable: run seed/migration manually from console only.
+    // window.migrateProducts() remains available for first-time setup.
 }
 
 function applyAdminAccessUI() {
@@ -456,9 +461,14 @@ function formatDate(timestamp) {
 
 // Real-time Orders Listener
 function setupRealtimeOrders() {
+    if (ordersUnsubscribe) {
+        ordersUnsubscribe();
+        ordersUnsubscribe = null;
+    }
     const q = query(collection(db, "orders"), orderBy("timestamp", "desc"));
-    onSnapshot(q, (snapshot) => {
+    ordersUnsubscribe = onSnapshot(q, (snapshot) => {
         const tbody = document.getElementById('orders-table-body');
+        if (!tbody) return;
         tbody.innerHTML = '';
         
         let todayOrders = 0;
@@ -505,16 +515,22 @@ function setupRealtimeOrders() {
         document.getElementById('stat-revenue').innerText = '฿' + todayRevenue.toLocaleString();
     }, (error) => {
         console.error("Error listening to orders:", error);
-        document.getElementById('orders-table-body').innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">ไม่มีสิทธิ์เข้าถึงข้อมูล หรือเกิดข้อผิดพลาด</td></tr>';
+        const tbody = document.getElementById('orders-table-body');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">ไม่มีสิทธิ์เข้าถึงข้อมูล หรือเกิดข้อผิดพลาด</td></tr>';
     });
 }
 
 // Real-time Bookings Listener
 function setupRealtimeBookings() {
+    if (bookingsUnsubscribe) {
+        bookingsUnsubscribe();
+        bookingsUnsubscribe = null;
+    }
     const q = query(collection(db, "bookings"), orderBy("timestamp", "desc"));
-    onSnapshot(q, (snapshot) => {
+    bookingsUnsubscribe = onSnapshot(q, (snapshot) => {
         const tbody = document.getElementById('bookings-table-body');
         const roomTbody = document.getElementById('room-bookings-table-body');
+        if (!tbody || !roomTbody) return;
         tbody.innerHTML = '';
         roomTbody.innerHTML = '';
         
@@ -596,8 +612,10 @@ function setupRealtimeBookings() {
         document.getElementById('stat-bookings').innerText = todayBookings + todayRoomBookings;
     }, (error) => {
         console.error("Error listening to bookings:", error);
-        document.getElementById('bookings-table-body').innerHTML = '<tr><td colspan="7" style="text-align:center; color:red;">ไม่มีสิทธิ์เข้าถึงข้อมูล หรือเกิดข้อผิดพลาด</td></tr>';
-        document.getElementById('room-bookings-table-body').innerHTML = '<tr><td colspan="8" style="text-align:center; color:red;">ไม่มีสิทธิ์เข้าถึงข้อมูล หรือเกิดข้อผิดพลาด</td></tr>';
+        const tbody = document.getElementById('bookings-table-body');
+        const roomTbody = document.getElementById('room-bookings-table-body');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:red;">ไม่มีสิทธิ์เข้าถึงข้อมูล หรือเกิดข้อผิดพลาด</td></tr>';
+        if (roomTbody) roomTbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:red;">ไม่มีสิทธิ์เข้าถึงข้อมูล หรือเกิดข้อผิดพลาด</td></tr>';
     });
 }
 
@@ -1133,7 +1151,7 @@ function setupRealtimeRooms() {
             
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td><img loading="lazy" src="${safeImageURL(room.imageUrl, 'assets/default-room.jpg')}" alt="${escapeHTML(room.name)}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 5px;"></td>
+                <td><img loading="lazy" src="${safeImageURL(room.imageUrl, 'Images/Logo.webp')}" alt="${escapeHTML(room.name)}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 5px;"></td>
                 <td><strong>${escapeHTML(room.name)}</strong><br><small class="text-muted">${escapeHTML(id)}</small></td>
                 <td>${escapeHTML(room.capacity)} ท่าน</td>
                 <td>฿${escapeHTML(room.price)}/ชม.</td>
@@ -1609,6 +1627,7 @@ window.updateBookingStatus = async (id, newStatus) => {
 window.fetchOrders = setupRealtimeOrders;
 window.fetchBookings = setupRealtimeBookings;
 window.fetchRoomBookings = setupRealtimeBookings;
+window.migrateProducts = migrateProducts;
 
 async function migrateProducts() {
     try {
@@ -1746,8 +1765,8 @@ function setupRealtimeShopProducts() {
                 <td>${escapeHTML(product.stock || 0)}</td>
                 <td>${product.isFeatured ? '<span style="color: green;"> </span>' : '-'}</td>
                 <td>
-                    <button class="btn-action btn-edit" onclick="editShopProduct('${escapeJSString(id)}')"> </button>
-                    <button class="btn-action btn-delete" onclick="deleteShopProduct('${escapeJSString(id)}')"> </button>
+                    <button class="btn-action btn-edit" onclick="editShopProduct('${escapeJSString(id)}')">แก้ไข</button>
+                    <button class="btn-action btn-delete" onclick="deleteShopProduct('${escapeJSString(id)}')">ลบ</button>
                 </td>
             `;
             tbody.appendChild(tr);

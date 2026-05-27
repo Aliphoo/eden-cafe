@@ -575,7 +575,7 @@ exports.syncAuthUsersToFirestore = onRequest(
     }
 
     try {
-      await requireAdminUid(req);
+      await requireAdminAccess(req, 'members');
       let nextPageToken;
       let synced = 0;
       let created = 0;
