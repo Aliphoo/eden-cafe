@@ -94,12 +94,13 @@ function normalizeMenuItem(item) {
     const trackStock = parseMenuBool(item.trackStock, false);
     const stock = Number(item.stock ?? item.inStock ?? 0);
     const availableForSale = parseMenuBool(item.availableForSale, true);
+    const showOnWebsite = parseMenuBool(item.showOnWebsite, true);
     const categoryOrder = Number(categoryMeta.order ?? item.categoryOrder ?? 999);
     const order = Number(item.order ?? 999999);
     const price = Number(item.price) || 0;
     const variants = normalizeMenuVariants(item, price);
     const hasSellableVariant = variants.some(variant => variant.canSell);
-    const canSell = availableForSale && (variants.length ? hasSellableVariant : (!trackStock || stock > 0));
+    const canSell = availableForSale && showOnWebsite && (variants.length ? hasSellableVariant : (!trackStock || stock > 0));
 
     return {
         id: item.id || item.handle || item.sku || item.slug || item.name || String(Date.now()),
@@ -120,6 +121,7 @@ function normalizeMenuItem(item) {
         stock: Number.isFinite(stock) ? stock : 0,
         lowStock: Number(item.lowStock ?? 0) || 0,
         availableForSale,
+        showOnWebsite,
         canSell,
         taxEnabled: parseMenuBool(item.taxEnabled, true)
     };
@@ -271,7 +273,7 @@ async function fetchMenuFromCloud() {
     }, {});
     const items = productSnap.docs
         .map(docSnap => normalizeMenuItem({ id: docSnap.id, ...docSnap.data(), categoryMeta: categoryMeta[docSnap.data().category] }))
-        .filter(item => item.availableForSale);
+        .filter(item => item.availableForSale && item.showOnWebsite);
     return { items: sortMenuItems(items), categories };
 }
 
