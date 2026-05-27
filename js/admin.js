@@ -1,6 +1,6 @@
 import { auth, provider, db } from './firebase-config.js';
 import { getMemberTier, getTierBenefits } from './membership.js';
-import { signInWithPopup, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const ADMIN_IMAGE_MAX_FILE_SIZE = 8 * 1024 * 1024;
@@ -799,6 +799,14 @@ const loginError = document.getElementById('login-error');
 
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
+    getRedirectResult(auth).catch((error) => {
+        console.error('Google redirect login failed:', error);
+        if (loginError) {
+            loginError.innerText = 'Google login failed: ' + error.message;
+            loginError.style.display = 'block';
+        }
+    });
+
     // Check Auth State
     onAuthStateChanged(auth, async (user) => {
         console.log("Auth State Changed in Admin:", user ? user.email : "No User");
@@ -869,6 +877,10 @@ document.addEventListener('DOMContentLoaded', () => {
             await signInWithPopup(auth, provider);
         } catch (error) {
             console.error('Google login failed:', error);
+            if (error.code === 'auth/popup-blocked' || error.code === 'auth/popup-closed-by-user') {
+                await signInWithRedirect(auth, provider);
+                return;
+            }
             loginError.innerText = ' การเข้าสู่ระบบด้วย Google ล้มเหลว: ' + error.message;
             loginError.style.display = 'block';
         }
