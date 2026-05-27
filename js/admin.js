@@ -1090,16 +1090,37 @@ function setupRealtimeCategories() {
             return;
         }
 
-        snapshot.forEach((docSnap) => {
+        const sortedDocs = snapshot.docs.slice().sort((a, b) => {
+            const aData = a.data();
+            const bData = b.data();
+            const aOrder = Number(aData.order || 999);
+            const bOrder = Number(bData.order || 999);
+            if (aOrder !== bOrder) return aOrder - bOrder;
+            return a.id.localeCompare(b.id);
+        });
+
+        sortedDocs.forEach((docSnap) => {
             const cat = docSnap.data();
             const id = docSnap.id;
             categoriesData[id] = cat;
+            const color = cat.color || '#ddd';
+            const itemCount = cat.itemCount ? Number(cat.itemCount).toLocaleString() + ' items' : '';
+            const orderText = cat.order ? 'Order ' + Number(cat.order).toLocaleString() : '';
+            const metaText = [itemCount, orderText].filter(Boolean).join(' | ');
             
             // Populate Table
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td><code>${escapeHTML(id)}</code></td>
-                <td><strong>${escapeHTML(cat.name)}</strong></td>
+                <td>
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <span style="display:inline-block; width:24px; height:24px; border-radius:50%; background:${escapeHTML(color)}; border:1px solid rgba(0,0,0,0.08); flex:0 0 auto;"></span>
+                        <span>
+                            <strong>${escapeHTML(cat.name)}</strong>
+                            ${metaText ? `<br><small style="color:#777;">${escapeHTML(metaText)}</small>` : ''}
+                        </span>
+                    </div>
+                </td>
                 <td>
                     <button class="btn-action btn-edit" onclick="editCategory('${escapeJSString(id)}')"> แก้ไข</button>
                     <button class="btn-action btn-delete" onclick="deleteCategory('${escapeJSString(id)}')"> ลบ</button>
