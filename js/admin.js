@@ -874,6 +874,10 @@ document.addEventListener('DOMContentLoaded', () => {
     btnLogin.addEventListener('click', async () => {
         loginError.style.display = 'none';
         try {
+            if (hasLoyverseImportMode()) {
+                await signInWithRedirect(auth, provider);
+                return;
+            }
             await signInWithPopup(auth, provider);
         } catch (error) {
             console.error('Google login failed:', error);
