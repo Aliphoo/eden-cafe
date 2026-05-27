@@ -1370,6 +1370,142 @@ footer p {
     outline: none;
     box-shadow: 0 0 0 3px rgba(26, 147, 69, 0.1);
 }
+.checkout-fulfillment {
+    margin-bottom: 24px;
+}
+.checkout-field-title {
+    margin-bottom: 10px;
+    font-weight: 700;
+    color: #253328;
+}
+.fulfillment-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+.fulfillment-card {
+    display: block;
+    margin: 0;
+    cursor: pointer;
+}
+.fulfillment-card input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+.fulfillment-card-body {
+    min-height: 94px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 12px;
+    align-items: center;
+    padding: 16px;
+    border: 1px solid #dfe8df;
+    border-radius: 12px;
+    background: linear-gradient(180deg, #ffffff 0%, #fbfdfb 100%);
+    box-shadow: 0 8px 20px rgba(16, 40, 24, 0.04);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.fulfillment-card input:checked + .fulfillment-card-body {
+    border-color: var(--primary-color);
+    background: #f2fbf5;
+    box-shadow: 0 10px 26px rgba(26, 147, 69, 0.13);
+}
+.fulfillment-mark {
+    width: 22px;
+    height: 22px;
+    border: 2px solid #b7c8ba;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: #fff;
+}
+.fulfillment-card input:checked + .fulfillment-card-body .fulfillment-mark {
+    border-color: var(--primary-color);
+}
+.fulfillment-card input:checked + .fulfillment-card-body .fulfillment-mark::after {
+    content: "";
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--primary-color);
+}
+.fulfillment-copy strong {
+    display: block;
+    color: #253328;
+    font-size: 1rem;
+    line-height: 1.25;
+}
+.fulfillment-copy small {
+    display: block;
+    margin-top: 4px;
+    color: #6f7f74;
+    font-size: 0.84rem;
+    line-height: 1.35;
+}
+.checkout-item-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 14px;
+    align-items: start;
+    padding: 12px 0;
+    border-bottom: 1px solid #edf1ed;
+}
+.checkout-item-row:last-child {
+    border-bottom: 0;
+}
+.checkout-item-name {
+    display: block;
+    color: #333;
+    font-weight: 600;
+}
+.checkout-item-meta {
+    display: block;
+    color: #7a827b;
+    font-size: 0.88rem;
+    margin-top: 4px;
+}
+.checkout-item-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+}
+.checkout-item-price {
+    color: #333;
+    font-weight: 700;
+}
+.checkout-item-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.checkout-qty-btn,
+.checkout-remove-btn {
+    min-width: 32px;
+    height: 32px;
+    border: 1px solid #dfe5df;
+    border-radius: 8px;
+    background: #fff;
+    color: #2f3b33;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+.checkout-qty-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    background: #f4fbf6;
+}
+.checkout-remove-btn {
+    padding: 0 10px;
+    color: #b42318;
+    border-color: #f2d0cc;
+}
+.checkout-remove-btn:hover {
+    background: #fff4f2;
+}
 .payment-method {
     padding: 15px;
     border: 1px solid #eee;
@@ -1399,6 +1535,28 @@ footer p {
     justify-content: space-between;
     margin-bottom: 12px;
     font-size: 0.95rem;
+}
+
+@media (max-width: 640px) {
+    .fulfillment-options {
+        grid-template-columns: 1fr;
+    }
+
+    .fulfillment-card-body {
+        min-height: 78px;
+    }
+
+    .checkout-item-row {
+        grid-template-columns: 1fr;
+    }
+
+    .checkout-item-side {
+        align-items: stretch;
+    }
+
+    .checkout-item-actions {
+        justify-content: flex-end;
+    }
 }
 
 /* Success Modal */
