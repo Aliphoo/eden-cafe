@@ -280,6 +280,259 @@ let ordersUnsubscribe = null;
 let bookingsUnsubscribe = null;
 let memberFiltersBound = false;
 
+const XLSX_CATEGORY_CONFIG = {
+    products: {
+        label: 'เมนูร้าน (products)',
+        collection: 'products',
+        permission: 'products',
+        numberFields: ['price', 'order'],
+        booleanFields: ['isSignature'],
+        arrayFields: [],
+        template: { id: 'espresso', name: 'Espresso', description: 'Coffee shot', category: 'coffee', price: 80, imageUrl: 'https://example.com/espresso.webp', isSignature: true, order: 1 }
+    },
+    categories: {
+        label: 'หมวดเมนูร้าน (categories)',
+        collection: 'categories',
+        permission: 'products',
+        numberFields: ['order'],
+        booleanFields: [],
+        arrayFields: [],
+        template: { id: 'coffee', name: 'กาแฟ', nameEn: 'Coffee', order: 1 }
+    },
+    shop_products: {
+        label: 'สินค้าออนไลน์ (shop_products)',
+        collection: 'shop_products',
+        permission: 'shop',
+        numberFields: ['price', 'stock', 'order'],
+        booleanFields: ['isFeatured'],
+        arrayFields: [],
+        template: { id: 'eden-beans-01', name: 'Eden House Blend', description: 'Medium roast', category: 'coffee_bean', price: 490, stock: 20, imageUrl: 'https://example.com/beans.webp', isFeatured: true, order: 1 }
+    },
+    shop_categories: {
+        label: 'หมวดสินค้าออนไลน์ (shop_categories)',
+        collection: 'shop_categories',
+        permission: 'shop',
+        numberFields: ['order'],
+        booleanFields: [],
+        arrayFields: [],
+        template: { id: 'coffee_bean', name: 'เมล็ดกาแฟ', parent: '', order: 1 }
+    },
+    rooms: {
+        label: 'ห้องรับรอง (rooms)',
+        collection: 'rooms',
+        permission: 'rooms',
+        numberFields: ['price', 'amount', 'order'],
+        booleanFields: [],
+        arrayFields: [],
+        template: { id: 'meeting', name: 'Meeting Room', capacity: '3-6 ท่าน', price: 350, amount: 2, imageUrl: 'https://example.com/room.webp', order: 1 }
+    },
+    tables: {
+        label: 'โต๊ะ/โซน (tables)',
+        collection: 'tables',
+        permission: 'tables',
+        numberFields: ['x', 'y', 'w', 'h', 'seats', 'order'],
+        booleanFields: [],
+        arrayFields: ['tableIds'],
+        template: { id: 'IN-01', type: 'table', code: 'IN-01', name: 'โต๊ะอินดอร์ 1', zone: 'Indoor', seats: 4, shape: 'rect', status: 'available', x: 15, y: 20, w: 20, h: 15, tableIds: 'IN-01|IN-02', order: 1 }
+    },
+    blogs: {
+        label: 'บทความ (blogs)',
+        collection: 'blogs',
+        permission: 'blogs',
+        numberFields: ['order'],
+        booleanFields: [],
+        arrayFields: [],
+        template: { id: 'blog-001', title: 'หัวข้อบทความ', category: 'ความรู้เรื่องกาแฟ', status: 'draft', excerpt: 'สรุปสั้น', imageUrl: 'https://example.com/blog.webp', content: '<p>เนื้อหา</p>', order: 1 }
+    },
+    faqs: {
+        label: 'คำถามที่พบบ่อย (faqs)',
+        collection: 'faqs',
+        permission: 'faqs',
+        numberFields: ['order'],
+        booleanFields: [],
+        arrayFields: [],
+        template: { id: 'faq-001', question: 'เปิดกี่โมง?', answer: 'เปิดทุกวัน 07:30-18:00', order: 1 }
+    },
+    users: {
+        label: 'สมาชิก (users)',
+        collection: 'users',
+        permission: 'members',
+        numberFields: ['points', 'totalSpent', 'visitCount', 'orderCount', 'bookingCount'],
+        booleanFields: [],
+        arrayFields: ['adminTags'],
+        template: { id: 'uid_xxxxx', uid: 'uid_xxxxx', displayName: 'ลูกค้าตัวอย่าง', email: 'member@example.com', phone: '08x-xxx-xxxx', points: 120, totalSpent: 4500, visitCount: 8, adminTags: 'vip|coffee_lover', status: 'active' }
+    }
+};
+
+function getXLSXCategoryConfig(categoryKey) {
+    return XLSX_CATEGORY_CONFIG[categoryKey] || null;
+}
+
+function parseXLSXCellValue(value, key, cfg) {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value === 'string' && value.trim() === '') return undefined;
+    if (cfg.booleanFields.includes(key)) return value === true || String(value).trim().toLowerCase() === 'true' || String(value).trim() === '1';
+    if (cfg.numberFields.includes(key)) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    if (cfg.arrayFields.includes(key)) {
+        if (Array.isArray(value)) return value.map(item => String(item).trim()).filter(Boolean);
+        return String(value).split('|').map(item => item.trim()).filter(Boolean);
+    }
+    return typeof value === 'string' ? value.trim() : value;
+}
+
+function normalizeRowForUpload(row, cfg) {
+    const normalized = {};
+    Object.keys(row || {}).forEach((key) => {
+        const cleanKey = String(key || '').trim();
+        if (!cleanKey) return;
+        const value = parseXLSXCellValue(row[key], cleanKey, cfg);
+        if (value === undefined) return;
+        normalized[cleanKey] = value;
+    });
+    return normalized;
+}
+
+function xlsxFileName(prefix, categoryKey) {
+    const date = new Date().toISOString().slice(0, 10);
+    return `eden-${prefix}-${categoryKey}-${date}.xlsx`;
+}
+
+function worksheetFromData(rows) {
+    const XLSX = window.XLSX;
+    if (!XLSX) throw new Error('XLSX library is unavailable');
+    return XLSX.utils.json_to_sheet(rows.length ? rows : [{}], { skipHeader: false });
+}
+
+async function downloadCategoryDataAsXLSX(categoryKey) {
+    const cfg = getXLSXCategoryConfig(categoryKey);
+    if (!cfg) throw new Error('กรุณาเลือกหมวดข้อมูล');
+    if (!canAdmin(cfg.permission)) throw new Error('บัญชีนี้ไม่มีสิทธิ์ในหมวดนี้');
+
+    const snapshot = await getDocs(query(collection(db, cfg.collection)));
+    const rows = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+    const XLSX = window.XLSX;
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheetFromData(rows), 'data');
+    XLSX.writeFile(workbook, xlsxFileName('data', categoryKey));
+}
+
+function downloadCategoryTemplateAsXLSX(categoryKey) {
+    const cfg = getXLSXCategoryConfig(categoryKey);
+    if (!cfg) throw new Error('กรุณาเลือกหมวดข้อมูล');
+    if (!canAdmin(cfg.permission)) throw new Error('บัญชีนี้ไม่มีสิทธิ์ในหมวดนี้');
+
+    const XLSX = window.XLSX;
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheetFromData([cfg.template]), 'template');
+    XLSX.writeFile(workbook, xlsxFileName('template', categoryKey));
+}
+
+async function uploadCategoryDataFromXLSX(categoryKey, file) {
+    const cfg = getXLSXCategoryConfig(categoryKey);
+    if (!cfg) throw new Error('กรุณาเลือกหมวดข้อมูล');
+    if (!canAdmin(cfg.permission)) throw new Error('บัญชีนี้ไม่มีสิทธิ์ในหมวดนี้');
+    if (!file) throw new Error('กรุณาเลือกไฟล์ .xlsx ก่อนอัปโหลด');
+
+    const XLSX = window.XLSX;
+    if (!XLSX) throw new Error('XLSX library is unavailable');
+
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array' });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) throw new Error('ไม่พบชีตข้อมูลในไฟล์');
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
+    if (!rows.length) throw new Error('ไฟล์ไม่มีข้อมูล');
+
+    let created = 0;
+    let updated = 0;
+    for (const row of rows) {
+        const normalized = normalizeRowForUpload(row, cfg);
+        const idValue = String(normalized.id || normalized.uid || '').trim();
+        delete normalized.id;
+        if (!Object.keys(normalized).length) continue;
+        normalized.updatedAt = new Date().toISOString();
+
+        if (idValue) {
+            await setDoc(doc(db, cfg.collection, idValue), normalized, { merge: true });
+            updated += 1;
+        } else {
+            normalized.createdAt = new Date().toISOString();
+            await addDoc(collection(db, cfg.collection), normalized);
+            created += 1;
+        }
+    }
+
+    return { created, updated, total: created + updated };
+}
+
+function updateXLSXToolsState() {
+    const select = document.getElementById('xlsx-category-select');
+    const note = document.getElementById('xlsx-tools-note');
+    if (!select || !note) return;
+    const key = select.value;
+    const cfg = getXLSXCategoryConfig(key);
+    if (!cfg) {
+        note.textContent = 'เลือกหมวดก่อน แล้วดาวน์โหลดเทมเพลตเพื่อกรอกข้อมูล จากนั้นค่อยอัปโหลดไฟล์กลับเข้าระบบ';
+        return;
+    }
+    const allowed = canAdmin(cfg.permission);
+    note.textContent = allowed
+        ? `รองรับคอลเลกชัน ${cfg.collection} | อัปโหลดแบบ upsert (มี id = update, ไม่มี id = create)`
+        : 'บัญชีนี้ไม่มีสิทธิ์ในหมวดที่เลือก';
+}
+
+function initXLSXTools() {
+    const select = document.getElementById('xlsx-category-select');
+    const fileInput = document.getElementById('xlsx-upload-input');
+    const btnDownloadData = document.getElementById('btn-xlsx-download-data');
+    const btnTemplate = document.getElementById('btn-xlsx-download-template');
+    const btnUpload = document.getElementById('btn-xlsx-upload');
+    if (!select || !fileInput || !btnDownloadData || !btnTemplate || !btnUpload) return;
+
+    const options = Object.entries(XLSX_CATEGORY_CONFIG)
+        .filter(([, cfg]) => canAdmin(cfg.permission))
+        .map(([key, cfg]) => `<option value="${key}">${escapeHTML(cfg.label)}</option>`)
+        .join('');
+    select.innerHTML = `<option value="">-- เลือกหมวดข้อมูล --</option>${options}`;
+
+    select.onchange = updateXLSXToolsState;
+    btnDownloadData.onclick = async () => {
+        try {
+            btnDownloadData.disabled = true;
+            await downloadCategoryDataAsXLSX(select.value);
+        } catch (error) {
+            alert('ดาวน์โหลดข้อมูลไม่สำเร็จ: ' + error.message);
+        } finally {
+            btnDownloadData.disabled = false;
+        }
+    };
+    btnTemplate.onclick = () => {
+        try {
+            downloadCategoryTemplateAsXLSX(select.value);
+        } catch (error) {
+            alert('ดาวน์โหลดเทมเพลตไม่สำเร็จ: ' + error.message);
+        }
+    };
+    btnUpload.onclick = async () => {
+        try {
+            btnUpload.disabled = true;
+            btnUpload.textContent = 'กำลังอัปโหลด...';
+            const result = await uploadCategoryDataFromXLSX(select.value, fileInput.files?.[0]);
+            alert(`อัปโหลดสำเร็จ รวม ${result.total} รายการ (เพิ่ม ${result.created}, อัปเดต ${result.updated})`);
+            fileInput.value = '';
+        } catch (error) {
+            alert('อัปโหลดไม่สำเร็จ: ' + error.message);
+        } finally {
+            btnUpload.disabled = false;
+            btnUpload.textContent = 'อัปโหลด XLSX';
+        }
+    };
+    updateXLSXToolsState();
+}
+
 // DOM Elements
 const loginScreen = document.getElementById('admin-login');
 const btnLogin = document.getElementById('btn-admin-login');
@@ -389,6 +642,7 @@ function initializeAdminModules() {
     }
     if (canAdmin('members')) setupRealtimeMembers();
     if (isOwnerAccess()) setupRealtimeAdminAccess();
+    initXLSXTools();
     // Keep production data stable: run seed/migration manually from console only.
     // window.migrateProducts() remains available for first-time setup.
 }
@@ -408,7 +662,10 @@ function applyAdminAccessUI() {
     });
 
     const active = document.querySelector('.content-section.active');
-    if (active && window.canAccessAdminTab(active.id)) return;
+    if (active && window.canAccessAdminTab(active.id)) {
+        updateXLSXToolsState();
+        return;
+    }
 
     const firstAllowedMenu = Array.from(document.querySelectorAll('.sidebar-menu li'))
         .find(li => li.style.display !== 'none');
@@ -416,6 +673,7 @@ function applyAdminAccessUI() {
         const match = String(firstAllowedMenu.getAttribute('onclick') || '').match(/switchTab\('([^']+)'/);
         if (match) window.switchTab(match[1], firstAllowedMenu);
     }
+    updateXLSXToolsState();
 }
 
 // Fetch Stats for Dashboard

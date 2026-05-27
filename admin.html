@@ -95,6 +95,22 @@
         /* Charts & Tables Section */
         .section-container { background: var(--white); padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); margin-bottom: 30px; }
         .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .data-tools {
+            background: #fbfff8;
+            border: 1px solid #e0eadc;
+            border-radius: 14px;
+            padding: 14px 16px;
+            margin-bottom: 20px;
+        }
+        .data-tools h3 { margin-bottom: 10px; color: var(--primary-color); font-size: 1rem; }
+        .data-tools-row { display: grid; grid-template-columns: 220px 1fr auto auto auto; gap: 10px; align-items: center; }
+        .data-tools-row select, .data-tools-row input[type="file"] {
+            width: 100%; padding: 9px 10px; border: 1px solid #d8e5da; border-radius: 8px; background: #fff;
+        }
+        .data-tools-note { margin-top: 8px; color: #6b7a72; font-size: 0.84rem; }
+        @media (max-width: 1100px) {
+            .data-tools-row { grid-template-columns: 1fr; }
+        }
         
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #eee; }
@@ -298,6 +314,19 @@
                 <span id="admin-name">Admin Name</span>
                 <img id="admin-avatar" src="Images/Logo.webp" alt="Avatar">
             </div>
+        </div>
+        <div class="data-tools">
+            <h3>นำเข้า/ส่งออกข้อมูล (XLSX)</h3>
+            <div class="data-tools-row">
+                <select id="xlsx-category-select">
+                    <option value="">-- เลือกหมวดข้อมูล --</option>
+                </select>
+                <input type="file" id="xlsx-upload-input" accept=".xlsx,.xls">
+                <button class="btn-action btn-view" id="btn-xlsx-download-data" type="button">ดาวน์โหลดข้อมูลทั้งหมด</button>
+                <button class="btn-action btn-edit" id="btn-xlsx-download-template" type="button">ดาวน์โหลดเทมเพลต</button>
+                <button class="btn-action" id="btn-xlsx-upload" type="button">อัปโหลด XLSX</button>
+            </div>
+            <p class="data-tools-note" id="xlsx-tools-note">เลือกหมวดก่อน แล้วดาวน์โหลดเทมเพลตเพื่อกรอกข้อมูล จากนั้นค่อยอัปโหลดไฟล์กลับเข้าระบบ</p>
         </div>
 
         <!-- Dashboard Section -->
@@ -1219,7 +1248,8 @@
     </div>
 
     <!-- Firebase Scripts -->
-    <script type="module" src="js/admin.js?v=23"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script type="module" src="js/admin.js?v=24"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {
