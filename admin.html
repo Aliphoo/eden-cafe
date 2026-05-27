@@ -208,6 +208,24 @@
         /* Content Sections */
         .content-section { display: none; }
         .content-section.active { display: block; }
+
+        /* Footer Settings */
+        .footer-settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 30px; }
+        .footer-settings-card { background: #fbfff8; border: 1px solid #e0eadc; border-radius: 16px; padding: 22px 24px; }
+        .footer-settings-card h3 { font-size: 1.1rem; color: var(--primary-color); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid #edf3ed; }
+        .footer-settings-card .form-group { margin-bottom: 14px; }
+        .footer-settings-card .form-group:last-child { margin-bottom: 0; }
+        .footer-settings-card .form-group label { font-size: 0.88rem; color: #556; }
+        .footer-settings-card .form-group input { font-size: 0.92rem; }
+        .footer-preview-strip { background: linear-gradient(135deg, #1A9345 0%, #137234 100%); border-radius: 16px; padding: 30px 36px; color: white; margin-bottom: 24px; }
+        .footer-preview-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 30px; }
+        .footer-preview-grid h4 { color: white; margin-bottom: 10px; font-size: 1.05rem; }
+        .footer-preview-grid p { color: rgba(255,255,255,0.85); font-size: 0.9rem; margin-bottom: 4px; }
+        .footer-preview-social { display: flex; gap: 12px; margin-top: 10px; }
+        .footer-preview-social a { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; background: rgba(255,255,255,0.2); color: white; text-decoration: none; transition: 0.3s; }
+        .footer-preview-social a:hover { background: rgba(255,255,255,0.4); }
+        .footer-settings-full { grid-column: 1 / -1; }
+        @media (max-width: 900px) { .footer-settings-grid { grid-template-columns: 1fr; } .footer-preview-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
@@ -265,6 +283,7 @@
             <li onclick="switchTab('shop-categories', this)">📦 หมวดหมู่ Shop</li>
             <li onclick="switchTab('blogs', this)">📝 จัดการบทความ (Blogs)</li>
             <li onclick="switchTab('faqs', this)">❓ คำถามที่พบบ่อย (FAQ)</li>
+            <li onclick="switchTab('footer-settings', this)">🦶 จัดการ Footer</li>
         </ul>
         <div class="sidebar-footer">
             <div class="logout-btn" id="btn-admin-logout">🚪 ออกจากระบบ</div>
@@ -775,6 +794,109 @@
                         <!-- Data injected via JS -->
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <!-- Footer Settings Section -->
+        <div id="footer-settings" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <div>
+                        <h2>จัดการข้อมูล Footer</h2>
+                        <p style="color:#667; margin-top:4px;">แก้ไขข้อมูลที่แสดงใน Footer ของทุกหน้าเว็บไซต์ เช่น ชื่อแบรนด์ ที่อยู่ เบอร์โทร โซเชียลมีเดีย</p>
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button class="btn-action btn-view" onclick="loadFooterSettings()">โหลดข้อมูลปัจจุบัน</button>
+                    </div>
+                </div>
+
+                <!-- Live Preview -->
+                <div class="footer-preview-strip" id="footer-live-preview">
+                    <p style="font-size: 0.78rem; opacity: 0.7; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.1em;">🔍 ตัวอย่างการแสดงผล Footer (Live Preview)</p>
+                    <div class="footer-preview-grid">
+                        <div>
+                            <h4 id="fp-brand">Eden Cafe.</h4>
+                            <p id="fp-tagline">กาแฟพิเศษระดับพรีเมียม สวนพักผ่อนส่วนตัวของคุณในเมืองใหญ่</p>
+                        </div>
+                        <div>
+                            <h4>ติดต่อและสถานที่ตั้ง</h4>
+                            <p id="fp-address">123 ถนนสุขุมวิท กรุงเทพมหานคร 10110</p>
+                            <p id="fp-email">อีเมล: hello@edencafe.co</p>
+                            <p id="fp-phone">โทร: +66-2-000-0000</p>
+                        </div>
+                        <div>
+                            <h4>ติดตามเรา</h4>
+                            <div class="footer-preview-social">
+                                <a id="fp-ig" href="#" title="Instagram"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg></a>
+                                <a id="fp-fb" href="#" title="Facebook"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path></svg></a>
+                                <a id="fp-line" href="#" title="LINE"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 10.5C21.5 5.8 17.2 2 12 2S2.5 5.8 2.5 10.5c0 4.2 3.5 7.8 8.1 8.4.3.1.8.3.9.7l.2 1.9c0 .1 0 .2.1.2.1 0 .2-.1.3-.2l2.6-3.1c.3-.4.8-.6 1.3-.6 3.1 0 5.6-3.3 5.6-7.3z"></path></svg></a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Edit Form -->
+                <form id="footerSettingsForm">
+                    <div class="footer-settings-grid">
+                        <!-- Column 1: Brand Info -->
+                        <div class="footer-settings-card">
+                            <h3>🏷️ ข้อมูลแบรนด์</h3>
+                            <div class="form-group">
+                                <label for="footer-brand-name">ชื่อแบรนด์ (Brand Name)</label>
+                                <input type="text" id="footer-brand-name" value="Eden Cafe." oninput="updateFooterPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="footer-tagline">คำอธิบาย / Tagline</label>
+                                <input type="text" id="footer-tagline" value="กาแฟพิเศษระดับพรีเมียม สวนพักผ่อนส่วนตัวของคุณในเมืองใหญ่" oninput="updateFooterPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="footer-copyright">ข้อความลิขสิทธิ์ (Copyright)</label>
+                                <input type="text" id="footer-copyright" value="© 2026 Eden Cafe Thailand. สงวนลิขสิทธิ์ | Optimized for AEO & GEO">
+                            </div>
+                        </div>
+
+                        <!-- Column 2: Contact -->
+                        <div class="footer-settings-card">
+                            <h3>📍 ติดต่อและสถานที่ตั้ง</h3>
+                            <div class="form-group">
+                                <label for="footer-address">ที่อยู่ร้าน (Address)</label>
+                                <input type="text" id="footer-address" value="123 ถนนสุขุมวิท กรุงเทพมหานคร 10110" oninput="updateFooterPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="footer-email">อีเมลติดต่อ (Email)</label>
+                                <input type="email" id="footer-email" value="hello@edencafe.co" oninput="updateFooterPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="footer-phone">เบอร์โทรศัพท์ (Phone)</label>
+                                <input type="tel" id="footer-phone" value="+66-2-000-0000" oninput="updateFooterPreview()">
+                            </div>
+                        </div>
+
+                        <!-- Full Width: Social Links -->
+                        <div class="footer-settings-card footer-settings-full">
+                            <h3>🌐 ลิงก์โซเชียลมีเดีย (Social Media Links)</h3>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px;">
+                                <div class="form-group">
+                                    <label for="footer-instagram">Instagram URL</label>
+                                    <input type="url" id="footer-instagram" value="https://instagram.com" placeholder="https://instagram.com/yourpage" oninput="updateFooterPreview()">
+                                </div>
+                                <div class="form-group">
+                                    <label for="footer-facebook">Facebook URL</label>
+                                    <input type="url" id="footer-facebook" value="https://facebook.com" placeholder="https://facebook.com/yourpage" oninput="updateFooterPreview()">
+                                </div>
+                                <div class="form-group">
+                                    <label for="footer-line">LINE URL</label>
+                                    <input type="url" id="footer-line" value="https://line.me" placeholder="https://line.me/yourID" oninput="updateFooterPreview()">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 10px;">
+                        <button type="button" class="btn-action" style="background:#789; padding: 10px 24px;" onclick="loadFooterSettings()">ยกเลิก / โหลดใหม่</button>
+                        <button type="submit" class="btn-submit" style="width: auto; padding: 10px 32px; background: var(--accent-color);">💾 บันทึกข้อมูล Footer</button>
+                    </div>
+                </form>
             </div>
         </div>
 

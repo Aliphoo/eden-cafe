@@ -82,6 +82,10 @@ service cloud.firestore {
       allow read: if true;
       allow write: if hasAdminPermission('faqs');
     }
+    match /site_settings/{docId} {
+      allow read: if true;
+      allow write: if hasAdminPermission('footer');
+    }
     match /categories/{docId} {
       allow read: if true;
       allow write: if hasAdminPermission('products');

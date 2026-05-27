@@ -1,4 +1,4 @@
-﻿import { auth, provider, db } from './firebase-config.js';
+import { auth, provider, db } from './firebase-config.js';
 import { getMemberTier, getTierBenefits } from './membership.js';
 import { signInWithPopup, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -114,7 +114,8 @@ const ADMIN_PERMISSION_LABELS = {
     products: 'เมนูและหมวดหมู่',
     shop: 'สินค้าออนไลน์',
     blogs: 'บทความ',
-    faqs: 'FAQ'
+    faqs: 'FAQ',
+    footer: 'Footer'
 };
 const ADMIN_ROLE_LABELS = {
     owner: 'Owner',
@@ -134,7 +135,8 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
         products: false,
         shop: false,
         blogs: false,
-        faqs: false
+        faqs: false,
+        footer: false
     }
 };
 const ADMIN_TAB_PERMISSIONS = {
@@ -151,7 +153,8 @@ const ADMIN_TAB_PERMISSIONS = {
     'shop-products': 'shop',
     'shop-categories': 'shop',
     blogs: 'blogs',
-    faqs: 'faqs'
+    faqs: 'faqs',
+    'footer-settings': 'footer'
 };
 
 function normalizeEmail(value) {
@@ -2677,9 +2680,107 @@ faqForm?.addEventListener('submit', async (e) => {
 onAuthStateChanged(auth, (user) => {
     if (user) {
         if(typeof fetchFaqsFromCloud === 'function') fetchFaqsFromCloud();
+        if(typeof loadFooterSettings === 'function') loadFooterSettings();
     }
 });
 
+// ==========================================
+// Footer Settings Management Logic
+// ==========================================
+
+const footerSettingsForm = document.getElementById('footerSettingsForm');
+
+window.updateFooterPreview = function() {
+    const brandName = document.getElementById('footer-brand-name')?.value || '';
+    const tagline = document.getElementById('footer-tagline')?.value || '';
+    const address = document.getElementById('footer-address')?.value || '';
+    const email = document.getElementById('footer-email')?.value || '';
+    const phone = document.getElementById('footer-phone')?.value || '';
+    const instagram = document.getElementById('footer-instagram')?.value || '#';
+    const facebook = document.getElementById('footer-facebook')?.value || '#';
+    const line = document.getElementById('footer-line')?.value || '#';
+
+    const fpBrand = document.getElementById('fp-brand');
+    const fpTagline = document.getElementById('fp-tagline');
+    const fpAddress = document.getElementById('fp-address');
+    const fpEmail = document.getElementById('fp-email');
+    const fpPhone = document.getElementById('fp-phone');
+    const fpIg = document.getElementById('fp-ig');
+    const fpFb = document.getElementById('fp-fb');
+    const fpLine = document.getElementById('fp-line');
+
+    if (fpBrand) fpBrand.textContent = brandName;
+    if (fpTagline) fpTagline.textContent = tagline;
+    if (fpAddress) fpAddress.textContent = address;
+    if (fpEmail) fpEmail.textContent = '\u0e2d\u0e35\u0e40\u0e21\u0e25: ' + email;
+    if (fpPhone) fpPhone.textContent = '\u0e42\u0e17\u0e23: ' + phone;
+    if (fpIg) fpIg.href = instagram;
+    if (fpFb) fpFb.href = facebook;
+    if (fpLine) fpLine.href = line;
+};
+
+window.loadFooterSettings = async function() {
+    try {
+        const snap = await getDoc(doc(db, 'site_settings', 'footer'));
+        if (snap.exists()) {
+            const data = snap.data();
+            const setVal = (id, val) => {
+                const el = document.getElementById(id);
+                if (el && val !== undefined && val !== null) el.value = val;
+            };
+            setVal('footer-brand-name', data.brandName);
+            setVal('footer-tagline', data.tagline);
+            setVal('footer-copyright', data.copyright);
+            setVal('footer-address', data.address);
+            setVal('footer-email', data.email);
+            setVal('footer-phone', data.phone);
+            setVal('footer-instagram', data.instagram);
+            setVal('footer-facebook', data.facebook);
+            setVal('footer-line', data.line);
+
+            updateFooterPreview();
+        }
+    } catch (error) {
+        console.error('Error loading footer settings:', error);
+    }
+};
+
+footerSettingsForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const submitBtn = footerSettingsForm.querySelector('button[type="submit"]');
+    const originalText = submitBtn?.textContent;
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = '\u23f3 \u0e01\u0e33\u0e25\u0e31\u0e07\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01...';
+    }
+
+    const footerData = {
+        brandName: document.getElementById('footer-brand-name')?.value || '',
+        tagline: document.getElementById('footer-tagline')?.value || '',
+        copyright: document.getElementById('footer-copyright')?.value || '',
+        address: document.getElementById('footer-address')?.value || '',
+        email: document.getElementById('footer-email')?.value || '',
+        phone: document.getElementById('footer-phone')?.value || '',
+        instagram: document.getElementById('footer-instagram')?.value || '',
+        facebook: document.getElementById('footer-facebook')?.value || '',
+        line: document.getElementById('footer-line')?.value || '',
+        updatedAt: new Date().toISOString(),
+        updatedBy: auth.currentUser?.email || 'unknown'
+    };
+
+    try {
+        await setDoc(doc(db, 'site_settings', 'footer'), footerData, { merge: true });
+        alert('\u2705 \u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25 Footer \u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08');
+    } catch (error) {
+        alert('\u274c \u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08: ' + error.message);
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+        }
+    }
+});
 
 
 
