@@ -58,7 +58,8 @@ service cloud.firestore {
           'source', 'orderType', 'receiptNo', 'paymentStatus', 'paymentMethod',
           'subtotal', 'discount', 'taxIncluded', 'paidAmount', 'changeAmount',
           'note', 'cashierUid', 'cashierName', 'cashierEmail',
-          'isTestOrder', 'softLaunch', 'stockMode', 'createdAt'
+          'isTestOrder', 'softLaunch', 'stockAdjusted', 'stockAdjustments',
+          'stockMode', 'createdAt'
         ])
         && request.resource.data.keys().hasAll(['id', 'date', 'items', 'totalAmount', 'uid', 'timestamp', 'status'])
         && request.resource.data.uid == request.auth.uid
@@ -90,8 +91,48 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['cashierEmail']) || (request.resource.data.cashierEmail is string && request.resource.data.cashierEmail.size() <= 180))
         && (!request.resource.data.keys().hasAny(['isTestOrder']) || request.resource.data.isTestOrder is bool)
         && (!request.resource.data.keys().hasAny(['softLaunch']) || request.resource.data.softLaunch is bool)
+        && (!request.resource.data.keys().hasAny(['stockAdjusted']) || request.resource.data.stockAdjusted is bool)
+        && (!request.resource.data.keys().hasAny(['stockAdjustments']) || (request.resource.data.stockAdjustments is list && request.resource.data.stockAdjustments.size() <= 100))
+        && (!request.resource.data.keys().hasAny(['stockMode']) || (request.resource.data.stockMode is string && request.resource.data.stockMode.size() <= 40))
         && request.resource.data.timestamp == request.time
         && (!request.resource.data.keys().hasAny(['createdAt']) || request.resource.data.createdAt == request.time);
+    }
+    function isValidPosProductStockUpdate() {
+      return (hasAdminPermission('pos') || hasAdminPermission('orders'))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'stock', 'variants', 'updatedAt', 'updatedBy', 'stockUpdatedAt', 'stockUpdatedBy'
+        ])
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['stock'])
+          || (request.resource.data.stock is number && request.resource.data.stock >= 0 && request.resource.data.stock <= 1000000))
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['variants'])
+          || (request.resource.data.variants is list && request.resource.data.variants.size() <= 200))
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['updatedAt'])
+          || request.resource.data.updatedAt == request.time)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['stockUpdatedAt'])
+          || request.resource.data.stockUpdatedAt == request.time)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['updatedBy'])
+          || request.resource.data.updatedBy == request.auth.uid)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['stockUpdatedBy'])
+          || request.resource.data.stockUpdatedBy == request.auth.uid);
+    }
+    function isValidPosOrderVoidUpdate() {
+      return (hasAdminPermission('pos') || hasAdminPermission('orders'))
+        && resource.data.source == 'pos'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'paymentStatus', 'voidReason', 'voidedAt', 'voidedBy',
+          'voidedByName', 'voidedByEmail', 'voidedStockRestored',
+          'stockRestoreAdjustments', 'updatedAt'
+        ])
+        && request.resource.data.status == 'cancelled'
+        && (!request.resource.data.keys().hasAny(['paymentStatus']) || request.resource.data.paymentStatus == 'refunded')
+        && (!request.resource.data.keys().hasAny(['voidReason']) || (request.resource.data.voidReason is string && request.resource.data.voidReason.size() <= 300))
+        && (!request.resource.data.keys().hasAny(['voidedAt']) || request.resource.data.voidedAt == request.time)
+        && (!request.resource.data.keys().hasAny(['voidedBy']) || request.resource.data.voidedBy == request.auth.uid)
+        && (!request.resource.data.keys().hasAny(['voidedByName']) || (request.resource.data.voidedByName is string && request.resource.data.voidedByName.size() <= 120))
+        && (!request.resource.data.keys().hasAny(['voidedByEmail']) || (request.resource.data.voidedByEmail is string && request.resource.data.voidedByEmail.size() <= 180))
+        && (!request.resource.data.keys().hasAny(['voidedStockRestored']) || request.resource.data.voidedStockRestored is bool)
+        && (!request.resource.data.keys().hasAny(['stockRestoreAdjustments']) || (request.resource.data.stockRestoreAdjustments is list && request.resource.data.stockRestoreAdjustments.size() <= 100))
+        && (!request.resource.data.keys().hasAny(['updatedAt']) || request.resource.data.updatedAt == request.time);
     }
     function ownsResource() {
       return isSignedIn()
@@ -134,7 +175,8 @@ service cloud.firestore {
     }
     match /products/{docId} {
       allow read: if true;
-      allow write: if hasAdminPermission('products');
+      allow create, delete: if hasAdminPermission('products');
+      allow update: if hasAdminPermission('products') || isValidPosProductStockUpdate();
     }
     match /google_reviews/{docId} {
       allow read: if true;
@@ -230,7 +272,8 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['totalAmount']) || (request.resource.data.totalAmount is number && request.resource.data.totalAmount >= 0 && request.resource.data.totalAmount <= 1000000))
         && request.resource.data.timestamp == request.time);
       allow read: if hasAdminPermission('orders') || hasAdminPermission('pos') || ownsResource();
-      allow update, delete: if hasAdminPermission('orders');
+      allow update: if hasAdminPermission('orders') || isValidPosOrderVoidUpdate();
+      allow delete: if hasAdminPermission('orders');
     }
     match /bookings/{docId} {
       allow create: if request.resource.data.keys().hasOnly([

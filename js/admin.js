@@ -1,7 +1,7 @@
 import { auth, provider, db } from './firebase-config.js';
 import { getMemberTier, getTierBenefits } from './membership.js';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp, writeBatch, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const ADMIN_IMAGE_MAX_FILE_SIZE = 8 * 1024 * 1024;
 const ADMIN_IMAGE_MAX_EDGE = 1800;
@@ -1322,6 +1322,7 @@ function setupRealtimeOrders() {
             const isTestOrder = !!order.isTestOrder;
             const displayId = order.receiptNo || order.orderNumber || id.substring(0,8).toUpperCase();
             const sourceLabel = order.source === 'pos' ? (isTestOrder ? 'POS TEST' : 'POS') : 'Online';
+            const canVoidPos = order.source === 'pos' && status !== 'cancelled';
             const orderDateStr = order.timestamp ? (order.timestamp.toDate ? order.timestamp.toDate().toLocaleDateString('th-TH') : new Date(order.timestamp).toLocaleDateString('th-TH')) : '';
             
             if (!isTestOrder && orderDateStr === todayStr) {
@@ -1343,6 +1344,7 @@ function setupRealtimeOrders() {
                         <option value="completed" ${status === 'completed' ? 'selected' : ''}>เสร็จสิ้น</option>
                         <option value="cancelled" ${status === 'cancelled' ? 'selected' : ''}>ยกเลิก</option>
                     </select>
+                    ${canVoidPos ? `<button class="btn-action btn-delete" type="button" style="margin-left:6px;" onclick="voidPosOrder('${escapeJSString(id)}')">Void</button>` : ''}
                 </td>
             `;
             tbody.appendChild(tr);
@@ -2310,6 +2312,10 @@ function posLimitString(value, maxLength) {
     return String(value ?? '').trim().slice(0, maxLength);
 }
 
+function posVariantKey(value) {
+    return String(value ?? '').trim() || 'base';
+}
+
 function posStorageKey() {
     return 'edenAdminPosCartV1';
 }
@@ -2333,8 +2339,12 @@ function persistPosCart() {
 }
 
 function posSellableVariants(product = {}) {
-    const variants = productVariantsForDisplay(product).filter(variant => variant.availableForSale !== false);
+    const variants = productVariantsForDisplay(product).filter(variant => {
+        if (variant.availableForSale === false) return false;
+        return !product.trackStock || safeNumber(variant.stock) > 0;
+    });
     if (variants.length) return variants;
+    if (product.trackStock && safeNumber(product.stock) <= 0) return [];
     return [{
         id: 'base',
         name: '',
@@ -2405,9 +2415,9 @@ function renderPosProducts() {
     grid.innerHTML = rows.map(({ id, product }) => {
         const variants = posSellableVariants(product);
         const variantSelect = variants.length > 1 ? `
-            <select class="pos-card-variant" aria-label="เลือกตัวเลือกสินค้า">
+            <select class="pos-card-variant" aria-label="เลือกตัวเลือกสินค้า" onchange="updatePosCardPrice(this)">
                 ${variants.map(variant => `
-                    <option value="${escapeHTML(variant.id || variant.name || 'base')}">${escapeHTML(variant.name || 'ปกติ')} - ${posMoney(variant.price)}</option>
+                    <option value="${escapeHTML(variant.id || variant.name || 'base')}" data-price="${escapeHTML(variant.price)}">${escapeHTML(variant.name || 'ปกติ')} - ${posMoney(variant.price)}</option>
                 `).join('')}
             </select>
         ` : '';
@@ -2419,7 +2429,7 @@ function renderPosProducts() {
                 <div class="pos-product-name">${escapeHTML(product.name || id)}</div>
                 <div class="pos-product-meta">${escapeHTML(stockText || '-')}</div>
                 ${variantSelect}
-                <button class="pos-add-btn" type="button" onclick="addPosProductFromCard('${escapeJSString(id)}', this.closest('.pos-product-card'))">
+                <button class="pos-add-btn" type="button" data-default-label="เพิ่ม" onclick="addPosProductFromCard('${escapeJSString(id)}', this.closest('.pos-product-card'))">
                     เพิ่ม ${posMoney(firstVariant.price ?? product.price)}
                 </button>
             </div>
@@ -2545,6 +2555,13 @@ window.addPosProductFromCard = (productId, cardEl = null) => {
     renderPosCart();
 };
 
+window.updatePosCardPrice = (selectEl) => {
+    const card = selectEl?.closest?.('.pos-product-card');
+    const button = card?.querySelector?.('.pos-add-btn');
+    const price = selectEl?.selectedOptions?.[0]?.dataset?.price;
+    if (button && price !== undefined) button.textContent = `เพิ่ม ${posMoney(price)}`;
+};
+
 window.changePosCartQty = (key, delta) => {
     posCart = posCart.map(item => {
         if (item.key !== key) return item;
@@ -2578,6 +2595,225 @@ function generatePosReceiptNo() {
     const datePart = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
     const timePart = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
     return `POS-${datePart}-${timePart}`;
+}
+
+function groupedPosItemsForStock(items = []) {
+    const grouped = new Map();
+    items.forEach(item => {
+        const productId = String(item.productId || '').trim();
+        if (!productId) return;
+        const variantId = posVariantKey(item.variantId);
+        const key = `${productId}::${variantId}`;
+        const quantity = Math.max(0, safeNumber(item.quantity, 1));
+        if (!quantity) return;
+        const current = grouped.get(key) || {
+            productId,
+            variantId,
+            sku: item.sku || '',
+            name: item.name || productId,
+            variantName: item.variantName || '',
+            quantity: 0
+        };
+        current.quantity += quantity;
+        grouped.set(key, current);
+    });
+    return Array.from(grouped.values());
+}
+
+function findStockVariantIndex(variants = [], entry = {}) {
+    const variantId = posVariantKey(entry.variantId);
+    const sku = String(entry.sku || '').trim();
+    const variantName = String(entry.variantName || '').trim();
+    let index = variants.findIndex(variant => posVariantKey(variant.id) === variantId);
+    if (index >= 0) return index;
+    if (sku) {
+        index = variants.findIndex(variant => String(variant.sku || '').trim() === sku);
+        if (index >= 0) return index;
+    }
+    if (variantName) {
+        index = variants.findIndex(variant => String(variant.name || '').trim() === variantName);
+        if (index >= 0) return index;
+    }
+    return -1;
+}
+
+function nextTrackedStockValue(current, delta, label) {
+    const beforeStock = safeNumber(current);
+    const afterStock = posRound(beforeStock + delta);
+    if (afterStock < 0) {
+        throw new Error(`${label} สต็อกไม่พอ เหลือ ${beforeStock.toLocaleString('th-TH')}`);
+    }
+    return { beforeStock, afterStock };
+}
+
+function buildStockUpdateForProduct(productId, product = {}, entries = [], direction = -1) {
+    if (!product.trackStock) return { update: null, adjustments: [] };
+
+    const variants = Array.isArray(product.variants)
+        ? product.variants.map(variant => ({ ...variant }))
+        : [];
+    const adjustments = [];
+    let productStock = safeNumber(product.stock);
+
+    if (variants.length) {
+        entries.forEach(entry => {
+            const variantIndex = findStockVariantIndex(variants, entry);
+            if (variantIndex < 0) {
+                throw new Error(`ไม่พบตัวเลือกสินค้า ${entry.name || productId} สำหรับตัดสต็อก`);
+            }
+            const variant = variants[variantIndex];
+            const quantityDelta = direction * Math.max(0, safeNumber(entry.quantity, 1));
+            const stock = nextTrackedStockValue(variant.stock ?? product.stock, quantityDelta, `${entry.name}${entry.variantName ? ' / ' + entry.variantName : ''}`);
+            variant.stock = stock.afterStock;
+            variants[variantIndex] = variant;
+            adjustments.push({
+                productId,
+                variantId: posVariantKey(variant.id || entry.variantId),
+                sku: variant.sku || entry.sku || '',
+                name: entry.name || product.name || productId,
+                variantName: variant.name || entry.variantName || '',
+                quantity: Math.max(0, safeNumber(entry.quantity, 1)),
+                beforeStock: stock.beforeStock,
+                afterStock: stock.afterStock
+            });
+        });
+        productStock = variants.reduce((sum, variant) => sum + Math.max(0, safeNumber(variant.stock)), 0);
+    } else {
+        const totalQuantity = entries.reduce((sum, entry) => sum + Math.max(0, safeNumber(entry.quantity, 1)), 0);
+        const stock = nextTrackedStockValue(product.stock, direction * totalQuantity, product.name || productId);
+        productStock = stock.afterStock;
+        adjustments.push({
+            productId,
+            variantId: 'base',
+            sku: product.sku || entries[0]?.sku || '',
+            name: product.name || entries[0]?.name || productId,
+            variantName: '',
+            quantity: totalQuantity,
+            beforeStock: stock.beforeStock,
+            afterStock: stock.afterStock
+        });
+    }
+
+    const update = {
+        stock: productStock,
+        updatedAt: serverTimestamp(),
+        updatedBy: auth.currentUser?.uid || '',
+        stockUpdatedAt: serverTimestamp(),
+        stockUpdatedBy: auth.currentUser?.uid || ''
+    };
+    if (variants.length) update.variants = variants;
+    return { update, adjustments };
+}
+
+async function commitPosOrderWithStock(orderData, items, isTestOrder) {
+    if (isTestOrder) {
+        const docRef = await addDoc(collection(db, 'orders'), {
+            ...orderData,
+            stockAdjusted: false,
+            stockAdjustments: [],
+            stockMode: 'test-no-stock'
+        });
+        return { docRef, orderData: { ...orderData, stockAdjusted: false, stockAdjustments: [], stockMode: 'test-no-stock' } };
+    }
+
+    const orderRef = doc(collection(db, 'orders'));
+    const committedOrder = await runTransaction(db, async (transaction) => {
+        const stockEntries = groupedPosItemsForStock(items);
+        const byProduct = new Map();
+        stockEntries.forEach(entry => {
+            const list = byProduct.get(entry.productId) || [];
+            list.push(entry);
+            byProduct.set(entry.productId, list);
+        });
+
+        const productSnapshots = new Map();
+        for (const productId of byProduct.keys()) {
+            const productRef = doc(db, 'products', productId);
+            const productSnap = await transaction.get(productRef);
+            if (!productSnap.exists()) {
+                throw new Error(`ไม่พบสินค้า ${productId} ในระบบ`);
+            }
+            productSnapshots.set(productId, { ref: productRef, data: productSnap.data() || {} });
+        }
+
+        const stockAdjustments = [];
+        productSnapshots.forEach(({ ref, data }, productId) => {
+            const result = buildStockUpdateForProduct(productId, data, byProduct.get(productId) || [], -1);
+            if (result.update) {
+                transaction.update(ref, result.update);
+                stockAdjustments.push(...result.adjustments);
+            }
+        });
+
+        const finalOrder = {
+            ...orderData,
+            stockAdjusted: stockAdjustments.length > 0,
+            stockAdjustments,
+            stockMode: stockAdjustments.length ? 'auto' : 'not-tracked'
+        };
+        transaction.set(orderRef, finalOrder);
+        return finalOrder;
+    });
+
+    return { docRef: orderRef, orderData: committedOrder };
+}
+
+async function restorePosOrderStock(orderId, reason = '') {
+    const user = auth.currentUser;
+    if (!user) throw new Error('กรุณาเข้าสู่ระบบแอดมินก่อน Void ออเดอร์');
+
+    await runTransaction(db, async (transaction) => {
+        const orderRef = doc(db, 'orders', orderId);
+        const orderSnap = await transaction.get(orderRef);
+        if (!orderSnap.exists()) throw new Error('ไม่พบออเดอร์นี้');
+        const order = orderSnap.data() || {};
+        if (order.source !== 'pos') throw new Error('Void แบบคืนสต็อกใช้กับออเดอร์ POS เท่านั้น');
+        if (order.status === 'cancelled' && order.voidedStockRestored) {
+            throw new Error('ออเดอร์นี้ถูก Void และคืนสต็อกแล้ว');
+        }
+
+        const stockEntries = order.stockAdjusted && !order.isTestOrder
+            ? groupedPosItemsForStock(order.items || [])
+            : [];
+        const byProduct = new Map();
+        stockEntries.forEach(entry => {
+            const list = byProduct.get(entry.productId) || [];
+            list.push(entry);
+            byProduct.set(entry.productId, list);
+        });
+
+        const productSnapshots = new Map();
+        for (const productId of byProduct.keys()) {
+            const productRef = doc(db, 'products', productId);
+            const productSnap = await transaction.get(productRef);
+            if (!productSnap.exists()) {
+                throw new Error(`ไม่พบสินค้า ${productId} สำหรับคืนสต็อก`);
+            }
+            productSnapshots.set(productId, { ref: productRef, data: productSnap.data() || {} });
+        }
+
+        const restoredAdjustments = [];
+        productSnapshots.forEach(({ ref, data }, productId) => {
+            const result = buildStockUpdateForProduct(productId, data, byProduct.get(productId) || [], 1);
+            if (result.update) {
+                transaction.update(ref, result.update);
+                restoredAdjustments.push(...result.adjustments);
+            }
+        });
+
+        transaction.update(orderRef, {
+            status: 'cancelled',
+            paymentStatus: 'refunded',
+            voidReason: posLimitString(reason, 300) || 'Void POS order',
+            voidedAt: serverTimestamp(),
+            voidedBy: user.uid,
+            voidedByName: posLimitString(user.displayName || user.email || 'Admin', 120),
+            voidedByEmail: posLimitString(user.email || '', 180),
+            voidedStockRestored: restoredAdjustments.length > 0,
+            stockRestoreAdjustments: restoredAdjustments,
+            updatedAt: serverTimestamp()
+        });
+    });
 }
 
 function buildPosReceiptHTML(order = {}) {
@@ -2633,6 +2869,19 @@ window.checkoutPosOrder = async () => {
         const isTestOrder = !!document.getElementById('pos-soft-launch-mode')?.checked;
         const receiptNo = generatePosReceiptNo();
         const now = new Date();
+        const orderItems = posCart.map(item => ({
+            productId: item.productId,
+            variantId: item.variantId,
+            name: item.name,
+            variantName: item.variantName || '',
+            sku: item.sku || '',
+            category: item.category || '',
+            price: posRound(item.price),
+            cost: posRound(item.cost),
+            quantity: safeNumber(item.quantity, 1),
+            lineTotal: posRound(safeNumber(item.price) * safeNumber(item.quantity, 1)),
+            taxEnabled: item.taxEnabled !== false
+        }));
         const orderData = {
             id: receiptNo,
             receiptNo,
@@ -2647,19 +2896,7 @@ window.checkoutPosOrder = async () => {
             phone: posLimitString(document.getElementById('pos-customer-phone')?.value, 40),
             address: 'หน้าร้าน Eden Cafe',
             note: posLimitString(document.getElementById('pos-note')?.value, 500),
-            items: posCart.map(item => ({
-                productId: item.productId,
-                variantId: item.variantId,
-                name: item.name,
-                variantName: item.variantName || '',
-                sku: item.sku || '',
-                category: item.category || '',
-                price: posRound(item.price),
-                cost: posRound(item.cost),
-                quantity: safeNumber(item.quantity, 1),
-                lineTotal: posRound(safeNumber(item.price) * safeNumber(item.quantity, 1)),
-                taxEnabled: item.taxEnabled !== false
-            })),
+            items: orderItems,
             subtotal: totals.subtotal,
             discount: totals.discount,
             taxIncluded: totals.taxIncluded,
@@ -2672,12 +2909,11 @@ window.checkoutPosOrder = async () => {
             cashierEmail: posLimitString(user.email || '', 180),
             isTestOrder,
             softLaunch: isTestOrder,
-            stockMode: 'manual-soft-launch',
             timestamp: serverTimestamp(),
             createdAt: serverTimestamp()
         };
-        const docRef = await addDoc(collection(db, 'orders'), orderData);
-        posLastReceipt = { ...orderData, firestoreId: docRef.id, timestamp: new Date(), createdAt: new Date() };
+        const result = await commitPosOrderWithStock(orderData, orderItems, isTestOrder);
+        posLastReceipt = { ...result.orderData, firestoreId: result.docRef.id, timestamp: new Date(), createdAt: new Date() };
         const receipt = document.getElementById('pos-receipt');
         const printBtn = document.getElementById('pos-print-btn');
         if (receipt) {
@@ -3343,11 +3579,31 @@ window.onclick = function(event) {
 // Global functions for inline HTML execution
 window.updateOrderStatus = async (id, newStatus) => {
     try {
+        if (newStatus === 'cancelled') {
+            const orderSnap = await getDoc(doc(db, "orders", id));
+            const order = orderSnap.exists() ? orderSnap.data() : null;
+            if (order?.source === 'pos') {
+                await window.voidPosOrder(id);
+                return;
+            }
+        }
         await updateDoc(doc(db, "orders", id), { status: newStatus });
     } catch (e) {
         alert("อัปเดตไม่สำเร็จ: " + e.message);
     }
 }
+
+window.voidPosOrder = async (id) => {
+    const reason = prompt('ระบุเหตุผลการ Void / ยกเลิกบิล POS');
+    if (reason === null) return;
+    try {
+        await restorePosOrderStock(id, reason);
+        alert('Void ออเดอร์ POS และคืนสต็อกเรียบร้อย');
+    } catch (error) {
+        console.error('Void POS order failed:', error);
+        alert('Void ออเดอร์ POS ไม่สำเร็จ: ' + error.message);
+    }
+};
 
 // ==========================================
 // Blog Management Logic
