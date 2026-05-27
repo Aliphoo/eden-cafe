@@ -23,6 +23,11 @@ const ADMIN_EMAILS = new Set([
 ]);
 const IMAGE_REMOTE_ROOT = 'Images/uploads';
 const IMAGE_PUBLIC_BASE_URL = 'https://www.edencafe.co/Images/uploads';
+const SPACESHIP_FTP_FALLBACK_HOSTS = [
+  'ftp.edencafe.co',
+  'edencafe.co',
+  '209.74.68.30',
+];
 
 const ALLOWED_ORIGINS = new Set([
   'https://edencafe-d9095.web.app',
@@ -195,20 +200,38 @@ async function uploadToSpaceshipHosting({ folder, fileName, buffer }) {
   const remoteParts = remotePath.split('/');
   const remoteFileName = remoteParts.pop();
   const remoteDir = remoteParts.join('/');
-  const client = new ftp.Client(30000);
+  const hosts = [...new Set([server, ...SPACESHIP_FTP_FALLBACK_HOSTS].filter(Boolean))];
+  let client;
+  let lastAccessError;
 
   try {
-    await client.access({
-      host: server,
-      user: username,
-      password,
-      secure: true,
-      secureOptions: { rejectUnauthorized: false },
-    });
+    for (const host of hosts) {
+      client = new ftp.Client(30000);
+      try {
+        await client.access({
+          host,
+          user: username,
+          password,
+          secure: true,
+          secureOptions: { rejectUnauthorized: false },
+        });
+        lastAccessError = null;
+        break;
+      } catch (error) {
+        lastAccessError = error;
+        logger.warn('Spaceship FTP host failed, trying fallback if available', {
+          host,
+          message: error.message,
+        });
+        client.close();
+        client = null;
+      }
+    }
+    if (lastAccessError) throw lastAccessError;
     await client.ensureDir(remoteDir);
     await client.uploadFrom(Readable.from([buffer]), remoteFileName);
   } finally {
-    client.close();
+    if (client) client.close();
   }
 
   return {
