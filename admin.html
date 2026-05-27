@@ -116,6 +116,52 @@
         th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #eee; }
         th { background: #fafafa; color: #666; font-weight: 500; }
         tbody tr:hover { background: #f9f9f9; }
+        .menu-pos-shell { max-width: none; padding: 0; overflow: hidden; }
+        .menu-pos-topbar { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; padding: 24px 28px 18px; border-bottom: 1px solid #edf1ed; }
+        .menu-pos-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+        .menu-pos-actions .btn-action { min-height: 44px; padding: 0 22px; border-radius: 3px; box-shadow: 0 3px 8px rgba(76,175,80,0.25); }
+        .menu-pos-link { border: 0; background: transparent; color: #111; font-weight: 600; cursor: pointer; padding: 12px 6px; font-size: 0.95rem; }
+        .menu-pos-link:hover { color: var(--accent-color); }
+        .menu-pos-filters { display: grid; grid-template-columns: 190px 190px minmax(220px, 320px); gap: 14px; align-items: end; }
+        .menu-filter-field label { display: block; color: #7c8480; font-size: 0.82rem; margin-bottom: 5px; }
+        .menu-filter-field select, .menu-search-wrap input {
+            width: 100%; border: 0; border-bottom: 2px solid #e1e6e1; padding: 9px 4px; outline: none; background: transparent; font-size: 0.95rem;
+        }
+        .menu-filter-field select:focus, .menu-search-wrap input:focus { border-bottom-color: var(--accent-color); }
+        .menu-search-wrap { display: flex; gap: 8px; align-items: center; border-bottom: 2px solid #e1e6e1; }
+        .menu-search-wrap input { border: 0; }
+        .menu-search-icon { color: #607d8b; font-size: 1.2rem; }
+        .menu-pos-table-wrap { overflow-x: auto; }
+        .menu-pos-table th { background: #fff; height: 58px; color: #606a66; font-size: 0.92rem; white-space: nowrap; }
+        .menu-pos-table td { height: 66px; vertical-align: middle; white-space: nowrap; }
+        .menu-check-cell { width: 54px; text-align: center; }
+        .menu-check-cell input { width: 19px; height: 19px; accent-color: var(--accent-color); cursor: pointer; }
+        .menu-row-toggle { color: #777; margin-right: 12px; font-size: 1.15rem; }
+        .menu-item-name { display: flex; align-items: center; gap: 12px; min-width: 280px; }
+        .menu-item-thumb { width: 42px; height: 42px; border-radius: 8px; object-fit: cover; background: #f2f2f2; }
+        .menu-item-title strong { display: block; color: #111; font-size: 1rem; }
+        .menu-item-title small { color: #789; }
+        .menu-muted { color: #999; }
+        .menu-margin-good { color: #2e7d32; font-weight: 600; }
+        .menu-margin-warn { color: #ef6c00; font-weight: 600; }
+        .menu-stock-low { color: #ef6c00; font-weight: 600; }
+        .menu-stock-out { color: #d32f2f; font-weight: 600; }
+        .menu-pos-footer { display: flex; align-items: center; justify-content: flex-end; gap: 18px; padding: 18px 24px 22px; border-top: 1px solid #edf1ed; color: #4b5651; flex-wrap: wrap; }
+        .menu-page-btn { border: 1px solid #e0e0e0; background: #fff; width: 44px; height: 40px; border-radius: 3px; cursor: pointer; font-size: 1.2rem; color: #607d8b; }
+        .menu-page-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        .menu-page-input { width: 56px; padding: 8px 10px; border: 1px solid #e0e0e0; border-radius: 4px; text-align: center; }
+        .menu-page-size { border: 0; border-bottom: 2px solid #e1e6e1; padding: 8px 22px 8px 4px; background: transparent; }
+        .menu-count-pill { background: #eef7ef; color: #2e7d32; padding: 8px 12px; border-radius: 999px; font-weight: 600; }
+        @media (max-width: 1180px) {
+            .menu-pos-topbar { flex-direction: column; }
+            .menu-pos-filters { width: 100%; grid-template-columns: repeat(2, minmax(160px, 1fr)); }
+            .menu-search-wrap { grid-column: 1 / -1; }
+        }
+        @media (max-width: 760px) {
+            .menu-pos-filters { grid-template-columns: 1fr; }
+            .menu-search-wrap { grid-column: auto; }
+            .menu-pos-footer { justify-content: flex-start; }
+        }
 
         .status-badge { padding: 5px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: 500; }
         .status-pending { background: #fff3e0; color: var(--warning); }
@@ -679,32 +725,70 @@
 
         <!-- Products/Menu Section -->
         <div id="products" class="content-section">
-            <div class="section-container">
-                <div class="section-header">
-                    <h2>รายการเมนูสินค้าทั้งหมด</h2>
-                    <button class="btn-action" onclick="openProductModal()">+ เพิ่มเมนูใหม่</button>
+            <div class="section-container menu-pos-shell">
+                <div class="menu-pos-topbar">
+                    <div class="menu-pos-actions">
+                        <button class="btn-action" onclick="openProductModal()">+ เพิ่มสินค้า</button>
+                        <button class="menu-pos-link" onclick="document.getElementById('product-xlsx-upload').click()">นำเข้า</button>
+                        <button class="menu-pos-link" onclick="downloadProductDataXLSX()">ส่งออก</button>
+                        <input type="file" id="product-xlsx-upload" accept=".xlsx,.xls" style="display:none;">
+                        <span id="product-selected-count" class="menu-count-pill" style="display:none;">0 selected</span>
+                    </div>
+                    <div class="menu-pos-filters">
+                        <div class="menu-filter-field">
+                            <label for="product-category-filter">ประเภท</label>
+                            <select id="product-category-filter">
+                                <option value="all">รายการทั้งหมด</option>
+                            </select>
+                        </div>
+                        <div class="menu-filter-field">
+                            <label for="product-stock-filter">แจ้งเตือนสต็อก</label>
+                            <select id="product-stock-filter">
+                                <option value="all">รายการทั้งหมด</option>
+                                <option value="low">สต็อกต่ำ</option>
+                                <option value="out">สินค้าหมด</option>
+                                <option value="tracked">เปิดนับสต็อก</option>
+                                <option value="untracked">ไม่ได้นับสต็อก</option>
+                            </select>
+                        </div>
+                        <div class="menu-search-wrap">
+                            <span class="menu-search-icon">⌕</span>
+                            <input type="search" id="product-search-input" placeholder="ค้นหาชื่อสินค้า / SKU / หมวดหมู่">
+                        </div>
+                    </div>
                 </div>
-                <div style="overflow-x: auto;">
-                    <table>
+                <div class="menu-pos-table-wrap">
+                    <table class="menu-pos-table">
                         <thead>
                             <tr>
-                                
-                                
-                                <th>Image</th>
-                                <th>SKU</th>
-                                <th>Name</th>
-                                <th>Category</th>
-                                <th>Price</th>
-                                <th>Stock</th>
-                                <th>Available</th>
-                                <th>Signature</th>
-                                <th>Actions</th>
+                                <th class="menu-check-cell"><input type="checkbox" id="product-select-all" aria-label="Select all products on page"></th>
+                                <th>ชื่อสินค้า ↑</th>
+                                <th>ประเภท</th>
+                                <th>ราคาขาย</th>
+                                <th>ต้นทุน</th>
+                                <th>ผลต่าง</th>
+                                <th>อยู่ในคลัง</th>
+                                <th>จัดการ</th>
                             </tr>
                         </thead>
                         <tbody id="products-table-body">
-                            <tr><td colspan="9" style="text-align: center;">กำลังโหลดข้อมูล...</td></tr>
+                            <tr><td colspan="8" style="text-align: center;">กำลังโหลดข้อมูล...</td></tr>
                         </tbody>
                     </table>
+                </div>
+                <div class="menu-pos-footer">
+                    <button class="menu-page-btn" id="product-page-prev" type="button" aria-label="Previous page">‹</button>
+                    <button class="menu-page-btn" id="product-page-next" type="button" aria-label="Next page">›</button>
+                    <span>หน้าที่:</span>
+                    <input class="menu-page-input" id="product-page-input" type="number" min="1" value="1">
+                    <span id="product-page-total">จาก 1</span>
+                    <span>จำนวนที่แสดง/หน้า</span>
+                    <select class="menu-page-size" id="product-page-size">
+                        <option value="10">10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                    </select>
+                    <span id="product-filter-count" class="menu-muted">0 รายการ</span>
                 </div>
             </div>
         </div>
@@ -1293,7 +1377,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=26"></script>
+    <script type="module" src="js/admin.js?v=27"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {

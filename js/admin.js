@@ -269,6 +269,11 @@ window.canAccessAdminTab = (tabId) => {
 
 // Global Data (for editing)
 let productsData = {};
+let productRows = [];
+let productCurrentPage = 1;
+let productPageSize = 10;
+let productControlsBound = false;
+const selectedProductIds = new Set();
 let categoriesData = {};
 let shopProductsData = {};
 let shopCategoriesData = {};
@@ -1134,6 +1139,8 @@ function setupRealtimeCategories() {
             opt.innerText = cat.name;
             select.appendChild(opt);
         });
+        updateProductCategoryFilterOptions();
+        renderProductsTable();
     }, (error) => {
         console.error("Error listening to categories:", error);
     });
@@ -1711,16 +1718,259 @@ roomForm.addEventListener('submit', async (e) => {
     }
 });
 
+function categoryNameForProduct(product = {}) {
+    const category = product.category || '';
+    return categoriesData[category]?.name || category || '-';
+}
+
+function productSearchHaystack(row) {
+    const product = row.product || {};
+    return [
+        row.id,
+        product.name,
+        product.nameEn,
+        product.sku,
+        product.handle,
+        product.barcode,
+        product.category,
+        categoryNameForProduct(product)
+    ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function productStockText(product = {}) {
+    if (!product.trackStock) return { text: '-', className: 'menu-muted' };
+    const stock = safeNumber(product.stock);
+    const lowStock = safeNumber(product.lowStock);
+    if (stock <= 0) return { text: '0', className: 'menu-stock-out' };
+    if (lowStock > 0 && stock <= lowStock) return { text: stock.toLocaleString(), className: 'menu-stock-low' };
+    return { text: stock.toLocaleString(), className: '' };
+}
+
+function productMatchesStockFilter(product = {}, filter) {
+    const stock = safeNumber(product.stock);
+    const lowStock = safeNumber(product.lowStock);
+    if (filter === 'tracked') return !!product.trackStock;
+    if (filter === 'untracked') return !product.trackStock;
+    if (filter === 'out') return !!product.trackStock && stock <= 0;
+    if (filter === 'low') return !!product.trackStock && lowStock > 0 && stock > 0 && stock <= lowStock;
+    return true;
+}
+
+function productMargin(product = {}) {
+    const price = safeNumber(product.price);
+    const cost = safeNumber(product.cost);
+    if (!price || !cost) return { text: '-', className: 'menu-muted' };
+    const margin = ((price - cost) / price) * 100;
+    return {
+        text: margin.toFixed(2) + '%',
+        className: margin >= 45 ? 'menu-margin-good' : 'menu-margin-warn'
+    };
+}
+
+function productMoney(value) {
+    const amount = safeNumber(value);
+    return amount ? '&#3647;' + amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-';
+}
+
+function filteredProductRows() {
+    const category = document.getElementById('product-category-filter')?.value || 'all';
+    const stockFilter = document.getElementById('product-stock-filter')?.value || 'all';
+    const search = (document.getElementById('product-search-input')?.value || '').trim().toLowerCase();
+    return productRows
+        .filter(row => category === 'all' || row.product.category === category)
+        .filter(row => productMatchesStockFilter(row.product, stockFilter))
+        .filter(row => !search || productSearchHaystack(row).includes(search))
+        .sort((a, b) => String(a.product.name || '').localeCompare(String(b.product.name || ''), 'th'));
+}
+
+function updateProductCategoryFilterOptions() {
+    const filter = document.getElementById('product-category-filter');
+    if (!filter) return;
+    const currentValue = filter.value || 'all';
+    const rowsByOrder = Object.entries(categoriesData)
+        .sort(([, a], [, b]) => {
+            const aOrder = Number(a.order || 999);
+            const bOrder = Number(b.order || 999);
+            if (aOrder !== bOrder) return aOrder - bOrder;
+            return String(a.name || '').localeCompare(String(b.name || ''), 'th');
+        });
+    filter.innerHTML = '<option value="all">รายการทั้งหมด</option>' + rowsByOrder
+        .map(([id, cat]) => `<option value="${escapeHTML(id)}">${escapeHTML(cat.name || id)}</option>`)
+        .join('');
+    filter.value = rowsByOrder.some(([id]) => id === currentValue) ? currentValue : 'all';
+}
+
+function updateProductSelectionUI(pageRows = []) {
+    const countEl = document.getElementById('product-selected-count');
+    const selectAll = document.getElementById('product-select-all');
+    if (countEl) {
+        countEl.textContent = selectedProductIds.size + ' selected';
+        countEl.style.display = selectedProductIds.size ? 'inline-flex' : 'none';
+    }
+    if (selectAll) {
+        const pageIds = pageRows.map(row => row.id);
+        const selectedOnPage = pageIds.filter(id => selectedProductIds.has(id)).length;
+        selectAll.checked = pageIds.length > 0 && selectedOnPage === pageIds.length;
+        selectAll.indeterminate = selectedOnPage > 0 && selectedOnPage < pageIds.length;
+    }
+}
+
+function renderProductsTable() {
+    const tbody = document.getElementById('products-table-body');
+    if (!tbody) return;
+    bindProductManagerControls();
+    updateProductCategoryFilterOptions();
+
+    const rows = filteredProductRows();
+    const totalPages = Math.max(1, Math.ceil(rows.length / productPageSize));
+    productCurrentPage = Math.max(1, Math.min(productCurrentPage, totalPages));
+    const start = (productCurrentPage - 1) * productPageSize;
+    const pageRows = rows.slice(start, start + productPageSize);
+
+    if (!pageRows.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:30px;">No menu items match the selected filters.</td></tr>';
+    } else {
+        tbody.innerHTML = pageRows.map(({ id, product }) => {
+            const catName = categoryNameForProduct(product);
+            const stock = productStockText(product);
+            const margin = productMargin(product);
+            const available = product.availableForSale !== false;
+            const itemName = product.name || product.nameTh || product.nameEn || id;
+            return `
+                <tr>
+                    <td class="menu-check-cell"><input type="checkbox" class="product-row-check" data-id="${escapeHTML(id)}" ${selectedProductIds.has(id) ? 'checked' : ''}></td>
+                    <td>
+                        <div class="menu-item-name">
+                            <span class="menu-row-toggle">⌄</span>
+                            <img loading="lazy" class="menu-item-thumb" src="${safeImageURL(product.imageUrl)}" alt="${escapeHTML(itemName)}">
+                            <span class="menu-item-title">
+                                <strong>${escapeHTML(itemName)}</strong>
+                                <small>${escapeHTML(product.sku || product.handle || id)}${available ? '' : ' | Hidden from sale'}</small>
+                            </span>
+                        </div>
+                    </td>
+                    <td>${escapeHTML(catName)} <span class="menu-muted">⌄</span></td>
+                    <td>${productMoney(product.price)}</td>
+                    <td>${productMoney(product.cost)}</td>
+                    <td><span class="${margin.className}">${escapeHTML(margin.text)}</span></td>
+                    <td><span class="${stock.className}">${escapeHTML(stock.text)}</span></td>
+                    <td>
+                        <button class="btn-action btn-edit" onclick="editProduct('${escapeJSString(id)}')">Edit</button>
+                        <button class="btn-action btn-delete" onclick="deleteProduct('${escapeJSString(id)}')">Delete</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    const pageInput = document.getElementById('product-page-input');
+    const totalEl = document.getElementById('product-page-total');
+    const countEl = document.getElementById('product-filter-count');
+    const prev = document.getElementById('product-page-prev');
+    const next = document.getElementById('product-page-next');
+    if (pageInput) pageInput.value = productCurrentPage;
+    if (totalEl) totalEl.textContent = 'จาก ' + totalPages.toLocaleString('th-TH');
+    if (countEl) countEl.textContent = rows.length.toLocaleString('th-TH') + ' รายการ';
+    if (prev) prev.disabled = productCurrentPage <= 1;
+    if (next) next.disabled = productCurrentPage >= totalPages;
+    updateProductSelectionUI(pageRows);
+}
+
+function bindProductManagerControls() {
+    if (productControlsBound) return;
+    const categoryFilter = document.getElementById('product-category-filter');
+    const stockFilter = document.getElementById('product-stock-filter');
+    const searchInput = document.getElementById('product-search-input');
+    const pageInput = document.getElementById('product-page-input');
+    const pageSize = document.getElementById('product-page-size');
+    const prev = document.getElementById('product-page-prev');
+    const next = document.getElementById('product-page-next');
+    const selectAll = document.getElementById('product-select-all');
+    const tbody = document.getElementById('products-table-body');
+    const upload = document.getElementById('product-xlsx-upload');
+
+    [categoryFilter, stockFilter, searchInput].forEach(el => {
+        if (!el) return;
+        el.addEventListener('input', () => {
+            productCurrentPage = 1;
+            renderProductsTable();
+        });
+        el.addEventListener('change', () => {
+            productCurrentPage = 1;
+            renderProductsTable();
+        });
+    });
+    if (pageInput) {
+        pageInput.addEventListener('change', () => {
+            productCurrentPage = Math.max(1, safeNumber(pageInput.value, 1));
+            renderProductsTable();
+        });
+    }
+    if (pageSize) {
+        pageSize.addEventListener('change', () => {
+            productPageSize = Math.max(1, safeNumber(pageSize.value, 10));
+            productCurrentPage = 1;
+            renderProductsTable();
+        });
+    }
+    if (prev) prev.addEventListener('click', () => { productCurrentPage -= 1; renderProductsTable(); });
+    if (next) next.addEventListener('click', () => { productCurrentPage += 1; renderProductsTable(); });
+    if (selectAll) {
+        selectAll.addEventListener('change', () => {
+            const rows = filteredProductRows();
+            const start = (productCurrentPage - 1) * productPageSize;
+            rows.slice(start, start + productPageSize).forEach(row => {
+                if (selectAll.checked) selectedProductIds.add(row.id);
+                else selectedProductIds.delete(row.id);
+            });
+            renderProductsTable();
+        });
+    }
+    if (tbody) {
+        tbody.addEventListener('change', event => {
+            const checkbox = event.target.closest('.product-row-check');
+            if (!checkbox) return;
+            if (checkbox.checked) selectedProductIds.add(checkbox.dataset.id);
+            else selectedProductIds.delete(checkbox.dataset.id);
+            updateProductSelectionUI(filteredProductRows().slice((productCurrentPage - 1) * productPageSize, productCurrentPage * productPageSize));
+        });
+    }
+    if (upload) {
+        upload.addEventListener('change', async () => {
+            if (!upload.files?.[0]) return;
+            try {
+                const result = await uploadCategoryDataFromXLSX('products', upload.files[0]);
+                alert(`Upload complete: ${result.total} rows (created ${result.created}, updated ${result.updated})`);
+            } catch (error) {
+                alert('Upload failed: ' + error.message);
+            } finally {
+                upload.value = '';
+            }
+        });
+    }
+    productControlsBound = true;
+}
+
+window.downloadProductDataXLSX = async () => {
+    try {
+        await downloadCategoryDataAsXLSX('products');
+    } catch (error) {
+        alert('Export failed: ' + error.message);
+    }
+};
+
 // Real-time Products Listener
 function setupRealtimeProducts() {
     const q = query(collection(db, "products"), orderBy("category"));
     onSnapshot(q, (snapshot) => {
         const tbody = document.getElementById('products-table-body');
-        tbody.innerHTML = '';
+        if (tbody) tbody.innerHTML = '';
         productsData = {};
+        productRows = [];
         
         if (snapshot.empty) {
-            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">ไม่มีข้อมูลเมนูสินค้า</td></tr>';
+            if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">ไม่มีข้อมูลเมนูสินค้า</td></tr>';
+            renderProductsTable();
             return;
         }
 
@@ -1728,34 +1978,16 @@ function setupRealtimeProducts() {
             const product = docSnap.data();
             const id = docSnap.id;
             productsData[id] = product; // Store locally for edit modal
-            
-            // Resolve Category Name
-            let catName = product.category;
-            if (categoriesData[product.category]) {
-                catName = categoriesData[product.category].name;
-            }
-
-            const tr = document.createElement('tr');
-            const availableForSale = product.availableForSale !== false;
-            const stockText = product.trackStock ? String(product.stock ?? 0) : '-';
-            tr.innerHTML = `
-                <td><img loading="lazy" src="${safeImageURL(product.imageUrl)}" alt="${escapeHTML(product.name)}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 5px;"></td>
-                <td><strong>${escapeHTML(product.sku || product.handle || id)}</strong></td>
-                <td><strong>${escapeHTML(product.name)}</strong><br><small style="color:#789;">${escapeHTML(product.handle || id)}</small></td>
-                <td>${escapeHTML(catName)}</td>
-                <td>&#3647;${escapeHTML(product.price)}</td>
-                <td>${escapeHTML(stockText)}</td>
-                <td>${availableForSale ? '<span style="color: green;">Yes</span>' : '<span style="color:#d32f2f;">No</span>'}</td>
-                <td>${product.isSignature ? '<span style="color: green;">Yes</span>' : '-'}</td>
-                <td>
-                    <button class="btn-action btn-edit" onclick="editProduct('${escapeJSString(id)}')">Edit</button>
-                    <button class="btn-action btn-delete" onclick="deleteProduct('${escapeJSString(id)}')">Delete</button>
-                </td>
-            `;
-            tbody.appendChild(tr);
+            productRows.push({ id, product });
         });
+        selectedProductIds.forEach(id => {
+            if (!productsData[id]) selectedProductIds.delete(id);
+        });
+        renderProductsTable();
     }, (error) => {
         console.error("Error listening to products:", error);
+        const tbody = document.getElementById('products-table-body');
+        if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="color:red; text-align:center;">Error: ${escapeHTML(error.message)}</td></tr>`;
     });
 }
 
