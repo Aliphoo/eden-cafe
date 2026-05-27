@@ -14,3 +14,9 @@ Static website and Firebase backend configuration for Eden Cafe.
 - Do not commit generated ZIP deploy packages.
 - Do not commit `node_modules` or Firebase local cache files.
 - Cloud Functions dependencies can be restored with `npm install --prefix functions`.
+
+## Encoding safety
+- Save source files as UTF-8.
+- Before deploy, run `node scripts/check-encoding.js`.
+- For simple text replacements, prefer `node scripts/utf8-replace.js <file> <search> <replace>`.
+- Avoid PowerShell text edits without explicit UTF-8, because Thai text can become mojibake.
