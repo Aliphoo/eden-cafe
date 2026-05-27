@@ -53,6 +53,56 @@ function compressToWebP(file, quality = 0.8) {
 
 const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
 const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net';
+const ADMIN_COLLECTION = 'admin_users';
+const ADMIN_PERMISSION_LABELS = {
+    dashboard: 'ภาพรวมระบบ',
+    members: 'จัดการสมาชิก',
+    orders: 'ออเดอร์สินค้า',
+    bookings: 'คิวจองโต๊ะ/ห้อง',
+    tables: 'จัดการโต๊ะ/โซน',
+    rooms: 'จัดการห้องรับรอง',
+    products: 'เมนูและหมวดหมู่',
+    shop: 'สินค้าออนไลน์',
+    blogs: 'บทความ',
+    faqs: 'FAQ'
+};
+const ADMIN_ROLE_LABELS = {
+    owner: 'Owner',
+    head_manager: 'Head Manager',
+    manager: 'Manager'
+};
+const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
+    owner: Object.fromEntries(Object.keys(ADMIN_PERMISSION_LABELS).map(key => [key, true])),
+    head_manager: Object.fromEntries(Object.keys(ADMIN_PERMISSION_LABELS).map(key => [key, true])),
+    manager: {
+        dashboard: true,
+        members: false,
+        orders: true,
+        bookings: true,
+        tables: false,
+        rooms: false,
+        products: false,
+        shop: false,
+        blogs: false,
+        faqs: false
+    }
+};
+const ADMIN_TAB_PERMISSIONS = {
+    dashboard: 'dashboard',
+    members: 'members',
+    'admin-access': 'adminAccess',
+    orders: 'orders',
+    bookings: 'bookings',
+    'room-bookings': 'bookings',
+    tables: 'tables',
+    rooms: 'rooms',
+    products: 'products',
+    categories: 'products',
+    'shop-products': 'shop',
+    'shop-categories': 'shop',
+    blogs: 'blogs',
+    faqs: 'faqs'
+};
 
 function normalizeEmail(value) {
     return String(value ?? '').trim().toLowerCase();
@@ -72,6 +122,84 @@ function getAuthEmails(user) {
 function isAdminUser(user) {
     return getAuthEmails(user).some(email => ADMIN_EMAILS.includes(email));
 }
+
+function adminRoleDefaults(role) {
+    return { ...(ADMIN_ROLE_DEFAULT_PERMISSIONS[role] || ADMIN_ROLE_DEFAULT_PERMISSIONS.manager) };
+}
+
+let currentAdminAccess = null;
+let adminAccessData = {};
+let adminAccessUnsubscribe = null;
+let adminAccessFormBound = false;
+
+function buildBootstrapOwnerAccess(user) {
+    return {
+        uid: user.uid,
+        email: normalizeEmail(user.email),
+        displayName: user.displayName || 'Owner',
+        role: 'owner',
+        status: 'active',
+        permissions: adminRoleDefaults('owner'),
+        source: 'bootstrap'
+    };
+}
+
+async function loadAdminAccess(user) {
+    if (!user) return null;
+    if (isAdminUser(user)) return buildBootstrapOwnerAccess(user);
+
+    const snap = await getDoc(doc(db, ADMIN_COLLECTION, user.uid));
+    if (!snap.exists()) return null;
+
+    const data = snap.data();
+    if (data.status !== 'active') return null;
+
+    const role = ADMIN_ROLE_LABELS[data.role] ? data.role : 'manager';
+    return {
+        uid: user.uid,
+        email: normalizeEmail(data.email || user.email),
+        displayName: data.displayName || user.displayName || 'Manager',
+        role,
+        status: data.status,
+        permissions: { ...adminRoleDefaults(role), ...(data.permissions || {}) },
+        source: 'firestore'
+    };
+}
+
+async function ensureBootstrapOwnerRecord(user) {
+    if (!user || !isAdminUser(user)) return;
+    try {
+        await setDoc(doc(db, ADMIN_COLLECTION, user.uid), {
+            uid: user.uid,
+            email: normalizeEmail(user.email),
+            displayName: user.displayName || user.email || 'Owner',
+            role: 'owner',
+            status: 'active',
+            permissions: adminRoleDefaults('owner'),
+            updatedAt: serverTimestamp(),
+            updatedBy: user.uid
+        }, { merge: true });
+    } catch (error) {
+        console.warn('Unable to ensure bootstrap owner admin record:', error);
+    }
+}
+
+function isOwnerAccess(access = currentAdminAccess) {
+    return !!access && access.status === 'active' && access.role === 'owner';
+}
+
+function canAdmin(permission) {
+    if (!currentAdminAccess || currentAdminAccess.status !== 'active') return false;
+    if (currentAdminAccess.role === 'owner') return true;
+    if (permission === 'adminAccess') return false;
+    if (currentAdminAccess.role === 'head_manager') return true;
+    return currentAdminAccess.permissions?.[permission] === true;
+}
+
+window.canAccessAdminTab = (tabId) => {
+    const permission = ADMIN_TAB_PERMISSIONS[tabId] || 'dashboard';
+    return permission === 'adminAccess' ? isOwnerAccess() : canAdmin(permission);
+};
 
 // Global Data (for editing)
 let productsData = {};
@@ -100,8 +228,9 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log("Auth State Changed in Admin:", user ? user.email : "No User");
         if (user) {
             const authEmails = getAuthEmails(user);
-            
-            if (!isAdminUser(user)) {
+            currentAdminAccess = await loadAdminAccess(user);
+
+            if (!currentAdminAccess) {
                 // Not an admin
                 console.warn("Unauthorized access attempt by:", authEmails);
                 const shownEmail = authEmails.length ? authEmails.join(', ') : '(no email returned from Firebase Auth)';
@@ -113,25 +242,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // User is logged in and IS an admin
+            await ensureBootstrapOwnerRecord(user);
             loginScreen.style.display = 'none';
-            adminName.innerText = user.displayName || 'Admin';
+            adminName.innerText = `${currentAdminAccess.displayName || user.displayName || 'Admin'} (${ADMIN_ROLE_LABELS[currentAdminAccess.role] || currentAdminAccess.role})`;
             adminAvatar.src = user.photoURL || 'Images/Logo.webp';
-            
-            // Initialize Dashboard Data
-            fetchStats();
-            // Initialize Real-time Listeners
-            setupRealtimeOrders();
-            setupRealtimeBookings();
-            setupRealtimeCategories();
-            setupRealtimeTables();
-            setupRealtimeRooms();
-            setupRealtimeProducts();
-            setupRealtimeShopCategories();
-            setupRealtimeShopProducts();
-            setupRealtimeMembers();
-            migrateProducts();
+            applyAdminAccessUI();
+            initializeAdminModules();
         } else {
             // User is logged out
+            currentAdminAccess = null;
             loginScreen.style.display = 'flex';
         }
     });
@@ -185,6 +304,50 @@ document.addEventListener('DOMContentLoaded', () => {
         window.location.reload();
     });
 });
+
+function initializeAdminModules() {
+    if (canAdmin('dashboard')) fetchStats();
+    if (canAdmin('orders')) setupRealtimeOrders();
+    if (canAdmin('bookings')) setupRealtimeBookings();
+    if (canAdmin('products')) {
+        setupRealtimeCategories();
+        setupRealtimeProducts();
+    }
+    if (canAdmin('tables')) setupRealtimeTables();
+    if (canAdmin('rooms')) setupRealtimeRooms();
+    if (canAdmin('shop')) {
+        setupRealtimeShopCategories();
+        setupRealtimeShopProducts();
+    }
+    if (canAdmin('members')) setupRealtimeMembers();
+    if (isOwnerAccess()) setupRealtimeAdminAccess();
+    if (canAdmin('products') || canAdmin('shop')) migrateProducts();
+}
+
+function applyAdminAccessUI() {
+    document.querySelectorAll('.sidebar-menu li').forEach(li => {
+        const match = String(li.getAttribute('onclick') || '').match(/switchTab\('([^']+)'/);
+        const tabId = match ? match[1] : '';
+        const allowed = !tabId || window.canAccessAdminTab(tabId);
+        li.style.display = allowed ? '' : 'none';
+        li.classList.toggle('access-disabled', !allowed);
+    });
+
+    document.querySelectorAll('.content-section').forEach(section => {
+        const allowed = window.canAccessAdminTab(section.id);
+        section.dataset.accessAllowed = allowed ? 'true' : 'false';
+    });
+
+    const active = document.querySelector('.content-section.active');
+    if (active && window.canAccessAdminTab(active.id)) return;
+
+    const firstAllowedMenu = Array.from(document.querySelectorAll('.sidebar-menu li'))
+        .find(li => li.style.display !== 'none');
+    if (firstAllowedMenu) {
+        const match = String(firstAllowedMenu.getAttribute('onclick') || '').match(/switchTab\('([^']+)'/);
+        if (match) window.switchTab(match[1], firstAllowedMenu);
+    }
+}
 
 // Fetch Stats for Dashboard
 async function fetchStats() {
@@ -1712,6 +1875,10 @@ shopProductForm.addEventListener('submit', async (e) => {
 
 
 window.syncMembersFromAuth = async () => {
+    if (!canAdmin('members')) {
+        alert('บัญชีนี้ไม่มีสิทธิ์ซิงก์สมาชิก');
+        return;
+    }
     const confirmed = confirm('Sync all Firebase Authentication users into Firestore members now?');
     if (!confirmed) return;
 
@@ -1733,6 +1900,223 @@ window.syncMembersFromAuth = async () => {
         alert('Member sync failed: ' + error.message);
     }
 };
+
+// ==========================================
+// Admin Access / Manager Permission Logic
+// ==========================================
+function adminRoleBadgeHTML(role) {
+    const safeRole = ADMIN_ROLE_LABELS[role] ? role : 'manager';
+    return '<span class="access-role-badge access-role-' + safeRole + '">' + escapeHTML(ADMIN_ROLE_LABELS[safeRole]) + '</span>';
+}
+
+function normalizePermissions(role, permissions = {}) {
+    if (role === 'owner' || role === 'head_manager') return adminRoleDefaults(role);
+    return { ...adminRoleDefaults('manager'), ...permissions };
+}
+
+function renderAdminPermissionInputs(selected = adminRoleDefaults('manager'), disabled = false) {
+    const container = document.getElementById('access-permissions');
+    if (!container) return;
+    container.innerHTML = Object.entries(ADMIN_PERMISSION_LABELS).map(([key, label]) => `
+        <label>
+            <input type="checkbox" data-access-permission="${escapeHTML(key)}" ${selected[key] ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
+            <span>${escapeHTML(label)}</span>
+        </label>
+    `).join('');
+}
+
+function getSelectedAdminPermissions() {
+    const permissions = {};
+    document.querySelectorAll('[data-access-permission]').forEach(input => {
+        permissions[input.dataset.accessPermission] = input.checked === true;
+    });
+    return permissions;
+}
+
+function setAdminAccessStats(rows) {
+    const counts = { owner: 0, head_manager: 0, manager: 0 };
+    rows.forEach(row => { counts[row.role] = (counts[row.role] || 0) + 1; });
+    const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = String(value); };
+    set('access-stat-total', rows.length);
+    set('access-stat-owner', counts.owner || 0);
+    set('access-stat-head', counts.head_manager || 0);
+    set('access-stat-manager', counts.manager || 0);
+}
+
+function renderAdminAccessTable() {
+    const tbody = document.getElementById('admin-access-table-body');
+    if (!tbody) return;
+
+    const rows = Object.entries(adminAccessData)
+        .map(([uid, access]) => ({ uid, ...access }))
+        .sort((a, b) => (a.role === 'owner' ? -1 : b.role === 'owner' ? 1 : String(a.email).localeCompare(String(b.email))));
+    setAdminAccessStats(rows);
+
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="6"><div class="member-empty-state">ยังไม่มีผู้จัดการในระบบ กรอก UID จาก Firebase Auth หรือเลือกจากสมาชิกเพื่อเริ่มต้น</div></td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = rows.map(row => {
+        const permissionText = row.role === 'owner' || row.role === 'head_manager'
+            ? 'ทุกสิทธิ์'
+            : Object.entries(ADMIN_PERMISSION_LABELS)
+                .filter(([key]) => row.permissions?.[key])
+                .map(([, label]) => label)
+                .join(', ') || '-';
+        const canDelete = row.uid !== currentAdminAccess?.uid;
+        return `
+            <tr>
+                <td><strong>${escapeHTML(row.displayName || 'Manager')}</strong><br><small>${escapeHTML(row.email || '-')}<br>UID: ${escapeHTML(row.uid)}</small></td>
+                <td>${adminRoleBadgeHTML(row.role)}</td>
+                <td style="max-width:260px;">${escapeHTML(permissionText)}</td>
+                <td><span class="access-status-${row.status === 'active' ? 'active' : 'paused'}">${escapeHTML(row.status || 'active')}</span></td>
+                <td>${formatDate(row.updatedAt || row.createdAt)}</td>
+                <td>
+                    <button class="btn-action btn-edit" onclick="editAdminAccess('${escapeJSString(row.uid)}')">แก้ไข</button>
+                    ${canDelete ? `<button class="btn-action btn-delete" onclick="deleteAdminAccess('${escapeJSString(row.uid)}')">ลบ</button>` : ''}
+                </td>
+            </tr>`;
+    }).join('');
+}
+
+function renderAdminUserOptions() {
+    const select = document.getElementById('access-user-select');
+    if (!select) return;
+    const currentValue = select.value;
+    const rows = Object.entries(membersData)
+        .map(([uid, member]) => ({ uid, member }))
+        .sort((a, b) => memberDisplayName(a.member).localeCompare(memberDisplayName(b.member), 'th'));
+    select.innerHTML = '<option value="">-- เลือกสมาชิก หรือกรอก UID เอง --</option>' + rows.map(({ uid, member }) =>
+        `<option value="${escapeHTML(uid)}">${escapeHTML(memberDisplayName(member))} - ${escapeHTML(member.email || uid)}</option>`
+    ).join('');
+    if (currentValue && rows.some(row => row.uid === currentValue)) select.value = currentValue;
+}
+
+function bindAdminAccessForm() {
+    if (adminAccessFormBound) return;
+    adminAccessFormBound = true;
+    renderAdminPermissionInputs();
+
+    const roleEl = document.getElementById('access-role');
+    if (roleEl) {
+        roleEl.addEventListener('change', () => {
+            const role = roleEl.value;
+            renderAdminPermissionInputs(adminRoleDefaults(role), role === 'owner' || role === 'head_manager');
+        });
+    }
+
+    const select = document.getElementById('access-user-select');
+    if (select) {
+        select.addEventListener('change', () => {
+            const uid = select.value;
+            if (!uid || !membersData[uid]) return;
+            const member = membersData[uid];
+            document.getElementById('access-uid').value = uid;
+            document.getElementById('access-email').value = member.email || '';
+            document.getElementById('access-display-name').value = memberDisplayName(member);
+        });
+    }
+
+    const form = document.getElementById('admin-access-form');
+    if (form) {
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            await saveAdminAccessFromForm();
+        });
+    }
+}
+
+async function saveAdminAccessFromForm() {
+    if (!isOwnerAccess()) {
+        alert('เฉพาะ Owner เท่านั้นที่จัดการผู้จัดการได้');
+        return;
+    }
+
+    const uid = document.getElementById('access-uid')?.value.trim();
+    const email = normalizeEmail(document.getElementById('access-email')?.value);
+    const displayName = document.getElementById('access-display-name')?.value.trim() || 'Manager';
+    const role = document.getElementById('access-role')?.value || 'manager';
+    const status = document.getElementById('access-status')?.value || 'active';
+    if (!uid || !email) {
+        alert('กรุณากรอก Firebase UID และอีเมล');
+        return;
+    }
+
+    const permissions = normalizePermissions(role, getSelectedAdminPermissions());
+    const existing = adminAccessData[uid];
+    const payload = {
+        uid,
+        email,
+        displayName,
+        role,
+        status,
+        permissions,
+        updatedAt: serverTimestamp(),
+        updatedBy: auth.currentUser?.uid || ''
+    };
+    if (!existing) {
+        payload.createdAt = serverTimestamp();
+        payload.createdBy = auth.currentUser?.uid || '';
+    }
+
+    await setDoc(doc(db, ADMIN_COLLECTION, uid), payload, { merge: true });
+    alert('บันทึกสิทธิ์ผู้จัดการเรียบร้อย');
+    resetAdminAccessForm();
+}
+
+window.editAdminAccess = (uid) => {
+    const data = adminAccessData[uid];
+    if (!data) return;
+    document.getElementById('access-user-select').value = uid;
+    document.getElementById('access-uid').value = uid;
+    document.getElementById('access-email').value = data.email || '';
+    document.getElementById('access-display-name').value = data.displayName || '';
+    document.getElementById('access-role').value = data.role || 'manager';
+    document.getElementById('access-status').value = data.status || 'active';
+    renderAdminPermissionInputs(normalizePermissions(data.role, data.permissions), data.role === 'owner' || data.role === 'head_manager');
+};
+
+window.deleteAdminAccess = async (uid) => {
+    if (!isOwnerAccess()) {
+        alert('เฉพาะ Owner เท่านั้นที่ลบสิทธิ์ผู้จัดการได้');
+        return;
+    }
+    if (uid === currentAdminAccess?.uid) {
+        alert('ไม่สามารถลบสิทธิ์ของตัวเองจากหน้านี้ได้ เพื่อป้องกันการล็อกตัวเองออก');
+        return;
+    }
+    if (!confirm('ลบสิทธิ์ผู้จัดการคนนี้ออกจากหลังบ้าน?')) return;
+    await deleteDoc(doc(db, ADMIN_COLLECTION, uid));
+};
+
+window.resetAdminAccessForm = () => {
+    const form = document.getElementById('admin-access-form');
+    if (form) form.reset();
+    renderAdminPermissionInputs(adminRoleDefaults('manager'));
+};
+
+window.refreshAdminAccess = () => {
+    renderAdminAccessTable();
+    renderAdminUserOptions();
+};
+
+function setupRealtimeAdminAccess() {
+    bindAdminAccessForm();
+    renderAdminUserOptions();
+    if (adminAccessUnsubscribe) adminAccessUnsubscribe();
+    adminAccessUnsubscribe = onSnapshot(collection(db, ADMIN_COLLECTION), (snapshot) => {
+        adminAccessData = {};
+        snapshot.forEach(docSnap => {
+            adminAccessData[docSnap.id] = { uid: docSnap.id, ...docSnap.data() };
+        });
+        renderAdminAccessTable();
+    }, (error) => {
+        console.error('Error listening to admin access:', error);
+        const tbody = document.getElementById('admin-access-table-body');
+        if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#c62828;">โหลดสิทธิ์ผู้จัดการไม่สำเร็จ: ${escapeHTML(error.message)}</td></tr>`;
+    });
+}
 
 // ==========================================
 // Member Management Logic
@@ -1902,6 +2286,7 @@ function setupRealtimeMembers() {
             membersData[docSnap.id] = { uid: docSnap.id, ...docSnap.data() };
         });
         renderMembersTable();
+        renderAdminUserOptions();
     }, (error) => {
         console.error('Error listening to members:', error);
         const tbody = document.getElementById('members-table-body');

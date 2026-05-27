@@ -1,8 +1,9 @@
 import { auth, provider, db } from './firebase-config.js';
 import { signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { collection, addDoc, doc, setDoc, serverTimestamp, getDocs, query, where, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, addDoc, doc, setDoc, getDoc, serverTimestamp, getDocs, query, where, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net';
+const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
 
 function escapeHTML(value) {
     return String(value ?? '')
@@ -42,6 +43,22 @@ async function syncAuthUserProfile(user) {
         }, { merge: true });
     } catch (error) {
         console.warn('Unable to sync member profile:', error);
+    }
+}
+
+async function getUserAdminAccess(user) {
+    if (!user || !db) return null;
+    const email = String(user.email || '').toLowerCase();
+    if (ADMIN_EMAILS.includes(email)) return { role: 'owner', status: 'active' };
+
+    try {
+        const snap = await getDoc(doc(db, 'admin_users', user.uid));
+        if (!snap.exists()) return null;
+        const access = snap.data();
+        return access.status === 'active' ? access : null;
+    } catch (error) {
+        console.warn('Unable to read admin access:', error);
+        return null;
     }
 }
 
@@ -219,8 +236,7 @@ function checkLoginStatus() {
         const profileUrl = isEn ? '/profile-en' : '/profile';
         const profileText = isEn ? 'Profile' : 'ข้อมูลส่วนตัว / Profile';
         const logoutText = isEn ? 'Logout' : 'ออกจากระบบ / Logout';
-        const adminEmails = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
-        const isAdmin = adminEmails.includes(String(user.email || '').toLowerCase());
+        const isAdmin = user.isAdmin === true;
         const adminLabel = isEn ? 'Admin Dashboard' : 'จัดการหลังบ้าน (Admin)';
         const adminLink = isAdmin ? `<a href="/admin" target="_blank" style="color:var(--accent-color); font-weight:500;">${adminLabel}</a>` : '';
 
@@ -356,11 +372,22 @@ document.addEventListener('DOMContentLoaded', () => {
         onAuthStateChanged(auth, user => {
             if (user) {
                 syncAuthUserProfile(user);
+                getUserAdminAccess(user).then(access => {
+                    const storedUser = getStoredUser() || {};
+                    localStorage.setItem('eden_user', JSON.stringify({
+                        ...storedUser,
+                        isAdmin: !!access,
+                        adminRole: access?.role || ''
+                    }));
+                    checkLoginStatus();
+                });
                 localStorage.setItem('eden_user', JSON.stringify({
                     uid: user.uid,
                     name: user.displayName || 'Eden Member',
                     email: user.email,
-                    avatar: user.photoURL || 'https://ui-avatars.com/api/?name=Eden+Member&background=4caf50&color=fff'
+                    avatar: user.photoURL || 'https://ui-avatars.com/api/?name=Eden+Member&background=4caf50&color=fff',
+                    isAdmin: ADMIN_EMAILS.includes(String(user.email || '').toLowerCase()),
+                    adminRole: ADMIN_EMAILS.includes(String(user.email || '').toLowerCase()) ? 'owner' : ''
                 }));
             } else {
                 localStorage.removeItem('eden_user');

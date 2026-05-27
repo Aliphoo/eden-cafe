@@ -178,6 +178,22 @@
         .member-empty-state { padding: 24px; text-align: center; color: #7b887f; background: #fbfffb; border: 1px dashed #d8e7db; border-radius: 14px; }
         @media (max-width: 920px) { .member-toolbar { grid-template-columns: 1fr; } .member-detail-grid, .member-mini-grid { grid-template-columns: 1fr; } }
 
+        /* Admin Access Management */
+        .access-help { background: #f6fbf7; border: 1px solid #dcefe0; border-radius: 14px; padding: 14px 16px; color: #40544a; line-height: 1.6; margin-bottom: 16px; }
+        .access-layout { display: grid; grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.4fr); gap: 20px; align-items: start; }
+        .access-form-card { background: #fbfff8; border: 1px solid #e0eadc; border-radius: 16px; padding: 18px; }
+        .access-permission-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+        .access-permission-grid label { display: flex; align-items: center; gap: 8px; border: 1px solid #e1ebe4; border-radius: 12px; padding: 9px 10px; background: #fff; font-size: 0.9rem; }
+        .access-role-badge { display: inline-flex; align-items: center; padding: 5px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; }
+        .access-role-owner { background: #123f2b; color: white; }
+        .access-role-head_manager { background: #fff3cd; color: #7a5700; }
+        .access-role-manager { background: #e8f5e9; color: #2e7d32; }
+        .access-status-active { color: #2e7d32; font-weight: 700; }
+        .access-status-paused { color: #c62828; font-weight: 700; }
+        .access-disabled { opacity: 0.55; pointer-events: none; }
+        @media (max-width: 1100px) { .access-layout { grid-template-columns: 1fr; } }
+        @media (max-width: 700px) { .access-permission-grid { grid-template-columns: 1fr; } }
+
         /* Modal Styles */
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); backdrop-filter: blur(5px); }
         .modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border-radius: 10px; width: 80%; max-width: 500px; }
@@ -237,6 +253,7 @@
         <ul class="sidebar-menu">
             <li class="active" onclick="switchTab('dashboard', this)">📊 ภาพรวม (Dashboard)</li>
             <li onclick="switchTab('members', this)">👥 จัดการสมาชิก (Members)</li>
+            <li data-owner-only="true" onclick="switchTab('admin-access', this)">🛡️ จัดการผู้จัดการ (Admin Access)</li>
             <li onclick="switchTab('orders', this)">🛍️ ออเดอร์สินค้า (Orders)</li>
             <li onclick="switchTab('bookings', this)">📅 คิวจองโต๊ะ (Table Bookings)</li>
             <li onclick="switchTab('room-bookings', this)">📅 คิวจองห้องรับรอง (Room Bookings)</li>
@@ -357,6 +374,98 @@
                             <tr><td colspan="9" style="text-align:center;">กำลังโหลดข้อมูลสมาชิก...</td></tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Access Section -->
+        <div id="admin-access" class="content-section" data-owner-only="true">
+            <div class="section-container">
+                <div class="section-header">
+                    <div>
+                        <h2>จัดการผู้จัดการและสิทธิ์หลังบ้าน</h2>
+                        <p style="color:#667; margin-top:4px;">กำหนดว่าใครเข้า Admin ได้ และให้แต่ละคนจัดการส่วนไหนของเว็บไซต์ได้บ้าง</p>
+                    </div>
+                    <button class="btn-action btn-view" onclick="refreshAdminAccess()">รีเฟรชข้อมูล</button>
+                </div>
+
+                <div class="access-help">
+                    <strong>โครงสร้างสิทธิ์:</strong>
+                    เจ้าของระบบ (Owner) ทำได้ทุกอย่างและจัดการผู้จัดการได้,
+                    หัวหน้าผู้จัดการ (Head Manager) ดูแลเมนู/ออเดอร์/จอง/สมาชิกได้ตามนโยบายร้าน,
+                    ผู้จัดการ (Manager) ใช้งานเฉพาะสิทธิ์ที่เจ้าของเปิดให้
+                </div>
+
+                <div class="member-summary-grid">
+                    <div class="member-summary-card"><small>ผู้มีสิทธิ์ทั้งหมด</small><strong id="access-stat-total">0</strong></div>
+                    <div class="member-summary-card"><small>Owner</small><strong id="access-stat-owner">0</strong></div>
+                    <div class="member-summary-card"><small>Head Manager</small><strong id="access-stat-head">0</strong></div>
+                    <div class="member-summary-card"><small>Manager</small><strong id="access-stat-manager">0</strong></div>
+                </div>
+
+                <div class="access-layout">
+                    <div class="access-form-card">
+                        <h3 style="margin-bottom:12px;">เพิ่ม / แก้ไขสิทธิ์ผู้จัดการ</h3>
+                        <form id="admin-access-form">
+                            <div class="form-group">
+                                <label>เลือกจากสมาชิกที่มีในระบบ</label>
+                                <select id="access-user-select">
+                                    <option value="">-- เลือกสมาชิก หรือกรอก UID เอง --</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="access-uid">Firebase UID</label>
+                                <input type="text" id="access-uid" placeholder="เช่น Zb4hnONKpBcEdPuJ36ad..." required>
+                            </div>
+                            <div class="form-group">
+                                <label for="access-email">อีเมล</label>
+                                <input type="email" id="access-email" placeholder="manager@example.com" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="access-display-name">ชื่อที่แสดง</label>
+                                <input type="text" id="access-display-name" placeholder="ชื่อผู้จัดการ">
+                            </div>
+                            <div class="form-group">
+                                <label for="access-role">ระดับสิทธิ์</label>
+                                <select id="access-role">
+                                    <option value="manager">Manager - ผู้จัดการ</option>
+                                    <option value="head_manager">Head Manager - หัวหน้าผู้จัดการ</option>
+                                    <option value="owner">Owner - เจ้าของระบบ</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="access-status">สถานะ</label>
+                                <select id="access-status">
+                                    <option value="active">Active - เปิดใช้งาน</option>
+                                    <option value="paused">Paused - ระงับชั่วคราว</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>สิทธิ์การใช้งาน</label>
+                                <div id="access-permissions" class="access-permission-grid"></div>
+                            </div>
+                            <button type="submit" class="btn-submit">บันทึกสิทธิ์</button>
+                            <button type="button" class="btn-action" style="width:100%; margin-top:10px; background:#789;" onclick="resetAdminAccessForm()">ล้างฟอร์ม</button>
+                        </form>
+                    </div>
+
+                    <div style="overflow-x:auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ผู้จัดการ</th>
+                                    <th>ระดับ</th>
+                                    <th>สิทธิ์</th>
+                                    <th>สถานะ</th>
+                                    <th>อัปเดตล่าสุด</th>
+                                    <th>จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-access-table-body">
+                                <tr><td colspan="6" style="text-align:center;">กำลังโหลดข้อมูลสิทธิ์...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -991,16 +1100,22 @@
     <script type="module" src="js/admin.js?v=18"></script>
     <script>
         function switchTab(tabId, el) {
+            if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {
+                alert('บัญชีนี้ไม่มีสิทธิ์เข้าถึงส่วนนี้');
+                return;
+            }
+
             // Update Menu Active
             document.querySelectorAll('.sidebar-menu li').forEach(li => li.classList.remove('active'));
-            el.classList.add('active');
+            if (el) el.classList.add('active');
             
             // Update Content
             document.querySelectorAll('.content-section').forEach(sec => sec.classList.remove('active'));
-            document.getElementById(tabId).classList.add('active');
+            const target = document.getElementById(tabId);
+            if (target) target.classList.add('active');
 
             // Update Title
-            document.getElementById('page-title').innerText = el.innerText.split(' ').slice(1).join(' ');
+            if (el) document.getElementById('page-title').innerText = el.innerText.split(' ').slice(1).join(' ');
         }
     </script>
 </body>

@@ -7,7 +7,42 @@ service cloud.firestore {
     function isAdmin() {
       return isSignedIn()
         && request.auth.token.email is string
-        && request.auth.token.email.matches('(?i)^(admin@edencafe\\.com|phoo1236@gmail\\.com|sonsawan\\.1231@gmail\\.com)$');
+        && (
+          request.auth.token.email.matches('(?i)^(admin@edencafe\\.com|phoo1236@gmail\\.com|sonsawan\\.1231@gmail\\.com)$')
+          || (
+            exists(/databases/$(database)/documents/admin_users/$(request.auth.uid))
+            && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.status == 'active'
+            && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role in ['owner', 'head_manager', 'manager']
+          )
+        );
+    }
+    function isOwner() {
+      return isSignedIn()
+        && request.auth.token.email is string
+        && (
+          request.auth.token.email.matches('(?i)^(admin@edencafe\\.com|phoo1236@gmail\\.com|sonsawan\\.1231@gmail\\.com)$')
+          || (
+            exists(/databases/$(database)/documents/admin_users/$(request.auth.uid))
+            && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.status == 'active'
+            && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'owner'
+          )
+        );
+    }
+    function isHeadManager() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/admin_users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.status == 'active'
+        && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'head_manager';
+    }
+    function hasAdminPermission(permission) {
+      return isOwner()
+        || isHeadManager()
+        || (
+          isSignedIn()
+          && exists(/databases/$(database)/documents/admin_users/$(request.auth.uid))
+          && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.status == 'active'
+          && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.permissions[permission] == true
+        );
     }
     function isShortString(value, maxLength) {
       return value is string && value.size() > 0 && value.size() <= maxLength;
@@ -25,43 +60,64 @@ service cloud.firestore {
     // Publicly readable collections (content)
     match /shop_products/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasAdminPermission('shop');
     }
     match /shop_categories/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasAdminPermission('shop');
     }
     match /tables/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasAdminPermission('tables');
     }
     match /rooms/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasAdminPermission('rooms');
     }
     match /blogs/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasAdminPermission('blogs');
     }
     match /faqs/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasAdminPermission('faqs');
     }
     match /categories/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasAdminPermission('products');
     }
     match /products/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasAdminPermission('products');
     }
     match /google_reviews/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isOwner();
+    }
+    match /admin_users/{userId} {
+      allow read: if isOwner()
+        || (
+          isSignedIn()
+          && request.auth.uid == userId
+          && resource.data.status == 'active'
+        );
+      allow create, update: if isOwner()
+        && request.resource.data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'role', 'status', 'permissions',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ])
+        && request.resource.data.uid == userId
+        && request.resource.data.email is string
+        && request.resource.data.email.size() > 0
+        && request.resource.data.email.size() <= 180
+        && request.resource.data.role in ['owner', 'head_manager', 'manager']
+        && request.resource.data.status in ['active', 'paused']
+        && request.resource.data.permissions is map;
+      allow delete: if isOwner() && request.auth.uid != userId;
     }
     match /users/{userId} {
-      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
-      allow write: if isAdmin();
+      allow read: if hasAdminPermission('members') || (isSignedIn() && request.auth.uid == userId);
+      allow write: if hasAdminPermission('members');
       allow create: if isSignedIn()
         && request.auth.uid == userId
         && request.resource.data.keys().hasOnly([
@@ -126,8 +182,8 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['total']) || (request.resource.data.total is number && request.resource.data.total >= 0 && request.resource.data.total <= 1000000))
         && (!request.resource.data.keys().hasAny(['totalAmount']) || (request.resource.data.totalAmount is number && request.resource.data.totalAmount >= 0 && request.resource.data.totalAmount <= 1000000))
         && request.resource.data.timestamp == request.time;
-      allow read: if isAdmin() || ownsResource();
-      allow update, delete: if isAdmin();
+      allow read: if hasAdminPermission('orders') || ownsResource();
+      allow update, delete: if hasAdminPermission('orders');
     }
     match /bookings/{docId} {
       allow create: if request.resource.data.keys().hasOnly([
@@ -153,12 +209,12 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['addons']) || (request.resource.data.addons is list && request.resource.data.addons.size() <= 20))
         && optionalUserMatchesAuth()
         && request.resource.data.timestamp == request.time;
-      allow read: if isAdmin() || ownsResource();
-      allow update, delete: if isAdmin();
+      allow read: if hasAdminPermission('bookings') || ownsResource();
+      allow update, delete: if hasAdminPermission('bookings');
     }
     match /table_availability/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if hasAdminPermission('tables');
     }
     match /stats/pageViews {
       allow read: if true;
