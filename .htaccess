@@ -1,4 +1,7 @@
+Options -MultiViews
+DirectoryIndex index.html
 RewriteEngine On
+RewriteBase /
 
 # Security headers. CSP is intentionally compatible with the current inline
 # admin handlers; we can tighten it after moving inline scripts/events out.
@@ -18,7 +21,12 @@ RewriteRule ^index\.html$ / [R=301,L]
 RewriteCond %{THE_REQUEST} \s/+(.+?)\.html[\s?] [NC]
 RewriteRule ^(.+)\.html$ /$1 [R=301,L,NE]
 
+# Let real files/assets pass through untouched before trying clean URL routing.
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
 # Serve extensionless URLs from their .html files, e.g. /shop -> /shop.html
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteCond %{REQUEST_FILENAME}.html -f
+RewriteCond %{DOCUMENT_ROOT}/$1.html -f
 RewriteRule ^(.+?)/?$ $1.html [L]
