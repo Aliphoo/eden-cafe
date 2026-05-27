@@ -1,7 +1,7 @@
 import { auth, provider, db } from './firebase-config.js';
 import { getMemberTier, getTierBenefits } from './membership.js';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const ADMIN_IMAGE_MAX_FILE_SIZE = 8 * 1024 * 1024;
 const ADMIN_IMAGE_MAX_EDGE = 1800;
@@ -900,6 +900,7 @@ function initializeAdminModules() {
     if (canAdmin('products')) {
         setupRealtimeCategories();
         setupRealtimeProducts();
+        initLoyverseImportTool();
     }
     if (canAdmin('tables')) setupRealtimeTables();
     if (canAdmin('rooms')) setupRealtimeRooms();
@@ -912,6 +913,140 @@ function initializeAdminModules() {
     initXLSXTools();
     // Keep production data stable: run seed/migration manually from console only.
     // window.migrateProducts() remains available for first-time setup.
+}
+
+function hasLoyverseImportMode() {
+    return new URLSearchParams(window.location.search).has('menu-import');
+}
+
+function stripUndefinedDeep(value) {
+    if (Array.isArray(value)) return value.map(stripUndefinedDeep);
+    if (value && typeof value === 'object') {
+        return Object.entries(value).reduce((acc, [key, item]) => {
+            if (item !== undefined) acc[key] = stripUndefinedDeep(item);
+            return acc;
+        }, {});
+    }
+    return value;
+}
+
+async function commitFirestoreOperations(operations, onProgress) {
+    let batch = writeBatch(db);
+    let count = 0;
+    let committed = 0;
+
+    for (const operation of operations) {
+        if (operation.type === 'delete') batch.delete(operation.ref);
+        if (operation.type === 'set') batch.set(operation.ref, stripUndefinedDeep(operation.data), { merge: false });
+        count += 1;
+
+        if (count >= 450) {
+            await batch.commit();
+            committed += count;
+            if (onProgress) onProgress(committed);
+            batch = writeBatch(db);
+            count = 0;
+        }
+    }
+
+    if (count > 0) {
+        await batch.commit();
+        committed += count;
+        if (onProgress) onProgress(committed);
+    }
+}
+
+async function replaceMenuWithLoyversePayload(payload, statusEl) {
+    const categories = Array.isArray(payload?.categories) ? payload.categories : [];
+    const products = Array.isArray(payload?.products) ? payload.products : [];
+    if (!categories.length || !products.length) {
+        throw new Error('Import JSON must contain categories[] and products[].');
+    }
+
+    statusEl.textContent = 'Reading current menu...';
+    const [oldProductSnap, oldCategorySnap] = await Promise.all([
+        getDocs(collection(db, 'products')),
+        getDocs(collection(db, 'categories'))
+    ]);
+
+    const operations = [];
+    oldProductSnap.forEach(snapshot => operations.push({ type: 'delete', ref: doc(db, 'products', snapshot.id) }));
+    oldCategorySnap.forEach(snapshot => operations.push({ type: 'delete', ref: doc(db, 'categories', snapshot.id) }));
+
+    categories.forEach((category, index) => {
+        const id = String(category.id || category.handle || `category-${index + 1}`).trim();
+        if (!id || id.includes('/')) throw new Error(`Invalid category id at row ${index + 1}.`);
+        operations.push({
+            type: 'set',
+            ref: doc(db, 'categories', id),
+            data: { ...category, id, updatedAt: serverTimestamp() }
+        });
+    });
+
+    products.forEach((product, index) => {
+        const id = String(product.id || product.handle || `product-${index + 1}`).trim();
+        if (!id || id.includes('/')) throw new Error(`Invalid product id at row ${index + 1}.`);
+        operations.push({
+            type: 'set',
+            ref: doc(db, 'products', id),
+            data: { ...product, id, handle: product.handle || id, updatedAt: serverTimestamp() }
+        });
+    });
+
+    statusEl.textContent = `Importing ${products.length} products and ${categories.length} categories...`;
+    await commitFirestoreOperations(operations, (done) => {
+        statusEl.textContent = `Imported ${done}/${operations.length} operations...`;
+    });
+
+    statusEl.textContent = `Done. Replaced ${oldProductSnap.size} old products with ${products.length} Loyverse products.`;
+}
+
+function initLoyverseImportTool() {
+    if (!hasLoyverseImportMode() || document.getElementById('loyverse-import-tool')) return;
+    const dashboard = document.getElementById('dashboard');
+    if (!dashboard) return;
+
+    const panel = document.createElement('div');
+    panel.id = 'loyverse-import-tool';
+    panel.className = 'section-container';
+    panel.style.maxWidth = '980px';
+    panel.style.border = '2px solid #2f8f46';
+    panel.innerHTML = `
+        <div class="section-header">
+            <h2>Loyverse Menu Import</h2>
+        </div>
+        <p style="margin-bottom:12px;color:#475569;">Paste the prepared Loyverse JSON below. This replaces all current menu products and menu categories.</p>
+        <textarea id="loyverse-import-json" placeholder="Paste loyverse-products-import-ready JSON here" style="width:100%;min-height:220px;border:1px solid #cbd5e1;border-radius:10px;padding:12px;font-family:Consolas,monospace;font-size:13px;"></textarea>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:12px;">
+            <button id="btn-loyverse-import" class="btn" type="button">Replace Menu From Loyverse JSON</button>
+            <span id="loyverse-import-status" style="color:#475569;font-weight:600;">Ready</span>
+        </div>
+    `;
+    dashboard.insertBefore(panel, dashboard.firstChild);
+
+    const textarea = panel.querySelector('#loyverse-import-json');
+    const button = panel.querySelector('#btn-loyverse-import');
+    const status = panel.querySelector('#loyverse-import-status');
+
+    button.addEventListener('click', async () => {
+        status.textContent = 'Parsing JSON...';
+        try {
+            const payload = JSON.parse(textarea.value || '{}');
+            const products = Array.isArray(payload.products) ? payload.products : [];
+            const categories = Array.isArray(payload.categories) ? payload.categories : [];
+            if (!confirm(`Replace current menu with ${products.length} products and ${categories.length} categories from Loyverse?`)) {
+                status.textContent = 'Cancelled.';
+                return;
+            }
+            button.disabled = true;
+            await replaceMenuWithLoyversePayload(payload, status);
+        } catch (error) {
+            console.error('Loyverse import failed:', error);
+            status.textContent = 'Import failed: ' + error.message;
+        } finally {
+            button.disabled = false;
+        }
+    });
 }
 
 function applyAdminAccessUI() {
