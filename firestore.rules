@@ -51,6 +51,48 @@ service cloud.firestore {
       return !request.resource.data.keys().hasAny(['uid'])
         || (isSignedIn() && request.resource.data.uid == request.auth.uid);
     }
+    function isValidAdminOrderCreate() {
+      return request.resource.data.keys().hasOnly([
+          'id', 'date', 'items', 'total', 'totalAmount', 'uid', 'timestamp',
+          'customerName', 'phone', 'address', 'status',
+          'source', 'orderType', 'receiptNo', 'paymentStatus', 'paymentMethod',
+          'subtotal', 'discount', 'taxIncluded', 'paidAmount', 'changeAmount',
+          'note', 'cashierUid', 'cashierName', 'cashierEmail',
+          'isTestOrder', 'softLaunch', 'stockMode', 'createdAt'
+        ])
+        && request.resource.data.keys().hasAll(['id', 'date', 'items', 'totalAmount', 'uid', 'timestamp', 'status'])
+        && request.resource.data.uid == request.auth.uid
+        && isShortString(request.resource.data.id, 60)
+        && isShortString(request.resource.data.date, 60)
+        && request.resource.data.items is list
+        && request.resource.data.items.size() > 0
+        && request.resource.data.items.size() <= 100
+        && request.resource.data.totalAmount is number
+        && request.resource.data.totalAmount >= 0
+        && request.resource.data.totalAmount <= 1000000
+        && request.resource.data.status in ['pending', 'processing', 'completed', 'cancelled']
+        && (!request.resource.data.keys().hasAny(['source']) || request.resource.data.source in ['pos', 'online'])
+        && (!request.resource.data.keys().hasAny(['orderType']) || request.resource.data.orderType in ['pos', 'online', 'shop'])
+        && (!request.resource.data.keys().hasAny(['paymentStatus']) || request.resource.data.paymentStatus in ['pending', 'paid', 'failed', 'refunded'])
+        && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'qr', 'card', 'other'])
+        && (!request.resource.data.keys().hasAny(['receiptNo']) || isShortString(request.resource.data.receiptNo, 60))
+        && (!request.resource.data.keys().hasAny(['customerName']) || (request.resource.data.customerName is string && request.resource.data.customerName.size() <= 120))
+        && (!request.resource.data.keys().hasAny(['phone']) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['address']) || (request.resource.data.address is string && request.resource.data.address.size() <= 250))
+        && (!request.resource.data.keys().hasAny(['note']) || (request.resource.data.note is string && request.resource.data.note.size() <= 500))
+        && (!request.resource.data.keys().hasAny(['subtotal']) || (request.resource.data.subtotal is number && request.resource.data.subtotal >= 0 && request.resource.data.subtotal <= 1000000))
+        && (!request.resource.data.keys().hasAny(['discount']) || (request.resource.data.discount is number && request.resource.data.discount >= 0 && request.resource.data.discount <= 1000000))
+        && (!request.resource.data.keys().hasAny(['taxIncluded']) || (request.resource.data.taxIncluded is number && request.resource.data.taxIncluded >= 0 && request.resource.data.taxIncluded <= 1000000))
+        && (!request.resource.data.keys().hasAny(['paidAmount']) || (request.resource.data.paidAmount is number && request.resource.data.paidAmount >= 0 && request.resource.data.paidAmount <= 1000000))
+        && (!request.resource.data.keys().hasAny(['changeAmount']) || (request.resource.data.changeAmount is number && request.resource.data.changeAmount >= 0 && request.resource.data.changeAmount <= 1000000))
+        && (!request.resource.data.keys().hasAny(['cashierUid']) || request.resource.data.cashierUid == request.auth.uid)
+        && (!request.resource.data.keys().hasAny(['cashierName']) || (request.resource.data.cashierName is string && request.resource.data.cashierName.size() <= 120))
+        && (!request.resource.data.keys().hasAny(['cashierEmail']) || (request.resource.data.cashierEmail is string && request.resource.data.cashierEmail.size() <= 180))
+        && (!request.resource.data.keys().hasAny(['isTestOrder']) || request.resource.data.isTestOrder is bool)
+        && (!request.resource.data.keys().hasAny(['softLaunch']) || request.resource.data.softLaunch is bool)
+        && request.resource.data.timestamp == request.time
+        && (!request.resource.data.keys().hasAny(['createdAt']) || request.resource.data.createdAt == request.time);
+    }
     function ownsResource() {
       return isSignedIn()
         && resource.data.keys().hasAny(['uid'])
@@ -172,7 +214,8 @@ service cloud.firestore {
     
     // User data (orders, bookings)
     match /orders/{docId} {
-      allow create: if isSignedIn()
+      allow create: if ((hasAdminPermission('orders') || hasAdminPermission('pos')) && isValidAdminOrderCreate())
+        || (isSignedIn()
         && request.resource.data.keys().hasOnly([
           'id', 'date', 'items', 'total', 'totalAmount', 'uid', 'timestamp',
           'customerName', 'phone', 'address', 'status'
@@ -185,8 +228,8 @@ service cloud.firestore {
         && request.resource.data.items.size() <= 50
         && (!request.resource.data.keys().hasAny(['total']) || (request.resource.data.total is number && request.resource.data.total >= 0 && request.resource.data.total <= 1000000))
         && (!request.resource.data.keys().hasAny(['totalAmount']) || (request.resource.data.totalAmount is number && request.resource.data.totalAmount >= 0 && request.resource.data.totalAmount <= 1000000))
-        && request.resource.data.timestamp == request.time;
-      allow read: if hasAdminPermission('orders') || ownsResource();
+        && request.resource.data.timestamp == request.time);
+      allow read: if hasAdminPermission('orders') || hasAdminPermission('pos') || ownsResource();
       allow update, delete: if hasAdminPermission('orders');
     }
     match /bookings/{docId} {

@@ -107,6 +107,7 @@ const ADMIN_COLLECTION = 'admin_users';
 const ADMIN_PERMISSION_LABELS = {
     dashboard: 'ภาพรวมระบบ',
     members: 'จัดการสมาชิก',
+    pos: 'POS หน้าร้าน',
     orders: 'ออเดอร์สินค้า',
     bookings: 'คิวจองโต๊ะ/ห้อง',
     tables: 'จัดการโต๊ะ/โซน',
@@ -128,6 +129,7 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
     manager: {
         dashboard: true,
         members: false,
+        pos: true,
         orders: true,
         bookings: true,
         tables: false,
@@ -141,6 +143,7 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
 };
 const ADMIN_TAB_PERMISSIONS = {
     dashboard: 'dashboard',
+    pos: 'pos',
     members: 'members',
     'admin-access': 'adminAccess',
     orders: 'orders',
@@ -270,6 +273,11 @@ window.canAccessAdminTab = (tabId) => {
 // Global Data (for editing)
 let productsData = {};
 let productRows = [];
+let posSelectedCategory = 'all';
+let posSearchTerm = '';
+let posCart = [];
+let posLastReceipt = null;
+let posControlsBound = false;
 let productCurrentPage = 1;
 let productPageSize = 10;
 let productControlsBound = false;
@@ -914,13 +922,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function initializeAdminModules() {
     if (canAdmin('dashboard')) fetchStats();
-    if (canAdmin('orders')) setupRealtimeOrders();
+    if (canAdmin('orders') || canAdmin('pos')) setupRealtimeOrders();
     if (canAdmin('bookings')) setupRealtimeBookings();
-    if (canAdmin('products')) {
+    if (canAdmin('products') || canAdmin('pos')) {
         setupRealtimeCategories();
         setupRealtimeProducts();
+    }
+    if (canAdmin('products')) {
         initLoyverseImportTool();
     }
+    if (canAdmin('pos')) initPosModule();
     if (canAdmin('tables')) setupRealtimeTables();
     if (canAdmin('rooms')) setupRealtimeRooms();
     if (canAdmin('shop')) {
@@ -1022,6 +1033,11 @@ window.refreshAdminSection = async (tabId, button = null) => {
                 break;
             case 'admin-access':
                 setupRealtimeAdminAccess();
+                break;
+            case 'pos':
+                setupRealtimeCategories();
+                setupRealtimeProducts();
+                renderPosScreen();
                 break;
             case 'orders':
                 setupRealtimeOrders();
@@ -1303,17 +1319,20 @@ function setupRealtimeOrders() {
             const order = docSnap.data();
             const id = docSnap.id;
             const status = order.status || 'pending';
+            const isTestOrder = !!order.isTestOrder;
+            const displayId = order.receiptNo || order.orderNumber || id.substring(0,8).toUpperCase();
+            const sourceLabel = order.source === 'pos' ? (isTestOrder ? 'POS TEST' : 'POS') : 'Online';
             const orderDateStr = order.timestamp ? (order.timestamp.toDate ? order.timestamp.toDate().toLocaleDateString('th-TH') : new Date(order.timestamp).toLocaleDateString('th-TH')) : '';
             
-            if (orderDateStr === todayStr) {
+            if (!isTestOrder && orderDateStr === todayStr) {
                 todayOrders++;
                 todayRevenue += (order.totalAmount || 0);
             }
 
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td style="font-family: monospace;">${escapeHTML(id.substring(0,8).toUpperCase())}</td>
-                <td>${escapeHTML(order.customerName || 'Customer')}<br><small style="color:#888;">${escapeHTML(order.phone || '')}</small></td>
+                <td style="font-family: monospace;">${escapeHTML(displayId)}</td>
+                <td>${escapeHTML(order.customerName || 'Customer')}<br><small style="color:#888;">${escapeHTML([order.phone || '', sourceLabel].filter(Boolean).join(' | '))}</small></td>
                 <td style="font-weight: 500;">฿${safeNumber(order.totalAmount || order.total).toLocaleString()}</td>
                 <td>${formatDate(order.timestamp)}</td>
                 <td>${getStatusBadgeHTML(status, 'order')}</td>
@@ -1538,6 +1557,7 @@ function setupRealtimeCategories() {
         });
         updateProductCategoryFilterOptions();
         renderProductsTable();
+        renderPosScreen();
     }, (error) => {
         console.error("Error listening to categories:", error);
     });
@@ -2275,6 +2295,440 @@ function productMoney(value) {
     return amount ? '&#3647;' + amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-';
 }
 
+function posMoney(value) {
+    return '฿' + safeNumber(value).toLocaleString('th-TH', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+}
+
+function posRound(value) {
+    return Math.round(safeNumber(value) * 100) / 100;
+}
+
+function posLimitString(value, maxLength) {
+    return String(value ?? '').trim().slice(0, maxLength);
+}
+
+function posStorageKey() {
+    return 'edenAdminPosCartV1';
+}
+
+function restorePosCart() {
+    try {
+        const saved = JSON.parse(sessionStorage.getItem(posStorageKey()) || '[]');
+        posCart = Array.isArray(saved) ? saved.filter(item => item && item.key) : [];
+    } catch (error) {
+        console.warn('Unable to restore POS cart:', error);
+        posCart = [];
+    }
+}
+
+function persistPosCart() {
+    try {
+        sessionStorage.setItem(posStorageKey(), JSON.stringify(posCart));
+    } catch (error) {
+        console.warn('Unable to persist POS cart:', error);
+    }
+}
+
+function posSellableVariants(product = {}) {
+    const variants = productVariantsForDisplay(product).filter(variant => variant.availableForSale !== false);
+    if (variants.length) return variants;
+    return [{
+        id: 'base',
+        name: '',
+        price: safeNumber(product.price),
+        cost: safeNumber(product.cost),
+        sku: product.sku || '',
+        stock: safeNumber(product.stock),
+        lowStock: safeNumber(product.lowStock),
+        availableForSale: product.availableForSale !== false
+    }];
+}
+
+function posProductRows() {
+    return productRows
+        .filter(row => row?.product)
+        .filter(row => row.product.availableForSale !== false)
+        .filter(row => row.product.showOnPos !== false)
+        .filter(row => posSellableVariants(row.product).some(variant => variant.availableForSale !== false))
+        .sort((a, b) => String(a.product.name || '').localeCompare(String(b.product.name || ''), 'th'));
+}
+
+function filteredPosProductRows() {
+    const search = posSearchTerm.trim().toLowerCase();
+    return posProductRows()
+        .filter(row => posSelectedCategory === 'all' || row.product.category === posSelectedCategory)
+        .filter(row => !search || productSearchHaystack(row).includes(search));
+}
+
+function renderPosCategories(rows = posProductRows()) {
+    const container = document.getElementById('pos-category-list');
+    if (!container) return;
+    const categories = new Map();
+    rows.forEach(row => {
+        const categoryId = row.product.category || 'other';
+        categories.set(categoryId, categoriesData[categoryId]?.name || categoryId || 'ไม่ระบุ');
+    });
+    if (posSelectedCategory !== 'all' && !categories.has(posSelectedCategory)) {
+        posSelectedCategory = 'all';
+    }
+    const sortedCategories = Array.from(categories.entries()).sort(([aId, aName], [bId, bName]) => {
+        const aOrder = Number(categoriesData[aId]?.order || 999);
+        const bOrder = Number(categoriesData[bId]?.order || 999);
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return String(aName).localeCompare(String(bName), 'th');
+    });
+    container.innerHTML = [
+        `<button class="pos-category-btn ${posSelectedCategory === 'all' ? 'active' : ''}" type="button" onclick="setPosCategory('all')">ทั้งหมด</button>`,
+        ...sortedCategories.map(([id, name]) => `
+            <button class="pos-category-btn ${posSelectedCategory === id ? 'active' : ''}" type="button" onclick="setPosCategory('${escapeJSString(id)}')">${escapeHTML(name)}</button>
+        `)
+    ].join('');
+}
+
+function renderPosProducts() {
+    const grid = document.getElementById('pos-product-grid');
+    const count = document.getElementById('pos-product-count');
+    if (!grid) return;
+    const allRows = posProductRows();
+    const rows = filteredPosProductRows();
+    if (count) count.textContent = allRows.length.toLocaleString('th-TH');
+    renderPosCategories(allRows);
+
+    if (!rows.length) {
+        grid.innerHTML = '<div class="pos-empty">ไม่พบสินค้า POS ตามเงื่อนไขที่เลือก</div>';
+        return;
+    }
+
+    grid.innerHTML = rows.map(({ id, product }) => {
+        const variants = posSellableVariants(product);
+        const variantSelect = variants.length > 1 ? `
+            <select class="pos-card-variant" aria-label="เลือกตัวเลือกสินค้า">
+                ${variants.map(variant => `
+                    <option value="${escapeHTML(variant.id || variant.name || 'base')}">${escapeHTML(variant.name || 'ปกติ')} - ${posMoney(variant.price)}</option>
+                `).join('')}
+            </select>
+        ` : '';
+        const firstVariant = variants[0] || {};
+        const stockText = product.trackStock ? `คงเหลือ ${safeNumber(firstVariant.stock ?? product.stock).toLocaleString('th-TH')}` : categoryNameForProduct(product);
+        return `
+            <div class="pos-product-card" data-product-id="${escapeHTML(id)}">
+                <img src="${escapeHTML(safeImageURL(product.imageUrl))}" alt="${escapeHTML(product.name || id)}" loading="lazy">
+                <div class="pos-product-name">${escapeHTML(product.name || id)}</div>
+                <div class="pos-product-meta">${escapeHTML(stockText || '-')}</div>
+                ${variantSelect}
+                <button class="pos-add-btn" type="button" onclick="addPosProductFromCard('${escapeJSString(id)}', this.closest('.pos-product-card'))">
+                    เพิ่ม ${posMoney(firstVariant.price ?? product.price)}
+                </button>
+            </div>
+        `;
+    }).join('');
+}
+
+function posCartTotals() {
+    const subtotal = posRound(posCart.reduce((sum, item) => sum + (safeNumber(item.price) * safeNumber(item.quantity, 1)), 0));
+    const discountInput = document.getElementById('pos-discount');
+    const paidInput = document.getElementById('pos-paid-amount');
+    const paymentMethod = document.getElementById('pos-payment-method')?.value || 'cash';
+    const discount = Math.min(Math.max(safeNumber(discountInput?.value), 0), subtotal);
+    const total = posRound(Math.max(subtotal - discount, 0));
+    const taxableSubtotal = posCart
+        .filter(item => item.taxEnabled !== false)
+        .reduce((sum, item) => sum + (safeNumber(item.price) * safeNumber(item.quantity, 1)), 0);
+    const taxableAfterDiscount = subtotal > 0 ? Math.max(taxableSubtotal - (discount * (taxableSubtotal / subtotal)), 0) : 0;
+    const taxIncluded = posRound(taxableAfterDiscount * 7 / 107);
+    const paidAmount = safeNumber(paidInput?.value);
+    const changeAmount = paymentMethod === 'cash' ? posRound(Math.max(paidAmount - total, 0)) : 0;
+    return { subtotal, discount, total, taxableSubtotal, taxIncluded, paymentMethod, paidAmount, changeAmount };
+}
+
+function renderPosCart() {
+    const container = document.getElementById('pos-cart-items');
+    const summary = document.getElementById('pos-summary');
+    if (!container || !summary) return;
+
+    if (!posCart.length) {
+        container.innerHTML = '<div class="pos-empty">ยังไม่มีสินค้าในตะกร้า</div>';
+    } else {
+        container.innerHTML = posCart.map(item => `
+            <div class="pos-cart-row">
+                <div>
+                    <div class="pos-cart-title">${escapeHTML(item.name)}${item.variantName ? ` / ${escapeHTML(item.variantName)}` : ''}</div>
+                    <div class="pos-cart-sub">${escapeHTML(item.sku || item.categoryName || '-')} · ${posMoney(item.price)} x ${safeNumber(item.quantity, 1).toLocaleString('th-TH')}</div>
+                    <button class="pos-remove-btn" type="button" onclick="removePosCartItem('${escapeJSString(item.key)}')">ลบ</button>
+                </div>
+                <div class="pos-qty">
+                    <button type="button" onclick="changePosCartQty('${escapeJSString(item.key)}', -1)">-</button>
+                    <strong>${safeNumber(item.quantity, 1).toLocaleString('th-TH')}</strong>
+                    <button type="button" onclick="changePosCartQty('${escapeJSString(item.key)}', 1)">+</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    const totals = posCartTotals();
+    summary.innerHTML = `
+        <div class="pos-summary-row"><span>ยอดก่อนส่วนลด</span><strong>${posMoney(totals.subtotal)}</strong></div>
+        <div class="pos-summary-row"><span>ส่วนลด</span><strong>-${posMoney(totals.discount)}</strong></div>
+        <div class="pos-summary-row"><span>VAT 7% รวมในราคา</span><strong>${posMoney(totals.taxIncluded)}</strong></div>
+        <div class="pos-summary-row"><span>เงินทอน</span><strong>${posMoney(totals.changeAmount)}</strong></div>
+        <div class="pos-summary-row total"><span>ยอดสุทธิ</span><strong>${posMoney(totals.total)}</strong></div>
+    `;
+    persistPosCart();
+}
+
+function renderPosScreen() {
+    if (!document.getElementById('pos-product-grid')) return;
+    renderPosProducts();
+    renderPosCart();
+}
+
+function initPosModule() {
+    if (posControlsBound) {
+        renderPosScreen();
+        return;
+    }
+    restorePosCart();
+    document.getElementById('pos-search-input')?.addEventListener('input', (event) => {
+        posSearchTerm = event.target.value || '';
+        renderPosProducts();
+    });
+    ['pos-discount', 'pos-paid-amount', 'pos-payment-method'].forEach(id => {
+        document.getElementById(id)?.addEventListener('input', renderPosCart);
+        document.getElementById(id)?.addEventListener('change', renderPosCart);
+    });
+    posControlsBound = true;
+    renderPosScreen();
+}
+
+window.setPosCategory = (categoryId = 'all') => {
+    posSelectedCategory = categoryId || 'all';
+    renderPosProducts();
+};
+
+window.refreshPosProducts = () => {
+    setupRealtimeCategories();
+    setupRealtimeProducts();
+    renderPosScreen();
+};
+
+window.addPosProductFromCard = (productId, cardEl = null) => {
+    const product = productsData[productId];
+    if (!product) return;
+    const variants = posSellableVariants(product);
+    const selectedVariantId = cardEl?.querySelector('.pos-card-variant')?.value || variants[0]?.id || variants[0]?.name || 'base';
+    const variant = variants.find(item => String(item.id || item.name || 'base') === String(selectedVariantId)) || variants[0] || {};
+    const variantId = variant.id || variant.name || 'base';
+    const key = `${productId}::${variantId}`;
+    const existing = posCart.find(item => item.key === key);
+    if (existing) {
+        existing.quantity = safeNumber(existing.quantity, 1) + 1;
+    } else {
+        posCart.push({
+            key,
+            productId,
+            variantId,
+            name: product.name || productId,
+            variantName: variant.name || '',
+            sku: variant.sku || product.sku || '',
+            category: product.category || '',
+            categoryName: categoryNameForProduct(product),
+            imageUrl: product.imageUrl || '',
+            price: safeNumber(variant.price, safeNumber(product.price)),
+            cost: safeNumber(variant.cost, safeNumber(product.cost)),
+            taxEnabled: product.taxEnabled !== false,
+            quantity: 1
+        });
+    }
+    renderPosCart();
+};
+
+window.changePosCartQty = (key, delta) => {
+    posCart = posCart.map(item => {
+        if (item.key !== key) return item;
+        return { ...item, quantity: Math.max(1, safeNumber(item.quantity, 1) + delta) };
+    });
+    renderPosCart();
+};
+
+window.removePosCartItem = (key) => {
+    posCart = posCart.filter(item => item.key !== key);
+    renderPosCart();
+};
+
+window.clearPosCart = () => {
+    if (posCart.length && !confirm('ล้างตะกร้า POS นี้หรือไม่?')) return;
+    posCart = [];
+    posLastReceipt = null;
+    const receipt = document.getElementById('pos-receipt');
+    const printBtn = document.getElementById('pos-print-btn');
+    if (receipt) {
+        receipt.style.display = 'none';
+        receipt.innerHTML = '';
+    }
+    if (printBtn) printBtn.style.display = 'none';
+    renderPosCart();
+};
+
+function generatePosReceiptNo() {
+    const now = new Date();
+    const pad = value => String(value).padStart(2, '0');
+    const datePart = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+    const timePart = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    return `POS-${datePart}-${timePart}`;
+}
+
+function buildPosReceiptHTML(order = {}) {
+    const items = Array.isArray(order.items) ? order.items : [];
+    return `
+        <div style="text-align:center; font-weight:900; font-size:1rem;">Eden Cafe</div>
+        <div style="text-align:center;">ใบเสร็จรับเงิน${order.isTestOrder ? ' (TEST)' : ''}</div>
+        <div style="border-top:1px dashed #9aa; margin:10px 0;"></div>
+        <div>เลขที่: ${escapeHTML(order.receiptNo || '-')}</div>
+        <div>เวลา: ${escapeHTML(order.date || '-')}</div>
+        <div>แคชเชียร์: ${escapeHTML(order.cashierName || '-')}</div>
+        <div style="border-top:1px dashed #9aa; margin:10px 0;"></div>
+        ${items.map(item => `
+            <div style="display:flex; justify-content:space-between; gap:10px;">
+                <span>${escapeHTML(item.name)}${item.variantName ? ` / ${escapeHTML(item.variantName)}` : ''} x${safeNumber(item.quantity, 1)}</span>
+                <strong>${posMoney(item.lineTotal)}</strong>
+            </div>
+        `).join('')}
+        <div style="border-top:1px dashed #9aa; margin:10px 0;"></div>
+        <div style="display:flex; justify-content:space-between;"><span>Subtotal</span><strong>${posMoney(order.subtotal)}</strong></div>
+        <div style="display:flex; justify-content:space-between;"><span>Discount</span><strong>-${posMoney(order.discount)}</strong></div>
+        <div style="display:flex; justify-content:space-between;"><span>VAT included</span><strong>${posMoney(order.taxIncluded)}</strong></div>
+        <div style="display:flex; justify-content:space-between; font-size:1.05rem;"><span>Total</span><strong>${posMoney(order.totalAmount)}</strong></div>
+        <div style="display:flex; justify-content:space-between;"><span>Payment</span><strong>${escapeHTML(order.paymentMethod || '-')}</strong></div>
+        <div style="display:flex; justify-content:space-between;"><span>Paid</span><strong>${posMoney(order.paidAmount)}</strong></div>
+        <div style="display:flex; justify-content:space-between;"><span>Change</span><strong>${posMoney(order.changeAmount)}</strong></div>
+        <div style="border-top:1px dashed #9aa; margin:10px 0;"></div>
+        <div style="text-align:center;">ขอบคุณที่อุดหนุน Eden Cafe</div>
+    `;
+}
+
+window.checkoutPosOrder = async () => {
+    if (!posCart.length) {
+        alert('กรุณาเพิ่มสินค้าในตะกร้าก่อนบันทึกออเดอร์');
+        return;
+    }
+    const user = auth.currentUser;
+    if (!user) {
+        alert('กรุณาเข้าสู่ระบบแอดมินก่อนทำรายการ POS');
+        return;
+    }
+    const checkoutBtn = document.getElementById('pos-checkout-btn');
+    const originalText = checkoutBtn?.textContent || '';
+    try {
+        if (checkoutBtn) {
+            checkoutBtn.disabled = true;
+            checkoutBtn.textContent = 'กำลังบันทึกออเดอร์...';
+        }
+        const totals = posCartTotals();
+        if (totals.paymentMethod === 'cash' && totals.paidAmount > 0 && totals.paidAmount < totals.total) {
+            throw new Error('จำนวนเงินที่รับมาต่ำกว่ายอดสุทธิ');
+        }
+        const isTestOrder = !!document.getElementById('pos-soft-launch-mode')?.checked;
+        const receiptNo = generatePosReceiptNo();
+        const now = new Date();
+        const orderData = {
+            id: receiptNo,
+            receiptNo,
+            date: now.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }),
+            source: 'pos',
+            orderType: 'pos',
+            status: 'completed',
+            paymentStatus: 'paid',
+            paymentMethod: totals.paymentMethod,
+            uid: user.uid,
+            customerName: posLimitString(document.getElementById('pos-customer-name')?.value, 120) || 'Walk-in Customer',
+            phone: posLimitString(document.getElementById('pos-customer-phone')?.value, 40),
+            address: 'หน้าร้าน Eden Cafe',
+            note: posLimitString(document.getElementById('pos-note')?.value, 500),
+            items: posCart.map(item => ({
+                productId: item.productId,
+                variantId: item.variantId,
+                name: item.name,
+                variantName: item.variantName || '',
+                sku: item.sku || '',
+                category: item.category || '',
+                price: posRound(item.price),
+                cost: posRound(item.cost),
+                quantity: safeNumber(item.quantity, 1),
+                lineTotal: posRound(safeNumber(item.price) * safeNumber(item.quantity, 1)),
+                taxEnabled: item.taxEnabled !== false
+            })),
+            subtotal: totals.subtotal,
+            discount: totals.discount,
+            taxIncluded: totals.taxIncluded,
+            total: totals.total,
+            totalAmount: totals.total,
+            paidAmount: totals.paidAmount || totals.total,
+            changeAmount: totals.changeAmount,
+            cashierUid: user.uid,
+            cashierName: posLimitString(user.displayName || user.email || 'Admin', 120),
+            cashierEmail: posLimitString(user.email || '', 180),
+            isTestOrder,
+            softLaunch: isTestOrder,
+            stockMode: 'manual-soft-launch',
+            timestamp: serverTimestamp(),
+            createdAt: serverTimestamp()
+        };
+        const docRef = await addDoc(collection(db, 'orders'), orderData);
+        posLastReceipt = { ...orderData, firestoreId: docRef.id, timestamp: new Date(), createdAt: new Date() };
+        const receipt = document.getElementById('pos-receipt');
+        const printBtn = document.getElementById('pos-print-btn');
+        if (receipt) {
+            receipt.innerHTML = buildPosReceiptHTML(posLastReceipt);
+            receipt.style.display = 'block';
+        }
+        if (printBtn) printBtn.style.display = 'block';
+        posCart = [];
+        persistPosCart();
+        renderPosCart();
+        alert(isTestOrder ? 'บันทึกออเดอร์ทดสอบ POS สำเร็จ' : 'บันทึกออเดอร์ POS สำเร็จ');
+    } catch (error) {
+        console.error('POS checkout failed:', error);
+        alert('บันทึกออเดอร์ POS ไม่สำเร็จ: ' + error.message);
+    } finally {
+        if (checkoutBtn) {
+            checkoutBtn.disabled = false;
+            checkoutBtn.textContent = originalText || 'บันทึกออเดอร์และออกใบเสร็จ';
+        }
+    }
+};
+
+window.printPosReceipt = () => {
+    if (!posLastReceipt) {
+        alert('ยังไม่มีใบเสร็จล่าสุดให้พิมพ์');
+        return;
+    }
+    const printWindow = window.open('', '_blank', 'width=420,height=720');
+    if (!printWindow) {
+        alert('เบราว์เซอร์บล็อกหน้าต่างพิมพ์ กรุณาอนุญาต Pop-up');
+        return;
+    }
+    printWindow.document.write(`
+        <!doctype html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>${escapeHTML(posLastReceipt.receiptNo || 'POS Receipt')}</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 18px; color: #111; }
+                @media print { body { margin: 0; } }
+            </style>
+        </head>
+        <body>${buildPosReceiptHTML(posLastReceipt)}</body>
+        </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+};
+
 function filteredProductRows() {
     const category = document.getElementById('product-category-filter')?.value || 'all';
     const stockFilter = document.getElementById('product-stock-filter')?.value || 'all';
@@ -2544,6 +2998,7 @@ function setupRealtimeProducts() {
             if (!productsData[id]) selectedProductIds.delete(id);
         });
         renderProductsTable();
+        renderPosScreen();
     }, (error) => {
         console.error("Error listening to products:", error);
         const tbody = document.getElementById('products-table-body');
