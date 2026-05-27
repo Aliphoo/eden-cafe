@@ -1,8 +1,7 @@
-﻿import { auth, provider, db, storage } from './firebase-config.js';
+﻿import { auth, provider, db } from './firebase-config.js';
 import { getMemberTier, getTierBenefits } from './membership.js';
 import { signInWithPopup, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 
 function escapeHTML(value) {
     return String(value ?? '')
@@ -60,11 +59,11 @@ function blobToBase64(blob) {
     });
 }
 
-async function uploadImageToCloudflare(blob, folder, fileName) {
+async function uploadAdminImage(blob, folder, fileName) {
     const token = await auth.currentUser?.getIdToken(true);
     if (!token) throw new Error('Please sign in as admin before uploading images');
 
-    const response = await fetch(FUNCTIONS_BASE_URL + '/uploadCloudflareImage', {
+    const response = await fetch(FUNCTIONS_BASE_URL + '/uploadSpaceshipImage', {
         method: 'POST',
         headers: {
             'Authorization': 'Bearer ' + token,
@@ -78,20 +77,10 @@ async function uploadImageToCloudflare(blob, folder, fileName) {
         })
     });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok || !result.url) throw new Error(result.error || 'Cloudflare image upload failed');
+    if (!response.ok || !result.url) throw new Error(result.error || 'Spaceship image upload failed');
     return result.url;
 }
 
-async function uploadAdminImage(blob, folder, fileName) {
-    try {
-        return await uploadImageToCloudflare(blob, folder, fileName);
-    } catch (cloudflareError) {
-        console.warn('Cloudflare upload unavailable, falling back to Firebase Storage:', cloudflareError);
-        const storageRef = ref(storage, `${folder}/${fileName}`);
-        const snapshot = await uploadBytes(storageRef, blob);
-        return await getDownloadURL(snapshot.ref);
-    }
-}
 
 const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
 const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net';
@@ -1210,7 +1199,7 @@ roomForm.addEventListener('submit', async (e) => {
             const file = fileInput.files[0];
             submitBtn.innerText = 'กำลังอัปโหลดรูป...';
             
-            // Upload to Firebase Storage (Convert to WebP)
+            // Convert and upload to Spaceship hosting
             submitBtn.innerText = 'กำลังแปลงรูปภาพ...';
             const webpBlob = await compressToWebP(file, 0.8);
             submitBtn.innerText = 'กำลังอัปโหลดรูปภาพ...';

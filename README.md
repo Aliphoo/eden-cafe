@@ -7,7 +7,7 @@ Static website and Firebase backend configuration for Eden Cafe.
 - Firebase Authentication
 - Cloud Firestore
 - Firebase Cloud Functions
-- Firebase Storage
+- Spaceship/cPanel hosting for uploaded admin images
 - cPanel/Apache hosting support via `.htaccess`
 
 ## Notes

@@ -3,12 +3,15 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
+const ftp = require('basic-ftp');
+const { Readable } = require('stream');
 
 admin.initializeApp();
 
 const db = admin.firestore();
-const CLOUDFLARE_ACCOUNT_ID = defineSecret('CLOUDFLARE_ACCOUNT_ID');
-const CLOUDFLARE_IMAGES_API_TOKEN = defineSecret('CLOUDFLARE_IMAGES_API_TOKEN');
+const SPACESHIP_FTP_SERVER = defineSecret('SPACESHIP_FTP_SERVER');
+const SPACESHIP_FTP_USERNAME = defineSecret('SPACESHIP_FTP_USERNAME');
+const SPACESHIP_FTP_PASSWORD = defineSecret('SPACESHIP_FTP_PASSWORD');
 
 const PLACE_ID = 'ChIJVTN6cGwB1zAR66OQ_OBKRkM';
 const PLACE_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
@@ -18,6 +21,8 @@ const ADMIN_EMAILS = new Set([
   'phoo1236@gmail.com',
   'sonsawan.1231@gmail.com',
 ]);
+const IMAGE_REMOTE_ROOT = 'Images/uploads';
+const IMAGE_PUBLIC_BASE_URL = 'https://www.edencafe.co/Images/uploads';
 
 const ALLOWED_ORIGINS = new Set([
   'https://edencafe-d9095.web.app',
@@ -171,39 +176,42 @@ function normalizeImagePayload(raw) {
   return { folder, fileName, mimeType, buffer };
 }
 
-async function uploadToCloudflareImages({ folder, fileName, mimeType, buffer }) {
-  const accountId = CLOUDFLARE_ACCOUNT_ID.value();
-  const apiToken = CLOUDFLARE_IMAGES_API_TOKEN.value();
-  const accountHash = process.env.CLOUDFLARE_IMAGES_ACCOUNT_HASH || '';
-  if (!accountId || !apiToken) throw new Error('Cloudflare Images secrets are not configured');
+function publicImagePath(folder, fileName) {
+  const yearMonth = new Date().toISOString().slice(0, 7);
+  const uniqueName = `${Date.now()}-${fileName}`.replace(/-+/g, '-');
+  return `${folder}/${yearMonth}/${uniqueName}`.replace(/\/+/g, '/');
+}
 
-  const imageId = `${folder}/${Date.now()}-${fileName.replace(/\.[^.]+$/, '')}`.replace(/\/+/g, '/');
-  const form = new FormData();
-  form.append('file', new Blob([buffer], { type: mimeType }), fileName);
-  form.append('id', imageId);
-  form.append('metadata', JSON.stringify({ source: 'eden-admin', folder, originalFileName: fileName }));
-  form.append('requireSignedURLs', 'false');
+async function uploadToSpaceshipHosting({ folder, fileName, buffer }) {
+  const server = SPACESHIP_FTP_SERVER.value();
+  const username = SPACESHIP_FTP_USERNAME.value();
+  const password = SPACESHIP_FTP_PASSWORD.value();
+  if (!server || !username || !password) throw new Error('Spaceship FTP secrets are not configured');
 
-  const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiToken}` },
-    body: form,
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || data.success === false) {
-    const message = Array.isArray(data.errors) && data.errors.length
-      ? data.errors.map(item => item.message || item.code).join(', ')
-      : `Cloudflare upload failed with HTTP ${response.status}`;
-    throw new Error(message);
+  const relativePath = publicImagePath(folder, fileName);
+  const remotePath = `${IMAGE_REMOTE_ROOT}/${relativePath}`.replace(/\/+/g, '/');
+  const remoteParts = remotePath.split('/');
+  const remoteFileName = remoteParts.pop();
+  const remoteDir = remoteParts.join('/');
+  const client = new ftp.Client(30000);
+
+  try {
+    await client.access({
+      host: server,
+      user: username,
+      password,
+      secure: true,
+      secureOptions: { rejectUnauthorized: false },
+    });
+    await client.ensureDir(remoteDir);
+    await client.uploadFrom(Readable.from([buffer]), remoteFileName);
+  } finally {
+    client.close();
   }
 
-  const result = data.result || {};
-  const variants = Array.isArray(result.variants) ? result.variants : [];
-  const url = variants[0] || (accountHash ? `https://imagedelivery.net/${accountHash}/${result.id || imageId}/public` : '');
   return {
-    id: result.id || imageId,
-    url,
-    variants,
+    path: remotePath,
+    url: `${IMAGE_PUBLIC_BASE_URL}/${relativePath}`.replace(/([^:]\/)\/+/g, '$1'),
   };
 }
 
@@ -487,12 +495,13 @@ exports.createBooking = onRequest(
   }
 );
 
-exports.uploadCloudflareImage = onRequest(
+exports.uploadSpaceshipImage = onRequest(
   {
     region: 'asia-southeast1',
     secrets: [
-      CLOUDFLARE_ACCOUNT_ID,
-      CLOUDFLARE_IMAGES_API_TOKEN,
+      SPACESHIP_FTP_SERVER,
+      SPACESHIP_FTP_USERNAME,
+      SPACESHIP_FTP_PASSWORD,
     ],
     timeoutSeconds: 60,
     memory: '512MiB',
@@ -509,23 +518,22 @@ exports.uploadCloudflareImage = onRequest(
     try {
       const payload = normalizeImagePayload(req.body || {});
       await requireAdminAccess(req, permissionFromImageFolder(payload.folder));
-      const uploaded = await uploadToCloudflareImages(payload);
-      logger.info('Image uploaded to Cloudflare Images', {
-        imageId: uploaded.id,
+      const uploaded = await uploadToSpaceshipHosting(payload);
+      logger.info('Image uploaded to Spaceship hosting', {
+        path: uploaded.path,
         folder: payload.folder,
         byteLength: payload.buffer.length,
       });
       res.status(201).json({
         ok: true,
-        provider: 'cloudflare_images',
-        id: uploaded.id,
+        provider: 'spaceship_hosting',
+        path: uploaded.path,
         url: uploaded.url,
-        variants: uploaded.variants,
       });
     } catch (error) {
       const status = error.statusCode || (/Missing|Invalid|Unsupported|large|configured/i.test(error.message) ? 400 : 500);
-      logger.warn('Cloudflare image upload failed', { message: error.message, status });
-      res.status(status).json({ error: error.message || 'Cloudflare image upload failed' });
+      logger.warn('Spaceship image upload failed', { message: error.message, status });
+      res.status(status).json({ error: error.message || 'Spaceship image upload failed' });
     }
   }
 );
