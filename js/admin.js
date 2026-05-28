@@ -1,5 +1,6 @@
 import { auth, provider, db } from './firebase-config.js';
 import { getMemberTier, getTierBenefits } from './membership.js';
+import { BLOG_POSTS, SITE, getBlogUrl } from './blog-data.mjs';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp, writeBatch, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -3672,6 +3673,148 @@ document.addEventListener("DOMContentLoaded", () => {
 
 const blogModal = document.getElementById('blogModal');
 const blogForm = document.getElementById('blogForm');
+
+function renderSeedBlogBlocks(blocks = []) {
+    return blocks.map(block => {
+        if (block.type === 'h2') return `<h2>${escapeHTML(block.text)}</h2>`;
+        if (block.type === 'h3') return `<h3>${escapeHTML(block.text)}</h3>`;
+        if (block.type === 'ul') {
+            const items = (block.items || []).map(item => `<li>${escapeHTML(item)}</li>`).join('');
+            return `<ul>${items}</ul>`;
+        }
+        return `<p>${escapeHTML(block.text || '')}</p>`;
+    }).join('\n');
+}
+
+function renderSeedLinkList(links = []) {
+    if (!links.length) return '';
+    const items = links
+        .map(link => `<li><a href="${escapeHTML(link.href)}">${escapeHTML(link.label)}</a></li>`)
+        .join('');
+    return `<ul>${items}</ul>`;
+}
+
+function renderSeedBlogContent(post) {
+    const summary = (post.summary || []).map(item => `<li>${escapeHTML(item)}</li>`).join('');
+    const faqs = (post.faqs || [])
+        .map(faq => `<h3>${escapeHTML(faq.question)}</h3>\n<p>${escapeHTML(faq.answer)}</p>`)
+        .join('\n');
+    const internalLinks = renderSeedLinkList(post.suggestedInternalLinks || []);
+    const externalLinks = renderSeedLinkList(post.suggestedExternalLinks || []);
+    const cta = post.cta
+        ? `<p><a href="${escapeHTML(post.cta.href)}"><strong>${escapeHTML(post.cta.label)}</strong></a></p>`
+        : '';
+
+    return [
+        `<p><strong>สรุปคำตอบ:</strong> ${escapeHTML(post.excerpt)}</p>`,
+        summary ? `<h2>สรุปสั้น</h2>\n<ul>${summary}</ul>` : '',
+        renderSeedBlogBlocks(post.blocks || []),
+        faqs ? `<h2>คำถามที่พบบ่อย</h2>\n${faqs}` : '',
+        internalLinks ? `<h2>ลิงก์ภายในที่เกี่ยวข้อง</h2>\n${internalLinks}` : '',
+        externalLinks ? `<h2>แหล่งข้อมูลอ้างอิง</h2>\n${externalLinks}` : '',
+        cta
+    ].filter(Boolean).join('\n\n');
+}
+
+function getAbsoluteSeedImageUrl(post) {
+    const src = post?.image?.src || SITE.defaultImage;
+    if (/^https?:\/\//i.test(src)) return src;
+    return `${SITE.origin}${src.startsWith('/') ? src : `/${src}`}`;
+}
+
+function buildSeoBlogSeedData(post, index) {
+    const publishedAt = `${post.publishedDate}T09:00:00+07:00`;
+    const updatedAt = `${post.updatedDate || post.publishedDate}T09:00:00+07:00`;
+
+    return {
+        title: post.title,
+        slug: post.slug,
+        category: post.category || 'Local Guide',
+        status: 'published',
+        excerpt: post.excerpt,
+        content: renderSeedBlogContent(post),
+        imageUrl: getAbsoluteSeedImageUrl(post),
+        imageAlt: post.image?.alt || post.title,
+        imageFileName: post.image?.fileName || `${post.slug}-cover.webp`,
+        imagePrompt16x9: post.image?.prompt16x9 || '',
+        imagePrompt1x1: post.image?.prompt1x1 || '',
+        imageSizes: post.image?.sizes || ['16:9 blog cover', '1:1 social share'],
+        seoTitle: post.seoTitle,
+        metaDescription: post.metaDescription,
+        focusKeyword: post.focusKeyword,
+        secondaryKeywords: post.secondaryKeywords || [],
+        author: SITE.author,
+        readingTime: post.readingTime,
+        publishedDate: post.publishedDate,
+        updatedDate: post.updatedDate || post.publishedDate,
+        publishedAt,
+        createdAt: publishedAt,
+        updatedAt,
+        importedAt: new Date().toISOString(),
+        displayOrder: index + 1,
+        staticUrl: getBlogUrl(post),
+        canonicalUrl: `${SITE.origin}${getBlogUrl(post)}`,
+        openGraphImage: getAbsoluteSeedImageUrl(post),
+        twitterCard: 'summary_large_image',
+        faqs: post.faqs || [],
+        summary: post.summary || [],
+        suggestedInternalLinks: post.suggestedInternalLinks || [],
+        suggestedExternalLinks: post.suggestedExternalLinks || [],
+        cta: post.cta || null,
+        relatedSlugs: post.relatedSlugs || [],
+        schemaTypes: ['BlogPosting', 'FAQPage', 'CafeOrCoffeeShop'],
+        localEntity: {
+            name: SITE.name,
+            address: SITE.address,
+            telephone: SITE.telephone,
+            openingHours: SITE.openingHours,
+            mapUrl: SITE.mapUrl
+        },
+        seededFrom: 'js/blog-data.mjs',
+        blogSystemVersion: 'seo-blog-v1'
+    };
+}
+
+window.seedSeoBlogPosts = async () => {
+    if (!auth.currentUser) {
+        alert('กรุณาเข้าสู่ระบบ Admin ก่อนนำเข้าบทความ');
+        return;
+    }
+    if (!isOwnerAccess()) {
+        alert('ฟังก์ชันนำเข้าบทความ SEO ใช้ได้เฉพาะ Owner เท่านั้น');
+        return;
+    }
+
+    const confirmed = confirm('นำเข้า/อัปเดตบทความ SEO ทั้ง 6 บทความลงในหน้า Admin ใช่ไหม? ระบบจะอัปเดตเอกสารที่มี slug เดิมใน collection blogs');
+    if (!confirmed) return;
+
+    const button = document.getElementById('seed-seo-blogs-btn');
+    const originalText = button?.innerText || '';
+
+    try {
+        if (button) {
+            button.disabled = true;
+            button.innerText = 'กำลังนำเข้าบทความ...';
+        }
+
+        const batch = writeBatch(db);
+        BLOG_POSTS.forEach((post, index) => {
+            batch.set(doc(db, 'blogs', post.slug), buildSeoBlogSeedData(post, index), { merge: true });
+        });
+        await batch.commit();
+
+        alert('นำเข้า/อัปเดตบทความ SEO 6 บทความเรียบร้อยแล้ว');
+        if (typeof fetchBlogsFromCloud === 'function') fetchBlogsFromCloud();
+    } catch (error) {
+        console.error('Seed SEO blogs failed:', error);
+        alert('นำเข้าบทความไม่สำเร็จ: ' + error.message);
+    } finally {
+        if (button) {
+            button.innerText = originalText;
+            button.disabled = false;
+        }
+    }
+};
 
 window.fetchBlogsFromCloud = function() {
     if (blogsUnsubscribe) {

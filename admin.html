@@ -95,6 +95,7 @@
         /* Charts & Tables Section */
         .section-container { background: var(--white); padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); margin-bottom: 30px; }
         .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .blog-admin-actions { display: flex; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
         .data-tools {
             background: #fbfff8;
             border: 1px solid #e0eadc;
@@ -923,7 +924,10 @@
             <div class="section-container">
                 <div class="section-header">
                     <h2>จัดการบทความ (Blogs)</h2>
-                    <button class="btn-action" onclick="openBlogModal()">+ เพิ่มบทความใหม่</button>
+                    <div class="blog-admin-actions">
+                        <button class="btn-action btn-edit" id="seed-seo-blogs-btn" onclick="seedSeoBlogPosts()">นำเข้า/อัปเดต SEO Blog 6 บทความ</button>
+                        <button class="btn-action" onclick="openBlogModal()">+ เพิ่มบทความใหม่</button>
+                    </div>
                 </div>
                 <table>
                     <thead>
@@ -1496,7 +1500,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=39"></script>
+    <script type="module" src="js/admin.js?v=40"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {
