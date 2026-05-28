@@ -764,6 +764,18 @@ body.pos-ready .pos-app { opacity: 1; transform: none; }
 .section-header h2 { color: var(--forest); font-size: 1.55rem; }
 .section-header p { color: var(--muted); margin-top: 4px; }
 .pos-toolbar { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; margin-bottom: 12px; }
+.pos-sales-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 14px;
+    align-items: center;
+    margin-bottom: 16px;
+}
+.pos-sales-controls .btn-action {
+    min-height: 54px;
+    padding-inline: 22px;
+    white-space: nowrap;
+}
 .pos-search { padding: 14px 16px; }
 .pos-counter { color: #315443; font-weight: 900; white-space: nowrap; }
 .pos-category-list { display: flex; gap: 10px; overflow-x: auto; padding: 4px 0 14px; margin-bottom: 2px; scrollbar-width: thin; }
@@ -1218,6 +1230,7 @@ body.pos-ready .pos-app { opacity: 1; transform: none; }
     .mini-seat-map { grid-template-columns: 1fr; }
     .os-mode-card { min-height: 168px; }
     .pos-toolbar,
+    .pos-sales-controls,
     .pos-sync-row,
     .pos-customer-grid,
     .pos-cash-row,
