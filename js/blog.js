@@ -44,6 +44,42 @@ function formatDate(value) {
     }).format(new Date(millis));
 }
 
+function setMeta(selector, attr, value) {
+    const node = document.querySelector(selector);
+    if (node) node.setAttribute(attr, value);
+}
+
+function upsertBlogJsonLd(blog, title, excerpt) {
+    let script = document.getElementById('blog-jsonld');
+    if (!script) {
+        script = document.createElement('script');
+        script.type = 'application/ld+json';
+        script.id = 'blog-jsonld';
+        document.head.appendChild(script);
+    }
+    script.textContent = JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'Article',
+        headline: title,
+        description: excerpt,
+        image: safeImageURL(blog.imageUrl, 'https://www.edencafe.co/Images/Logo.webp'),
+        datePublished: toMillis(blog.createdAt) ? new Date(toMillis(blog.createdAt)).toISOString() : undefined,
+        dateModified: toMillis(blog.updatedAt || blog.createdAt) ? new Date(toMillis(blog.updatedAt || blog.createdAt)).toISOString() : undefined,
+        author: {
+            '@type': 'Organization',
+            name: 'Eden Cafe'
+        },
+        publisher: {
+            '@type': 'Organization',
+            name: 'Eden Cafe',
+            logo: {
+                '@type': 'ImageObject',
+                url: 'https://www.edencafe.co/Images/Logo.webp'
+            }
+        }
+    });
+}
+
 function excerptFrom(blog) {
     const excerpt = String(blog.excerpt || '').trim();
     if (excerpt) return excerpt;
@@ -92,6 +128,7 @@ function renderBlogList(blogs) {
         return;
     }
 
+    grid.classList.remove('blog-list-loading');
     grid.innerHTML = blogs.map(blog => `
         <article class="blog-card">
             <img loading="lazy" src="${safeImageURL(blog.imageUrl)}" alt="${escapeHTML(blog.title || 'Eden Cafe Blog')}" class="blog-card-img">
@@ -108,11 +145,11 @@ function renderBlogList(blogs) {
 async function loadBlogList() {
     const grid = document.querySelector('.blog-listing .grid');
     if (!grid) return;
-    grid.innerHTML = '<p style="grid-column:1/-1;text-align:center;">กำลังโหลดบทความ...</p>';
     try {
         renderBlogList(await getPublishedBlogs());
     } catch (error) {
         console.error('Blog list load failed:', error);
+        grid.classList.remove('blog-list-loading');
         grid.innerHTML = '<p style="grid-column:1/-1;text-align:center;color:#c62828;">โหลดบทความไม่สำเร็จ กรุณาลองใหม่อีกครั้ง</p>';
     }
 }
@@ -122,17 +159,23 @@ async function loadBlogPost() {
     if (!main) return;
 
     const id = new URLSearchParams(window.location.search).get('id');
-    if (!id) return;
+    if (!id) {
+        main.classList.remove('blog-post-loading');
+        main.innerHTML = '<div class="container"><h1>เลือกบทความที่ต้องการอ่าน</h1><p>กรุณากลับไปหน้า Blog แล้วเลือกบทความจากรายการล่าสุด</p><a href="/blog" class="btn">กลับไปหน้าบทความ</a></div>';
+        return;
+    }
 
     try {
         const snap = await getDoc(doc(db, 'blogs', id));
         if (!snap.exists()) {
+            main.classList.remove('blog-post-loading');
             main.innerHTML = '<div class="container"><h1>ไม่พบบทความ</h1><p>บทความนี้อาจถูกลบหรือยังไม่ได้เผยแพร่</p><a href="/blog" class="btn">กลับไปหน้าบทความ</a></div>';
             return;
         }
 
         const blog = { id: snap.id, ...snap.data() };
         if (String(blog.status || '').toLowerCase() !== 'published') {
+            main.classList.remove('blog-post-loading');
             main.innerHTML = '<div class="container"><h1>บทความยังไม่เผยแพร่</h1><p>กรุณากลับไปเลือกบทความอื่น</p><a href="/blog" class="btn">กลับไปหน้าบทความ</a></div>';
             return;
         }
@@ -140,11 +183,15 @@ async function loadBlogPost() {
         const title = blog.title || 'บทความ Eden Cafe';
         const excerpt = excerptFrom(blog);
         document.title = `${title} | Eden Cafe Blog`;
-        document.querySelector('meta[name="description"]')?.setAttribute('content', excerpt);
-        document.querySelector('meta[property="og:title"]')?.setAttribute('content', title);
-        document.querySelector('meta[property="og:description"]')?.setAttribute('content', excerpt);
-        document.querySelector('meta[property="og:image"]')?.setAttribute('content', safeImageURL(blog.imageUrl, 'https://www.edencafe.co/Images/Logo.webp'));
+        setMeta('meta[name="description"]', 'content', excerpt);
+        setMeta('meta[property="og:type"]', 'content', 'article');
+        setMeta('meta[property="og:url"]', 'content', window.location.href);
+        setMeta('meta[property="og:title"]', 'content', title);
+        setMeta('meta[property="og:description"]', 'content', excerpt);
+        setMeta('meta[property="og:image"]', 'content', safeImageURL(blog.imageUrl, 'https://www.edencafe.co/Images/Logo.webp'));
+        upsertBlogJsonLd(blog, title, excerpt);
 
+        main.classList.remove('blog-post-loading');
         main.innerHTML = `
             <div class="container">
                 <div class="blog-header">
@@ -161,6 +208,7 @@ async function loadBlogPost() {
         `;
     } catch (error) {
         console.error('Blog post load failed:', error);
+        main.classList.remove('blog-post-loading');
         main.innerHTML = '<div class="container"><h1>โหลดบทความไม่สำเร็จ</h1><p>กรุณาลองใหม่อีกครั้ง</p><a href="/blog" class="btn">กลับไปหน้าบทความ</a></div>';
     }
 }

@@ -7,7 +7,7 @@
     <link rel="icon" type="image/webp" href="Images/Logo.webp">
     
     <meta name="description" content="รวมบทความ แนะนำวิธีชงกาแฟ การเลือกเมล็ดกาแฟไทย และเคล็ดลับไลฟ์สไตล์จาก Eden Cafe">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=4">
     
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -65,39 +65,37 @@
         <section class="blog-listing">
             <div class="container">
                 <h1 style="text-align: center; margin-bottom: 50px;">บทความจาก Eden Cafe</h1>
-                <div class="grid">
-                    <!-- Blog Card 1 -->
-                    <div class="blog-card">
-                        <img loading="lazy" src="https://images.unsplash.com/photo-1497935586351-b67a49e012bf?auto=format&fit=crop&w=600&q=80" alt="กาแฟ Specialty" class="blog-card-img">
+                <div class="grid blog-list-loading" aria-live="polite">
+                    <article class="blog-card" aria-hidden="true">
+                        <div class="blog-skeleton-media"></div>
                         <div class="blog-card-content">
-                            <span class="blog-meta">24 พฤษภาคม 2026 • ความรู้เรื่องกาแฟ</span>
-                            <h3>กาแฟ Specialty คืออะไร? ต่างจากกาแฟทั่วไปอย่างไร</h3>
-                            <p>ค้นหาคำตอบว่าทำไมกาแฟพิเศษถึงมีรสชาติที่ซับซ้อน และขั้นตอนกว่าจะมาเป็น Specialty Coffee...</p>
-                            <a href="/blog-post" class="btn">อ่านเพิ่มเติม</a>
+                            <div class="blog-skeleton-pill"></div>
+                            <div class="blog-skeleton-line"></div>
+                            <div class="blog-skeleton-line medium"></div>
+                            <div class="blog-skeleton-line short"></div>
+                            <div class="blog-skeleton-button"></div>
                         </div>
-                    </div>
-                    
-                    <!-- Blog Card 2 -->
-                    <div class="blog-card">
-                        <img loading="lazy" src="https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&w=600&q=80" alt="เมล็ดกาแฟ" class="blog-card-img">
+                    </article>
+                    <article class="blog-card" aria-hidden="true">
+                        <div class="blog-skeleton-media"></div>
                         <div class="blog-card-content">
-                            <span class="blog-meta">10 พฤษภาคม 2026 • แหล่งปลูกกาแฟ</span>
-                            <h3>เจาะลึก 3 แหล่งปลูกกาแฟอาราบิก้าที่ดีที่สุดในไทย</h3>
-                            <p>พาขึ้นดอยไปทำความรู้จักกับเกษตรกรและพื้นที่ปลูกกาแฟที่ให้รสชาติเอกลักษณ์ระดับโลก...</p>
-                            <a href="/blog-post" class="btn">อ่านเพิ่มเติม</a>
+                            <div class="blog-skeleton-pill"></div>
+                            <div class="blog-skeleton-line"></div>
+                            <div class="blog-skeleton-line medium"></div>
+                            <div class="blog-skeleton-line short"></div>
+                            <div class="blog-skeleton-button"></div>
                         </div>
-                    </div>
-
-                    <!-- Blog Card 3 -->
-                    <div class="blog-card">
-                        <img loading="lazy" src="https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=600&q=80" alt="คาเฟ่นั่งทำงาน" class="blog-card-img">
+                    </article>
+                    <article class="blog-card" aria-hidden="true">
+                        <div class="blog-skeleton-media"></div>
                         <div class="blog-card-content">
-                            <span class="blog-meta">1 พฤษภาคม 2026 • ไลฟ์สไตล์</span>
-                            <h3>เคล็ดลับการเลือกคาเฟ่นั่งทำงานสำหรับ Digital Nomad</h3>
-                            <p>ทำงานนอกสถานที่ให้มีประสิทธิภาพ พร้อมรีวิวโซนทำงานส่วนตัวที่ Eden Cafe...</p>
-                            <a href="/blog-post" class="btn">อ่านเพิ่มเติม</a>
+                            <div class="blog-skeleton-pill"></div>
+                            <div class="blog-skeleton-line"></div>
+                            <div class="blog-skeleton-line medium"></div>
+                            <div class="blog-skeleton-line short"></div>
+                            <div class="blog-skeleton-button"></div>
                         </div>
-                    </div>
+                    </article>
                 </div>
             </div>
         </section>
@@ -214,7 +212,7 @@
         }
     </script>
     <script type="module" src="js/auth.js?v=7"></script>
-    <script type="module" src="js/blog.js?v=1"></script>
+    <script type="module" src="js/blog.js?v=2"></script>
     <!-- Cookie Consent Banner -->
     <div id="cookie-consent"
         style="display: none; position: fixed; bottom: 20px; left: 20px; right: 20px; max-width: 600px; margin: 0 auto; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); padding: 20px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); z-index: 9999; border: 1px solid rgba(0,0,0,0.05); text-align: left;">
