@@ -125,6 +125,23 @@ function renderFeaturedCard(product, categoryMap) {
     `;
 }
 
+function renderFeaturedEmpty(grid, error = false) {
+    const en = isEnglishPage();
+    const title = error
+        ? (en ? 'Could not load featured products right now.' : 'ยังโหลดสินค้าแนะนำไม่ได้ในตอนนี้')
+        : (en ? 'Featured products are being updated.' : 'กำลังอัปเดตสินค้าแนะนำ');
+    const detail = error
+        ? (en ? 'Please refresh again shortly.' : 'ลองรีเฟรชอีกครั้งในอีกสักครู่')
+        : (en ? 'Please check back soon.' : 'กลับมาดูอีกครั้งเร็วๆ นี้');
+    grid.classList.add('featured-products-empty');
+    grid.innerHTML = `
+        <div class="featured-empty-state">
+            <strong>${escapeHTML(title)}</strong>
+            <span>${escapeHTML(detail)}</span>
+        </div>
+    `;
+}
+
 async function fetchCategoryMap() {
     if (!db) return {};
     try {
@@ -141,7 +158,11 @@ async function fetchCategoryMap() {
 
 async function loadFeaturedProducts() {
     const grid = document.querySelector('#recommended-shop .shop-grid');
-    if (!grid || !db) return;
+    if (!grid) return;
+    if (!db) {
+        renderFeaturedEmpty(grid, true);
+        return;
+    }
 
     try {
         const [categoryMap, productSnapshot] = await Promise.all([
@@ -158,10 +179,15 @@ async function loadFeaturedProducts() {
             })
             .slice(0, FEATURED_LIMIT);
 
-        if (!products.length) return;
+        if (!products.length) {
+            renderFeaturedEmpty(grid, false);
+            return;
+        }
+        grid.classList.remove('featured-products-loading', 'featured-products-empty');
         grid.innerHTML = products.map(product => renderFeaturedCard(product, categoryMap)).join('');
     } catch (error) {
         console.error('Failed to load featured products:', error);
+        renderFeaturedEmpty(grid, true);
     }
 }
 

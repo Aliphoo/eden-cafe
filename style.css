@@ -1074,6 +1074,100 @@ footer p {
     display: none;
 }
 
+.featured-products-loading .featured-skeleton-card {
+    background: rgba(255,255,255,0.88);
+    border: 1px solid rgba(15, 122, 61, 0.08);
+    box-shadow: 0 10px 26px rgba(15, 122, 61, 0.06);
+    overflow: hidden;
+}
+
+.featured-products-loading .featured-skeleton-card:hover {
+    box-shadow: 0 10px 26px rgba(15, 122, 61, 0.06);
+    transform: none;
+}
+
+.featured-skeleton-media,
+.featured-skeleton-line,
+.featured-skeleton-pill,
+.featured-skeleton-button {
+    background: linear-gradient(90deg, rgba(225, 236, 228, 0.72), rgba(246, 250, 247, 0.95), rgba(225, 236, 228, 0.72));
+    background-size: 220% 100%;
+    animation: featuredSkeletonShimmer 1.25s ease-in-out infinite;
+}
+
+.featured-skeleton-media {
+    aspect-ratio: 1 / 1;
+    border-bottom: 1px solid rgba(15, 122, 61, 0.06);
+}
+
+.featured-skeleton-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+}
+
+.featured-skeleton-pill {
+    border-radius: 999px;
+    height: 14px;
+    width: 42%;
+}
+
+.featured-skeleton-line {
+    border-radius: 10px;
+    height: 16px;
+}
+
+.featured-skeleton-line.short {
+    width: 62%;
+}
+
+.featured-skeleton-line.medium {
+    width: 82%;
+}
+
+.featured-skeleton-action {
+    align-items: center;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    margin-top: 10px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(15, 122, 61, 0.08);
+}
+
+.featured-skeleton-button {
+    border-radius: 999px;
+    height: 36px;
+    width: 44%;
+}
+
+.featured-empty-state {
+    background: rgba(255,255,255,0.9);
+    border: 1px dashed rgba(15, 122, 61, 0.22);
+    border-radius: 18px;
+    color: #385343;
+    grid-column: 1 / -1;
+    padding: 34px 20px;
+    text-align: center;
+}
+
+.featured-empty-state strong,
+.featured-empty-state span {
+    display: block;
+}
+
+.featured-empty-state strong {
+    color: var(--primary-color);
+    font-size: 1.15rem;
+    margin-bottom: 8px;
+}
+
+@keyframes featuredSkeletonShimmer {
+    0% { background-position: 120% 0; }
+    100% { background-position: -120% 0; }
+}
+
 #recommended-shop .shop-card {
     height: 100%;
 }
