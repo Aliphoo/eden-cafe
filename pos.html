@@ -6,7 +6,7 @@
     <title>Eden POS | Eden OS</title>
     <link rel="icon" href="Images/Logo.webp" type="image/webp">
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="pos.css?v=8">
+    <link rel="stylesheet" href="pos.css?v=9">
 </head>
 <body>
     <div id="admin-login" style="display: none;">
@@ -118,20 +118,27 @@
                     <div>
                         <span class="system-kicker">Receipt Control</span>
                         <h2>จัดการใบเสร็จและบิลค้างชำระ</h2>
-                        <p>ค้นหาใบเสร็จ POS ย้อนหลัง พิมพ์ซ้ำ และเรียกบิลค้างชำระกลับไปปิดยอดได้จากหน้าภาพรวม</p>
+                        <p>เลือกวันที่เพื่อดึงข้อมูลรายวัน ค้นหาใบเสร็จ POS พิมพ์ซ้ำ และเรียกบิลค้างชำระกลับไปปิดยอดได้จากหน้าภาพรวม</p>
                     </div>
-                    <button id="pos-receipt-refresh-btn" class="btn-action btn-view" type="button" onclick="refreshPosReceipts()">รีเฟรชใบเสร็จ</button>
+                    <div class="pos-receipt-controls">
+                        <label class="pos-receipt-date-field" for="pos-receipt-date">
+                            <span>ประจำวันที่</span>
+                            <input id="pos-receipt-date" type="date" required>
+                        </label>
+                        <button id="pos-receipt-today-btn" class="btn-action btn-view" type="button" onclick="setPosReceiptDateToday()">วันนี้</button>
+                        <button id="pos-receipt-refresh-btn" class="btn-action btn-view" type="button" onclick="refreshPosReceipts()">รีเฟรชใบเสร็จ</button>
+                    </div>
                 </div>
                 <div class="pos-receipt-stats">
                     <article>
-                        <span>ใบเสร็จล่าสุด</span>
+                        <span>ใบเสร็จรายวัน</span>
                         <strong id="pos-receipt-count">0</strong>
-                        <small>รายการที่ปิดยอดแล้ว</small>
+                        <small id="pos-receipt-date-label">ประจำวันที่ -</small>
                     </article>
                     <article>
                         <span>ยอดรับชำระ</span>
                         <strong id="pos-receipt-total">฿0.00</strong>
-                        <small>จากใบเสร็จที่โหลดล่าสุด</small>
+                        <small>ยอดรับชำระรายวัน</small>
                     </article>
                     <article>
                         <span>บิลค้างชำระ</span>
@@ -142,7 +149,7 @@
                 <div class="pos-receipt-workspace">
                     <aside class="pos-receipt-browser">
                         <div class="pos-receipt-search-row">
-                            <input id="pos-receipt-search" type="search" placeholder="ค้นหาเลขใบเสร็จ / ลูกค้า / วิธีชำระ">
+                            <input id="pos-receipt-search" type="search" placeholder="ค้นหาในวันที่เลือก: เลขใบเสร็จ / ลูกค้า / วิธีชำระ">
                         </div>
                         <div id="pos-receipt-list" class="pos-receipt-list">
                             <div class="pos-empty">กำลังโหลดใบเสร็จ...</div>
@@ -428,6 +435,6 @@
         </main>
     </div>
 
-    <script type="module" src="js/pos.js?v=13"></script>
+    <script type="module" src="js/pos.js?v=14"></script>
 </body>
 </html>

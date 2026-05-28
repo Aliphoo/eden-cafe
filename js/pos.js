@@ -35,6 +35,7 @@ let posControlsBound = false;
 let posReceiptOrders = [];
 let posSelectedReceiptId = '';
 let posReceiptSearchTerm = '';
+let posReceiptBusinessDate = posTodayBusinessDate();
 const POS_VIEW_KEY = 'edenPosActiveView';
 const POS_PAYMENT_METHODS = {
     cash: { label: 'เงินสด', hint: 'รับเงินสดและคำนวณเงินทอน' },
@@ -213,6 +214,45 @@ function posTimestampMillis(value) {
     const parsed = Date.parse(value);
     return Number.isFinite(parsed) ? parsed : 0;
 }
+function posBusinessDateFromDate(date = new Date()) {
+    const safeDate = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
+    const year = safeDate.getFullYear();
+    const month = String(safeDate.getMonth() + 1).padStart(2, '0');
+    const day = String(safeDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+function posTodayBusinessDate() {
+    return posBusinessDateFromDate(new Date());
+}
+function posDateFromBusinessDate(value) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return null;
+    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+function posBusinessDateLabel(value = posReceiptBusinessDate) {
+    const date = posDateFromBusinessDate(value);
+    return date ? date.toLocaleDateString('th-TH', { dateStyle: 'long' }) : '-';
+}
+function posBusinessDateFromOrderDateText(value) {
+    const text = String(value || '').trim();
+    const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    if (!match) return '';
+    let year = Number(match[3]);
+    if (year < 100) year += 2500;
+    if (year > 2400) year -= 543;
+    const date = new Date(year, Number(match[2]) - 1, Number(match[1]));
+    return Number.isNaN(date.getTime()) ? '' : posBusinessDateFromDate(date);
+}
+function posOrderBusinessDate(order = {}) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(order.businessDate || ''))) return order.businessDate;
+    const timestamp = posOrderTimestamp(order);
+    if (timestamp) return posBusinessDateFromDate(new Date(timestamp));
+    return posBusinessDateFromOrderDateText(order.date);
+}
+function posOrderMatchesReceiptDate(order = {}) {
+    return posOrderBusinessDate(order) === posReceiptBusinessDate;
+}
 function posOrderTimestamp(order = {}) {
     return posTimestampMillis(order.closedAt || order.updatedAt || order.createdAt || order.timestamp) || posTimestampMillis(order.date);
 }
@@ -302,6 +342,9 @@ function clearLoginError() {
 
 document.addEventListener('DOMContentLoaded', () => {
     initPosViewSwitcher();
+    syncPosReceiptDateInput();
+    renderPosReceiptManager();
+    renderPosOverviewOpenBills();
     window.addEventListener('hashchange', () => {
         if (window.location.hash === '#pos-sales') setPosView('sales', { persist: false });
         if (window.location.hash === '#pos-overview') setPosView('overview', { persist: false });
@@ -889,15 +932,16 @@ function renderPosOverviewOpenBills() {
     const list = document.getElementById('pos-overview-open-bills-list');
     const countEl = document.getElementById('pos-overview-open-count');
     const totalEl = document.getElementById('pos-overview-open-total');
-    const openTotal = posOpenBills.reduce((sum, order) => sum + safeNumber(order.totalAmount ?? order.total), 0);
-    if (countEl) countEl.textContent = posOpenBills.length.toLocaleString('th-TH');
+    const dailyOpenBills = posOpenBills.filter(posOrderMatchesReceiptDate);
+    const openTotal = dailyOpenBills.reduce((sum, order) => sum + safeNumber(order.totalAmount ?? order.total), 0);
+    if (countEl) countEl.textContent = dailyOpenBills.length.toLocaleString('th-TH');
     if (totalEl) totalEl.textContent = 'รวม ' + posMoney(openTotal);
     if (!list) return;
-    if (!posOpenBills.length) {
-        list.innerHTML = '<div class="pos-empty">ไม่มีบิลค้างชำระตอนนี้</div>';
+    if (!dailyOpenBills.length) {
+        list.innerHTML = `<div class="pos-empty">ไม่มีบิลค้างชำระประจำวันที่ ${escapeHTML(posBusinessDateLabel())}</div>`;
         return;
     }
-    list.innerHTML = posOpenBills.slice(0, 8).map(order => {
+    list.innerHTML = dailyOpenBills.slice(0, 8).map(order => {
         const itemCount = Array.isArray(order.items) ? order.items.reduce((sum, item) => sum + safeNumber(item.quantity, 1), 0) : 0;
         return `
             <article class="pos-overview-open-card">
@@ -919,6 +963,7 @@ function renderReceiptsSnapshot(snapshot) {
     posReceiptOrders = docs
         .map(docSnap => ({ firestoreId: docSnap.id, ...(docSnap.data() || {}) }))
         .filter(order => order.source === 'pos' && (order.billStatus === 'paid' || order.paymentStatus === 'paid'))
+        .filter(posOrderMatchesReceiptDate)
         .sort((a, b) => posOrderTimestamp(b) - posOrderTimestamp(a));
     if (posSelectedReceiptId && !posReceiptOrders.some(order => order.firestoreId === posSelectedReceiptId)) {
         posSelectedReceiptId = '';
@@ -930,7 +975,7 @@ function renderReceiptsSnapshot(snapshot) {
 }
 
 async function refreshPosReceiptsOnce() {
-    const snapshot = await getDocs(query(collection(db, 'orders'), where('billStatus', '==', 'paid'), limit(120)));
+    const snapshot = await getDocs(query(collection(db, 'orders'), where('billStatus', '==', 'paid'), limit(500)));
     renderReceiptsSnapshot(snapshot);
 }
 
@@ -961,16 +1006,18 @@ function renderPosReceiptManager() {
     const printBtn = document.getElementById('pos-selected-receipt-print');
     const countEl = document.getElementById('pos-receipt-count');
     const totalEl = document.getElementById('pos-receipt-total');
+    const dateLabelEl = document.getElementById('pos-receipt-date-label');
     const receipts = filteredPosReceipts();
     const receiptTotal = posReceiptOrders.reduce((sum, order) => sum + safeNumber(order.totalAmount ?? order.total), 0);
     if (countEl) countEl.textContent = posReceiptOrders.length.toLocaleString('th-TH');
     if (totalEl) totalEl.textContent = posMoney(receiptTotal);
+    if (dateLabelEl) dateLabelEl.textContent = 'ประจำวันที่ ' + posBusinessDateLabel();
 
     if (list) {
         if (!posReceiptOrders.length) {
-            list.innerHTML = '<div class="pos-empty">ยังไม่มีใบเสร็จที่ปิดยอดแล้ว</div>';
+            list.innerHTML = `<div class="pos-empty">ยังไม่มีใบเสร็จประจำวันที่ ${escapeHTML(posBusinessDateLabel())}</div>`;
         } else if (!receipts.length) {
-            list.innerHTML = '<div class="pos-empty">ไม่พบใบเสร็จตามคำค้นหา</div>';
+            list.innerHTML = `<div class="pos-empty">ไม่พบใบเสร็จตามคำค้นหาในวันที่ ${escapeHTML(posBusinessDateLabel())}</div>`;
         } else {
             list.innerHTML = receipts.slice(0, 60).map(order => {
                 const active = order.firestoreId === posSelectedReceiptId;
@@ -1001,6 +1048,27 @@ function renderPosReceiptManager() {
         preview.innerHTML = selected
             ? buildPosReceiptHTML(selected)
             : '<div class="pos-empty">เลือกใบเสร็จจากรายการด้านซ้ายเพื่อดูรายละเอียด</div>';
+    }
+}
+
+function syncPosReceiptDateInput() {
+    const input = document.getElementById('pos-receipt-date');
+    if (input && input.value !== posReceiptBusinessDate) input.value = posReceiptBusinessDate;
+}
+
+async function setPosReceiptBusinessDate(value = posTodayBusinessDate(), options = {}) {
+    const nextDate = /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value) : posTodayBusinessDate();
+    const changed = nextDate !== posReceiptBusinessDate;
+    posReceiptBusinessDate = nextDate;
+    syncPosReceiptDateInput();
+    if (changed) posSelectedReceiptId = '';
+    renderPosReceiptManager();
+    renderPosOverviewOpenBills();
+    if (options.reload !== false) {
+        await Promise.allSettled([
+            refreshPosReceiptsOnce(),
+            refreshOpenBillsOnce()
+        ]);
     }
 }
 
@@ -1087,12 +1155,14 @@ function renderPosScreen() {
 
 function initPosModule() {
     if (posControlsBound) {
+        syncPosReceiptDateInput();
         renderPosScreen();
         renderPosReceiptManager();
         renderPosOverviewOpenBills();
         return;
     }
     restorePosCart();
+    syncPosReceiptDateInput();
     document.getElementById('pos-search-input')?.addEventListener('input', (event) => {
         posSearchTerm = event.target.value || '';
         renderPosProducts();
@@ -1121,6 +1191,12 @@ function initPosModule() {
     document.getElementById('pos-receipt-search')?.addEventListener('input', (event) => {
         posReceiptSearchTerm = event.target.value || '';
         renderPosReceiptManager();
+    });
+    document.getElementById('pos-receipt-date')?.addEventListener('change', (event) => {
+        setPosReceiptBusinessDate(event.target.value).catch(error => {
+            console.error('Unable to load daily receipt data:', error);
+            alert('โหลดข้อมูลรายวันไม่สำเร็จ: ' + error.message);
+        });
     });
     document.getElementById('pos-customer-search')?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
@@ -1288,6 +1364,7 @@ function buildPosOrderFields(user, options = {}) {
     const orderItems = currentPosOrderItems();
     const now = new Date();
     const receiptNo = options.receiptNo || generatePosReceiptNo();
+    const businessDate = options.businessDate || posBusinessDateFromDate(now);
     const paymentStatus = options.paymentStatus || 'paid';
     const pendingPayment = paymentStatus === 'pending';
     const paidAmount = pendingPayment
@@ -1308,6 +1385,8 @@ function buildPosOrderFields(user, options = {}) {
             id: receiptNo,
             receiptNo,
             date: options.date || now.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }),
+            businessDate,
+            businessDateLabel: posBusinessDateLabel(businessDate),
             source: 'pos',
             orderType: 'pos',
             status: options.status || 'completed',
@@ -1607,13 +1686,16 @@ window.refreshPosReceipts = async () => {
     const list = document.getElementById('pos-receipt-list');
     const button = document.getElementById('pos-receipt-refresh-btn');
     const originalText = button?.textContent || '';
-    if (list) list.innerHTML = '<div class="pos-empty">กำลังรีเฟรชใบเสร็จ...</div>';
+    if (list) list.innerHTML = `<div class="pos-empty">กำลังรีเฟรชใบเสร็จประจำวันที่ ${escapeHTML(posBusinessDateLabel())}...</div>`;
     try {
         if (button) {
             button.disabled = true;
             button.textContent = 'กำลังรีเฟรช...';
         }
-        await refreshPosReceiptsOnce();
+        await Promise.all([
+            refreshPosReceiptsOnce(),
+            refreshOpenBillsOnce()
+        ]);
     } catch (error) {
         console.error('Refresh POS receipts failed:', error);
         if (list) list.innerHTML = '<div class="pos-empty pos-error">รีเฟรชใบเสร็จไม่สำเร็จ: ' + escapeHTML(error.message) + '</div>';
@@ -1623,6 +1705,13 @@ window.refreshPosReceipts = async () => {
             button.textContent = originalText || 'รีเฟรชใบเสร็จ';
         }
     }
+};
+
+window.setPosReceiptDateToday = () => {
+    setPosReceiptBusinessDate(posTodayBusinessDate()).catch(error => {
+        console.error('Unable to load today receipt data:', error);
+        alert('โหลดข้อมูลวันนี้ไม่สำเร็จ: ' + error.message);
+    });
 };
 
 window.selectPosReceipt = (orderId) => {
