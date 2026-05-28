@@ -1,0 +1,17 @@
+{
+  "name": "edencafe-functions",
+  "description": "Scheduled backend jobs for Eden Cafe",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "lint": "node --check index.js"
+  },
+  "dependencies": {
+    "basic-ftp": "^5.2.1",
+    "firebase-admin": "^12.7.0",
+    "firebase-functions": "^6.3.2"
+  },
+  "private": true
+}

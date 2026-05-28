@@ -1,0 +1,30 @@
+﻿# Dependencies
+node_modules/
+functions/node_modules/
+
+# Build/cache/runtime
+.firebase/
+.cache/
+.tmp*/
+tmp/
+backups/
+__pycache__/
+*.pyc
+*.log
+npm-debug.log*
+
+# Deployment archives
+*.zip
+
+# Local/private files
+.env
+.env.*
+SPACESHIP_*.txt
+*_SECRET*.txt
+*_PASSWORD*.txt
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,343 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eden Cafe | Our Menu</title>
+    <link rel="icon" type="image/webp" href="Images/Logo.webp">
+    
+    <!-- SEO Alternate Links -->
+    <link rel="alternate" hreflang="th" href="/" />
+    <link rel="alternate" hreflang="en" href="/en" />
+    <link rel="alternate" hreflang="x-default" href="/" />
+    
+    <!-- Meta Descriptions for SEO -->
+    <meta name="description" content="Experience the best Specialty Coffee at Eden Cafe Thailand. A minimalist, nature-inspired sanctuary serving fresh roasted Thai coffee beans.">
+    <meta name="keywords" content="Eden Cafe, Specialty Coffee Thailand, Coffee shop Bangkok, Minimalist Cafe, Thai Arabica">
+    
+    <link rel="stylesheet" href="style.css?v=5">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- GEO & Local SEO: LocalBusiness Schema Markup -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "CafeOrCoffeeShop",
+      "name": "Eden Cafe",
+      "image": "https://edencafe.co/Images/Logo.webp",
+      "@id": "https://edencafe.co/en",
+      "url": "https://edencafe.co/en",
+      "telephone": "+66-2-000-0000",
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "123 Sukhumvit Road",
+        "addressLocality": "Bangkok",
+        "postalCode": "10110",
+        "addressCountry": "TH"
+      },
+      "geo": {
+        "@type": "GeoCoordinates",
+        "latitude": 13.7563,
+        "longitude": 100.5018
+      },
+      "servesCuisine": ["Coffee", "Bakery", "Thai Fusion"],
+      "priceRange": "$$",
+      "makesOffer": [
+        {
+          "@type": "Offer",
+          "itemOffered": {
+            "@type": "Product",
+            "name": "Coffee Beans & Merchandise"
+          }
+        },
+        {
+          "@type": "Offer",
+          "itemOffered": {
+            "@type": "Service",
+            "name": "Private Room Booking"
+          }
+        }
+      ],
+      "openingHoursSpecification": {
+        "@type": "OpeningHoursSpecification",
+        "dayOfWeek": [
+          "Monday",
+          "Tuesday",
+          "Wednesday",
+          "Thursday",
+          "Friday",
+          "Saturday",
+          "Sunday"
+        ],
+        "opens": "07:30",
+        "closes": "18:00"
+      }
+    }
+    </script>
+    
+    <!-- AEO (Answer Engine Optimization): FAQ Schema Markup -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [{
+        "@type": "Question",
+        "name": "What is the recommended menu at Eden Cafe?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Our highly recommended menu is the Signature Thai Specialty Coffee, made from authentic Arabica beans from Northern Thailand, as well as our premium matcha green tea."
+        }
+      }, {
+        "@type": "Question",
+        "name": "Is Eden Cafe a good place for remote work?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Absolutely! We provide complimentary high-speed Wi-Fi and multiple power outlets in a quiet, minimalist atmosphere perfect for remote working."
+        }
+      }]
+    }
+    </script>
+    <!-- Open Graph / Social Media Meta Tags -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://edencafe.co/">
+    <meta property="og:title" content="Eden Cafe | Premium Specialty Coffee in Thailand">
+    <meta property="og:description" content="Experience authentic Thai specialty coffee in a serene minimal atmosphere at Eden Cafe.">
+    <meta property="og:image" content="https://edencafe.co/Images/Logo.webp">
+    <meta name="twitter:card" content="summary_large_image">
+</head>
+<body>
+    <!-- Header & Navigation -->
+    <header class="navbar">
+        <div class="container">
+            <a href="/en" class="logo">
+                <img src="Images/Logo.webp" alt="Eden Cafe Logo" class="logo-img">
+            </a>
+            <div class="menu-toggle" id="mobile-menu">
+                <span class="bar"></span>
+                <span class="bar"></span>
+                <span class="bar"></span>
+            </div>
+            <nav>
+                <ul class="nav-links">
+                    <li><a href="/en#home">Home</a></li>
+                    <li><a href="/en#about">About Us</a></li>
+                    <li><a href="/menu-en" class="active">Menu</a></li>
+                    <li><a href="/shop-en">Shop</a></li>
+                    <li><a href="/booking-en">Book a Room</a></li>
+                    <li><a href="/blog-en">Blog</a></li>
+                    <li><a href="/en#faq">FAQ</a></li>
+                </ul>
+            </nav>
+                        <div class="nav-actions">
+                <a href="/checkout-en" class="global-cart-icon" aria-label="Cart">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="9" cy="21" r="1"></circle>
+                        <circle cx="20" cy="21" r="1"></circle>
+                        <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+                    </svg>
+                    <span class="global-cart-badge" id="global-cart-badge" style="display: none;">0</span>
+                </a>
+                <div class="lang-switcher">
+                    <a href="/menu">TH</a> | <a href="/menu-en" class="active">EN</a>
+                </div>
+                <div class="auth-container"></div>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <!-- Menu/Products Section -->
+        <section id="menu" class="products menu-main" style="padding-top: 100px; min-height: 80vh; background-color: var(--light-gray);">
+            <div class="container">
+                <div style="text-align: center; margin-bottom: 40px;">
+                    <h1 style="font-size: 2.8rem; margin-bottom: 15px;">Our Menu</h1>
+                </div>
+                <div class="shop-section" id="menu-products">
+                    <p style="text-align:center; width:100%;">Loading menu...</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer id="contact">
+        <div class="container">
+
+            <div class="footer-reviews"
+                style="text-align: center; margin-bottom: 50px; overflow: hidden; padding-bottom: 10px;">
+                <h3 style="color: white; margin-bottom: 20px;">รีวิวจากลูกค้าจริงบน Google Maps</h3>
+                <a href="https://maps.app.goo.gl/BYJNa4mXjVNaLDPy5" target="_blank" rel="noopener noreferrer" class="review-stat"
+                    style="display: inline-flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.2); padding: 12px 25px; border-radius: 50px; color: white; text-decoration: none; backdrop-filter: blur(5px); transition: background 0.3s; border: 1px solid rgba(255,255,255,0.3);">
+                    <svg viewBox="0 0 48 48" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+                        <path fill="#EA4335"
+                            d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                        <path fill="#4285F4"
+                            d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                        <path fill="#FBBC05"
+                            d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                        <path fill="#34A853"
+                            d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                    </svg>
+                    <strong id="google-rating-score" style="font-size: 1.2rem; color: #FFD700;">★ 4.8</strong>
+                    <span id="google-rating-count" style="font-size: 0.95rem;">(978 รีวิวบน Google Maps)</span>
+                </a>
+                <div class="hero-reviews" id="google-reviews-container">
+                    <div class="hero-review-card">
+                        <div style="display: flex; gap: 10px; margin-bottom: 8px; align-items: center;">
+                            <div style="width: 32px; height: 32px; background: rgba(255,255,255,0.3); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.9rem;">G</div>
+                            <div>
+                                <div style="font-size: 0.85rem; font-weight: bold; line-height: 1;">Google Maps Reviews</div>
+                                <div style="color: #FFD700; font-size: 0.75rem; margin-top: 3px;">Updating...</div>
+                            </div>
+                        </div>
+                        <p style="font-size: 0.9rem; margin: 0; font-style: italic; opacity: 0.9;">"Real Google Maps reviews will appear after the cache refreshes."</p>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-grid">
+                <div>
+                    <h4>Eden Cafe.</h4>
+                    <p>กาแฟพิเศษระดับพรีเมียม สวนพักผ่อนส่วนตัวของคุณในเมืองใหญ่</p>
+                </div>
+                <div>
+                    <h4>ติดต่อและสถานที่ตั้ง</h4>
+                    <p>123 ถนนสุขุมวิท กรุงเทพมหานคร 10110</p>
+                    <p>อีเมล: hello@edencafe.co</p>
+                    <p>โทร: +66-2-000-0000</p>
+                </div>
+                <div>
+                    <h4>ติดตามเรา</h4>
+                    <div class="social-icons-premium">
+                        <a href="https://instagram.com" target="_blank" aria-label="Instagram">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
+                                <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
+                                <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
+                            </svg>
+                        </a>
+                        <a href="https://facebook.com" target="_blank" aria-label="Facebook">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path>
+                            </svg>
+                        </a>
+                        <a href="https://line.me" target="_blank" aria-label="LINE">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path
+                                    d="M21.5 10.5C21.5 5.8 17.2 2 12 2S2.5 5.8 2.5 10.5c0 4.2 3.5 7.8 8.1 8.4.3.1.8.3.9.7l.2 1.9c0 .1 0 .2.1.2.1 0 .2-.1.3-.2l2.6-3.1c.3-.4.8-.6 1.3-.6 3.1 0 5.6-3.3 5.6-7.3z">
+                                </path>
+                            </svg>
+                        </a>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom"
+                style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 20px;">
+                <p class="copyright">© 2026 Eden Cafe Thailand. สงวนลิขสิทธิ์ | Optimized for AEO & GEO</p>
+                <div class="visitor-stats-mini"
+                    style="display: flex; gap: 20px; font-size: 0.85rem; color: rgba(255,255,255,0.9); background: rgba(255, 255, 255, 0.1); padding: 10px 20px; border-radius: 50px; border: 1px solid rgba(255, 255, 255, 0.2); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1); backdrop-filter: blur(5px);">
+                    <span>👁️ เข้าชมวันนี้: <strong id="daily-views" style="color: #fff;">0</strong></span>
+                    <span>|</span>
+                    <span>📈 เข้าชมสะสม: <strong id="total-views" style="color: #fff;">0</strong></span>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        const menu = document.querySelector('#mobile-menu');
+        const navLinks = document.querySelector('.nav-links');
+        const navActions = document.querySelector('.nav-actions');
+
+        if (menu) {
+            menu.addEventListener('click', function () {
+                menu.classList.toggle('is-active');
+                navLinks.classList.toggle('active');
+                navActions.classList.toggle('active');
+            });
+
+            // Close menu when a link is clicked
+            const navItems = document.querySelectorAll('.nav-links a');
+            navItems.forEach(item => {
+                item.addEventListener('click', () => {
+                    menu.classList.remove('is-active');
+                    navLinks.classList.remove('active');
+                    navActions.classList.remove('active');
+                });
+            });
+        }
+    </script>
+    <script type="module" src="js/auth.js?v=10"></script>
+    <!-- Cookie Consent Banner -->
+    <div id="cookie-consent"
+        style="display: none; position: fixed; bottom: 20px; left: 20px; right: 20px; max-width: 600px; margin: 0 auto; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); padding: 20px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); z-index: 9999; border: 1px solid rgba(0,0,0,0.05); text-align: left;">
+        <div style="display: flex; flex-direction: column; gap: 15px;">
+            <div>
+                <strong style="display: block; margin-bottom: 5px; font-size: 1.05rem; color: #2c3e50;">🍪
+                    การตั้งค่าคุกกี้ (Cookie Policy)</strong>
+                <p style="margin: 0; font-size: 0.85rem; color: #555; line-height: 1.5;">
+                    เว็บไซต์นี้ใช้คุกกี้เพื่อมอบประสบการณ์ที่ดีที่สุดในการใช้งาน
+                    และช่วยให้เราเข้าใจการเข้าถึงเว็บไซต์ของคุณ (ตาม พ.ร.บ. คุ้มครองข้อมูลส่วนบุคคล - PDPA)
+                    หากคุณใช้งานเว็บไซต์ต่อ ถือว่าคุณยอมรับการใช้งานคุกกี้ของเรา</p>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button id="accept-cookies"
+                    style="background: var(--primary-color); color: white; border: none; padding: 8px 20px; border-radius: 5px; cursor: pointer; font-family: 'Prompt', sans-serif; font-weight: 500; transition: opacity 0.3s;"
+                    onmouseover="this.style.opacity=0.8" onmouseout="this.style.opacity=1">ยอมรับทั้งหมด
+                    (Accept)</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            if (!localStorage.getItem('cookieConsent')) {
+                document.getElementById('cookie-consent').style.display = 'block';
+            }
+            document.getElementById('accept-cookies').addEventListener('click', function () {
+                localStorage.setItem('cookieConsent', 'true');
+                document.getElementById('cookie-consent').style.display = 'none';
+            });
+        });
+    </script>
+    <script src="js/cart.js?v=1"></script>
+    <script type="module" src="js/menu.js?v=8"></script>
+    <script type="module" src="js/footer-settings.js?v=2"></script>
+    <script src="js/reviews.js?v=6"></script>
+<script type="module" src="js/counter.js?v=3"></script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

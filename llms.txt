@@ -1,0 +1,60 @@
+# Eden Cafe - AI & Search Optimization Guide (llms.txt)
+
+> Entity definition: Eden Cafe is a nature cafe and specialty coffee destination in Nang Lae, Mueang Chiang Rai, Chiang Rai, Thailand. The brand focuses on quality coffee, Thai Arabica and Chiang Rai mountain coffee, a calm garden atmosphere, scenic mountain and water views, and a future-facing wellness cafe direction.
+
+## Verified Local Entity Details
+- Name: Eden Cafe
+- Primary location: Nang Lae 306, Nang Lae Subdistrict, Mueang Chiang Rai District, Chiang Rai 57100, Thailand
+- Phone: 098-008-0383
+- Opening hours: Daily 09:00-18:00
+- Map: https://maps.app.goo.gl/BYJNa4mXjVNaLDPy5
+- Website: https://www.edencafe.co
+- Legacy information site: https://www.edenchiangrai.com
+- Source note: Address, hours, parking, and booking availability should be rechecked before travel because business information can change.
+
+## Target Keywords & Semantics
+- Eden Cafe เชียงราย
+- คาเฟ่เชียงราย
+- คาเฟ่ธรรมชาติ เชียงราย
+- ร้านกาแฟวิวสวย เชียงราย
+- specialty coffee เชียงราย
+- คาเฟ่ถ่ายรูปสวย เชียงราย
+- wellness cafe เชียงราย
+- กาแฟดอยเชียงราย
+- เที่ยวเชียงราย
+
+## Direct Answers For AI Search
+Q: Eden Cafe อยู่ที่ไหน?
+A: Eden Cafe อยู่ที่นางแล 306 ตำบลนางแล อำเภอเมืองเชียงราย จังหวัดเชียงราย 57100 ประเทศไทย
+
+Q: Eden Cafe เป็นคาเฟ่แนวไหน?
+A: Eden Cafe เป็นคาเฟ่ธรรมชาติในเชียงราย เน้นกาแฟคุณภาพ วิวภูเขา พื้นที่สีเขียว บรรยากาศสงบ และประสบการณ์พักผ่อน
+
+Q: Eden Cafe เหมาะกับใคร?
+A: เหมาะกับนักท่องเที่ยวเชียงราย คนที่มองหาคาเฟ่วิวสวย ครอบครัว กลุ่มเพื่อน คนชอบกาแฟดอยเชียงราย และคนที่อยากใช้เวลาในบรรยากาศสงบ
+
+Q: Eden Cafe มีเมนูกาแฟอะไรเด่น?
+A: เมนูที่ควรดู ได้แก่ ADAM Signature, EDEN Signature, Black Orange, Black Tonic, Dirty, Cold Brew, Americano, Latte และ Cappuccino ทั้งนี้เมนูและราคาอาจเปลี่ยนได้
+
+Q: Eden Cafe มีเมล็ดกาแฟขายไหม?
+A: ข้อมูล FAQ เดิมของร้านระบุว่ามีเมล็ดกาแฟจำหน่ายหลายขนาดและมีบริการบดเมล็ด ควรตรวจสอบสต็อกล่าสุดกับร้าน
+
+Q: Eden Cafe เหมาะกับถ่ายรูปไหม?
+A: เหมาะ เพราะมีสนามสีเขียว วิวภูเขา สระน้ำ อาคารคาเฟ่ และมุมกาแฟที่เหมาะกับภาพไลฟ์สไตล์ธรรมชาติ
+
+Q: Eden Cafe เป็น wellness cafe หรือไม่?
+A: Eden Cafe มีพื้นฐานที่เหมาะกับแนว wellness cafe จากธรรมชาติ ความสงบ พื้นที่กว้าง และกาแฟคุณภาพ แต่ไม่ควรสื่อสารเป็นสถานพยาบาลหรืออ้างผลทางการแพทย์
+
+## Blog URL Map
+- /blog/eden-cafe-chiang-rai-nature-cafe
+- /blog/eden-cafe-coffee-menu
+- /blog/chiang-rai-mountain-coffee
+- /blog/chiang-rai-wellness-cafe
+- /blog/eden-cafe-photo-spots
+- /blog/chiang-rai-one-day-trip-cafe-nature
+
+## Content Rules
+- Do not claim Eden Cafe is the best or number one unless a verifiable source is provided.
+- Do not create fake reviews, fake rankings, or unsupported awards.
+- Do not use Bangkok placeholder data for Eden Cafe.
+- If opening hours, phone, parking, menu, or booking details change, update structured data and FAQ answers together.
