@@ -621,6 +621,36 @@ function posStorageKey() {
     return 'edenAdminPosCartV1';
 }
 
+function posActiveBillStorageKey() {
+    return 'edenAdminPosActiveBillV1';
+}
+
+function serializePosActiveBill(order = null) {
+    if (!order) return null;
+    return {
+        firestoreId: order.firestoreId || '',
+        id: order.id || '',
+        receiptNo: order.receiptNo || '',
+        uid: order.uid || '',
+        customerName: order.customerName || '',
+        phone: order.phone || '',
+        note: order.note || '',
+        customerUid: order.customerUid || '',
+        customerEmail: order.customerEmail || '',
+        customerLineId: order.customerLineId || '',
+        customerTier: order.customerTier || '',
+        customerMemberCode: order.customerMemberCode || '',
+        customerProfileSynced: !!order.customerProfileSynced,
+        paymentMethod: order.paymentMethod || 'cash',
+        discount: safeNumber(order.discount),
+        source: order.source || 'pos',
+        orderType: order.orderType || 'pos',
+        billStatus: order.billStatus || 'open',
+        paymentStatus: order.paymentStatus || 'pending',
+        items: Array.isArray(order.items) ? order.items : []
+    };
+}
+
 function restorePosCart() {
     try {
         const saved = JSON.parse(sessionStorage.getItem(posStorageKey()) || '[]');
@@ -636,6 +666,33 @@ function persistPosCart() {
         sessionStorage.setItem(posStorageKey(), JSON.stringify(posCart));
     } catch (error) {
         console.warn('Unable to persist POS cart:', error);
+    }
+}
+
+function restorePosActiveBill() {
+    try {
+        const saved = JSON.parse(sessionStorage.getItem(posActiveBillStorageKey()) || 'null');
+        if (!saved || !saved.firestoreId) {
+            posActiveBill = null;
+            return;
+        }
+        posActiveBill = serializePosActiveBill(saved);
+        if (!posCart.length && Array.isArray(posActiveBill.items) && posActiveBill.items.length) {
+            posCart = posActiveBill.items.map(buildPosCartItemFromOrderItem);
+        }
+    } catch (error) {
+        console.warn('Unable to restore POS active bill:', error);
+        posActiveBill = null;
+    }
+}
+
+function persistPosActiveBill(order = posActiveBill) {
+    try {
+        const payload = serializePosActiveBill(order);
+        if (payload) sessionStorage.setItem(posActiveBillStorageKey(), JSON.stringify(payload));
+        else sessionStorage.removeItem(posActiveBillStorageKey());
+    } catch (error) {
+        console.warn('Unable to persist POS active bill:', error);
     }
 }
 
@@ -876,7 +933,40 @@ function buildPosCartItemFromOrderItem(item = {}, index = 0) {
 
 function setPosActiveBill(order = null) {
     posActiveBill = order ? { ...order } : null;
+    persistPosActiveBill(posActiveBill);
     renderPosActiveBill();
+}
+
+function findLoadedPosOpenBill(orderId) {
+    const id = String(orderId || '').trim();
+    if (!id) return null;
+    return posOpenBills.find(order =>
+        order.firestoreId === id
+        || order.id === id
+        || order.receiptNo === id
+    ) || null;
+}
+
+function upsertLoadedPosOpenBill(order = null) {
+    if (!order?.firestoreId) return;
+    const index = posOpenBills.findIndex(item => item.firestoreId === order.firestoreId);
+    if (index >= 0) posOpenBills[index] = { ...posOpenBills[index], ...order };
+    else posOpenBills.unshift(order);
+}
+
+function activatePosSalesCheckout(focusPayment = false) {
+    setPosView('sales');
+    const target = focusPayment
+        ? (document.querySelector('.pos-cart') || document.getElementById('pos-sales'))
+        : document.getElementById('pos-sales');
+    requestAnimationFrame(() => {
+        target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if (focusPayment) {
+            window.setTimeout(() => {
+                document.getElementById('pos-payment-method')?.focus();
+            }, 180);
+        }
+    });
 }
 
 function renderPosActiveBill() {
@@ -1168,6 +1258,7 @@ function initPosModule() {
         return;
     }
     restorePosCart();
+    restorePosActiveBill();
     syncPosReceiptDateInput();
     document.getElementById('pos-search-input')?.addEventListener('input', (event) => {
         posSearchTerm = event.target.value || '';
@@ -1749,29 +1840,29 @@ window.loadPosOpenBill = async (orderId, focusPayment = false, sourceButton = nu
             sourceButton.textContent = 'กำลังโหลด...';
         }
         if (!orderId) throw new Error('ไม่พบรหัสบิลที่ต้องการเรียก');
-        const orderSnap = await getDoc(doc(db, 'orders', orderId));
-        if (!orderSnap.exists()) throw new Error('ไม่พบบิลนี้แล้ว');
-        const order = { firestoreId: orderSnap.id, ...(orderSnap.data() || {}) };
+        let order = findLoadedPosOpenBill(orderId);
+        if (!order) {
+            const orderSnap = await getDoc(doc(db, 'orders', orderId));
+            if (!orderSnap.exists()) throw new Error('ไม่พบบิลนี้แล้ว');
+            order = { firestoreId: orderSnap.id, ...(orderSnap.data() || {}) };
+        }
         if (order.source !== 'pos' || order.billStatus !== 'open' || order.paymentStatus === 'paid') {
             throw new Error('บิลนี้ไม่อยู่ในสถานะค้างชำระ');
         }
         posCart = Array.isArray(order.items) ? order.items.map(buildPosCartItemFromOrderItem) : [];
         applyPosOpenBillToForm(order);
         setPosActiveBill(order);
+        upsertLoadedPosOpenBill(order);
         renderPosCart();
         renderPosOpenBills();
-        setPosView('sales');
-        const salesView = document.getElementById('pos-sales-view');
-        if (salesView) {
-            salesView.hidden = false;
-            salesView.classList.add('active');
-        }
-        requestAnimationFrame(() => {
-            document.getElementById('pos-sales')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        });
+        renderPosOverviewOpenBills();
+        activatePosSalesCheckout(focusPayment);
         if (focusPayment) {
-            document.getElementById('pos-payment-method')?.focus();
-            alert('โหลดบิลแล้ว เลือกช่องทางชำระเงินและกด "ยืนยันการชำระเงิน ออกใบเสร็จ" เพื่อปิดยอด');
+            const status = document.getElementById('pos-customer-sync-status');
+            if (status) {
+                status.textContent = 'โหลดบิลค้างชำระแล้ว เลือกช่องทางชำระเงินและกดปุ่มยืนยันเพื่อปิดยอด';
+                status.className = 'pos-sync-status success';
+            }
         }
     } catch (error) {
         console.error('Load POS open bill failed:', error);
