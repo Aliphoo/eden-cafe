@@ -920,8 +920,8 @@ function renderPosOpenBills() {
                 </div>
                 <small>${escapeHTML(order.customerName || 'Walk-in Customer')} · ${itemCount.toLocaleString('th-TH')} รายการ · ${escapeHTML(updatedText)}</small>
                 <div class="pos-open-bill-actions">
-                    <button class="pos-open-bill-load" type="button" onclick="loadPosOpenBill('${escapeJSString(order.firestoreId)}')">เรียกบิล</button>
-                    <button class="pos-open-bill-pay" type="button" onclick="loadPosOpenBill('${escapeJSString(order.firestoreId)}', true)">เรียกมาชำระ</button>
+                    <button class="pos-open-bill-load" type="button" data-pos-open-bill-id="${escapeHTML(order.firestoreId)}">เรียกบิล</button>
+                    <button class="pos-open-bill-pay" type="button" data-pos-open-bill-id="${escapeHTML(order.firestoreId)}" data-pos-open-bill-pay="true">เรียกมาชำระ</button>
                 </div>
             </article>
         `;
@@ -941,17 +941,20 @@ function renderPosOverviewOpenBills() {
         list.innerHTML = `<div class="pos-empty">ไม่มีบิลค้างชำระประจำวันที่ ${escapeHTML(posBusinessDateLabel())}</div>`;
         return;
     }
-    list.innerHTML = dailyOpenBills.slice(0, 8).map(order => {
+    list.innerHTML = dailyOpenBills.slice(0, 40).map((order, index) => {
         const itemCount = Array.isArray(order.items) ? order.items.reduce((sum, item) => sum + safeNumber(item.quantity, 1), 0) : 0;
         return `
             <article class="pos-overview-open-card">
-                <div>
-                    <strong>${escapeHTML(order.receiptNo || order.id || order.firestoreId)}</strong>
-                    <small>${escapeHTML(order.customerName || 'Walk-in Customer')} · ${itemCount.toLocaleString('th-TH')} รายการ · ${escapeHTML(posOrderDateText(order))}</small>
+                <div class="pos-numbered-line">
+                    <span class="pos-list-index">${(index + 1).toLocaleString('th-TH')}</span>
+                    <span>
+                        <strong>${escapeHTML(order.receiptNo || order.id || order.firestoreId)}</strong>
+                        <small>${escapeHTML(order.customerName || 'Walk-in Customer')} · ${itemCount.toLocaleString('th-TH')} รายการ · ${escapeHTML(posOrderDateText(order))}</small>
+                    </span>
                 </div>
                 <div class="pos-overview-open-actions">
                     <strong>${posMoney(order.totalAmount ?? order.total)}</strong>
-                    <button type="button" onclick="loadPosOpenBill('${escapeJSString(order.firestoreId)}', true)">เรียกมาชำระ</button>
+                    <button type="button" data-pos-open-bill-id="${escapeHTML(order.firestoreId)}" data-pos-open-bill-pay="true">เรียกมาชำระ</button>
                 </div>
             </article>
         `;
@@ -1019,15 +1022,18 @@ function renderPosReceiptManager() {
         } else if (!receipts.length) {
             list.innerHTML = `<div class="pos-empty">ไม่พบใบเสร็จตามคำค้นหาในวันที่ ${escapeHTML(posBusinessDateLabel())}</div>`;
         } else {
-            list.innerHTML = receipts.slice(0, 60).map(order => {
+            list.innerHTML = receipts.slice(0, 120).map((order, index) => {
                 const active = order.firestoreId === posSelectedReceiptId;
                 const itemCount = Array.isArray(order.items) ? order.items.reduce((sum, item) => sum + safeNumber(item.quantity, 1), 0) : 0;
                 return `
                     <article class="pos-receipt-card ${active ? 'active' : ''}">
                         <button type="button" onclick="selectPosReceipt('${escapeJSString(order.firestoreId)}')">
-                            <span>
-                                <strong>${escapeHTML(order.receiptNo || order.id || order.firestoreId)}</strong>
-                                <small>${escapeHTML(order.customerName || 'Walk-in Customer')} · ${itemCount.toLocaleString('th-TH')} รายการ · ${escapeHTML(posOrderDateText(order))}</small>
+                            <span class="pos-numbered-line">
+                                <span class="pos-list-index">${(index + 1).toLocaleString('th-TH')}</span>
+                                <span>
+                                    <strong>${escapeHTML(order.receiptNo || order.id || order.firestoreId)}</strong>
+                                    <small>${escapeHTML(order.customerName || 'Walk-in Customer')} · ${itemCount.toLocaleString('th-TH')} รายการ · ${escapeHTML(posOrderDateText(order))}</small>
+                                </span>
                             </span>
                             <strong>${posMoney(order.totalAmount ?? order.total)}</strong>
                         </button>
@@ -1197,6 +1203,15 @@ function initPosModule() {
             console.error('Unable to load daily receipt data:', error);
             alert('โหลดข้อมูลรายวันไม่สำเร็จ: ' + error.message);
         });
+    });
+    document.addEventListener('click', (event) => {
+        const button = event.target.closest?.('[data-pos-open-bill-id]');
+        if (!button) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const orderId = button.dataset.posOpenBillId || '';
+        const focusPayment = button.dataset.posOpenBillPay === 'true';
+        window.loadPosOpenBill(orderId, focusPayment);
     });
     document.getElementById('pos-customer-search')?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
@@ -1721,6 +1736,7 @@ window.selectPosReceipt = (orderId) => {
 
 window.loadPosOpenBill = async (orderId, focusPayment = false) => {
     try {
+        if (!orderId) throw new Error('ไม่พบรหัสบิลที่ต้องการเรียก');
         const orderSnap = await getDoc(doc(db, 'orders', orderId));
         if (!orderSnap.exists()) throw new Error('ไม่พบบิลนี้แล้ว');
         const order = { firestoreId: orderSnap.id, ...(orderSnap.data() || {}) };
@@ -1731,11 +1747,19 @@ window.loadPosOpenBill = async (orderId, focusPayment = false) => {
         applyPosOpenBillToForm(order);
         setPosActiveBill(order);
         setPosView('sales');
+        const salesView = document.getElementById('pos-sales-view');
+        if (salesView) {
+            salesView.hidden = false;
+            salesView.classList.add('active');
+        }
         renderPosCart();
         renderPosOpenBills();
+        requestAnimationFrame(() => {
+            document.getElementById('pos-sales')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
         if (focusPayment) {
-            document.getElementById('pos-paid-amount')?.focus();
-            alert('โหลดบิลแล้ว เลือกช่องทางชำระเงินและกด "ชำระเงินทันที" เพื่อปิดยอด');
+            document.getElementById('pos-payment-method')?.focus();
+            alert('โหลดบิลแล้ว เลือกช่องทางชำระเงินและกด "ยืนยันการชำระเงิน ออกใบเสร็จ" เพื่อปิดยอด');
         }
     } catch (error) {
         console.error('Load POS open bill failed:', error);

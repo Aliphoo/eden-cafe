@@ -490,12 +490,42 @@ body.pos-ready .pos-app { opacity: 1; transform: none; }
 }
 .pos-receipt-list,
 .pos-overview-open-bills-list {
+    position: relative;
     display: grid;
     gap: 9px;
-    max-height: 520px;
+    height: min(52vh, 520px);
+    min-height: 260px;
     overflow-y: auto;
     margin-top: 12px;
-    padding-right: 2px;
+    padding: 0 6px 12px 0;
+    overscroll-behavior: contain;
+    scrollbar-color: rgba(19, 146, 85, .45) rgba(31, 82, 52, .06);
+    scrollbar-width: thin;
+}
+.pos-receipt-list::-webkit-scrollbar,
+.pos-overview-open-bills-list::-webkit-scrollbar { width: 10px; }
+.pos-receipt-list::-webkit-scrollbar-track,
+.pos-overview-open-bills-list::-webkit-scrollbar-track {
+    border-radius: 999px;
+    background: rgba(31, 82, 52, .06);
+}
+.pos-receipt-list::-webkit-scrollbar-thumb,
+.pos-overview-open-bills-list::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: rgba(19, 146, 85, .45);
+}
+.pos-scroll-hint {
+    position: sticky;
+    bottom: 0;
+    margin-top: -2px;
+    padding: 9px 12px 0;
+    color: #4f8b6b;
+    font-size: .78rem;
+    font-weight: 900;
+    letter-spacing: .06em;
+    text-align: center;
+    text-transform: uppercase;
+    background: linear-gradient(180deg, transparent, rgba(255,255,255,.86) 34%);
 }
 .pos-receipt-card button,
 .pos-overview-open-card {
@@ -517,6 +547,25 @@ body.pos-ready .pos-app { opacity: 1; transform: none; }
     border-color: rgba(19, 146, 85, .38);
     background: linear-gradient(135deg, #effaf2, #fff8dc);
     box-shadow: 0 12px 28px rgba(19, 146, 85, .10);
+}
+.pos-numbered-line {
+    min-width: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+.pos-list-index {
+    flex: 0 0 auto;
+    min-width: 34px;
+    height: 34px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 12px;
+    color: #fff;
+    background: linear-gradient(135deg, var(--forest), var(--leaf));
+    font-size: .84rem;
+    font-weight: 900;
+    box-shadow: 0 8px 18px rgba(19,146,85,.18);
 }
 .pos-receipt-card strong,
 .pos-overview-open-card strong { color: var(--forest); font-weight: 900; }
