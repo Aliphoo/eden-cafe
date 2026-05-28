@@ -39,6 +39,10 @@ const POS_PAYMENT_METHODS = {
     card: { label: 'บัตร', hint: 'บันทึกยอดชำระด้วยบัตร' },
     other: { label: 'อื่น ๆ', hint: 'ช่องทางชำระเงินอื่น' }
 };
+const POS_PROMPTPAY_ID = '057556001655';
+const POS_PROMPTPAY_MERCHANT_NAME = 'EDEN CAFE';
+const POS_PROMPTPAY_CITY = 'CHIANG RAI';
+let posPromptPayRenderToken = 0;
 
 function escapeHTML(value) {
     return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -389,6 +393,114 @@ function posMoney(value) {
 
 function posRound(value) {
     return Math.round(safeNumber(value) * 100) / 100;
+}
+
+function emvQrField(id, value) {
+    const text = String(value ?? '');
+    return String(id).padStart(2, '0') + String(text.length).padStart(2, '0') + text;
+}
+
+function promptPayProxyField(promptPayId = POS_PROMPTPAY_ID) {
+    const id = String(promptPayId ?? '').replace(/\D/g, '');
+    if (/^0\d{9}$/.test(id)) return emvQrField('01', '0066' + id.slice(1));
+    if (/^\d{13}$/.test(id)) return emvQrField('02', id);
+    if (/^\d{15}$/.test(id)) return emvQrField('03', id);
+    return emvQrField('02', id);
+}
+
+function promptPayCrc16(payload) {
+    let crc = 0xFFFF;
+    for (let i = 0; i < payload.length; i += 1) {
+        crc ^= payload.charCodeAt(i) << 8;
+        for (let bit = 0; bit < 8; bit += 1) {
+            crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
+            crc &= 0xFFFF;
+        }
+    }
+    return crc.toString(16).toUpperCase().padStart(4, '0');
+}
+
+function buildPromptPayPayload(amount) {
+    const total = posRound(amount);
+    const merchantInfo = emvQrField('00', 'A000000677010111') + promptPayProxyField(POS_PROMPTPAY_ID);
+    let payload = ''
+        + emvQrField('00', '01')
+        + emvQrField('01', total > 0 ? '12' : '11')
+        + emvQrField('29', merchantInfo)
+        + emvQrField('53', '764');
+    if (total > 0) payload += emvQrField('54', total.toFixed(2));
+    payload += emvQrField('58', 'TH')
+        + emvQrField('59', POS_PROMPTPAY_MERCHANT_NAME.slice(0, 25))
+        + emvQrField('60', POS_PROMPTPAY_CITY.slice(0, 15))
+        + '6304';
+    return payload + promptPayCrc16(payload);
+}
+
+function setPromptPayStatus(message, state = '') {
+    const status = document.getElementById('pos-promptpay-status');
+    if (!status) return;
+    status.textContent = message;
+    status.className = ['pos-promptpay-status', state].filter(Boolean).join(' ');
+}
+
+async function createQrDataUrl(payload) {
+    if (window.QRCode?.toDataURL) {
+        return window.QRCode.toDataURL(payload, {
+            errorCorrectionLevel: 'M',
+            margin: 1,
+            width: 260,
+            color: { dark: '#06351f', light: '#ffffff' }
+        });
+    }
+    if (typeof window.qrcode === 'function') {
+        const qr = window.qrcode(0, 'M');
+        qr.addData(payload);
+        qr.make();
+        return qr.createDataURL(8, 1);
+    }
+    throw new Error('QR library is not available');
+}
+
+async function renderPosPromptPayQr(totals = posCartTotals()) {
+    const panel = document.getElementById('pos-promptpay-panel');
+    if (!panel) return;
+    const isQrPayment = totals.paymentMethod === 'qr';
+    panel.hidden = !isQrPayment;
+    if (!isQrPayment) {
+        posPromptPayRenderToken += 1;
+        return;
+    }
+
+    const qrImg = document.getElementById('pos-promptpay-qr');
+    const amountEl = document.getElementById('pos-promptpay-amount');
+    const idEl = document.getElementById('pos-promptpay-id');
+    const payloadEl = document.getElementById('pos-promptpay-payload');
+    const amount = posRound(totals.total);
+
+    if (idEl) idEl.textContent = POS_PROMPTPAY_ID;
+    if (amountEl) amountEl.textContent = posMoney(amount);
+    if (payloadEl) payloadEl.value = '';
+    if (qrImg) qrImg.removeAttribute('src');
+
+    if (!posCart.length || amount <= 0) {
+        setPromptPayStatus('เลือกสินค้าเพื่อสร้าง QR ตามยอดชำระ', 'warning');
+        return;
+    }
+
+    const payload = buildPromptPayPayload(amount);
+    if (payloadEl) payloadEl.value = payload;
+
+    const token = ++posPromptPayRenderToken;
+    setPromptPayStatus('กำลังสร้าง QR พร้อมเพย์...', 'warning');
+    try {
+        const dataUrl = await createQrDataUrl(payload);
+        if (token !== posPromptPayRenderToken) return;
+        if (qrImg) qrImg.src = dataUrl;
+        setPromptPayStatus('พร้อมสแกนชำระผ่าน PromptPay 057556001655', 'ready');
+    } catch (error) {
+        console.error('PromptPay QR generation failed:', error);
+        setPromptPayStatus('สร้าง QR ไม่สำเร็จ: ' + error.message, 'error');
+    }
 }
 
 function posLimitString(value, maxLength) {
@@ -786,6 +898,7 @@ function renderPosPaymentUI(totals = posCartTotals()) {
         exactBtn.style.display = method === 'cash' ? '' : 'none';
         exactBtn.disabled = !posCart.length;
     }
+    renderPosPromptPayQr(totals);
 }
 
 function renderPosCart() {

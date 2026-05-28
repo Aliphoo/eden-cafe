@@ -322,6 +322,22 @@
                             <input id="pos-paid-amount" type="number" min="0" step="1" placeholder="รับเงินมา">
                             <button id="pos-cash-exact-btn" type="button">รับพอดี</button>
                         </div>
+                        <div id="pos-promptpay-panel" class="pos-promptpay-panel" hidden>
+                            <div class="pos-promptpay-copy">
+                                <span>PromptPay</span>
+                                <strong id="pos-promptpay-id">057556001655</strong>
+                                <small>สแกนจ่ายตามยอดสุทธิ</small>
+                            </div>
+                            <div class="pos-promptpay-qr-wrap">
+                                <img id="pos-promptpay-qr" alt="PromptPay QR Payment">
+                            </div>
+                            <div class="pos-promptpay-total">
+                                <span>ยอด QR</span>
+                                <strong id="pos-promptpay-amount">฿0.00</strong>
+                            </div>
+                            <small id="pos-promptpay-status" class="pos-promptpay-status">เลือกสินค้าเพื่อสร้าง QR ตามยอดชำระ</small>
+                            <textarea id="pos-promptpay-payload" readonly aria-label="PromptPay QR payload"></textarea>
+                        </div>
                         <input id="pos-discount" type="number" min="0" step="1" placeholder="ส่วนลด (บาท)">
                     </section>
                     <div id="pos-summary" class="pos-summary"></div>
@@ -350,6 +366,7 @@
         </main>
     </div>
 
-    <script type="module" src="js/pos.js?v=10"></script>
+    <script src="js/qrcode-generator.min.js?v=3"></script>
+    <script type="module" src="js/pos.js?v=11"></script>
 </body>
 </html>
