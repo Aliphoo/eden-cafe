@@ -437,6 +437,22 @@
         </main>
     </div>
 
-    <script type="module" src="js/pos.js?v=15"></script>
+    <script>
+        window.handlePosOpenBillClick = window.handlePosOpenBillClick || function(event, button) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            const detail = {
+                orderId: button && button.dataset ? button.dataset.posOpenBillId || '' : '',
+                focusPayment: !!(button && button.dataset && button.dataset.posOpenBillPay === 'true'),
+                button: button || null
+            };
+            window.__pendingPosOpenBillAction = detail;
+            window.dispatchEvent(new CustomEvent('eden:load-pos-open-bill', { detail }));
+            return false;
+        };
+    </script>
+    <script type="module" src="js/pos.js?v=17"></script>
 </body>
 </html>
