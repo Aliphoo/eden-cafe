@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eden Cafe POS</title>
+    <link rel="icon" href="Images/Logo.webp" type="image/webp">
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="pos.css?v=3">
+</head>
+<body>
+    <div id="admin-login" style="display: none;">
+        <div class="login-box">
+            <div class="login-box-header">
+                <div class="logo-text">Eden POS</div>
+                <p>เข้าสู่ระบบเพื่อขายหน้าร้านและบันทึกออเดอร์</p>
+            </div>
+            <form id="email-login-form">
+                <div class="login-form-group">
+                    <label for="admin-email">อีเมล (Email)</label>
+                    <input type="email" id="admin-email" placeholder="admin@edencafe.com" required autocomplete="email">
+                </div>
+                <div class="login-form-group">
+                    <label for="admin-password">รหัสผ่าน (Password)</label>
+                    <input type="password" id="admin-password" placeholder="รหัสผ่านของคุณ" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="email-login-btn" id="btn-email-login">เข้าสู่ระบบ</button>
+            </form>
+            <div class="login-divider">หรือเข้าสู่ระบบด้วย</div>
+            <button class="google-btn" id="btn-admin-login" type="button">
+                <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                Sign in with Google
+            </button>
+            <div id="login-error"></div>
+        </div>
+    </div>
+
+    <div id="pos-app" class="pos-app" aria-hidden="true">
+        <header class="pos-topbar">
+            <div class="brand">
+                <div class="brand-mark">POS</div>
+                <div>
+                    <h1>Eden Cafe POS</h1>
+                    <p>หน้าแคชเชียร์แยกจาก Admin Dashboard</p>
+                </div>
+            </div>
+            <div class="top-actions">
+                <a class="top-link" href="admin.html">กลับ Admin</a>
+                <div class="admin-profile">
+                    <span id="admin-name">Admin</span>
+                    <img id="admin-avatar" src="Images/Logo.webp" alt="Admin avatar">
+                </div>
+                <button class="logout-btn" id="btn-admin-logout" type="button">ออกจากระบบ</button>
+            </div>
+        </header>
+
+        <main class="pos-main">
+            <section class="pos-hero">
+                <span class="pos-badge">Soft Launch POS</span>
+                <h2>ขายหน้าร้านได้ไวขึ้น</h2>
+                <p>เลือกเฉพาะสินค้าที่เปิด “แสดงบน POS” เพิ่มเข้าตะกร้า รับชำระเงิน บันทึกออเดอร์ ตัดสต็อก และพิมพ์ใบเสร็จในหน้าเดียว</p>
+            </section>
+
+            <section class="pos-shell">
+                <div class="pos-panel">
+                    <div class="section-header">
+                        <div>
+                            <h2>เลือกสินค้า</h2>
+                            <p>ดึงข้อมูลจากเมนูในระบบ และแสดงเฉพาะรายการที่ขายบน POS</p>
+                        </div>
+                        <button class="btn-action btn-view" type="button" onclick="refreshPosProducts()">รีเฟรช POS</button>
+                    </div>
+                    <div class="pos-toolbar">
+                        <input id="pos-search-input" class="pos-search" type="search" placeholder="ค้นหาชื่อสินค้า / SKU / หมวดหมู่">
+                        <div class="pos-counter"><span id="pos-product-count">0</span> รายการ POS</div>
+                    </div>
+                    <div id="pos-category-list" class="pos-category-list"></div>
+                    <div id="pos-product-grid" class="pos-grid">
+                        <div class="pos-empty">กำลังโหลดสินค้า POS...</div>
+                    </div>
+                </div>
+
+                <aside class="pos-panel pos-cart">
+                    <h3>ตะกร้า POS</h3>
+                    <div class="pos-customer-grid">
+                        <input id="pos-customer-name" type="text" placeholder="ชื่อลูกค้า (Walk-in)">
+                        <input id="pos-customer-phone" type="tel" placeholder="เบอร์โทร (ถ้ามี)">
+                    </div>
+                    <textarea id="pos-note" rows="2" placeholder="หมายเหตุหน้าร้าน เช่น โต๊ะ A1 / รับกลับบ้าน"></textarea>
+                    <label class="pos-soft-mode">
+                        <input id="pos-soft-launch-mode" type="checkbox" checked>
+                        โหมดทดลอง Soft Launch (ไม่รวมยอด Dashboard)
+                    </label>
+                    <div id="pos-cart-items" class="pos-cart-items">
+                        <div class="pos-empty">ยังไม่มีสินค้าในตะกร้า</div>
+                    </div>
+                    <div class="pos-payment-grid">
+                        <select id="pos-payment-method">
+                            <option value="cash">เงินสด</option>
+                            <option value="transfer">โอนเงิน</option>
+                            <option value="qr">QR Payment</option>
+                            <option value="card">บัตร</option>
+                            <option value="other">อื่น ๆ</option>
+                        </select>
+                        <input id="pos-paid-amount" type="number" min="0" step="1" placeholder="รับเงินมา">
+                    </div>
+                    <input id="pos-discount" type="number" min="0" step="1" placeholder="ส่วนลด (บาท)">
+                    <div id="pos-summary" class="pos-summary"></div>
+                    <button id="pos-checkout-btn" class="pos-checkout-btn" type="button" onclick="checkoutPosOrder()">บันทึกออเดอร์และออกใบเสร็จ</button>
+                    <button class="pos-clear-btn" type="button" onclick="clearPosCart()">ล้างตะกร้า</button>
+                    <button id="pos-print-btn" class="pos-print-btn" type="button" onclick="printPosReceipt()" style="display:none;">พิมพ์ใบเสร็จล่าสุด</button>
+                    <div id="pos-receipt" class="pos-receipt" style="display:none;"></div>
+                </aside>
+            </section>
+        </main>
+    </div>
+
+    <script type="module" src="js/pos.js?v=4"></script>
+</body>
+</html>

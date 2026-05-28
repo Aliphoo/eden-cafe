@@ -1,6 +1,7 @@
 {
   "hosting": {
     "public": ".",
+    "cleanUrls": true,
     "ignore": [
       "firebase.json",
       "firestore.rules",
@@ -21,7 +22,6 @@
       "booking-*.png",
       "*.log",
       "blog-logic.js",
-      "llms.txt",
       "**/.*",
       "**/node_modules/**"
     ],
