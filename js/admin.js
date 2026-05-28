@@ -1040,8 +1040,10 @@ window.refreshAdminSection = async (tabId, button = null) => {
                 setupRealtimeAdminAccess();
                 break;
             case 'pos':
-                setupRealtimeCategories();
-                setupRealtimeProducts();
+                if (!categoriesUnsubscribe) setupRealtimeCategories();
+                if (!productsUnsubscribe) setupRealtimeProducts();
+                await refreshCategoriesOnce();
+                await refreshProductsOnce();
                 renderPosScreen();
                 break;
             case 'orders':
@@ -1058,11 +1060,14 @@ window.refreshAdminSection = async (tabId, button = null) => {
                 setupRealtimeRooms();
                 break;
             case 'products':
-                setupRealtimeCategories();
-                setupRealtimeProducts();
+                if (!categoriesUnsubscribe) setupRealtimeCategories();
+                if (!productsUnsubscribe) setupRealtimeProducts();
+                await refreshCategoriesOnce();
+                await refreshProductsOnce();
                 break;
             case 'categories':
-                setupRealtimeCategories();
+                if (!categoriesUnsubscribe) setupRealtimeCategories();
+                await refreshCategoriesOnce();
                 break;
             case 'shop-products':
                 setupRealtimeShopCategories();
@@ -1499,44 +1504,40 @@ function getStatusBadgeHTML(status, type) {
     }
 }
 
-// Real-time Categories Listener
-function setupRealtimeCategories() {
-    if (categoriesUnsubscribe) {
-        categoriesUnsubscribe();
-        categoriesUnsubscribe = null;
+function renderCategoriesSnapshot(snapshot) {
+    const tbody = document.getElementById('categories-table-body');
+    const select = document.getElementById('productCategory');
+    if (tbody) tbody.innerHTML = '';
+    if (select) select.innerHTML = '<option value="">-- เลือกหมวดหมู่ --</option>';
+    categoriesData = {};
+
+    if (snapshot.empty) {
+        if (tbody) tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;">ไม่มีข้อมูลหมวดหมู่</td></tr>';
+        updateProductCategoryFilterOptions();
+        renderProductsTable();
+        renderPosScreen();
+        return;
     }
-    const q = query(collection(db, "categories"));
-    categoriesUnsubscribe = onSnapshot(q, (snapshot) => {
-        const tbody = document.getElementById('categories-table-body');
-        const select = document.getElementById('productCategory');
-        tbody.innerHTML = '';
-        select.innerHTML = '<option value="">-- เลือกหมวดหมู่ --</option>';
-        categoriesData = {};
-        
-        if (snapshot.empty) {
-            tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;">ไม่มีข้อมูลหมวดหมู่</td></tr>';
-            return;
-        }
 
-        const sortedDocs = snapshot.docs.slice().sort((a, b) => {
-            const aData = a.data();
-            const bData = b.data();
-            const aOrder = Number(aData.order || 999);
-            const bOrder = Number(bData.order || 999);
-            if (aOrder !== bOrder) return aOrder - bOrder;
-            return a.id.localeCompare(b.id);
-        });
+    const sortedDocs = snapshot.docs.slice().sort((a, b) => {
+        const aData = a.data();
+        const bData = b.data();
+        const aOrder = Number(aData.order || 999);
+        const bOrder = Number(bData.order || 999);
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return a.id.localeCompare(b.id);
+    });
 
-        sortedDocs.forEach((docSnap) => {
-            const cat = docSnap.data();
-            const id = docSnap.id;
-            categoriesData[id] = cat;
-            const color = cat.color || '#ddd';
-            const itemCount = cat.itemCount ? Number(cat.itemCount).toLocaleString() + ' items' : '';
-            const orderText = cat.order ? 'Order ' + Number(cat.order).toLocaleString() : '';
-            const metaText = [itemCount, orderText].filter(Boolean).join(' | ');
-            
-            // Populate Table
+    sortedDocs.forEach((docSnap) => {
+        const cat = docSnap.data();
+        const id = docSnap.id;
+        categoriesData[id] = cat;
+        const color = cat.color || '#ddd';
+        const itemCount = cat.itemCount ? Number(cat.itemCount).toLocaleString() + ' items' : '';
+        const orderText = cat.order ? 'Order ' + Number(cat.order).toLocaleString() : '';
+        const metaText = [itemCount, orderText].filter(Boolean).join(' | ');
+
+        if (tbody) {
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td><code>${escapeHTML(id)}</code></td>
@@ -1555,17 +1556,33 @@ function setupRealtimeCategories() {
                 </td>
             `;
             tbody.appendChild(tr);
+        }
 
-            // Populate Select Dropdown
+        if (select) {
             const opt = document.createElement('option');
             opt.value = id;
             opt.innerText = cat.name;
             select.appendChild(opt);
-        });
-        updateProductCategoryFilterOptions();
-        renderProductsTable();
-        renderPosScreen();
-    }, (error) => {
+        }
+    });
+    updateProductCategoryFilterOptions();
+    renderProductsTable();
+    renderPosScreen();
+}
+
+async function refreshCategoriesOnce() {
+    const snapshot = await getDocs(query(collection(db, "categories")));
+    renderCategoriesSnapshot(snapshot);
+}
+
+// Real-time Categories Listener
+function setupRealtimeCategories() {
+    if (categoriesUnsubscribe) {
+        categoriesUnsubscribe();
+        categoriesUnsubscribe = null;
+    }
+    const q = query(collection(db, "categories"));
+    categoriesUnsubscribe = onSnapshot(q, renderCategoriesSnapshot, (error) => {
         console.error("Error listening to categories:", error);
     });
 }
@@ -2524,9 +2541,11 @@ window.setPosCategory = (categoryId = 'all') => {
     renderPosProducts();
 };
 
-window.refreshPosProducts = () => {
-    setupRealtimeCategories();
-    setupRealtimeProducts();
+window.refreshPosProducts = async () => {
+    if (!categoriesUnsubscribe) setupRealtimeCategories();
+    if (!productsUnsubscribe) setupRealtimeProducts();
+    await refreshCategoriesOnce();
+    await refreshProductsOnce();
     renderPosScreen();
 };
 
@@ -3212,6 +3231,37 @@ window.downloadProductDataXLSX = async () => {
     }
 };
 
+function renderProductsSnapshot(snapshot) {
+    const tbody = document.getElementById('products-table-body');
+    if (tbody) tbody.innerHTML = '';
+    productsData = {};
+    productRows = [];
+
+    if (snapshot.empty) {
+        if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">ไม่มีข้อมูลเมนูสินค้า</td></tr>';
+        renderProductsTable();
+        renderPosScreen();
+        return;
+    }
+
+    snapshot.forEach((docSnap) => {
+        const product = docSnap.data();
+        const id = docSnap.id;
+        productsData[id] = product;
+        productRows.push({ id, product });
+    });
+    selectedProductIds.forEach(id => {
+        if (!productsData[id]) selectedProductIds.delete(id);
+    });
+    renderProductsTable();
+    renderPosScreen();
+}
+
+async function refreshProductsOnce() {
+    const snapshot = await getDocs(query(collection(db, "products"), orderBy("category")));
+    renderProductsSnapshot(snapshot);
+}
+
 // Real-time Products Listener
 function setupRealtimeProducts() {
     if (productsUnsubscribe) {
@@ -3219,30 +3269,7 @@ function setupRealtimeProducts() {
         productsUnsubscribe = null;
     }
     const q = query(collection(db, "products"), orderBy("category"));
-    productsUnsubscribe = onSnapshot(q, (snapshot) => {
-        const tbody = document.getElementById('products-table-body');
-        if (tbody) tbody.innerHTML = '';
-        productsData = {};
-        productRows = [];
-        
-        if (snapshot.empty) {
-            if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">ไม่มีข้อมูลเมนูสินค้า</td></tr>';
-            renderProductsTable();
-            return;
-        }
-
-        snapshot.forEach((docSnap) => {
-            const product = docSnap.data();
-            const id = docSnap.id;
-            productsData[id] = product; // Store locally for edit modal
-            productRows.push({ id, product });
-        });
-        selectedProductIds.forEach(id => {
-            if (!productsData[id]) selectedProductIds.delete(id);
-        });
-        renderProductsTable();
-        renderPosScreen();
-    }, (error) => {
+    productsUnsubscribe = onSnapshot(q, renderProductsSnapshot, (error) => {
         console.error("Error listening to products:", error);
         const tbody = document.getElementById('products-table-body');
         if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="color:red; text-align:center;">Error: ${escapeHTML(error.message)}</td></tr>`;
