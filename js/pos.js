@@ -1,6 +1,6 @@
 import { auth, provider, db } from './firebase-config.js';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { collection, getDocs, doc, setDoc, addDoc, query, orderBy, onSnapshot, getDoc, serverTimestamp, runTransaction, where, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, getDocs, doc, setDoc, addDoc, query, orderBy, onSnapshot, getDoc, serverTimestamp, runTransaction, where, limit, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
 const ADMIN_COLLECTION = 'admin_users';
@@ -22,11 +22,14 @@ let productRows = [];
 let categoriesData = {};
 let categoriesUnsubscribe = null;
 let productsUnsubscribe = null;
+let openBillsUnsubscribe = null;
 let posSelectedCategory = 'all';
 let posSearchTerm = '';
 let posCart = [];
 let posLastReceipt = null;
 let posSelectedCustomer = null;
+let posOpenBills = [];
+let posActiveBill = null;
 let posControlsBound = false;
 const POS_VIEW_KEY = 'edenPosActiveView';
 const POS_PAYMENT_METHODS = {
@@ -140,8 +143,10 @@ function canAdmin(permission) {
 function cleanupRealtimeListeners() {
     if (categoriesUnsubscribe) categoriesUnsubscribe();
     if (productsUnsubscribe) productsUnsubscribe();
+    if (openBillsUnsubscribe) openBillsUnsubscribe();
     categoriesUnsubscribe = null;
     productsUnsubscribe = null;
+    openBillsUnsubscribe = null;
 }
 function renderCategoriesSnapshot(snapshot) {
     categoriesData = {};
@@ -191,6 +196,33 @@ function setupRealtimeProducts() {
         console.error('Error listening to products:', error);
         const grid = document.getElementById('pos-product-grid');
         if (grid) grid.innerHTML = '<div class="pos-empty pos-error">โหลดสินค้า POS ไม่สำเร็จ: ' + escapeHTML(error.message) + '</div>';
+    });
+}
+function posTimestampMillis(value) {
+    if (!value) return 0;
+    if (typeof value.toMillis === 'function') return value.toMillis();
+    if (typeof value.toDate === 'function') return value.toDate().getTime();
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+function renderOpenBillsSnapshot(snapshot) {
+    const docs = snapshot?.docs ? snapshot.docs : [];
+    posOpenBills = docs
+        .map(docSnap => ({ firestoreId: docSnap.id, ...(docSnap.data() || {}) }))
+        .filter(order => order.source === 'pos' && order.billStatus === 'open' && order.paymentStatus !== 'paid')
+        .sort((a, b) => posTimestampMillis(b.updatedAt || b.createdAt || b.timestamp) - posTimestampMillis(a.updatedAt || a.createdAt || a.timestamp));
+    renderPosOpenBills();
+}
+async function refreshOpenBillsOnce() {
+    const snapshot = await getDocs(query(collection(db, 'orders'), where('billStatus', '==', 'open'), limit(80)));
+    renderOpenBillsSnapshot(snapshot);
+}
+function setupRealtimeOpenBills() {
+    if (openBillsUnsubscribe) openBillsUnsubscribe();
+    openBillsUnsubscribe = onSnapshot(query(collection(db, 'orders'), where('billStatus', '==', 'open'), limit(80)), renderOpenBillsSnapshot, error => {
+        console.error('Error listening to POS open bills:', error);
+        const container = document.getElementById('pos-open-bills-list');
+        if (container) container.innerHTML = '<div class="pos-empty pos-error">โหลดบิลค้างชำระไม่สำเร็จ: ' + escapeHTML(error.message) + '</div>';
     });
 }
 function setPosAppReady(isReady) {
@@ -294,6 +326,7 @@ document.addEventListener('DOMContentLoaded', () => {
             setPosAppReady(true);
             setupRealtimeCategories();
             setupRealtimeProducts();
+            setupRealtimeOpenBills();
             initPosModule();
         } catch (error) {
             console.error('Unable to initialize POS:', error);
@@ -616,6 +649,109 @@ function renderPosProducts() {
     }).join('');
 }
 
+function currentPosOrderItems() {
+    return posCart.map(item => ({
+        productId: item.productId,
+        variantId: item.variantId,
+        name: item.name,
+        variantName: item.variantName || '',
+        sku: item.sku || '',
+        category: item.category || '',
+        price: posRound(item.price),
+        cost: posRound(item.cost),
+        quantity: safeNumber(item.quantity, 1),
+        lineTotal: posRound(safeNumber(item.price) * safeNumber(item.quantity, 1)),
+        taxEnabled: item.taxEnabled !== false
+    }));
+}
+
+function currentPosCustomerPayload() {
+    return {
+        customerName: posLimitString(document.getElementById('pos-customer-name')?.value, 120) || 'Walk-in Customer',
+        phone: posLimitString(document.getElementById('pos-customer-phone')?.value, 40),
+        customerUid: posLimitString(posSelectedCustomer?.uid, 120),
+        customerEmail: posLimitString(posSelectedCustomer?.email, 180),
+        customerLineId: posLimitString(posSelectedCustomer?.lineId, 80),
+        customerTier: posLimitString(posSelectedCustomer?.tier, 30),
+        customerMemberCode: posLimitString(posSelectedCustomer?.memberCode, 40),
+        customerProfileSynced: !!posSelectedCustomer?.uid
+    };
+}
+
+function buildPosCartItemFromOrderItem(item = {}, index = 0) {
+    const productId = posLimitString(item.productId || item.id || ('open-bill-item-' + index), 120);
+    const variantId = posVariantKey(item.variantId || item.variantName || 'base');
+    return {
+        key: `${productId}::${variantId}`,
+        productId,
+        variantId,
+        name: item.name || productId,
+        variantName: item.variantName || '',
+        sku: item.sku || '',
+        category: item.category || '',
+        categoryName: categoryNameForProduct(productsData[productId] || { category: item.category }) || item.category || '',
+        imageUrl: productsData[productId]?.imageUrl || '',
+        price: safeNumber(item.price),
+        cost: safeNumber(item.cost),
+        taxEnabled: item.taxEnabled !== false,
+        quantity: Math.max(1, safeNumber(item.quantity, 1))
+    };
+}
+
+function setPosActiveBill(order = null) {
+    posActiveBill = order ? { ...order } : null;
+    renderPosActiveBill();
+}
+
+function renderPosActiveBill() {
+    const container = document.getElementById('pos-active-bill');
+    const openBtn = document.getElementById('pos-open-bill-btn');
+    const checkoutBtn = document.getElementById('pos-checkout-btn');
+    if (!container) return;
+    if (!posActiveBill) {
+        container.hidden = true;
+        container.innerHTML = '';
+        if (openBtn) openBtn.textContent = 'เปิดบิล / บันทึกค้างชำระ';
+        if (checkoutBtn) checkoutBtn.textContent = 'ชำระเงินทันทีและออกใบเสร็จ';
+        return;
+    }
+    container.hidden = false;
+    container.innerHTML = `
+        กำลังแก้บิลค้างชำระ ${escapeHTML(posActiveBill.receiptNo || posActiveBill.id || posActiveBill.firestoreId)}
+        <small>${escapeHTML(posActiveBill.customerName || 'Walk-in Customer')} · กด "เปิดบิล" เพื่ออัปเดต หรือ "ชำระเงินทันที" เพื่อปิดยอด</small>
+    `;
+    if (openBtn) openBtn.textContent = 'อัปเดตบิลค้างชำระ';
+    if (checkoutBtn) checkoutBtn.textContent = 'ชำระเงินปิดบิลและออกใบเสร็จ';
+}
+
+function renderPosOpenBills() {
+    const container = document.getElementById('pos-open-bills-list');
+    if (!container) return;
+    if (!posOpenBills.length) {
+        container.innerHTML = '<div class="pos-empty">ยังไม่มีบิลค้างชำระ</div>';
+        return;
+    }
+    container.innerHTML = posOpenBills.map(order => {
+        const active = posActiveBill?.firestoreId === order.firestoreId;
+        const itemCount = Array.isArray(order.items) ? order.items.reduce((sum, item) => sum + safeNumber(item.quantity, 1), 0) : 0;
+        const updated = posTimestampMillis(order.updatedAt || order.createdAt || order.timestamp);
+        const updatedText = updated ? new Date(updated).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : order.date || '-';
+        return `
+            <article class="pos-open-bill-card ${active ? 'active' : ''}">
+                <div class="pos-open-bill-top">
+                    <strong>${escapeHTML(order.receiptNo || order.id || order.firestoreId)}</strong>
+                    <strong>${posMoney(order.totalAmount ?? order.total)}</strong>
+                </div>
+                <small>${escapeHTML(order.customerName || 'Walk-in Customer')} · ${itemCount.toLocaleString('th-TH')} รายการ · ${escapeHTML(updatedText)}</small>
+                <div class="pos-open-bill-actions">
+                    <button class="pos-open-bill-load" type="button" onclick="loadPosOpenBill('${escapeJSString(order.firestoreId)}')">เรียกบิล</button>
+                    <button class="pos-open-bill-pay" type="button" onclick="loadPosOpenBill('${escapeJSString(order.firestoreId)}', true)">เรียกมาชำระ</button>
+                </div>
+            </article>
+        `;
+    }).join('');
+}
+
 function posCartTotals() {
     const subtotal = posRound(posCart.reduce((sum, item) => sum + (safeNumber(item.price) * safeNumber(item.quantity, 1)), 0));
     const discountInput = document.getElementById('pos-discount');
@@ -686,6 +822,7 @@ function renderPosCart() {
         <div class="pos-summary-row"><span>เงินทอน</span><strong>${posMoney(totals.changeAmount)}</strong></div>
         <div class="pos-summary-row total"><span>ยอดสุทธิ</span><strong>${posMoney(totals.total)}</strong></div>
     `;
+    renderPosActiveBill();
     persistPosCart();
 }
 
@@ -861,6 +998,7 @@ window.clearPosCart = () => {
     if (posCart.length && !confirm('ล้างตะกร้า POS นี้หรือไม่?')) return;
     posCart = [];
     posLastReceipt = null;
+    setPosActiveBill(null);
     const receipt = document.getElementById('pos-receipt');
     const printBtn = document.getElementById('pos-print-btn');
     if (receipt) {
@@ -877,6 +1015,61 @@ function generatePosReceiptNo() {
     const datePart = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
     const timePart = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
     return `POS-${datePart}-${timePart}`;
+}
+
+function buildPosOrderFields(user, options = {}) {
+    const totals = posCartTotals();
+    const orderItems = currentPosOrderItems();
+    const now = new Date();
+    const receiptNo = options.receiptNo || generatePosReceiptNo();
+    const paymentStatus = options.paymentStatus || 'paid';
+    const pendingPayment = paymentStatus === 'pending';
+    const paidAmount = pendingPayment
+        ? 0
+        : (totals.paymentMethod === 'cash' ? posRound(totals.paidAmount || totals.total) : totals.total);
+    const changeAmount = pendingPayment
+        ? 0
+        : (totals.paymentMethod === 'cash' ? posRound(Math.max(paidAmount - totals.total, 0)) : 0);
+    const isTestOrder = !!document.getElementById('pos-soft-launch-mode')?.checked;
+    const customerPayload = currentPosCustomerPayload();
+
+    return {
+        totals,
+        orderItems,
+        isTestOrder,
+        receiptNo,
+        fields: {
+            id: receiptNo,
+            receiptNo,
+            date: options.date || now.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }),
+            source: 'pos',
+            orderType: 'pos',
+            status: options.status || 'completed',
+            paymentStatus,
+            paymentMethod: totals.paymentMethod,
+            paymentLabel: posPaymentLabel(totals.paymentMethod),
+            uid: user.uid,
+            ...customerPayload,
+            address: 'หน้าร้าน Eden Cafe',
+            note: posLimitString(document.getElementById('pos-note')?.value, 500),
+            items: orderItems,
+            subtotal: totals.subtotal,
+            discount: totals.discount,
+            taxIncluded: totals.taxIncluded,
+            total: totals.total,
+            totalAmount: totals.total,
+            paidAmount,
+            changeAmount,
+            cashierUid: user.uid,
+            cashierName: posLimitString(user.displayName || user.email || 'Admin', 120),
+            cashierEmail: posLimitString(user.email || '', 180),
+            isTestOrder,
+            softLaunch: isTestOrder,
+            billStatus: options.billStatus || (pendingPayment ? 'open' : 'paid'),
+            isOpenBill: options.isOpenBill ?? pendingPayment,
+            orderMode: options.orderMode || (pendingPayment ? 'open_bill' : 'pay_now')
+        }
+    };
 }
 
 function groupedPosItemsForStock(items = []) {
@@ -1040,6 +1233,201 @@ async function commitPosOrderWithStock(orderData, items, isTestOrder) {
     return { docRef: orderRef, orderData: committedOrder };
 }
 
+async function closePosOpenBillWithStock(orderId, orderData, items, isTestOrder) {
+    const orderRef = doc(db, 'orders', orderId);
+    if (isTestOrder) {
+        const finalOrder = {
+            ...orderData,
+            stockAdjusted: false,
+            stockAdjustments: [],
+            stockMode: 'test-no-stock'
+        };
+        await updateDoc(orderRef, finalOrder);
+        return { docRef: orderRef, orderData: finalOrder };
+    }
+
+    const committedOrder = await runTransaction(db, async (transaction) => {
+        const orderSnap = await transaction.get(orderRef);
+        if (!orderSnap.exists()) throw new Error('ไม่พบบิลค้างชำระนี้');
+        const currentOrder = orderSnap.data() || {};
+        if (currentOrder.source !== 'pos') throw new Error('บิลนี้ไม่ใช่บิล POS');
+        if (currentOrder.billStatus !== 'open' || currentOrder.paymentStatus === 'paid') {
+            throw new Error('บิลนี้ถูกปิดยอดไปแล้ว');
+        }
+
+        const stockEntries = groupedPosItemsForStock(items);
+        const byProduct = new Map();
+        stockEntries.forEach(entry => {
+            const list = byProduct.get(entry.productId) || [];
+            list.push(entry);
+            byProduct.set(entry.productId, list);
+        });
+
+        const productSnapshots = new Map();
+        for (const productId of byProduct.keys()) {
+            const productRef = doc(db, 'products', productId);
+            const productSnap = await transaction.get(productRef);
+            if (!productSnap.exists()) {
+                throw new Error(`ไม่พบสินค้า ${productId} ในระบบ`);
+            }
+            productSnapshots.set(productId, { ref: productRef, data: productSnap.data() || {} });
+        }
+
+        const stockAdjustments = [];
+        productSnapshots.forEach(({ ref, data }, productId) => {
+            const result = buildStockUpdateForProduct(productId, data, byProduct.get(productId) || [], -1);
+            if (result.update) {
+                transaction.update(ref, result.update);
+                stockAdjustments.push(...result.adjustments);
+            }
+        });
+
+        const finalOrder = {
+            ...orderData,
+            stockAdjusted: stockAdjustments.length > 0,
+            stockAdjustments,
+            stockMode: stockAdjustments.length ? 'auto' : 'not-tracked'
+        };
+        transaction.update(orderRef, finalOrder);
+        return finalOrder;
+    });
+
+    return { docRef: orderRef, orderData: committedOrder };
+}
+
+function applyPosOpenBillToForm(order = {}) {
+    const nameInput = document.getElementById('pos-customer-name');
+    const phoneInput = document.getElementById('pos-customer-phone');
+    const searchInput = document.getElementById('pos-customer-search');
+    const noteInput = document.getElementById('pos-note');
+    const discountInput = document.getElementById('pos-discount');
+    const paidInput = document.getElementById('pos-paid-amount');
+    const paymentSelect = document.getElementById('pos-payment-method');
+
+    if (nameInput) nameInput.value = order.customerName || '';
+    if (phoneInput) phoneInput.value = order.phone || '';
+    if (searchInput) searchInput.value = order.customerEmail || order.phone || order.customerName || '';
+    if (noteInput) noteInput.value = order.note || '';
+    if (discountInput) discountInput.value = order.discount ? String(order.discount) : '';
+    if (paidInput) paidInput.value = '';
+    if (paymentSelect && order.paymentMethod) paymentSelect.value = order.paymentMethod;
+
+    posSelectedCustomer = order.customerProfileSynced || order.customerUid
+        ? posCleanCustomer(order.customerUid || order.customerEmail || 'customer', {
+            displayName: order.customerName,
+            email: order.customerEmail,
+            phone: order.phone,
+            lineId: order.customerLineId,
+            tier: order.customerTier,
+            memberCode: order.customerMemberCode
+        })
+        : null;
+    renderPosCustomerCard();
+}
+
+window.refreshPosOpenBills = async () => {
+    const list = document.getElementById('pos-open-bills-list');
+    if (list) list.innerHTML = '<div class="pos-empty">กำลังรีเฟรชบิลค้างชำระ...</div>';
+    try {
+        if (!openBillsUnsubscribe) setupRealtimeOpenBills();
+        await refreshOpenBillsOnce();
+    } catch (error) {
+        console.error('Refresh open bills failed:', error);
+        if (list) list.innerHTML = '<div class="pos-empty pos-error">รีเฟรชบิลไม่สำเร็จ: ' + escapeHTML(error.message) + '</div>';
+    }
+};
+
+window.loadPosOpenBill = async (orderId, focusPayment = false) => {
+    try {
+        const orderSnap = await getDoc(doc(db, 'orders', orderId));
+        if (!orderSnap.exists()) throw new Error('ไม่พบบิลนี้แล้ว');
+        const order = { firestoreId: orderSnap.id, ...(orderSnap.data() || {}) };
+        if (order.source !== 'pos' || order.billStatus !== 'open' || order.paymentStatus === 'paid') {
+            throw new Error('บิลนี้ไม่อยู่ในสถานะค้างชำระ');
+        }
+        posCart = Array.isArray(order.items) ? order.items.map(buildPosCartItemFromOrderItem) : [];
+        applyPosOpenBillToForm(order);
+        setPosActiveBill(order);
+        setPosView('sales');
+        renderPosCart();
+        renderPosOpenBills();
+        if (focusPayment) {
+            document.getElementById('pos-paid-amount')?.focus();
+            alert('โหลดบิลแล้ว เลือกช่องทางชำระเงินและกด "ชำระเงินทันที" เพื่อปิดยอด');
+        }
+    } catch (error) {
+        console.error('Load POS open bill failed:', error);
+        alert('เรียกบิลค้างชำระไม่สำเร็จ: ' + error.message);
+    }
+};
+
+window.savePosOpenBill = async () => {
+    if (!posCart.length) {
+        alert('กรุณาเพิ่มสินค้าในตะกร้าก่อนเปิดบิล');
+        return;
+    }
+    const user = auth.currentUser;
+    if (!user) {
+        alert('กรุณาเข้าสู่ระบบแอดมินก่อนเปิดบิล');
+        return;
+    }
+    const openBtn = document.getElementById('pos-open-bill-btn');
+    const originalText = openBtn?.textContent || '';
+    try {
+        if (openBtn) {
+            openBtn.disabled = true;
+            openBtn.textContent = 'กำลังบันทึกบิล...';
+        }
+        const receiptNo = posActiveBill?.receiptNo || posActiveBill?.id || generatePosReceiptNo();
+        const { fields } = buildPosOrderFields(user, {
+            receiptNo,
+            status: 'pending',
+            paymentStatus: 'pending',
+            billStatus: 'open',
+            isOpenBill: true,
+            orderMode: 'open_bill'
+        });
+        const billData = {
+            ...fields,
+            paidAmount: 0,
+            changeAmount: 0,
+            stockAdjusted: false,
+            stockAdjustments: [],
+            stockMode: 'open-bill-no-stock',
+            updatedAt: serverTimestamp(),
+            updatedBy: user.uid
+        };
+
+        if (posActiveBill?.firestoreId) {
+            await updateDoc(doc(db, 'orders', posActiveBill.firestoreId), billData);
+            setPosActiveBill({ ...posActiveBill, ...billData, updatedAt: new Date() });
+            alert('อัปเดตบิลค้างชำระแล้ว สามารถเรียกกลับมาแก้หรือปิดยอดได้');
+        } else {
+            const docRef = await addDoc(collection(db, 'orders'), {
+                ...billData,
+                uid: user.uid,
+                timestamp: serverTimestamp(),
+                createdAt: serverTimestamp(),
+                openedAt: serverTimestamp()
+            });
+            setPosActiveBill({ firestoreId: docRef.id, ...billData, uid: user.uid, createdAt: new Date(), openedAt: new Date(), updatedAt: new Date() });
+            alert('เปิดบิลค้างชำระแล้ว ลูกค้าสั่งเพิ่มได้เรื่อย ๆ');
+        }
+        renderPosCart();
+        renderPosOpenBills();
+        await refreshOpenBillsOnce();
+    } catch (error) {
+        console.error('Save POS open bill failed:', error);
+        alert('บันทึกบิลค้างชำระไม่สำเร็จ: ' + error.message);
+    } finally {
+        if (openBtn) {
+            openBtn.disabled = false;
+            openBtn.textContent = originalText || 'เปิดบิล / บันทึกค้างชำระ';
+        }
+        renderPosActiveBill();
+    }
+};
+
 async function restorePosOrderStock(orderId, reason = '') {
     const user = auth.currentUser;
     if (!user) throw new Error('กรุณาเข้าสู่ระบบแอดมินก่อน Void ออเดอร์');
@@ -1129,7 +1517,7 @@ function buildPosReceiptHTML(order = {}) {
 
 window.checkoutPosOrder = async () => {
     if (!posCart.length) {
-        alert('กรุณาเพิ่มสินค้าในตะกร้าก่อนบันทึกออเดอร์');
+        alert('กรุณาเพิ่มสินค้าในตะกร้าก่อนทำรายการ POS');
         return;
     }
     const user = auth.currentUser;
@@ -1142,72 +1530,39 @@ window.checkoutPosOrder = async () => {
     try {
         if (checkoutBtn) {
             checkoutBtn.disabled = true;
-            checkoutBtn.textContent = 'กำลังบันทึกออเดอร์...';
+            checkoutBtn.textContent = posActiveBill ? 'กำลังปิดบิล...' : 'กำลังบันทึกออเดอร์...';
         }
         const totals = posCartTotals();
         if (totals.paymentMethod === 'cash' && totals.paidAmount > 0 && totals.paidAmount < totals.total) {
             throw new Error('จำนวนเงินที่รับมาต่ำกว่ายอดสุทธิ');
         }
-        const paidAmount = totals.paymentMethod === 'cash'
-            ? posRound(totals.paidAmount || totals.total)
-            : totals.total;
-        const changeAmount = totals.paymentMethod === 'cash'
-            ? posRound(Math.max(paidAmount - totals.total, 0))
-            : 0;
-        const isTestOrder = !!document.getElementById('pos-soft-launch-mode')?.checked;
-        const receiptNo = generatePosReceiptNo();
-        const now = new Date();
-        const orderItems = posCart.map(item => ({
-            productId: item.productId,
-            variantId: item.variantId,
-            name: item.name,
-            variantName: item.variantName || '',
-            sku: item.sku || '',
-            category: item.category || '',
-            price: posRound(item.price),
-            cost: posRound(item.cost),
-            quantity: safeNumber(item.quantity, 1),
-            lineTotal: posRound(safeNumber(item.price) * safeNumber(item.quantity, 1)),
-            taxEnabled: item.taxEnabled !== false
-        }));
-        const orderData = {
-            id: receiptNo,
+        const receiptNo = posActiveBill?.receiptNo || posActiveBill?.id || generatePosReceiptNo();
+        const { orderItems, isTestOrder, fields } = buildPosOrderFields(user, {
             receiptNo,
-            date: now.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }),
-            source: 'pos',
-            orderType: 'pos',
             status: 'completed',
             paymentStatus: 'paid',
-            paymentMethod: totals.paymentMethod,
-            paymentLabel: posPaymentLabel(totals.paymentMethod),
-            uid: user.uid,
-            customerName: posLimitString(document.getElementById('pos-customer-name')?.value, 120) || 'Walk-in Customer',
-            phone: posLimitString(document.getElementById('pos-customer-phone')?.value, 40),
-            customerUid: posLimitString(posSelectedCustomer?.uid, 120),
-            customerEmail: posLimitString(posSelectedCustomer?.email, 180),
-            customerLineId: posLimitString(posSelectedCustomer?.lineId, 80),
-            customerTier: posLimitString(posSelectedCustomer?.tier, 30),
-            customerMemberCode: posLimitString(posSelectedCustomer?.memberCode, 40),
-            customerProfileSynced: !!posSelectedCustomer?.uid,
-            address: 'หน้าร้าน Eden Cafe',
-            note: posLimitString(document.getElementById('pos-note')?.value, 500),
-            items: orderItems,
-            subtotal: totals.subtotal,
-            discount: totals.discount,
-            taxIncluded: totals.taxIncluded,
-            total: totals.total,
-            totalAmount: totals.total,
-            paidAmount,
-            changeAmount,
-            cashierUid: user.uid,
-            cashierName: posLimitString(user.displayName || user.email || 'Admin', 120),
-            cashierEmail: posLimitString(user.email || '', 180),
-            isTestOrder,
-            softLaunch: isTestOrder,
-            timestamp: serverTimestamp(),
-            createdAt: serverTimestamp()
+            billStatus: 'paid',
+            isOpenBill: false,
+            orderMode: posActiveBill ? 'open_bill' : 'pay_now'
+        });
+        const orderData = {
+            ...fields,
+            closedAt: serverTimestamp(),
+            closedBy: user.uid,
+            closedByName: posLimitString(user.displayName || user.email || 'Admin', 120),
+            updatedAt: serverTimestamp(),
+            updatedBy: user.uid
         };
-        const result = await commitPosOrderWithStock(orderData, orderItems, isTestOrder);
+        if (!posActiveBill) {
+            orderData.timestamp = serverTimestamp();
+            orderData.createdAt = serverTimestamp();
+        }
+
+        const wasOpenBill = !!posActiveBill?.firestoreId;
+        const result = wasOpenBill
+            ? await closePosOpenBillWithStock(posActiveBill.firestoreId, orderData, orderItems, isTestOrder)
+            : await commitPosOrderWithStock(orderData, orderItems, isTestOrder);
+
         posLastReceipt = { ...result.orderData, firestoreId: result.docRef.id, timestamp: new Date(), createdAt: new Date() };
         const receipt = document.getElementById('pos-receipt');
         const printBtn = document.getElementById('pos-print-btn');
@@ -1217,20 +1572,23 @@ window.checkoutPosOrder = async () => {
         }
         if (printBtn) printBtn.style.display = 'block';
         posCart = [];
+        setPosActiveBill(null);
         persistPosCart();
         renderPosCart();
-        alert(isTestOrder ? 'บันทึกออเดอร์ทดสอบ POS สำเร็จ' : 'บันทึกออเดอร์ POS สำเร็จ');
+        renderPosOpenBills();
+        await refreshOpenBillsOnce().catch(error => console.warn('Unable to refresh open bills after checkout:', error));
+        alert(wasOpenBill ? 'ปิดบิลและออกใบเสร็จสำเร็จ' : (isTestOrder ? 'บันทึกออเดอร์ทดสอบ POS สำเร็จ' : 'บันทึกออเดอร์ POS สำเร็จ'));
     } catch (error) {
         console.error('POS checkout failed:', error);
-        alert('บันทึกออเดอร์ POS ไม่สำเร็จ: ' + error.message);
+        alert('ทำรายการ POS ไม่สำเร็จ: ' + error.message);
     } finally {
         if (checkoutBtn) {
             checkoutBtn.disabled = false;
-            checkoutBtn.textContent = originalText || 'บันทึกออเดอร์และออกใบเสร็จ';
+            checkoutBtn.textContent = originalText || 'ชำระเงินทันทีและออกใบเสร็จ';
         }
+        renderPosActiveBill();
     }
 };
-
 window.printPosReceipt = () => {
     if (!posLastReceipt) {
         alert('ยังไม่มีใบเสร็จล่าสุดให้พิมพ์');

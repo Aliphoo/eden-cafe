@@ -6,7 +6,7 @@
     <title>Eden POS | Eden OS</title>
     <link rel="icon" href="Images/Logo.webp" type="image/webp">
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="pos.css?v=6">
+    <link rel="stylesheet" href="pos.css?v=7">
 </head>
 <body>
     <div id="admin-login" style="display: none;">
@@ -284,6 +284,7 @@
                         <input id="pos-soft-launch-mode" type="checkbox" checked>
                         โหมดทดลอง Soft Launch (ไม่รวมยอด Dashboard)
                     </label>
+                    <div id="pos-active-bill" class="pos-active-bill" hidden></div>
                     <div id="pos-cart-items" class="pos-cart-items">
                         <div class="pos-empty">ยังไม่มีสินค้าในตะกร้า</div>
                     </div>
@@ -324,16 +325,31 @@
                         <input id="pos-discount" type="number" min="0" step="1" placeholder="ส่วนลด (บาท)">
                     </section>
                     <div id="pos-summary" class="pos-summary"></div>
-                    <button id="pos-checkout-btn" class="pos-checkout-btn" type="button" onclick="checkoutPosOrder()">บันทึกออเดอร์และออกใบเสร็จ</button>
+                    <div class="pos-action-grid">
+                        <button id="pos-checkout-btn" class="pos-checkout-btn" type="button" onclick="checkoutPosOrder()">ชำระเงินทันทีและออกใบเสร็จ</button>
+                        <button id="pos-open-bill-btn" class="pos-open-bill-btn" type="button" onclick="savePosOpenBill()">เปิดบิล / บันทึกค้างชำระ</button>
+                    </div>
                     <button class="pos-clear-btn" type="button" onclick="clearPosCart()">ล้างตะกร้า</button>
                     <button id="pos-print-btn" class="pos-print-btn" type="button" onclick="printPosReceipt()" style="display:none;">พิมพ์ใบเสร็จล่าสุด</button>
                     <div id="pos-receipt" class="pos-receipt" style="display:none;"></div>
+                    <section class="pos-open-bills-panel" aria-label="รายการบิลค้างชำระ">
+                        <div class="pos-open-bills-head">
+                            <div>
+                                <span>Outstanding Bills</span>
+                                <strong>บิลค้างชำระ</strong>
+                            </div>
+                            <button type="button" onclick="refreshPosOpenBills()">รีเฟรชบิล</button>
+                        </div>
+                        <div id="pos-open-bills-list" class="pos-open-bills-list">
+                            <div class="pos-empty">กำลังโหลดบิลค้างชำระ...</div>
+                        </div>
+                    </section>
                 </aside>
             </section>
             </section>
         </main>
     </div>
 
-    <script type="module" src="js/pos.js?v=7"></script>
+    <script type="module" src="js/pos.js?v=8"></script>
 </body>
 </html>
