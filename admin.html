@@ -314,50 +314,6 @@
         .variant-remove-btn:hover { background: #ffcdd2; }
         @media (max-width: 760px) { .modal-content.product-detail-modal { width: 96%; padding: 18px; } .menu-variant-detail-row td { padding-left: 16px; } }
         
-        /* POS */
-        .pos-shell { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: start; }
-        .pos-panel { background: #fff; border-radius: 18px; padding: 22px; box-shadow: 0 14px 35px rgba(20, 59, 38, 0.08); border: 1px solid #e7efe8; }
-        .pos-hero { background: linear-gradient(135deg, #0b4f33 0%, #148044 58%, #f8f4e7 58%, #fff 100%); color: #fff; overflow: hidden; position: relative; }
-        .pos-hero h2 { color: #fff; font-size: 1.8rem; margin-bottom: 8px; }
-        .pos-hero p { color: rgba(255,255,255,0.82); max-width: 640px; }
-        .pos-badge { display: inline-flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.16); border: 1px solid rgba(255,255,255,0.24); border-radius: 999px; padding: 8px 14px; font-size: 0.86rem; margin-bottom: 14px; }
-        .pos-toolbar { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: end; margin: 18px 0; }
-        .pos-search { width: 100%; border: 1px solid #d9e5dc; border-radius: 14px; padding: 13px 15px; font-size: 1rem; }
-        .pos-category-list { display: flex; gap: 10px; overflow-x: auto; padding: 6px 0 4px; margin-bottom: 16px; }
-        .pos-category-btn { border: 1px solid #d9e7db; background: #fbfff8; color: #244233; border-radius: 999px; padding: 10px 14px; cursor: pointer; font-weight: 700; white-space: nowrap; }
-        .pos-category-btn.active { background: #0f6b43; color: #fff; border-color: #0f6b43; }
-        .pos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; max-height: 680px; overflow-y: auto; padding-right: 4px; }
-        .pos-product-card { border: 1px solid #e0ebe2; border-radius: 18px; padding: 12px; background: #fffefa; display: flex; flex-direction: column; min-height: 245px; box-shadow: 0 6px 18px rgba(25, 75, 48, 0.06); }
-        .pos-product-card img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 14px; background: #f1f6f1; }
-        .pos-product-name { font-weight: 800; color: #18251d; margin-top: 10px; line-height: 1.35; min-height: 44px; }
-        .pos-product-meta { color: #718078; font-size: 0.82rem; margin: 3px 0 8px; }
-        .pos-product-card select { border: 1px solid #dce8df; border-radius: 10px; padding: 8px; margin-bottom: 8px; width: 100%; }
-        .pos-add-btn { margin-top: auto; border: 0; border-radius: 12px; padding: 10px 12px; background: #0f6b43; color: #fff; font-weight: 800; cursor: pointer; }
-        .pos-add-btn:hover { background: #0a5635; }
-        .pos-cart { position: sticky; top: 18px; }
-        .pos-cart h3 { font-size: 1.35rem; margin-bottom: 12px; color: #173522; }
-        .pos-customer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
-        .pos-cart input, .pos-cart select, .pos-cart textarea { width: 100%; border: 1px solid #d9e5dc; border-radius: 12px; padding: 11px 12px; font-size: 0.95rem; }
-        .pos-soft-mode { display: flex; gap: 10px; align-items: center; background: #fff8e6; border: 1px solid #f3dca2; border-radius: 14px; padding: 10px 12px; margin: 8px 0 12px; color: #755010; font-weight: 700; }
-        .pos-soft-mode input { width: auto; }
-        .pos-cart-items { border: 1px solid #e6eee8; border-radius: 14px; overflow: hidden; margin: 12px 0; max-height: 330px; overflow-y: auto; }
-        .pos-cart-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 12px; border-bottom: 1px solid #edf3ee; }
-        .pos-cart-row:last-child { border-bottom: 0; }
-        .pos-cart-title { font-weight: 800; color: #1d3326; }
-        .pos-cart-sub { color: #78847d; font-size: 0.82rem; margin-top: 2px; }
-        .pos-qty { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
-        .pos-qty button { width: 28px; height: 28px; border-radius: 50%; border: 1px solid #cfe0d4; background: #fff; cursor: pointer; font-weight: 900; }
-        .pos-remove-btn { border: 0; background: #fdeaea; color: #d33; border-radius: 9px; padding: 5px 8px; cursor: pointer; margin-top: 8px; }
-        .pos-summary { display: grid; gap: 8px; margin: 12px 0; }
-        .pos-summary-row { display: flex; justify-content: space-between; color: #314135; }
-        .pos-summary-row.total { border-top: 1px dashed #cddace; padding-top: 10px; font-size: 1.35rem; font-weight: 900; color: #0f5d3a; }
-        .pos-payment-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
-        .pos-checkout-btn { width: 100%; border: 0; border-radius: 16px; padding: 15px 18px; background: linear-gradient(135deg, #0b633d, #159251); color: #fff; font-size: 1rem; font-weight: 900; cursor: pointer; }
-        .pos-clear-btn, .pos-print-btn { width: 100%; border: 1px solid #d7e5dc; border-radius: 14px; padding: 12px; background: #fff; color: #254132; font-weight: 800; cursor: pointer; margin-top: 8px; }
-        .pos-receipt { background: #fbfbf5; border: 1px dashed #b9cabf; border-radius: 14px; padding: 14px; margin-top: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.86rem; color: #1e2d24; }
-        .pos-empty { text-align: center; padding: 24px 12px; color: #7d887f; }
-        @media (max-width: 1180px) { .pos-shell { grid-template-columns: 1fr; } .pos-cart { position: static; } }
-        @media (max-width: 640px) { .pos-toolbar, .pos-customer-grid, .pos-payment-grid { grid-template-columns: 1fr; } .pos-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: none; } .pos-panel { padding: 16px; } }
 
         /* Content Sections */
         .content-section { display: none; }
@@ -424,7 +380,7 @@
         </div>
         <ul class="sidebar-menu">
             <li class="active" onclick="switchTab('dashboard', this)">📊 ภาพรวม (Dashboard)</li>
-            <li onclick="switchTab('pos', this)">💳 POS หน้าร้าน</li>
+            <li class="sidebar-external-link" data-permission="pos" onclick="window.location.href='pos.html'">💳 POS หน้าร้าน</li>
             <li onclick="switchTab('members', this)">👥 จัดการสมาชิก (Members)</li>
             <li data-owner-only="true" onclick="switchTab('admin-access', this)">🛡️ จัดการผู้จัดการ (Admin Access)</li>
             <li onclick="switchTab('orders', this)">🛍️ ออเดอร์สินค้า (Orders)</li>
@@ -501,64 +457,7 @@
             </div>
         </div>
 
-        <!-- POS Section -->
-        <div id="pos" class="content-section">
-            <div class="section-container pos-hero">
-                <span class="pos-badge">Soft Launch POS</span>
-                <h2>POS หน้าร้าน Eden Cafe</h2>
-                <p>ขายหน้าร้านจากสินค้าที่เปิด `แสดงบน POS` เท่านั้น เลือกสินค้าเข้าตะกร้า รับชำระเงิน บันทึกออเดอร์ และออกใบเสร็จแบบง่ายในหน้าเดียว</p>
-            </div>
-            <div class="pos-shell">
-                <div class="pos-panel">
-                    <div class="section-header">
-                        <div>
-                            <h2>เลือกสินค้า</h2>
-                            <p style="color:#667; margin-top:4px;">ข้อมูลมาจาก collection products และกรองเฉพาะรายการที่เปิดขายบน POS</p>
-                        </div>
-                        <button class="btn-action btn-view" type="button" onclick="refreshPosProducts()">รีเฟรช POS</button>
-                    </div>
-                    <div class="pos-toolbar">
-                        <input id="pos-search-input" class="pos-search" type="search" placeholder="ค้นหาชื่อสินค้า / SKU / หมวดหมู่">
-                        <div style="font-weight:800; color:#31513f;"><span id="pos-product-count">0</span> รายการ POS</div>
-                    </div>
-                    <div id="pos-category-list" class="pos-category-list"></div>
-                    <div id="pos-product-grid" class="pos-grid">
-                        <div class="pos-empty">กำลังโหลดสินค้า POS...</div>
-                    </div>
-                </div>
-                <div class="pos-panel pos-cart">
-                    <h3>ตะกร้า POS</h3>
-                    <div class="pos-customer-grid">
-                        <input id="pos-customer-name" type="text" placeholder="ชื่อลูกค้า (Walk-in)">
-                        <input id="pos-customer-phone" type="tel" placeholder="เบอร์โทร (ถ้ามี)">
-                    </div>
-                    <textarea id="pos-note" rows="2" placeholder="หมายเหตุหน้าร้าน เช่น โต๊ะ A1 / รับกลับบ้าน"></textarea>
-                    <label class="pos-soft-mode">
-                        <input id="pos-soft-launch-mode" type="checkbox" checked>
-                        โหมดทดลอง Soft Launch (ไม่รวมยอด Dashboard)
-                    </label>
-                    <div id="pos-cart-items" class="pos-cart-items">
-                        <div class="pos-empty">ยังไม่มีสินค้าในตะกร้า</div>
-                    </div>
-                    <div class="pos-payment-grid">
-                        <select id="pos-payment-method">
-                            <option value="cash">เงินสด</option>
-                            <option value="transfer">โอนเงิน</option>
-                            <option value="qr">QR Payment</option>
-                            <option value="card">บัตร</option>
-                            <option value="other">อื่น ๆ</option>
-                        </select>
-                        <input id="pos-paid-amount" type="number" min="0" step="1" placeholder="รับเงินมา">
-                    </div>
-                    <input id="pos-discount" type="number" min="0" step="1" placeholder="ส่วนลด (บาท)">
-                    <div id="pos-summary" class="pos-summary"></div>
-                    <button id="pos-checkout-btn" class="pos-checkout-btn" type="button" onclick="checkoutPosOrder()">บันทึกออเดอร์และออกใบเสร็จ</button>
-                    <button class="pos-clear-btn" type="button" onclick="clearPosCart()">ล้างตะกร้า</button>
-                    <button id="pos-print-btn" class="pos-print-btn" type="button" onclick="printPosReceipt()" style="display:none;">พิมพ์ใบเสร็จล่าสุด</button>
-                    <div id="pos-receipt" class="pos-receipt" style="display:none;"></div>
-                </div>
-            </div>
-        </div>
+        <!-- POS moved to pos.html as a standalone counter page. -->
 
         <!-- Members Section -->
         <div id="members" class="content-section">
@@ -1597,7 +1496,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=38"></script>
+    <script type="module" src="js/admin.js?v=39"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {

@@ -929,14 +929,11 @@ function initializeAdminModules() {
     if (canAdmin('dashboard')) fetchStats();
     if (canAdmin('orders') || canAdmin('pos')) setupRealtimeOrders();
     if (canAdmin('bookings')) setupRealtimeBookings();
-    if (canAdmin('products') || canAdmin('pos')) {
+    if (canAdmin('products')) {
         setupRealtimeCategories();
         setupRealtimeProducts();
-    }
-    if (canAdmin('products')) {
         initLoyverseImportTool();
     }
-    if (canAdmin('pos')) initPosModule();
     if (canAdmin('tables')) setupRealtimeTables();
     if (canAdmin('rooms')) setupRealtimeRooms();
     if (canAdmin('shop')) {
@@ -1001,6 +998,9 @@ function restoreAdminActiveTab() {
     if (firstAllowedMenu) {
         const tabId = adminTabIdFromMenuItem(firstAllowedMenu);
         if (tabId) window.switchTab(tabId, firstAllowedMenu);
+        else if (firstAllowedMenu.dataset.permission === 'pos' && canAdmin('pos')) {
+            window.location.href = 'pos.html';
+        }
     }
 }
 
@@ -1237,7 +1237,8 @@ function applyAdminAccessUI() {
     document.querySelectorAll('.sidebar-menu li').forEach(li => {
         const match = String(li.getAttribute('onclick') || '').match(/switchTab\('([^']+)'/);
         const tabId = match ? match[1] : '';
-        const allowed = !tabId || window.canAccessAdminTab(tabId);
+        const directPermission = li.dataset.permission || '';
+        const allowed = directPermission ? canAdmin(directPermission) : (!tabId || window.canAccessAdminTab(tabId));
         li.style.display = allowed ? '' : 'none';
         li.classList.toggle('access-disabled', !allowed);
     });
