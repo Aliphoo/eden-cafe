@@ -54,8 +54,10 @@ service cloud.firestore {
     function isValidAdminOrderCreate() {
       return request.resource.data.keys().hasOnly([
           'id', 'date', 'items', 'total', 'totalAmount', 'uid', 'timestamp',
-          'customerName', 'phone', 'address', 'status',
-          'source', 'orderType', 'receiptNo', 'paymentStatus', 'paymentMethod',
+           'customerName', 'phone', 'address', 'status',
+           'source', 'orderType', 'receiptNo', 'paymentStatus', 'paymentMethod',
+          'paymentLabel', 'customerUid', 'customerEmail', 'customerLineId',
+          'customerTier', 'customerMemberCode', 'customerProfileSynced',
           'subtotal', 'discount', 'taxIncluded', 'paidAmount', 'changeAmount',
           'note', 'cashierUid', 'cashierName', 'cashierEmail',
           'isTestOrder', 'softLaunch', 'stockAdjusted', 'stockAdjustments',
@@ -76,9 +78,16 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['orderType']) || request.resource.data.orderType in ['pos', 'online', 'shop'])
         && (!request.resource.data.keys().hasAny(['paymentStatus']) || request.resource.data.paymentStatus in ['pending', 'paid', 'failed', 'refunded'])
         && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'qr', 'card', 'other'])
+        && (!request.resource.data.keys().hasAny(['paymentLabel']) || (request.resource.data.paymentLabel is string && request.resource.data.paymentLabel.size() <= 40))
         && (!request.resource.data.keys().hasAny(['receiptNo']) || isShortString(request.resource.data.receiptNo, 60))
         && (!request.resource.data.keys().hasAny(['customerName']) || (request.resource.data.customerName is string && request.resource.data.customerName.size() <= 120))
         && (!request.resource.data.keys().hasAny(['phone']) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['customerUid']) || (request.resource.data.customerUid is string && request.resource.data.customerUid.size() <= 120))
+        && (!request.resource.data.keys().hasAny(['customerEmail']) || (request.resource.data.customerEmail is string && request.resource.data.customerEmail.size() <= 180))
+        && (!request.resource.data.keys().hasAny(['customerLineId']) || (request.resource.data.customerLineId is string && request.resource.data.customerLineId.size() <= 80))
+        && (!request.resource.data.keys().hasAny(['customerTier']) || (request.resource.data.customerTier is string && request.resource.data.customerTier.size() <= 30))
+        && (!request.resource.data.keys().hasAny(['customerMemberCode']) || (request.resource.data.customerMemberCode is string && request.resource.data.customerMemberCode.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['customerProfileSynced']) || request.resource.data.customerProfileSynced is bool)
         && (!request.resource.data.keys().hasAny(['address']) || (request.resource.data.address is string && request.resource.data.address.size() <= 250))
         && (!request.resource.data.keys().hasAny(['note']) || (request.resource.data.note is string && request.resource.data.note.size() <= 500))
         && (!request.resource.data.keys().hasAny(['subtotal']) || (request.resource.data.subtotal is number && request.resource.data.subtotal >= 0 && request.resource.data.subtotal <= 1000000))
@@ -204,7 +213,7 @@ service cloud.firestore {
       allow delete: if isOwner() && request.auth.uid != userId;
     }
     match /users/{userId} {
-      allow read: if hasAdminPermission('members') || (isSignedIn() && request.auth.uid == userId);
+      allow read: if hasAdminPermission('members') || hasAdminPermission('pos') || (isSignedIn() && request.auth.uid == userId);
       allow write: if hasAdminPermission('members');
       allow create: if isSignedIn()
         && request.auth.uid == userId

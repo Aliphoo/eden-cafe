@@ -6,7 +6,7 @@
     <title>Eden POS | Eden OS</title>
     <link rel="icon" href="Images/Logo.webp" type="image/webp">
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="pos.css?v=5">
+    <link rel="stylesheet" href="pos.css?v=6">
 </head>
 <body>
     <div id="admin-login" style="display: none;">
@@ -259,9 +259,25 @@
 
                 <aside class="pos-panel pos-cart">
                     <h3>ตะกร้า POS</h3>
-                    <div class="pos-customer-grid">
-                        <input id="pos-customer-name" type="text" placeholder="ชื่อลูกค้า (Walk-in)">
-                        <input id="pos-customer-phone" type="tel" placeholder="เบอร์โทร (ถ้ามี)">
+                    <section class="pos-customer-sync" aria-label="ซิงค์ข้อมูลลูกค้า">
+                        <div class="pos-cart-section-title">
+                            <span>Customer Sync</span>
+                            <strong>ลูกค้า / สมาชิก</strong>
+                        </div>
+                        <div class="pos-sync-row">
+                            <input id="pos-customer-search" type="search" placeholder="ค้นหาเบอร์ / อีเมล / ชื่อลูกค้า">
+                            <button id="pos-customer-sync-btn" class="pos-sync-btn" type="button" onclick="syncPosCustomer()">ซิงค์ลูกค้า</button>
+                        </div>
+                        <div class="pos-customer-grid">
+                            <input id="pos-customer-name" type="text" placeholder="ชื่อลูกค้า (Walk-in)">
+                            <input id="pos-customer-phone" type="tel" placeholder="เบอร์โทร (ถ้ามี)">
+                        </div>
+                        <div id="pos-customer-card" class="pos-customer-card" hidden></div>
+                        <p id="pos-customer-sync-status" class="pos-sync-status">ยังไม่ผูกสมาชิก: ระบบจะบันทึกเป็น Walk-in Customer</p>
+                    </section>
+                    <div class="pos-cart-section-title">
+                        <span>Order Note</span>
+                        <strong>หมายเหตุหน้าร้าน</strong>
                     </div>
                     <textarea id="pos-note" rows="2" placeholder="หมายเหตุหน้าร้าน เช่น โต๊ะ A1 / รับกลับบ้าน"></textarea>
                     <label class="pos-soft-mode">
@@ -271,17 +287,42 @@
                     <div id="pos-cart-items" class="pos-cart-items">
                         <div class="pos-empty">ยังไม่มีสินค้าในตะกร้า</div>
                     </div>
-                    <div class="pos-payment-grid">
-                        <select id="pos-payment-method">
+                    <section class="pos-payment-section" aria-label="ชำระเงิน POS">
+                        <div class="pos-cart-section-title">
+                            <span>Checkout</span>
+                            <strong>วิธีชำระเงิน</strong>
+                        </div>
+                        <div class="pos-payment-methods" role="radiogroup" aria-label="เลือกวิธีชำระเงิน">
+                            <button class="pos-payment-card active" type="button" data-pos-payment="cash" aria-pressed="true">
+                                <strong>เงินสด</strong>
+                                <small>รับเงินสดและคำนวณเงินทอน</small>
+                            </button>
+                            <button class="pos-payment-card" type="button" data-pos-payment="transfer" aria-pressed="false">
+                                <strong>โอนเงิน</strong>
+                                <small>แนบเลขอ้างอิงในหมายเหตุได้</small>
+                            </button>
+                            <button class="pos-payment-card" type="button" data-pos-payment="qr" aria-pressed="false">
+                                <strong>QR Payment</strong>
+                                <small>พร้อมต่อ PromptPay/Payment Gateway</small>
+                            </button>
+                            <button class="pos-payment-card" type="button" data-pos-payment="card" aria-pressed="false">
+                                <strong>บัตร</strong>
+                                <small>บันทึกยอดชำระด้วยบัตร</small>
+                            </button>
+                        </div>
+                        <select id="pos-payment-method" class="pos-payment-native" aria-label="วิธีชำระเงิน">
                             <option value="cash">เงินสด</option>
                             <option value="transfer">โอนเงิน</option>
                             <option value="qr">QR Payment</option>
                             <option value="card">บัตร</option>
                             <option value="other">อื่น ๆ</option>
                         </select>
-                        <input id="pos-paid-amount" type="number" min="0" step="1" placeholder="รับเงินมา">
-                    </div>
-                    <input id="pos-discount" type="number" min="0" step="1" placeholder="ส่วนลด (บาท)">
+                        <div class="pos-cash-row">
+                            <input id="pos-paid-amount" type="number" min="0" step="1" placeholder="รับเงินมา">
+                            <button id="pos-cash-exact-btn" type="button">รับพอดี</button>
+                        </div>
+                        <input id="pos-discount" type="number" min="0" step="1" placeholder="ส่วนลด (บาท)">
+                    </section>
                     <div id="pos-summary" class="pos-summary"></div>
                     <button id="pos-checkout-btn" class="pos-checkout-btn" type="button" onclick="checkoutPosOrder()">บันทึกออเดอร์และออกใบเสร็จ</button>
                     <button class="pos-clear-btn" type="button" onclick="clearPosCart()">ล้างตะกร้า</button>
@@ -293,6 +334,6 @@
         </main>
     </div>
 
-    <script type="module" src="js/pos.js?v=6"></script>
+    <script type="module" src="js/pos.js?v=7"></script>
 </body>
 </html>

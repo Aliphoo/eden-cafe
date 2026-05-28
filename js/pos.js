@@ -1,6 +1,6 @@
 import { auth, provider, db } from './firebase-config.js';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { collection, getDocs, doc, setDoc, addDoc, query, orderBy, onSnapshot, getDoc, serverTimestamp, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, getDocs, doc, setDoc, addDoc, query, orderBy, onSnapshot, getDoc, serverTimestamp, runTransaction, where, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
 const ADMIN_COLLECTION = 'admin_users';
@@ -26,8 +26,16 @@ let posSelectedCategory = 'all';
 let posSearchTerm = '';
 let posCart = [];
 let posLastReceipt = null;
+let posSelectedCustomer = null;
 let posControlsBound = false;
 const POS_VIEW_KEY = 'edenPosActiveView';
+const POS_PAYMENT_METHODS = {
+    cash: { label: 'เงินสด', hint: 'รับเงินสดและคำนวณเงินทอน' },
+    transfer: { label: 'โอนเงิน', hint: 'บันทึกเป็นการโอนเงิน' },
+    qr: { label: 'QR Payment', hint: 'พร้อมต่อ PromptPay/Payment Gateway' },
+    card: { label: 'บัตร', hint: 'บันทึกยอดชำระด้วยบัตร' },
+    other: { label: 'อื่น ๆ', hint: 'ช่องทางชำระเงินอื่น' }
+};
 
 function escapeHTML(value) {
     return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -354,6 +362,48 @@ function posLimitString(value, maxLength) {
     return String(value ?? '').trim().slice(0, maxLength);
 }
 
+function posNormalizePhone(value) {
+    return String(value ?? '').replace(/[^\d+]/g, '').replace(/^\+66/, '0').replace(/[^\d]/g, '');
+}
+
+function posCustomerSearchText(customer = {}) {
+    return [
+        customer.uid,
+        customer.displayName,
+        customer.name,
+        customer.email,
+        customer.phone,
+        customer.lineId,
+        customer.memberCode
+    ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function posCleanCustomer(uid, data = {}) {
+    const displayName = posLimitString(data.displayName || data.name || data.customerName || data.email || 'Eden Member', 120);
+    const email = normalizeEmail(data.email);
+    const phone = posLimitString(data.phone || data.mobile || data.tel || '', 40);
+    return {
+        uid,
+        displayName,
+        email,
+        phone,
+        phoneNormalized: posNormalizePhone(data.phoneNormalized || phone),
+        photoURL: posLimitString(data.photoURL || data.avatarUrl || '', 500),
+        memberCode: posLimitString(data.memberCode || '', 40),
+        tier: posLimitString(data.tier || 'Silver', 30),
+        points: safeNumber(data.points),
+        totalSpent: safeNumber(data.totalSpent),
+        visitCount: safeNumber(data.visitCount),
+        lineId: posLimitString(data.lineId || '', 80),
+        allergies: posLimitString(data.allergies || '', 200),
+        healthNote: posLimitString(data.healthNote || '', 500)
+    };
+}
+
+function posPaymentLabel(method) {
+    return POS_PAYMENT_METHODS[method]?.label || method || '-';
+}
+
 function posVariantKey(value) {
     return String(value ?? '').trim() || 'base';
 }
@@ -378,6 +428,93 @@ function persistPosCart() {
     } catch (error) {
         console.warn('Unable to persist POS cart:', error);
     }
+}
+
+function setPosCustomerStatus(message, state = '') {
+    const el = document.getElementById('pos-customer-sync-status');
+    if (!el) return;
+    el.textContent = message;
+    el.className = ['pos-sync-status', state].filter(Boolean).join(' ');
+}
+
+function renderPosCustomerCard() {
+    const card = document.getElementById('pos-customer-card');
+    if (!card) return;
+    if (!posSelectedCustomer) {
+        card.hidden = true;
+        card.innerHTML = '';
+        setPosCustomerStatus('ยังไม่ผูกสมาชิก: ระบบจะบันทึกเป็น Walk-in Customer');
+        return;
+    }
+    const customer = posSelectedCustomer;
+    card.hidden = false;
+    card.innerHTML = `
+        <div class="pos-customer-card-head">
+            <div>
+                <h4>${escapeHTML(customer.displayName || 'Eden Member')}</h4>
+                <small>${escapeHTML(customer.email || customer.phone || customer.uid || '-')}</small>
+            </div>
+            <span class="pos-customer-badge">${escapeHTML(customer.tier || 'Silver')}</span>
+        </div>
+        <div class="pos-customer-card-meta">
+            <span>รหัส: ${escapeHTML(customer.memberCode || customer.uid?.slice?.(0, 8) || '-')}</span>
+            <span>แต้ม ${safeNumber(customer.points).toLocaleString('th-TH')}</span>
+            <span>ใช้บริการ ${safeNumber(customer.visitCount).toLocaleString('th-TH')} ครั้ง</span>
+            ${customer.lineId ? `<span>LINE: ${escapeHTML(customer.lineId)}</span>` : ''}
+            ${customer.allergies ? `<span>แพ้: ${escapeHTML(customer.allergies)}</span>` : ''}
+        </div>
+        ${customer.healthNote ? `<small style="display:block;margin-top:10px;">หมายเหตุสุขภาพ: ${escapeHTML(customer.healthNote)}</small>` : ''}
+        <button class="pos-customer-clear" type="button" onclick="clearPosCustomer()">ยกเลิกการผูกสมาชิก</button>
+    `;
+    setPosCustomerStatus('ซิงค์ข้อมูลสมาชิกแล้ว: ออเดอร์นี้จะผูกกับฐานข้อมูลลูกค้า', 'success');
+}
+
+async function queryPosCustomersByExact(searchTerm) {
+    const raw = posLimitString(searchTerm, 180);
+    const email = normalizeEmail(raw);
+    const phone = posNormalizePhone(raw);
+    const candidates = new Map();
+    const queries = [];
+
+    if (email && email.includes('@')) {
+        queries.push(query(collection(db, 'users'), where('email', '==', email), limit(5)));
+    }
+    if (phone.length >= 6) {
+        queries.push(query(collection(db, 'users'), where('phone', '==', raw), limit(5)));
+        queries.push(query(collection(db, 'users'), where('phone', '==', phone), limit(5)));
+        queries.push(query(collection(db, 'users'), where('phoneNormalized', '==', phone), limit(5)));
+    }
+
+    for (const customerQuery of queries) {
+        try {
+            const snap = await getDocs(customerQuery);
+            snap.forEach(docSnap => candidates.set(docSnap.id, posCleanCustomer(docSnap.id, docSnap.data() || {})));
+        } catch (error) {
+            console.warn('Exact customer query failed:', error);
+        }
+    }
+    return Array.from(candidates.values());
+}
+
+async function findPosCustomers(searchTerm) {
+    const raw = posLimitString(searchTerm, 180);
+    const term = raw.toLowerCase();
+    const phone = posNormalizePhone(raw);
+    if (!raw && !phone) return [];
+
+    const exactMatches = await queryPosCustomersByExact(raw);
+    if (exactMatches.length) return exactMatches;
+
+    const snap = await getDocs(query(collection(db, 'users'), limit(120)));
+    const matches = [];
+    snap.forEach(docSnap => {
+        const customer = posCleanCustomer(docSnap.id, docSnap.data() || {});
+        const text = posCustomerSearchText(customer);
+        const normalizedPhone = posNormalizePhone(customer.phoneNormalized || customer.phone);
+        const phoneMatches = phone.length >= 4 && normalizedPhone.includes(phone);
+        if (text.includes(term) || phoneMatches) matches.push(customer);
+    });
+    return matches.slice(0, 8);
 }
 
 function posSellableVariants(product = {}) {
@@ -496,6 +633,25 @@ function posCartTotals() {
     return { subtotal, discount, total, taxableSubtotal, taxIncluded, paymentMethod, paidAmount, changeAmount };
 }
 
+function renderPosPaymentUI(totals = posCartTotals()) {
+    const method = totals.paymentMethod || 'cash';
+    document.querySelectorAll('.pos-payment-card').forEach(card => {
+        const active = card.dataset.posPayment === method;
+        card.classList.toggle('active', active);
+        card.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    const paidInput = document.getElementById('pos-paid-amount');
+    const exactBtn = document.getElementById('pos-cash-exact-btn');
+    if (paidInput) {
+        paidInput.placeholder = method === 'cash' ? 'รับเงินมา' : 'บันทึกเต็มจำนวนอัตโนมัติ';
+        paidInput.disabled = !posCart.length || method !== 'cash';
+    }
+    if (exactBtn) {
+        exactBtn.style.display = method === 'cash' ? '' : 'none';
+        exactBtn.disabled = !posCart.length;
+    }
+}
+
 function renderPosCart() {
     const container = document.getElementById('pos-cart-items');
     const summary = document.getElementById('pos-summary');
@@ -521,10 +677,12 @@ function renderPosCart() {
     }
 
     const totals = posCartTotals();
+    renderPosPaymentUI(totals);
     summary.innerHTML = `
         <div class="pos-summary-row"><span>ยอดก่อนส่วนลด</span><strong>${posMoney(totals.subtotal)}</strong></div>
         <div class="pos-summary-row"><span>ส่วนลด</span><strong>-${posMoney(totals.discount)}</strong></div>
         <div class="pos-summary-row"><span>VAT 7% รวมในราคา</span><strong>${posMoney(totals.taxIncluded)}</strong></div>
+        <div class="pos-summary-row"><span>วิธีชำระเงิน</span><strong>${escapeHTML(posPaymentLabel(totals.paymentMethod))}</strong></div>
         <div class="pos-summary-row"><span>เงินทอน</span><strong>${posMoney(totals.changeAmount)}</strong></div>
         <div class="pos-summary-row total"><span>ยอดสุทธิ</span><strong>${posMoney(totals.total)}</strong></div>
     `;
@@ -551,6 +709,39 @@ function initPosModule() {
         document.getElementById(id)?.addEventListener('input', renderPosCart);
         document.getElementById(id)?.addEventListener('change', renderPosCart);
     });
+    document.querySelectorAll('.pos-payment-card').forEach(card => {
+        card.addEventListener('click', () => {
+            const method = card.dataset.posPayment || 'cash';
+            const select = document.getElementById('pos-payment-method');
+            if (select) {
+                select.value = method;
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            renderPosCart();
+        });
+    });
+    document.getElementById('pos-cash-exact-btn')?.addEventListener('click', () => {
+        const paidInput = document.getElementById('pos-paid-amount');
+        const totals = posCartTotals();
+        if (paidInput) paidInput.value = totals.total ? String(totals.total) : '';
+        renderPosCart();
+    });
+    document.getElementById('pos-customer-search')?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            window.syncPosCustomer();
+        }
+    });
+    ['pos-customer-name', 'pos-customer-phone'].forEach(id => {
+        document.getElementById(id)?.addEventListener('input', () => {
+            if (!posSelectedCustomer) return;
+            const name = document.getElementById('pos-customer-name')?.value || '';
+            const phone = document.getElementById('pos-customer-phone')?.value || '';
+            const sameName = !name || name === posSelectedCustomer.displayName;
+            const samePhone = !phone || posNormalizePhone(phone) === posNormalizePhone(posSelectedCustomer.phone);
+            if (!sameName || !samePhone) setPosCustomerStatus('มีการแก้ชื่อ/เบอร์หลังซิงค์ ระบบยังผูกสมาชิกเดิมไว้', 'warning');
+        });
+    });
     posControlsBound = true;
     renderPosScreen();
 }
@@ -566,6 +757,53 @@ window.refreshPosProducts = async () => {
     await refreshCategoriesOnce();
     await refreshProductsOnce();
     renderPosScreen();
+};
+
+window.syncPosCustomer = async () => {
+    const searchInput = document.getElementById('pos-customer-search');
+    const nameInput = document.getElementById('pos-customer-name');
+    const phoneInput = document.getElementById('pos-customer-phone');
+    const button = document.getElementById('pos-customer-sync-btn');
+    const searchTerm = posLimitString(searchInput?.value || phoneInput?.value || nameInput?.value, 180);
+    if (!searchTerm) {
+        setPosCustomerStatus('กรอกเบอร์ อีเมล หรือชื่อก่อนซิงค์ลูกค้า', 'warning');
+        return;
+    }
+    const originalText = button?.textContent || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'กำลังซิงค์...';
+        }
+        setPosCustomerStatus('กำลังค้นหาลูกค้าจากฐานข้อมูล...', 'warning');
+        const matches = await findPosCustomers(searchTerm);
+        if (!matches.length) {
+            posSelectedCustomer = null;
+            renderPosCustomerCard();
+            setPosCustomerStatus('ไม่พบสมาชิกในฐานข้อมูล ระบบจะบันทึกเป็น Walk-in Customer', 'warning');
+            return;
+        }
+        posSelectedCustomer = matches[0];
+        if (searchInput) searchInput.value = posSelectedCustomer.email || posSelectedCustomer.phone || posSelectedCustomer.displayName || '';
+        if (nameInput) nameInput.value = posSelectedCustomer.displayName || '';
+        if (phoneInput) phoneInput.value = posSelectedCustomer.phone || '';
+        renderPosCustomerCard();
+    } catch (error) {
+        console.error('Customer sync failed:', error);
+        setPosCustomerStatus('ซิงค์ลูกค้าไม่สำเร็จ: ' + error.message, 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText || 'ซิงค์ลูกค้า';
+        }
+    }
+};
+
+window.clearPosCustomer = () => {
+    posSelectedCustomer = null;
+    const searchInput = document.getElementById('pos-customer-search');
+    if (searchInput) searchInput.value = '';
+    renderPosCustomerCard();
 };
 
 window.addPosProductFromCard = (productId, cardEl = null) => {
@@ -881,7 +1119,7 @@ function buildPosReceiptHTML(order = {}) {
         <div style="display:flex; justify-content:space-between;"><span>Discount</span><strong>-${posMoney(order.discount)}</strong></div>
         <div style="display:flex; justify-content:space-between;"><span>VAT included</span><strong>${posMoney(order.taxIncluded)}</strong></div>
         <div style="display:flex; justify-content:space-between; font-size:1.05rem;"><span>Total</span><strong>${posMoney(order.totalAmount)}</strong></div>
-        <div style="display:flex; justify-content:space-between;"><span>Payment</span><strong>${escapeHTML(order.paymentMethod || '-')}</strong></div>
+        <div style="display:flex; justify-content:space-between;"><span>Payment</span><strong>${escapeHTML(order.paymentLabel || posPaymentLabel(order.paymentMethod) || '-')}</strong></div>
         <div style="display:flex; justify-content:space-between;"><span>Paid</span><strong>${posMoney(order.paidAmount)}</strong></div>
         <div style="display:flex; justify-content:space-between;"><span>Change</span><strong>${posMoney(order.changeAmount)}</strong></div>
         <div style="border-top:1px dashed #9aa; margin:10px 0;"></div>
@@ -910,6 +1148,12 @@ window.checkoutPosOrder = async () => {
         if (totals.paymentMethod === 'cash' && totals.paidAmount > 0 && totals.paidAmount < totals.total) {
             throw new Error('จำนวนเงินที่รับมาต่ำกว่ายอดสุทธิ');
         }
+        const paidAmount = totals.paymentMethod === 'cash'
+            ? posRound(totals.paidAmount || totals.total)
+            : totals.total;
+        const changeAmount = totals.paymentMethod === 'cash'
+            ? posRound(Math.max(paidAmount - totals.total, 0))
+            : 0;
         const isTestOrder = !!document.getElementById('pos-soft-launch-mode')?.checked;
         const receiptNo = generatePosReceiptNo();
         const now = new Date();
@@ -935,9 +1179,16 @@ window.checkoutPosOrder = async () => {
             status: 'completed',
             paymentStatus: 'paid',
             paymentMethod: totals.paymentMethod,
+            paymentLabel: posPaymentLabel(totals.paymentMethod),
             uid: user.uid,
             customerName: posLimitString(document.getElementById('pos-customer-name')?.value, 120) || 'Walk-in Customer',
             phone: posLimitString(document.getElementById('pos-customer-phone')?.value, 40),
+            customerUid: posLimitString(posSelectedCustomer?.uid, 120),
+            customerEmail: posLimitString(posSelectedCustomer?.email, 180),
+            customerLineId: posLimitString(posSelectedCustomer?.lineId, 80),
+            customerTier: posLimitString(posSelectedCustomer?.tier, 30),
+            customerMemberCode: posLimitString(posSelectedCustomer?.memberCode, 40),
+            customerProfileSynced: !!posSelectedCustomer?.uid,
             address: 'หน้าร้าน Eden Cafe',
             note: posLimitString(document.getElementById('pos-note')?.value, 500),
             items: orderItems,
@@ -946,8 +1197,8 @@ window.checkoutPosOrder = async () => {
             taxIncluded: totals.taxIncluded,
             total: totals.total,
             totalAmount: totals.total,
-            paidAmount: totals.paidAmount || totals.total,
-            changeAmount: totals.changeAmount,
+            paidAmount,
+            changeAmount,
             cashierUid: user.uid,
             cashierName: posLimitString(user.displayName || user.email || 'Admin', 120),
             cashierEmail: posLimitString(user.email || '', 180),
