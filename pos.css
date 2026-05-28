@@ -66,6 +66,7 @@ button:disabled { opacity: .62; cursor: not-allowed; transform: none; }
 .pos-cart select,
 .pos-cart textarea,
 .pos-search,
+.pos-category-select,
 .pos-product-card select {
     width: 100%;
     border: 1px solid var(--line);
@@ -82,6 +83,7 @@ button:disabled { opacity: .62; cursor: not-allowed; transform: none; }
 .pos-cart select:focus,
 .pos-cart textarea:focus,
 .pos-search:focus,
+.pos-category-select:focus,
 .pos-product-card select:focus {
     border-color: rgba(19, 146, 85, 0.55);
     box-shadow: 0 0 0 4px rgba(19, 146, 85, 0.12);
@@ -766,7 +768,7 @@ body.pos-ready .pos-app { opacity: 1; transform: none; }
 .pos-toolbar { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; margin-bottom: 12px; }
 .pos-sales-controls {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(320px, 1fr) minmax(220px, 280px) auto;
     gap: 14px;
     align-items: center;
     margin-bottom: 16px;
@@ -776,7 +778,16 @@ body.pos-ready .pos-app { opacity: 1; transform: none; }
     padding-inline: 22px;
     white-space: nowrap;
 }
-.pos-search { padding: 14px 16px; }
+.pos-search,
+.pos-category-select {
+    min-height: 54px;
+    padding: 14px 16px;
+}
+.pos-category-select {
+    cursor: pointer;
+    color: #315443;
+    font-weight: 800;
+}
 .pos-counter { color: #315443; font-weight: 900; white-space: nowrap; }
 .pos-category-list { display: flex; gap: 10px; overflow-x: auto; padding: 4px 0 14px; margin-bottom: 2px; scrollbar-width: thin; }
 .pos-category-btn {
