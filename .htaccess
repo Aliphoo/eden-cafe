@@ -1,4 +1,4 @@
-Options -MultiViews
+Options -Indexes -MultiViews
 DirectoryIndex index.html
 RewriteEngine On
 RewriteBase /

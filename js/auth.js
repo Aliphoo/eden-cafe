@@ -49,7 +49,7 @@ async function syncAuthUserProfile(user) {
 async function getUserAdminAccess(user) {
     if (!user || !db) return null;
     const email = String(user.email || '').toLowerCase();
-    if (ADMIN_EMAILS.includes(email)) return { role: 'owner', status: 'active' };
+    if (ADMIN_EMAILS.includes(email)) return { role: 'owner', status: 'active', permissions: { pos: true } };
 
     try {
         const snap = await getDoc(doc(db, 'admin_users', user.uid));
@@ -60,6 +60,12 @@ async function getUserAdminAccess(user) {
         console.warn('Unable to read admin access:', error);
         return null;
     }
+}
+
+function adminAccessAllowsPermission(access, permission) {
+    if (!access || access.status !== 'active') return false;
+    if (access.role === 'owner' || access.role === 'head_manager') return true;
+    return access.permissions?.[permission] === true;
 }
 
 async function loadProducts() {
@@ -237,8 +243,11 @@ function checkLoginStatus() {
         const profileText = isEn ? 'Profile' : 'ข้อมูลส่วนตัว / Profile';
         const logoutText = isEn ? 'Logout' : 'ออกจากระบบ / Logout';
         const isAdmin = user.isAdmin === true;
+        const canUsePos = user.canUsePos === true;
         const adminLabel = isEn ? 'Admin Dashboard' : 'จัดการหลังบ้าน (Admin)';
+        const posLabel = isEn ? 'Counter POS' : 'ขายหน้าร้าน POS';
         const adminLink = isAdmin ? `<a href="/admin" target="_blank" style="color:var(--accent-color); font-weight:500;">${adminLabel}</a>` : '';
+        const posLink = canUsePos ? `<a href="/pos" target="_blank" class="profile-pos-link">${posLabel}</a>` : '';
 
         container.innerHTML = `
             <div class="user-profile-menu">
@@ -249,6 +258,7 @@ function checkLoginStatus() {
                         <small style="color:#666;">${escapeHTML(user.email || '')}</small>
                     </div>
                     ${adminLink}
+                    ${posLink}
                     <a href="${profileUrl}">${profileText}</a>
                     <a href="#" onclick="logout(); return false;">${logoutText}</a>
                 </div>
@@ -377,17 +387,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     localStorage.setItem('eden_user', JSON.stringify({
                         ...storedUser,
                         isAdmin: !!access,
-                        adminRole: access?.role || ''
+                        adminRole: access?.role || '',
+                        canUsePos: adminAccessAllowsPermission(access, 'pos')
                     }));
                     checkLoginStatus();
                 });
+                const bootstrapAccess = ADMIN_EMAILS.includes(String(user.email || '').toLowerCase())
+                    ? { role: 'owner', status: 'active', permissions: { pos: true } }
+                    : null;
                 localStorage.setItem('eden_user', JSON.stringify({
                     uid: user.uid,
                     name: user.displayName || 'Eden Member',
                     email: user.email,
                     avatar: user.photoURL || 'https://ui-avatars.com/api/?name=Eden+Member&background=4caf50&color=fff',
-                    isAdmin: ADMIN_EMAILS.includes(String(user.email || '').toLowerCase()),
-                    adminRole: ADMIN_EMAILS.includes(String(user.email || '').toLowerCase()) ? 'owner' : ''
+                    isAdmin: !!bootstrapAccess,
+                    adminRole: bootstrapAccess?.role || '',
+                    canUsePos: adminAccessAllowsPermission(bootstrapAccess, 'pos')
                 }));
             } else {
                 localStorage.removeItem('eden_user');

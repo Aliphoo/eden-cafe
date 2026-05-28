@@ -442,19 +442,34 @@ function renderRelatedCard(post) {
     </article>`;
 }
 
-function renderListingCard(post) {
+function renderListingCard(post, index = 0) {
     return `
-    <article class="blog-card">
+    <article class="blog-card${index === 0 ? ' blog-card-featured' : ''}" data-category="${escapeHTML(post.category)}">
         <a href="${escapeHTML(getBlogUrl(post))}" aria-label="อ่าน ${escapeHTML(post.title)}">
             <img loading="lazy" src="${escapeHTML(post.image.src)}" alt="${escapeHTML(post.image.alt)}" class="blog-card-img">
         </a>
         <div class="blog-card-content">
-            <span class="blog-meta">${escapeHTML(post.category)} · ${escapeHTML(formatThaiDate(post.publishedDate))} · ${escapeHTML(post.readingTime)}</span>
+            <div class="blog-card-kicker">
+                <span class="blog-category-pill">${escapeHTML(post.category)}</span>
+                <span>${escapeHTML(formatThaiDate(post.publishedDate))}</span>
+            </div>
             <h3><a href="${escapeHTML(getBlogUrl(post))}">${escapeHTML(post.title)}</a></h3>
             <p>${escapeHTML(post.excerpt)}</p>
-            <a href="${escapeHTML(getBlogUrl(post))}" class="btn">อ่านบทความ</a>
+            <div class="blog-card-footer">
+                <span>${escapeHTML(post.readingTime)}</span>
+                <a href="${escapeHTML(getBlogUrl(post))}" class="blog-read-link">อ่านต่อ</a>
+            </div>
         </div>
     </article>`;
+}
+
+function renderCategoryFilters() {
+    const categories = Array.from(new Set(BLOG_POSTS.map(post => post.category)));
+    return `
+            <div class="blog-filter-bar" aria-label="กรองบทความตามหมวดหมู่">
+                <button type="button" class="active" data-blog-category="all">ทั้งหมด</button>
+                ${categories.map(category => `<button type="button" data-blog-category="${escapeHTML(category)}">${escapeHTML(category)}</button>`).join('')}
+            </div>`;
 }
 
 function renderListingPage() {
@@ -488,15 +503,34 @@ ${renderHeader('blog')}
             </div>
         </div>
     </section>
+    <section class="blog-quick-strip" aria-label="ข้อมูลสั้นเกี่ยวกับ Eden Cafe Blog">
+        <div class="container">
+            <div class="blog-quick-grid">
+                <div>
+                    <strong>${BLOG_POSTS.length}</strong>
+                    <span>บทความ Local SEO</span>
+                </div>
+                <div>
+                    <strong>นางแล</strong>
+                    <span>อำเภอเมืองเชียงราย</span>
+                </div>
+                <div>
+                    <strong>FAQ</strong>
+                    <span>พร้อมคำตอบสำหรับ AI Search</span>
+                </div>
+            </div>
+        </div>
+    </section>
     <section class="blog-listing blog-listing-static">
         <div class="container">
             <div class="blog-listing-head">
                 <div>
-                    <span class="blog-eyebrow">SEO / AEO / GEO Ready</span>
+                    <span class="blog-eyebrow">Guide / Coffee / Wellness</span>
                     <h2>อ่านคู่มือคาเฟ่และกาแฟเชียงราย</h2>
                 </div>
-                <p>ทุกบทความมีสรุปสั้น FAQ, JSON-LD, internal links และข้อมูลสถานที่ที่ตรวจสอบได้</p>
+                <p>คัดหัวข้อที่ช่วยให้คนค้นหา Eden Cafe เชียงรายเจอข้อมูลสำคัญเร็วขึ้น ทั้งสำหรับ Google และ AI Search</p>
             </div>
+            ${renderCategoryFilters()}
             <div class="grid blog-grid">
                 ${BLOG_POSTS.map(renderListingCard).join('')}
             </div>
@@ -612,7 +646,9 @@ function formatThaiDate(value) {
 
 async function main() {
     await mkdir(OUT_BLOG_DIR, { recursive: true });
-    await writeFile(resolve(ROOT, 'blog.html'), renderListingPage(), 'utf8');
+    const listingPage = renderListingPage();
+    await writeFile(resolve(ROOT, 'blog.html'), listingPage, 'utf8');
+    await writeFile(resolve(OUT_BLOG_DIR, 'index.html'), listingPage, 'utf8');
     await writeFile(resolve(ROOT, 'blog-post.html'), renderLegacyPostPage(), 'utf8');
     await Promise.all(BLOG_POSTS.map(post => (
         writeFile(resolve(OUT_BLOG_DIR, `${post.slug}.html`), renderArticlePage(post), 'utf8')
