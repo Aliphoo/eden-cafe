@@ -1257,6 +1257,7 @@
                         <label><input type="checkbox" id="productTrackStock"> ติดตามสต็อก</label>
                         <label><input type="checkbox" id="productTaxEnabled" checked> ภาษี eden cafe 7%</label>
                         <label><input type="checkbox" id="productSignature"> Signature menu</label>
+                        <label><input type="checkbox" id="productShowOnIndex"> สินค้าแนะนำหน้าแรก</label>
                     </div>
                 </div>
 
@@ -1596,7 +1597,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=36"></script>
+    <script type="module" src="js/admin.js?v=37"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {

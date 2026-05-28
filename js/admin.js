@@ -315,6 +315,7 @@ const MENU_TAX_COLUMN = 'Tax - "eden cafe" (7%)';
 const MENU_SHOW_POS_COLUMN = 'Show on POS';
 const MENU_SHOW_WEBSITE_COLUMN = 'Show on Website';
 const MENU_SHOW_SHOP_COLUMN = 'Show in Shop';
+const MENU_SHOW_INDEX_COLUMN = 'Show on Index';
 const MENU_VARIANTS_COLUMN = 'Variants JSON';
 
 const MENU_TEMPLATE_ROW = {
@@ -343,6 +344,7 @@ const MENU_TEMPLATE_ROW = {
     [MENU_SHOW_POS_COLUMN]: 'Yes',
     [MENU_SHOW_WEBSITE_COLUMN]: 'Yes',
     [MENU_SHOW_SHOP_COLUMN]: 'No',
+    [MENU_SHOW_INDEX_COLUMN]: 'No',
     Color: '#4caf50',
     Shape: 'rounded',
     [MENU_VARIANTS_COLUMN]: '[{"name":"เย็น","price":95,"cost":35,"sku":"MENU-COF-001-COLD","availableForSale":true},{"name":"ร้อน","price":85,"cost":32,"sku":"MENU-COF-001-HOT","availableForSale":true},{"name":"ปั่น","price":110,"cost":42,"sku":"MENU-COF-001-FRAPPE","availableForSale":true}]'
@@ -491,6 +493,7 @@ function normalizeMenuTemplateRow(row) {
         showOnPos: parseMenuBoolean(row[MENU_SHOW_POS_COLUMN] ?? row.showOnPos, true),
         showOnWebsite: parseMenuBoolean(row[MENU_SHOW_WEBSITE_COLUMN] ?? row.showOnWebsite, true),
         showInShop: parseMenuBoolean(row[MENU_SHOW_SHOP_COLUMN] ?? row.showInShop, false),
+        showOnIndex: parseMenuBoolean(row[MENU_SHOW_INDEX_COLUMN] ?? row.showOnIndex ?? row.isFeatured, false),
         price,
         stock,
         lowStock,
@@ -507,6 +510,7 @@ function normalizeMenuTemplateRow(row) {
     if (includedQty !== undefined) normalized.includedItemQuantity = includedQty;
     if (row.imageUrl || row.Image || row.image) normalized.imageUrl = cleanMenuCell(row.imageUrl ?? row.Image ?? row.image);
     if (row.isSignature !== undefined) normalized.isSignature = parseMenuBoolean(row.isSignature);
+    normalized.isFeatured = normalized.showOnIndex;
 
     Object.keys(normalized).forEach((key) => {
         if (normalized[key] === undefined || normalized[key] === '') delete normalized[key];
@@ -549,6 +553,7 @@ function menuProductToTemplateRow(product = {}) {
         [MENU_SHOW_POS_COLUMN]: boolToMenuText(product.showOnPos),
         [MENU_SHOW_WEBSITE_COLUMN]: boolToMenuText(product.showOnWebsite),
         [MENU_SHOW_SHOP_COLUMN]: boolToMenuText(product.showInShop),
+        [MENU_SHOW_INDEX_COLUMN]: boolToMenuText(product.showOnIndex === true || product.isFeatured === true),
         Color: product.color || '',
         Shape: product.shape || '',
         [MENU_VARIANTS_COLUMN]: variants.length ? JSON.stringify(variants) : ''
@@ -561,7 +566,7 @@ const XLSX_CATEGORY_CONFIG = {
         collection: 'products',
         permission: 'products',
         numberFields: ['price', 'order', 'cost', 'stock', 'lowStock', 'includedItemQuantity', 'taxRate'],
-        booleanFields: ['isSignature', 'soldByWeight', 'trackStock', 'availableForSale', 'taxEnabled', 'showOnPos', 'showOnWebsite', 'showInShop'],
+        booleanFields: ['isSignature', 'isFeatured', 'soldByWeight', 'trackStock', 'availableForSale', 'taxEnabled', 'showOnPos', 'showOnWebsite', 'showInShop', 'showOnIndex'],
         arrayFields: [],
         template: MENU_TEMPLATE_ROW,
         importRow: normalizeMenuTemplateRow,
@@ -2229,6 +2234,7 @@ function renderProductVariantDetailRow(id, product = {}) {
     const visibility = [
         product.showOnWebsite !== false ? 'แสดงในเมนูเว็บ' : 'ซ่อนจากเมนูเว็บ',
         product.showInShop ? 'แสดงในร้านค้า' : 'ไม่แสดงในร้านค้า',
+        product.showOnIndex || product.isFeatured ? 'สินค้าแนะนำหน้าแรก' : 'ไม่แสดงหน้าแรก',
         product.showOnPos !== false ? 'แสดงบน POS' : 'ซ่อนจาก POS',
         product.taxEnabled !== false ? 'ภาษี 7%' : 'ไม่คิดภาษี'
     ].join(' · ');
@@ -3033,6 +3039,7 @@ function renderProductsTable() {
             const hiddenNotes = [
                 available ? '' : 'Hidden from sale',
                 product.showOnWebsite === false ? 'Hidden from website' : '',
+                product.showOnIndex || product.isFeatured ? 'Featured on Index' : '',
                 product.showOnPos === false ? 'Hidden from POS' : ''
             ].filter(Boolean).join(' | ');
             const mainRow = `
@@ -3409,6 +3416,7 @@ window.openProductModal = () => {
     setProductCheckboxValue('productShowInShop', false);
     setProductCheckboxValue('productShowOnPos', true);
     setProductCheckboxValue('productSignature', false);
+    setProductCheckboxValue('productShowOnIndex', false);
     renderProductVariantRows(defaultProductVariants());
     document.getElementById('modal-title').innerText = 'เพิ่มเมนูใหม่';
     productModal.style.display = 'block';
@@ -3453,6 +3461,7 @@ window.editProduct = (id) => {
     setProductCheckboxValue('productShowInShop', !!product.showInShop);
     setProductCheckboxValue('productShowOnPos', product.showOnPos !== false);
     document.getElementById('productSignature').checked = !!product.isSignature;
+    setProductCheckboxValue('productShowOnIndex', !!(product.showOnIndex || product.isFeatured));
     renderProductVariantRows(productVariantsForDisplay(product));
     
     document.getElementById('modal-title').innerText = 'แก้ไขเมนูสินค้า';
@@ -3518,6 +3527,7 @@ productForm.addEventListener('submit', async (e) => {
             showOnWebsite: getProductCheckboxValue('productShowOnWebsite', true),
             showInShop: getProductCheckboxValue('productShowInShop', false),
             showOnPos: getProductCheckboxValue('productShowOnPos', true),
+            showOnIndex: getProductCheckboxValue('productShowOnIndex', false),
             taxName: 'eden cafe',
             taxRate: 7,
             taxEnabled: getProductCheckboxValue('productTaxEnabled', true),
@@ -3534,6 +3544,7 @@ productForm.addEventListener('submit', async (e) => {
             includedItemSku: getProductInputValue('productIncludedItemSku'),
             includedItemQuantity: getProductNumberValue('productIncludedItemQuantity', 1),
             isSignature: document.getElementById('productSignature').checked,
+            isFeatured: getProductCheckboxValue('productShowOnIndex', false),
             variants: variantList,
             updatedAt: new Date().toISOString()
         };
