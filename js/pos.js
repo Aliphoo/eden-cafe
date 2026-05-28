@@ -920,8 +920,8 @@ function renderPosOpenBills() {
                 </div>
                 <small>${escapeHTML(order.customerName || 'Walk-in Customer')} · ${itemCount.toLocaleString('th-TH')} รายการ · ${escapeHTML(updatedText)}</small>
                 <div class="pos-open-bill-actions">
-                    <button class="pos-open-bill-load" type="button" data-pos-open-bill-id="${escapeHTML(order.firestoreId)}">เรียกบิล</button>
-                    <button class="pos-open-bill-pay" type="button" data-pos-open-bill-id="${escapeHTML(order.firestoreId)}" data-pos-open-bill-pay="true">เรียกมาชำระ</button>
+                    <button class="pos-open-bill-load" type="button" data-pos-open-bill-id="${escapeHTML(order.firestoreId)}" onclick="return handlePosOpenBillClick(event, this)">เรียกบิล</button>
+                    <button class="pos-open-bill-pay" type="button" data-pos-open-bill-id="${escapeHTML(order.firestoreId)}" data-pos-open-bill-pay="true" onclick="return handlePosOpenBillClick(event, this)">เรียกมาชำระ</button>
                 </div>
             </article>
         `;
@@ -954,7 +954,7 @@ function renderPosOverviewOpenBills() {
                 </div>
                 <div class="pos-overview-open-actions">
                     <strong>${posMoney(order.totalAmount ?? order.total)}</strong>
-                    <button type="button" data-pos-open-bill-id="${escapeHTML(order.firestoreId)}" data-pos-open-bill-pay="true">เรียกมาชำระ</button>
+                    <button type="button" data-pos-open-bill-id="${escapeHTML(order.firestoreId)}" data-pos-open-bill-pay="true" onclick="return handlePosOpenBillClick(event, this)">เรียกมาชำระ</button>
                 </div>
             </article>
         `;
@@ -1207,11 +1207,7 @@ function initPosModule() {
     document.addEventListener('click', (event) => {
         const button = event.target.closest?.('[data-pos-open-bill-id]');
         if (!button) return;
-        event.preventDefault();
-        event.stopPropagation();
-        const orderId = button.dataset.posOpenBillId || '';
-        const focusPayment = button.dataset.posOpenBillPay === 'true';
-        window.loadPosOpenBill(orderId, focusPayment);
+        window.handlePosOpenBillClick(event, button);
     });
     document.getElementById('pos-customer-search')?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
@@ -1734,8 +1730,24 @@ window.selectPosReceipt = (orderId) => {
     renderPosReceiptManager();
 };
 
-window.loadPosOpenBill = async (orderId, focusPayment = false) => {
+window.handlePosOpenBillClick = (event, button) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (!button || button.dataset.posOpenBillBusy === 'true') return false;
+    const orderId = button.dataset.posOpenBillId || '';
+    const focusPayment = button.dataset.posOpenBillPay === 'true';
+    window.loadPosOpenBill(orderId, focusPayment, button);
+    return false;
+};
+
+window.loadPosOpenBill = async (orderId, focusPayment = false, sourceButton = null) => {
+    const originalButtonText = sourceButton?.textContent || '';
     try {
+        if (sourceButton) {
+            sourceButton.dataset.posOpenBillBusy = 'true';
+            sourceButton.disabled = true;
+            sourceButton.textContent = 'กำลังโหลด...';
+        }
         if (!orderId) throw new Error('ไม่พบรหัสบิลที่ต้องการเรียก');
         const orderSnap = await getDoc(doc(db, 'orders', orderId));
         if (!orderSnap.exists()) throw new Error('ไม่พบบิลนี้แล้ว');
@@ -1746,14 +1758,14 @@ window.loadPosOpenBill = async (orderId, focusPayment = false) => {
         posCart = Array.isArray(order.items) ? order.items.map(buildPosCartItemFromOrderItem) : [];
         applyPosOpenBillToForm(order);
         setPosActiveBill(order);
+        renderPosCart();
+        renderPosOpenBills();
         setPosView('sales');
         const salesView = document.getElementById('pos-sales-view');
         if (salesView) {
             salesView.hidden = false;
             salesView.classList.add('active');
         }
-        renderPosCart();
-        renderPosOpenBills();
         requestAnimationFrame(() => {
             document.getElementById('pos-sales')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         });
@@ -1764,8 +1776,27 @@ window.loadPosOpenBill = async (orderId, focusPayment = false) => {
     } catch (error) {
         console.error('Load POS open bill failed:', error);
         alert('เรียกบิลค้างชำระไม่สำเร็จ: ' + error.message);
+    } finally {
+        if (sourceButton) {
+            sourceButton.dataset.posOpenBillBusy = 'false';
+            sourceButton.disabled = false;
+            sourceButton.textContent = originalButtonText || (focusPayment ? 'เรียกมาชำระ' : 'เรียกบิล');
+        }
     }
 };
+
+window.addEventListener('eden:load-pos-open-bill', (event) => {
+    const detail = event.detail || {};
+    if (!detail.orderId) return;
+    window.__pendingPosOpenBillAction = null;
+    window.loadPosOpenBill(detail.orderId, !!detail.focusPayment, detail.button || null);
+});
+
+if (window.__pendingPosOpenBillAction?.orderId) {
+    const pending = window.__pendingPosOpenBillAction;
+    window.__pendingPosOpenBillAction = null;
+    window.loadPosOpenBill(pending.orderId, !!pending.focusPayment, pending.button || null);
+}
 
 window.savePosOpenBill = async () => {
     if (!posCart.length) {
