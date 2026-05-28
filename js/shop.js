@@ -37,6 +37,16 @@ function parseShopBoolean(value, fallback = false) {
     return ['true', '1', 'yes', 'y', 'available', 'sale', 'on', '\u0e40\u0e1b\u0e34\u0e14', '\u0e02\u0e32\u0e22', '\u0e43\u0e0a\u0e48'].includes(text);
 }
 
+function getShopCategoryName(product, category, categoryId) {
+    const en = isEnglishPage();
+    const rawName = product.categoryName || category.name || (en ? product.categoryNameEn : product.categoryNameTh) || '';
+    const normalizedName = String(rawName).trim().toLowerCase();
+    if (categoryId === 'other' || normalizedName === 'general' || normalizedName === '\u0e17\u0e31\u0e48\u0e27\u0e44\u0e1b') {
+        return 'Online Shopping';
+    }
+    return rawName || (en ? 'Products' : '\u0e2a\u0e34\u0e19\u0e04\u0e49\u0e32');
+}
+
 function normalizeProduct(product, categoryMap = {}) {
     const source = product.source || 'shop';
     const rawId = product.id || product.slug || product.name || crypto.randomUUID?.() || String(Date.now());
@@ -51,7 +61,7 @@ function normalizeProduct(product, categoryMap = {}) {
         id: source === 'menu' ? `menu-${rawId}` : rawId,
         source,
         category: categoryId,
-        categoryName: product.categoryName || category.name || (en ? product.categoryNameEn : product.categoryNameTh) || (en ? 'Products' : 'สินค้า'),
+        categoryName: getShopCategoryName(product, category, categoryId),
         name: product.name || (en ? product.nameEn : product.nameTh) || 'Eden Product',
         description: product.description || (en ? product.descriptionEn : product.descriptionTh) || '',
         price: Number(activeVariant?.price ?? product.price) || 0,
