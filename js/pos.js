@@ -819,8 +819,8 @@ function filteredPosProductRows() {
 }
 
 function renderPosCategories(rows = posProductRows()) {
+    const select = document.getElementById('pos-category-select');
     const container = document.getElementById('pos-category-list');
-    if (!container) return;
     const categories = new Map();
     rows.forEach(row => {
         const categoryId = row.product.category || 'other';
@@ -835,12 +835,23 @@ function renderPosCategories(rows = posProductRows()) {
         if (aOrder !== bOrder) return aOrder - bOrder;
         return String(aName).localeCompare(String(bName), 'th');
     });
-    container.innerHTML = [
-        `<button class="pos-category-btn ${posSelectedCategory === 'all' ? 'active' : ''}" type="button" onclick="setPosCategory('all')">ทั้งหมด</button>`,
-        ...sortedCategories.map(([id, name]) => `
-            <button class="pos-category-btn ${posSelectedCategory === id ? 'active' : ''}" type="button" onclick="setPosCategory('${escapeJSString(id)}')">${escapeHTML(name)}</button>
-        `)
-    ].join('');
+
+    if (select) {
+        select.innerHTML = [
+            '<option value="all">หมวดหมู่ทั้งหมด</option>',
+            ...sortedCategories.map(([id, name]) => `<option value="${escapeHTML(id)}">${escapeHTML(name)}</option>`)
+        ].join('');
+        select.value = posSelectedCategory;
+    }
+
+    if (container) {
+        container.innerHTML = [
+            `<button class="pos-category-btn ${posSelectedCategory === 'all' ? 'active' : ''}" type="button" onclick="setPosCategory('all')">ทั้งหมด</button>`,
+            ...sortedCategories.map(([id, name]) => `
+                <button class="pos-category-btn ${posSelectedCategory === id ? 'active' : ''}" type="button" onclick="setPosCategory('${escapeJSString(id)}')">${escapeHTML(name)}</button>
+            `)
+        ].join('');
+    }
 }
 
 function renderPosProducts() {
@@ -1262,6 +1273,10 @@ function initPosModule() {
     syncPosReceiptDateInput();
     document.getElementById('pos-search-input')?.addEventListener('input', (event) => {
         posSearchTerm = event.target.value || '';
+        renderPosProducts();
+    });
+    document.getElementById('pos-category-select')?.addEventListener('change', (event) => {
+        posSelectedCategory = event.target.value || 'all';
         renderPosProducts();
     });
     ['pos-discount', 'pos-paid-amount', 'pos-payment-method'].forEach(id => {
