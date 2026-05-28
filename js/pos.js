@@ -1399,6 +1399,7 @@ window.savePosOpenBill = async () => {
         };
 
         if (posActiveBill?.firestoreId) {
+            billData.uid = posActiveBill.uid || user.uid;
             await updateDoc(doc(db, 'orders', posActiveBill.firestoreId), billData);
             setPosActiveBill({ ...posActiveBill, ...billData, updatedAt: new Date() });
             alert('อัปเดตบิลค้างชำระแล้ว สามารถเรียกกลับมาแก้หรือปิดยอดได้');
