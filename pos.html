@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Eden Cafe POS</title>
+    <title>Eden POS | Eden OS</title>
     <link rel="icon" href="Images/Logo.webp" type="image/webp">
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="pos.css?v=3">
+    <link rel="stylesheet" href="pos.css?v=4">
 </head>
 <body>
     <div id="admin-login" style="display: none;">
@@ -40,7 +40,7 @@
             <div class="brand">
                 <div class="brand-mark">POS</div>
                 <div>
-                    <h1>Eden Cafe POS</h1>
+                    <h1>Eden POS</h1>
                     <p>หน้าแคชเชียร์แยกจาก Admin Dashboard</p>
                 </div>
             </div>
@@ -56,19 +56,182 @@
 
         <main class="pos-main">
             <section class="pos-hero">
-                <span class="pos-badge">Soft Launch POS</span>
-                <h2>ขายหน้าร้านได้ไวขึ้น</h2>
-                <p>เลือกเฉพาะสินค้าที่เปิด “แสดงบน POS” เพิ่มเข้าตะกร้า รับชำระเงิน บันทึกออเดอร์ ตัดสต็อก และพิมพ์ใบเสร็จในหน้าเดียว</p>
+                <span class="pos-badge">Eden OS · iPad-first Cafe Operation</span>
+                <h2>ศูนย์ควบคุมร้าน Eden Cafe</h2>
+                <p>ขายหน้าร้าน เปิดโต๊ะ รับ QR Order จองโต๊ะ ส่งออเดอร์ไป Bar/Kitchen/Bakery และต่อยอด Membership, Wellness, Inventory และ Franchise-ready ในระบบเดียว</p>
+                <div class="pos-hero-actions" aria-label="Eden POS quick modes">
+                    <a href="#pos-sales">POS Mode</a>
+                    <a href="#table-mode">Table Mode</a>
+                    <a href="#kitchen-mode">Kitchen Mode</a>
+                    <a href="#manager-mode">Manager Mode</a>
+                    <a href="#hq-mode">HQ Mode</a>
+                </div>
             </section>
 
-            <section class="pos-shell">
+            <section class="eden-os-strip" aria-label="Eden OS operating modes">
+                <article class="os-mode-card live">
+                    <span>01</span>
+                    <h3>POS Mode</h3>
+                    <p>ขายหน้าร้าน, Takeaway, Delivery, Staff Order, Void/Refund/Discount และพิมพ์ใบเสร็จ</p>
+                    <strong>Live foundation</strong>
+                </article>
+                <article class="os-mode-card">
+                    <span>02</span>
+                    <h3>Table Mode</h3>
+                    <p>เปิดโต๊ะ, ย้ายโต๊ะ, รวมโต๊ะ, แยกบิล, QR Order และ Seat Map แบบจองที่นั่ง</p>
+                    <strong>Signature module</strong>
+                </article>
+                <article class="os-mode-card dark">
+                    <span>03</span>
+                    <h3>Kitchen Mode</h3>
+                    <p>แยก Bar, Coffee, Kitchen, Bakery พร้อมสถานะ New, Preparing, Ready, Served</p>
+                    <strong>Dark display</strong>
+                </article>
+                <article class="os-mode-card">
+                    <span>04</span>
+                    <h3>Manager Mode</h3>
+                    <p>ยอดขาย, promotion, coupon, membership, stock, recipe cost และ staff performance</p>
+                    <strong>Daily control</strong>
+                </article>
+                <article class="os-mode-card">
+                    <span>05</span>
+                    <h3>HQ Mode</h3>
+                    <p>เมนูกลาง, ราคากลาง, สูตรกลาง, branch ranking, royalty และ franchise audit</p>
+                    <strong>Franchise-ready</strong>
+                </article>
+            </section>
+
+            <section class="pos-intelligence-grid">
+                <article class="pos-system-card table-signature" id="table-mode">
+                    <div class="system-card-header">
+                        <span class="system-kicker">Signature Table & Reservation</span>
+                        <strong>Seat Map Booking</strong>
+                    </div>
+                    <h2>จองโต๊ะเหมือนเลือกที่นั่งเครื่องบิน</h2>
+                    <p>ลูกค้าเลือกวัน เวลา จำนวนคน โซน และเห็นสถานะโต๊ะว่าง/จองแล้ว/กำลังใช้งาน พร้อม minimum spend และมัดจำบางช่วงเวลา</p>
+                    <div class="reservation-rules">
+                        <span>1-4 คน = 1 โต๊ะ</span>
+                        <span>5-8 คน = สูงสุด 2 โต๊ะ</span>
+                        <span>9-12 คน = สูงสุด 3 โต๊ะ</span>
+                        <span>เกิน 12 คน = ส่งให้แอดมินอนุมัติ</span>
+                    </div>
+                    <div class="mini-seat-map" aria-label="Eden table map preview">
+                        <button class="seat available">IN-01</button>
+                        <button class="seat booked">IN-02</button>
+                        <button class="seat active">GD-01</button>
+                        <button class="seat premium">RS-01</button>
+                        <button class="seat available">PV-01</button>
+                        <button class="seat disabled">OUT-03</button>
+                    </div>
+                </article>
+
+                <article class="pos-system-card kds-preview" id="kitchen-mode">
+                    <div class="system-card-header">
+                        <span class="system-kicker">Kitchen Display System</span>
+                        <strong>Bar / Kitchen / Bakery</strong>
+                    </div>
+                    <h2>จอแผนกพร้อม timer เตือนงานค้าง</h2>
+                    <div class="kds-lanes">
+                        <div class="kds-lane">
+                            <span>Bar · 06:42</span>
+                            <strong>Iced Latte</strong>
+                            <small>หวาน 50% · Oat milk · เพิ่มช็อต</small>
+                        </div>
+                        <div class="kds-lane warning">
+                            <span>Coffee · 08:11</span>
+                            <strong>Dirty Coffee</strong>
+                            <small>เตือนสีเหลืองเมื่อเกิน 7 นาที</small>
+                        </div>
+                        <div class="kds-lane danger">
+                            <span>Kitchen · 12:35</span>
+                            <strong>Brunch Set</strong>
+                            <small>เตือนสีแดงเมื่อเกิน 12 นาที</small>
+                        </div>
+                        <div class="kds-lane">
+                            <span>Bakery · Ready</span>
+                            <strong>Croissant</strong>
+                            <small>พร้อมเสิร์ฟ</small>
+                        </div>
+                    </div>
+                </article>
+            </section>
+
+            <section class="pos-system-grid" id="manager-mode">
+                <article class="pos-system-card">
+                    <span class="system-kicker">Order Engine</span>
+                    <h3>Modifier / Combo / Promotion</h3>
+                    <ul>
+                        <li>หวาน 25%, 50%, เพิ่มช็อต, เปลี่ยนนม</li>
+                        <li>Combo Set, Coupon, Happy Hour</li>
+                        <li>Void / Refund / Discount พร้อมเหตุผล</li>
+                    </ul>
+                </article>
+                <article class="pos-system-card">
+                    <span class="system-kicker">Inventory & Recipe Cost</span>
+                    <h3>รู้กำไรจริงต่อแก้ว</h3>
+                    <ul>
+                        <li>สูตรต่อเมนู เช่น Espresso 18g, Milk 180ml</li>
+                        <li>ตัดสต็อกอัตโนมัติ, wastage, supplier</li>
+                        <li>เตือนของใกล้หมดและรับเข้า stock</li>
+                    </ul>
+                </article>
+                <article class="pos-system-card">
+                    <span class="system-kicker">Eden Membership</span>
+                    <h3>Silver / Gold / Platinum</h3>
+                    <ul>
+                        <li>ยอดใช้จ่ายรวม, ความถี่การมา, เมนูที่ชอบ</li>
+                        <li>Birthday reward, priority queue, VIP booking</li>
+                        <li>เชื่อมจองโต๊ะและประวัติ Wellness</li>
+                    </ul>
+                </article>
+                <article class="pos-system-card">
+                    <span class="system-kicker">Wellness Booking</span>
+                    <h3>Ice Bath / Sauna / Yoga</h3>
+                    <ul>
+                        <li>Package, deposit, check-in, wellness credit</li>
+                        <li>จองหลายคนและจำกัดรอบต่อวัน</li>
+                        <li>ต่อยอด Monthly Wellness Pass</li>
+                    </ul>
+                </article>
+                <article class="pos-system-card" id="hq-mode">
+                    <span class="system-kicker">Franchise-ready</span>
+                    <h3>HQ & Branch Control</h3>
+                    <ul>
+                        <li>เมนูกลาง ราคากลาง สูตรกลาง Promotion กลาง</li>
+                        <li>POS/Stock/Staff แยกสาขา</li>
+                        <li>Royalty, audit checklist, training, SOP</li>
+                    </ul>
+                </article>
+                <article class="pos-system-card">
+                    <span class="system-kicker">Roles</span>
+                    <h3>สิทธิ์ตามตำแหน่ง</h3>
+                    <ul>
+                        <li>Owner, HQ Admin, Branch Manager, Cashier</li>
+                        <li>Barista, Kitchen, Stock, Marketing, Franchisee</li>
+                        <li>ลดความเสี่ยงพนักงานเห็นข้อมูลเกินสิทธิ์</li>
+                    </ul>
+                </article>
+            </section>
+
+            <section class="pos-shell" id="pos-sales">
                 <div class="pos-panel">
                     <div class="section-header">
                         <div>
+                            <span class="system-kicker">POS Mode · ขายหน้าร้าน</span>
                             <h2>เลือกสินค้า</h2>
-                            <p>ดึงข้อมูลจากเมนูในระบบ และแสดงเฉพาะรายการที่ขายบน POS</p>
+                            <p>ดึงข้อมูลจากเมนูในระบบ และแสดงเฉพาะรายการที่เปิดขายบน POS พร้อมรองรับ modifier และ variant จากหลังบ้าน</p>
                         </div>
                         <button class="btn-action btn-view" type="button" onclick="refreshPosProducts()">รีเฟรช POS</button>
+                    </div>
+                    <div class="pos-command-pills" aria-label="POS quick action roadmap">
+                        <span>เปิดโต๊ะ</span>
+                        <span>Takeaway</span>
+                        <span>Delivery</span>
+                        <span>Staff Order</span>
+                        <span>Coupon</span>
+                        <span>Happy Hour</span>
+                        <span>แยกบิล</span>
+                        <span>ส่ง Bar/Kitchen</span>
                     </div>
                     <div class="pos-toolbar">
                         <input id="pos-search-input" class="pos-search" type="search" placeholder="ค้นหาชื่อสินค้า / SKU / หมวดหมู่">
@@ -115,6 +278,6 @@
         </main>
     </div>
 
-    <script type="module" src="js/pos.js?v=4"></script>
+    <script type="module" src="js/pos.js?v=5"></script>
 </body>
 </html>
