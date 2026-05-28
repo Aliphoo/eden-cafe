@@ -243,9 +243,9 @@ function checkLoginStatus() {
         const profileText = isEn ? 'Profile' : 'ข้อมูลส่วนตัว / Profile';
         const logoutText = isEn ? 'Logout' : 'ออกจากระบบ / Logout';
         const isAdmin = user.isAdmin === true;
-        const canUsePos = user.canUsePos === true;
+        const canUsePos = user.canUsePos === true || user.adminRole === 'owner' || user.adminRole === 'head_manager' || isAdmin;
         const adminLabel = isEn ? 'Admin Dashboard' : 'จัดการหลังบ้าน (Admin)';
-        const posLabel = isEn ? 'Counter POS' : 'ขายหน้าร้าน POS';
+        const posLabel = isEn ? 'Counter POS' : 'POS หน้าร้าน';
         const adminLink = isAdmin ? `<a href="/admin" target="_blank" style="color:var(--accent-color); font-weight:500;">${adminLabel}</a>` : '';
         const posLink = canUsePos ? `<a href="/pos" target="_blank" class="profile-pos-link">${posLabel}</a>` : '';
 
