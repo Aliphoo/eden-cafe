@@ -188,6 +188,33 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['closedBy']) || request.resource.data.closedBy == request.auth.uid)
         && (!request.resource.data.keys().hasAny(['closedByName']) || (request.resource.data.closedByName is string && request.resource.data.closedByName.size() <= 120));
     }
+    function isPosAdminOrderWrite() {
+      return (hasAdminPermission('pos') || hasAdminPermission('orders'))
+        && request.resource.data.source == 'pos'
+        && request.resource.data.orderType == 'pos'
+        && request.resource.data.keys().hasAll(['items', 'totalAmount', 'status'])
+        && request.resource.data.items is list
+        && request.resource.data.items.size() > 0
+        && request.resource.data.items.size() <= 300
+        && request.resource.data.totalAmount is number
+        && request.resource.data.totalAmount >= 0
+        && request.resource.data.totalAmount <= 1000000
+        && request.resource.data.status in ['pending', 'processing', 'completed', 'cancelled']
+        && (!request.resource.data.keys().hasAny(['uid']) || request.resource.data.uid is string)
+        && (!request.resource.data.keys().hasAny(['paymentStatus']) || request.resource.data.paymentStatus in ['pending', 'paid', 'failed', 'refunded'])
+        && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'qr', 'card', 'other'])
+        && (!request.resource.data.keys().hasAny(['billStatus']) || request.resource.data.billStatus in ['open', 'paid', 'cancelled'])
+        && (!request.resource.data.keys().hasAny(['isOpenBill']) || request.resource.data.isOpenBill is bool)
+        && (!request.resource.data.keys().hasAny(['subtotal']) || (request.resource.data.subtotal is number && request.resource.data.subtotal >= 0 && request.resource.data.subtotal <= 1000000))
+        && (!request.resource.data.keys().hasAny(['discount']) || (request.resource.data.discount is number && request.resource.data.discount >= 0 && request.resource.data.discount <= 1000000))
+        && (!request.resource.data.keys().hasAny(['taxIncluded']) || (request.resource.data.taxIncluded is number && request.resource.data.taxIncluded >= 0 && request.resource.data.taxIncluded <= 1000000))
+        && (!request.resource.data.keys().hasAny(['paidAmount']) || (request.resource.data.paidAmount is number && request.resource.data.paidAmount >= 0 && request.resource.data.paidAmount <= 1000000))
+        && (!request.resource.data.keys().hasAny(['changeAmount']) || (request.resource.data.changeAmount is number && request.resource.data.changeAmount >= 0 && request.resource.data.changeAmount <= 1000000))
+        && (!request.resource.data.keys().hasAny(['total']) || (request.resource.data.total is number && request.resource.data.total >= 0 && request.resource.data.total <= 1000000))
+        && (!request.resource.data.keys().hasAny(['cashierUid']) || request.resource.data.cashierUid == request.auth.uid)
+        && (!request.resource.data.keys().hasAny(['updatedBy']) || request.resource.data.updatedBy == request.auth.uid)
+        && (!request.resource.data.keys().hasAny(['closedBy']) || request.resource.data.closedBy == request.auth.uid);
+    }
     function isValidPosProductStockUpdate() {
       return (hasAdminPermission('pos') || hasAdminPermission('orders'))
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -412,7 +439,8 @@ service cloud.firestore {
     
     // User data (orders, bookings)
     match /orders/{docId} {
-      allow create: if isValidPosOrderCreate()
+      allow create: if isPosAdminOrderWrite()
+        || isValidPosOrderCreate()
         || ((hasAdminPermission('orders') || hasAdminPermission('pos')) && isValidAdminOrderCreate())
         || (isSignedIn()
         && request.resource.data.keys().hasOnly([
@@ -429,7 +457,7 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['totalAmount']) || (request.resource.data.totalAmount is number && request.resource.data.totalAmount >= 0 && request.resource.data.totalAmount <= 1000000))
         && request.resource.data.timestamp == request.time);
       allow read: if hasAdminPermission('orders') || hasAdminPermission('pos') || ownsResource();
-      allow update: if hasAdminPermission('orders') || isValidPosOrderVoidUpdate() || isValidPosOpenBillUpdate();
+      allow update: if hasAdminPermission('orders') || isPosAdminOrderWrite() || isValidPosOrderVoidUpdate() || isValidPosOpenBillUpdate();
       allow delete: if hasAdminPermission('orders');
     }
     match /bookings/{docId} {
