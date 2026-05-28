@@ -6,7 +6,7 @@
     <title>Eden POS | Eden OS</title>
     <link rel="icon" href="Images/Logo.webp" type="image/webp">
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="pos.css?v=7">
+    <link rel="stylesheet" href="pos.css?v=8">
 </head>
 <body>
     <div id="admin-login" style="display: none;">
@@ -111,6 +111,68 @@
                     <p>เมนูกลาง, ราคากลาง, สูตรกลาง, branch ranking, royalty และ franchise audit</p>
                     <strong>Franchise-ready</strong>
                 </article>
+            </section>
+
+            <section class="pos-receipt-control" aria-label="จัดการใบเสร็จและบิลค้างชำระ">
+                <div class="pos-receipt-control-head">
+                    <div>
+                        <span class="system-kicker">Receipt Control</span>
+                        <h2>จัดการใบเสร็จและบิลค้างชำระ</h2>
+                        <p>ค้นหาใบเสร็จ POS ย้อนหลัง พิมพ์ซ้ำ และเรียกบิลค้างชำระกลับไปปิดยอดได้จากหน้าภาพรวม</p>
+                    </div>
+                    <button id="pos-receipt-refresh-btn" class="btn-action btn-view" type="button" onclick="refreshPosReceipts()">รีเฟรชใบเสร็จ</button>
+                </div>
+                <div class="pos-receipt-stats">
+                    <article>
+                        <span>ใบเสร็จล่าสุด</span>
+                        <strong id="pos-receipt-count">0</strong>
+                        <small>รายการที่ปิดยอดแล้ว</small>
+                    </article>
+                    <article>
+                        <span>ยอดรับชำระ</span>
+                        <strong id="pos-receipt-total">฿0.00</strong>
+                        <small>จากใบเสร็จที่โหลดล่าสุด</small>
+                    </article>
+                    <article>
+                        <span>บิลค้างชำระ</span>
+                        <strong id="pos-overview-open-count">0</strong>
+                        <small id="pos-overview-open-total">รวม ฿0.00</small>
+                    </article>
+                </div>
+                <div class="pos-receipt-workspace">
+                    <aside class="pos-receipt-browser">
+                        <div class="pos-receipt-search-row">
+                            <input id="pos-receipt-search" type="search" placeholder="ค้นหาเลขใบเสร็จ / ลูกค้า / วิธีชำระ">
+                        </div>
+                        <div id="pos-receipt-list" class="pos-receipt-list">
+                            <div class="pos-empty">กำลังโหลดใบเสร็จ...</div>
+                        </div>
+                    </aside>
+                    <article class="pos-receipt-preview-card">
+                        <div class="pos-receipt-preview-head">
+                            <div>
+                                <span>Receipt Preview</span>
+                                <strong id="pos-selected-receipt-title">ยังไม่ได้เลือกใบเสร็จ</strong>
+                            </div>
+                            <button id="pos-selected-receipt-print" type="button" onclick="printSelectedPosReceipt()" disabled>พิมพ์ซ้ำ</button>
+                        </div>
+                        <div id="pos-selected-receipt-preview" class="pos-receipt-preview">
+                            <div class="pos-empty">เลือกใบเสร็จจากรายการด้านซ้ายเพื่อดูรายละเอียด</div>
+                        </div>
+                    </article>
+                    <aside class="pos-overview-open-bills">
+                        <div class="pos-receipt-preview-head">
+                            <div>
+                                <span>Outstanding Bills</span>
+                                <strong>บิลค้างชำระ</strong>
+                            </div>
+                            <button type="button" onclick="refreshPosOpenBills()">รีเฟรชบิล</button>
+                        </div>
+                        <div id="pos-overview-open-bills-list" class="pos-overview-open-bills-list">
+                            <div class="pos-empty">กำลังโหลดบิลค้างชำระ...</div>
+                        </div>
+                    </aside>
+                </div>
             </section>
 
             <section class="pos-intelligence-grid">
@@ -366,6 +428,6 @@
         </main>
     </div>
 
-    <script type="module" src="js/pos.js?v=12"></script>
+    <script type="module" src="js/pos.js?v=13"></script>
 </body>
 </html>

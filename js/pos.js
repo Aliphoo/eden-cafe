@@ -32,6 +32,9 @@ let posSelectedCustomer = null;
 let posOpenBills = [];
 let posActiveBill = null;
 let posControlsBound = false;
+let posReceiptOrders = [];
+let posSelectedReceiptId = '';
+let posReceiptSearchTerm = '';
 const POS_VIEW_KEY = 'edenPosActiveView';
 const POS_PAYMENT_METHODS = {
     cash: { label: 'เงินสด', hint: 'รับเงินสดและคำนวณเงินทอน' },
@@ -210,6 +213,14 @@ function posTimestampMillis(value) {
     const parsed = Date.parse(value);
     return Number.isFinite(parsed) ? parsed : 0;
 }
+function posOrderTimestamp(order = {}) {
+    return posTimestampMillis(order.closedAt || order.updatedAt || order.createdAt || order.timestamp) || posTimestampMillis(order.date);
+}
+function posOrderDateText(order = {}) {
+    const timestamp = posOrderTimestamp(order);
+    if (timestamp) return new Date(timestamp).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+    return order.date || '-';
+}
 function renderOpenBillsSnapshot(snapshot) {
     const docs = snapshot?.docs ? snapshot.docs : [];
     posOpenBills = docs
@@ -217,6 +228,7 @@ function renderOpenBillsSnapshot(snapshot) {
         .filter(order => order.source === 'pos' && order.billStatus === 'open' && order.paymentStatus !== 'paid')
         .sort((a, b) => posTimestampMillis(b.updatedAt || b.createdAt || b.timestamp) - posTimestampMillis(a.updatedAt || a.createdAt || a.timestamp));
     renderPosOpenBills();
+    renderPosOverviewOpenBills();
 }
 async function refreshOpenBillsOnce() {
     const snapshot = await getDocs(query(collection(db, 'orders'), where('billStatus', '==', 'open'), limit(80)));
@@ -228,6 +240,8 @@ function setupRealtimeOpenBills() {
         console.error('Error listening to POS open bills:', error);
         const container = document.getElementById('pos-open-bills-list');
         if (container) container.innerHTML = '<div class="pos-empty pos-error">โหลดบิลค้างชำระไม่สำเร็จ: ' + escapeHTML(error.message) + '</div>';
+        const overviewContainer = document.getElementById('pos-overview-open-bills-list');
+        if (overviewContainer) overviewContainer.innerHTML = '<div class="pos-empty pos-error">โหลดบิลค้างชำระไม่สำเร็จ: ' + escapeHTML(error.message) + '</div>';
     });
 }
 function setPosAppReady(isReady) {
@@ -871,6 +885,125 @@ function renderPosOpenBills() {
     }).join('');
 }
 
+function renderPosOverviewOpenBills() {
+    const list = document.getElementById('pos-overview-open-bills-list');
+    const countEl = document.getElementById('pos-overview-open-count');
+    const totalEl = document.getElementById('pos-overview-open-total');
+    const openTotal = posOpenBills.reduce((sum, order) => sum + safeNumber(order.totalAmount ?? order.total), 0);
+    if (countEl) countEl.textContent = posOpenBills.length.toLocaleString('th-TH');
+    if (totalEl) totalEl.textContent = 'รวม ' + posMoney(openTotal);
+    if (!list) return;
+    if (!posOpenBills.length) {
+        list.innerHTML = '<div class="pos-empty">ไม่มีบิลค้างชำระตอนนี้</div>';
+        return;
+    }
+    list.innerHTML = posOpenBills.slice(0, 8).map(order => {
+        const itemCount = Array.isArray(order.items) ? order.items.reduce((sum, item) => sum + safeNumber(item.quantity, 1), 0) : 0;
+        return `
+            <article class="pos-overview-open-card">
+                <div>
+                    <strong>${escapeHTML(order.receiptNo || order.id || order.firestoreId)}</strong>
+                    <small>${escapeHTML(order.customerName || 'Walk-in Customer')} · ${itemCount.toLocaleString('th-TH')} รายการ · ${escapeHTML(posOrderDateText(order))}</small>
+                </div>
+                <div class="pos-overview-open-actions">
+                    <strong>${posMoney(order.totalAmount ?? order.total)}</strong>
+                    <button type="button" onclick="loadPosOpenBill('${escapeJSString(order.firestoreId)}', true)">เรียกมาชำระ</button>
+                </div>
+            </article>
+        `;
+    }).join('');
+}
+
+function renderReceiptsSnapshot(snapshot) {
+    const docs = snapshot?.docs ? snapshot.docs : [];
+    posReceiptOrders = docs
+        .map(docSnap => ({ firestoreId: docSnap.id, ...(docSnap.data() || {}) }))
+        .filter(order => order.source === 'pos' && (order.billStatus === 'paid' || order.paymentStatus === 'paid'))
+        .sort((a, b) => posOrderTimestamp(b) - posOrderTimestamp(a));
+    if (posSelectedReceiptId && !posReceiptOrders.some(order => order.firestoreId === posSelectedReceiptId)) {
+        posSelectedReceiptId = '';
+    }
+    if (!posSelectedReceiptId && posReceiptOrders.length) {
+        posSelectedReceiptId = posReceiptOrders[0].firestoreId;
+    }
+    renderPosReceiptManager();
+}
+
+async function refreshPosReceiptsOnce() {
+    const snapshot = await getDocs(query(collection(db, 'orders'), where('billStatus', '==', 'paid'), limit(120)));
+    renderReceiptsSnapshot(snapshot);
+}
+
+function receiptSearchText(order = {}) {
+    return [
+        order.receiptNo,
+        order.id,
+        order.firestoreId,
+        order.customerName,
+        order.phone,
+        order.customerEmail,
+        order.paymentLabel,
+        order.paymentMethod,
+        order.cashierName,
+        order.date
+    ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function filteredPosReceipts() {
+    const term = posReceiptSearchTerm.trim().toLowerCase();
+    return posReceiptOrders.filter(order => !term || receiptSearchText(order).includes(term));
+}
+
+function renderPosReceiptManager() {
+    const list = document.getElementById('pos-receipt-list');
+    const preview = document.getElementById('pos-selected-receipt-preview');
+    const title = document.getElementById('pos-selected-receipt-title');
+    const printBtn = document.getElementById('pos-selected-receipt-print');
+    const countEl = document.getElementById('pos-receipt-count');
+    const totalEl = document.getElementById('pos-receipt-total');
+    const receipts = filteredPosReceipts();
+    const receiptTotal = posReceiptOrders.reduce((sum, order) => sum + safeNumber(order.totalAmount ?? order.total), 0);
+    if (countEl) countEl.textContent = posReceiptOrders.length.toLocaleString('th-TH');
+    if (totalEl) totalEl.textContent = posMoney(receiptTotal);
+
+    if (list) {
+        if (!posReceiptOrders.length) {
+            list.innerHTML = '<div class="pos-empty">ยังไม่มีใบเสร็จที่ปิดยอดแล้ว</div>';
+        } else if (!receipts.length) {
+            list.innerHTML = '<div class="pos-empty">ไม่พบใบเสร็จตามคำค้นหา</div>';
+        } else {
+            list.innerHTML = receipts.slice(0, 60).map(order => {
+                const active = order.firestoreId === posSelectedReceiptId;
+                const itemCount = Array.isArray(order.items) ? order.items.reduce((sum, item) => sum + safeNumber(item.quantity, 1), 0) : 0;
+                return `
+                    <article class="pos-receipt-card ${active ? 'active' : ''}">
+                        <button type="button" onclick="selectPosReceipt('${escapeJSString(order.firestoreId)}')">
+                            <span>
+                                <strong>${escapeHTML(order.receiptNo || order.id || order.firestoreId)}</strong>
+                                <small>${escapeHTML(order.customerName || 'Walk-in Customer')} · ${itemCount.toLocaleString('th-TH')} รายการ · ${escapeHTML(posOrderDateText(order))}</small>
+                            </span>
+                            <strong>${posMoney(order.totalAmount ?? order.total)}</strong>
+                        </button>
+                    </article>
+                `;
+            }).join('');
+        }
+    }
+
+    let selected = receipts.find(order => order.firestoreId === posSelectedReceiptId) || receipts[0] || null;
+    if (!selected && !posReceiptSearchTerm.trim()) {
+        selected = posReceiptOrders.find(order => order.firestoreId === posSelectedReceiptId) || posReceiptOrders[0] || null;
+    }
+    if (selected) posSelectedReceiptId = selected.firestoreId;
+    if (title) title.textContent = selected ? (selected.receiptNo || selected.id || selected.firestoreId) : 'ยังไม่ได้เลือกใบเสร็จ';
+    if (printBtn) printBtn.disabled = !selected;
+    if (preview) {
+        preview.innerHTML = selected
+            ? buildPosReceiptHTML(selected)
+            : '<div class="pos-empty">เลือกใบเสร็จจากรายการด้านซ้ายเพื่อดูรายละเอียด</div>';
+    }
+}
+
 function posCartTotals() {
     const subtotal = posRound(posCart.reduce((sum, item) => sum + (safeNumber(item.price) * safeNumber(item.quantity, 1)), 0));
     const discountInput = document.getElementById('pos-discount');
@@ -955,6 +1088,8 @@ function renderPosScreen() {
 function initPosModule() {
     if (posControlsBound) {
         renderPosScreen();
+        renderPosReceiptManager();
+        renderPosOverviewOpenBills();
         return;
     }
     restorePosCart();
@@ -983,6 +1118,10 @@ function initPosModule() {
         if (paidInput) paidInput.value = totals.total ? String(totals.total) : '';
         renderPosCart();
     });
+    document.getElementById('pos-receipt-search')?.addEventListener('input', (event) => {
+        posReceiptSearchTerm = event.target.value || '';
+        renderPosReceiptManager();
+    });
     document.getElementById('pos-customer-search')?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
             event.preventDefault();
@@ -1001,6 +1140,13 @@ function initPosModule() {
     });
     posControlsBound = true;
     renderPosScreen();
+    renderPosReceiptManager();
+    renderPosOverviewOpenBills();
+    refreshPosReceiptsOnce().catch(error => {
+        console.error('Initial receipt load failed:', error);
+        const list = document.getElementById('pos-receipt-list');
+        if (list) list.innerHTML = '<div class="pos-empty pos-error">โหลดใบเสร็จไม่สำเร็จ: ' + escapeHTML(error.message) + '</div>';
+    });
 }
 
 window.setPosCategory = (categoryId = 'all') => {
@@ -1457,6 +1603,33 @@ window.refreshPosOpenBills = async () => {
     }
 };
 
+window.refreshPosReceipts = async () => {
+    const list = document.getElementById('pos-receipt-list');
+    const button = document.getElementById('pos-receipt-refresh-btn');
+    const originalText = button?.textContent || '';
+    if (list) list.innerHTML = '<div class="pos-empty">กำลังรีเฟรชใบเสร็จ...</div>';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'กำลังรีเฟรช...';
+        }
+        await refreshPosReceiptsOnce();
+    } catch (error) {
+        console.error('Refresh POS receipts failed:', error);
+        if (list) list.innerHTML = '<div class="pos-empty pos-error">รีเฟรชใบเสร็จไม่สำเร็จ: ' + escapeHTML(error.message) + '</div>';
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText || 'รีเฟรชใบเสร็จ';
+        }
+    }
+};
+
+window.selectPosReceipt = (orderId) => {
+    posSelectedReceiptId = orderId || '';
+    renderPosReceiptManager();
+};
+
 window.loadPosOpenBill = async (orderId, focusPayment = false) => {
     try {
         const orderSnap = await getDoc(doc(db, 'orders', orderId));
@@ -1700,6 +1873,7 @@ window.checkoutPosOrder = async () => {
         renderPosCart();
         renderPosOpenBills();
         await refreshOpenBillsOnce().catch(error => console.warn('Unable to refresh open bills after checkout:', error));
+        await refreshPosReceiptsOnce().catch(error => console.warn('Unable to refresh receipts after checkout:', error));
         alert(wasOpenBill ? 'ปิดบิลและออกใบเสร็จสำเร็จ' : (isTestOrder ? 'บันทึกออเดอร์ทดสอบ POS สำเร็จ' : 'บันทึกออเดอร์ POS สำเร็จ'));
     } catch (error) {
         console.error('POS checkout failed:', error);
@@ -1712,33 +1886,48 @@ window.checkoutPosOrder = async () => {
         renderPosActiveBill();
     }
 };
-window.printPosReceipt = () => {
-    if (!posLastReceipt) {
-        alert('ยังไม่มีใบเสร็จล่าสุดให้พิมพ์');
-        return;
-    }
+function openPosReceiptPrintWindow(order) {
+    if (!order) return false;
     const printWindow = window.open('', '_blank', 'width=420,height=720');
     if (!printWindow) {
         alert('เบราว์เซอร์บล็อกหน้าต่างพิมพ์ กรุณาอนุญาต Pop-up');
-        return;
+        return false;
     }
     printWindow.document.write(`
         <!doctype html>
         <html>
         <head>
             <meta charset="utf-8">
-            <title>${escapeHTML(posLastReceipt.receiptNo || 'POS Receipt')}</title>
+            <title>${escapeHTML(order.receiptNo || 'POS Receipt')}</title>
             <style>
                 body { font-family: Arial, sans-serif; margin: 18px; color: #111; }
                 @media print { body { margin: 0; } }
             </style>
         </head>
-        <body>${buildPosReceiptHTML(posLastReceipt)}</body>
+        <body>${buildPosReceiptHTML(order)}</body>
         </html>
     `);
     printWindow.document.close();
     printWindow.focus();
     printWindow.print();
+    return true;
+}
+
+window.printPosReceipt = () => {
+    if (!posLastReceipt) {
+        alert('ยังไม่มีใบเสร็จล่าสุดให้พิมพ์');
+        return;
+    }
+    openPosReceiptPrintWindow(posLastReceipt);
+};
+
+window.printSelectedPosReceipt = () => {
+    const selected = posReceiptOrders.find(order => order.firestoreId === posSelectedReceiptId);
+    if (!selected) {
+        alert('กรุณาเลือกใบเสร็จก่อนพิมพ์ซ้ำ');
+        return;
+    }
+    openPosReceiptPrintWindow(selected);
 };
 
 document.documentElement.dataset.posModule = 'ready';
