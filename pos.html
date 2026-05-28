@@ -6,7 +6,7 @@
     <title>Eden POS | Eden OS</title>
     <link rel="icon" href="Images/Logo.webp" type="image/webp">
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="pos.css?v=11">
+    <link rel="stylesheet" href="pos.css?v=12">
 </head>
 <body>
     <div id="admin-login" style="display: none;">
@@ -299,29 +299,10 @@
             <section id="pos-sales-view" class="pos-view-section" data-pos-view="sales" hidden>
             <section class="pos-shell" id="pos-sales">
                 <div class="pos-panel">
-                    <div class="section-header">
-                        <div>
-                            <span class="system-kicker">POS Mode · ขายหน้าร้าน</span>
-                            <h2>เลือกสินค้า</h2>
-                            <p>ดึงข้อมูลจากเมนูในระบบ และแสดงเฉพาะรายการที่เปิดขายบน POS พร้อมรองรับ modifier และ variant จากหลังบ้าน</p>
-                        </div>
+                    <div class="pos-sales-controls" aria-label="ค้นหาสินค้า POS">
+                        <input id="pos-search-input" class="pos-search" type="search" placeholder="ค้นหาชื่อสินค้า / SKU / หมวดหมู่">
                         <button class="btn-action btn-view" type="button" onclick="refreshPosProducts()">รีเฟรช POS</button>
                     </div>
-                    <div class="pos-command-pills" aria-label="POS quick action roadmap">
-                        <span>เปิดโต๊ะ</span>
-                        <span>Takeaway</span>
-                        <span>Delivery</span>
-                        <span>Staff Order</span>
-                        <span>Coupon</span>
-                        <span>Happy Hour</span>
-                        <span>แยกบิล</span>
-                        <span>ส่ง Bar/Kitchen</span>
-                    </div>
-                    <div class="pos-toolbar">
-                        <input id="pos-search-input" class="pos-search" type="search" placeholder="ค้นหาชื่อสินค้า / SKU / หมวดหมู่">
-                        <div class="pos-counter"><span id="pos-product-count">0</span> รายการ POS</div>
-                    </div>
-                    <div id="pos-category-list" class="pos-category-list"></div>
                     <div id="pos-product-grid" class="pos-grid">
                         <div class="pos-empty">กำลังโหลดสินค้า POS...</div>
                     </div>
