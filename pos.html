@@ -6,7 +6,7 @@
     <title>Eden POS | Eden OS</title>
     <link rel="icon" href="Images/Logo.webp" type="image/webp">
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="pos.css?v=12">
+    <link rel="stylesheet" href="pos.css?v=13">
 </head>
 <body>
     <div id="admin-login" style="display: none;">
@@ -301,6 +301,9 @@
                 <div class="pos-panel">
                     <div class="pos-sales-controls" aria-label="ค้นหาสินค้า POS">
                         <input id="pos-search-input" class="pos-search" type="search" placeholder="ค้นหาชื่อสินค้า / SKU / หมวดหมู่">
+                        <select id="pos-category-select" class="pos-category-select" aria-label="เลือกหมวดหมู่สินค้า">
+                            <option value="all">หมวดหมู่ทั้งหมด</option>
+                        </select>
                         <button class="btn-action btn-view" type="button" onclick="refreshPosProducts()">รีเฟรช POS</button>
                     </div>
                     <div id="pos-product-grid" class="pos-grid">
@@ -433,6 +436,6 @@
             return false;
         };
     </script>
-    <script type="module" src="js/pos.js?v=18"></script>
+    <script type="module" src="js/pos.js?v=19"></script>
 </body>
 </html>
