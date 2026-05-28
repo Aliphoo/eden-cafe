@@ -831,7 +831,7 @@ function renderPosActiveBill() {
         container.hidden = true;
         container.innerHTML = '';
         if (openBtn) openBtn.textContent = 'เปิดบิล / บันทึกค้างชำระ';
-        if (checkoutBtn) checkoutBtn.textContent = 'ชำระเงินทันทีและออกใบเสร็จ';
+        if (checkoutBtn) checkoutBtn.textContent = 'ยืนยันการชำระเงิน ออกใบเสร็จ';
         return;
     }
     container.hidden = false;
@@ -840,7 +840,7 @@ function renderPosActiveBill() {
         <small>${escapeHTML(posActiveBill.customerName || 'Walk-in Customer')} · กด "เปิดบิล" เพื่ออัปเดต หรือ "ชำระเงินทันที" เพื่อปิดยอด</small>
     `;
     if (openBtn) openBtn.textContent = 'อัปเดตบิลค้างชำระ';
-    if (checkoutBtn) checkoutBtn.textContent = 'ชำระเงินปิดบิลและออกใบเสร็จ';
+    if (checkoutBtn) checkoutBtn.textContent = 'ยืนยันการชำระเงิน ออกใบเสร็จ';
 }
 
 function renderPosOpenBills() {
@@ -1707,7 +1707,7 @@ window.checkoutPosOrder = async () => {
     } finally {
         if (checkoutBtn) {
             checkoutBtn.disabled = false;
-            checkoutBtn.textContent = originalText || 'ชำระเงินทันทีและออกใบเสร็จ';
+            checkoutBtn.textContent = originalText || 'ยืนยันการชำระเงิน ออกใบเสร็จ';
         }
         renderPosActiveBill();
     }
