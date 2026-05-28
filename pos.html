@@ -6,7 +6,7 @@
     <title>Eden POS | Eden OS</title>
     <link rel="icon" href="Images/Logo.webp" type="image/webp">
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="pos.css?v=10">
+    <link rel="stylesheet" href="pos.css?v=11">
 </head>
 <body>
     <div id="admin-login" style="display: none;">
@@ -44,6 +44,16 @@
                     <p>หน้าแคชเชียร์แยกจาก Admin Dashboard</p>
                 </div>
             </div>
+            <nav class="pos-view-switcher" aria-label="เลือกหน้าการทำงาน POS">
+                <button class="pos-view-tab active" type="button" data-pos-target="overview" aria-pressed="true" onclick="switchPosView('overview')">
+                    <span>Overview</span>
+                    ภาพรวม Eden OS
+                </button>
+                <button class="pos-view-tab" type="button" data-pos-target="sales" aria-pressed="false" onclick="switchPosView('sales')">
+                    <span>Live POS</span>
+                    ขายหน้าร้าน POS
+                </button>
+            </nav>
             <div class="top-actions">
                 <a class="top-link" href="admin.html">กลับ Admin</a>
                 <div class="admin-profile">
@@ -55,17 +65,6 @@
         </header>
 
         <main class="pos-main">
-            <nav class="pos-view-switcher" aria-label="เลือกหน้าการทำงาน POS">
-                <button class="pos-view-tab active" type="button" data-pos-target="overview" aria-pressed="true" onclick="switchPosView('overview')">
-                    <span>Overview</span>
-                    ภาพรวม Eden OS
-                </button>
-                <button class="pos-view-tab" type="button" data-pos-target="sales" aria-pressed="false" onclick="switchPosView('sales')">
-                    <span>Live POS</span>
-                    ขายหน้าร้าน POS
-                </button>
-            </nav>
-
             <section id="pos-overview-view" class="pos-view-section active" data-pos-view="overview">
             <section class="pos-hero">
                 <span class="pos-badge">Eden OS · iPad-first Cafe Operation</span>
@@ -453,6 +452,6 @@
             return false;
         };
     </script>
-    <script type="module" src="js/pos.js?v=17"></script>
+    <script type="module" src="js/pos.js?v=18"></script>
 </body>
 </html>
