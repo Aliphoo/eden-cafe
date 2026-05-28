@@ -27,6 +27,7 @@ let posSearchTerm = '';
 let posCart = [];
 let posLastReceipt = null;
 let posControlsBound = false;
+const POS_VIEW_KEY = 'edenPosActiveView';
 
 function escapeHTML(value) {
     return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -188,6 +189,47 @@ function setPosAppReady(isReady) {
     document.body.classList.toggle('pos-ready', isReady);
     document.getElementById('pos-app')?.setAttribute('aria-hidden', isReady ? 'false' : 'true');
 }
+function normalizePosView(view) {
+    return String(view || '').toLowerCase() === 'sales' ? 'sales' : 'overview';
+}
+function setPosView(view = 'overview', options = {}) {
+    const activeView = normalizePosView(view);
+    document.querySelectorAll('[data-pos-view]').forEach(section => {
+        const isActive = section.dataset.posView === activeView;
+        section.classList.toggle('active', isActive);
+        section.hidden = !isActive;
+    });
+    document.querySelectorAll('[data-pos-target]').forEach(button => {
+        const isActive = button.dataset.posTarget === activeView;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+    document.body.dataset.posView = activeView;
+    if (options.persist !== false) {
+        try { sessionStorage.setItem(POS_VIEW_KEY, activeView); } catch (error) { console.warn('Unable to save POS view:', error); }
+        const hash = activeView === 'sales' ? '#pos-sales' : '#pos-overview';
+        if (window.location.hash !== hash) history.replaceState(null, '', hash);
+    }
+    if (activeView === 'sales') renderPosScreen();
+}
+function initialPosView() {
+    const params = new URLSearchParams(window.location.search);
+    const requested = params.get('view');
+    if (requested) return normalizePosView(requested);
+    if (window.location.hash === '#pos-sales') return 'sales';
+    if (window.location.hash === '#pos-overview') return 'overview';
+    try { return normalizePosView(sessionStorage.getItem(POS_VIEW_KEY)); } catch (error) { return 'overview'; }
+}
+function initPosViewSwitcher() {
+    document.querySelectorAll('[data-pos-target]').forEach(button => {
+        button.addEventListener('click', () => setPosView(button.dataset.posTarget || 'overview'));
+    });
+    document.querySelectorAll('[data-pos-open-view]').forEach(control => {
+        control.addEventListener('click', () => setPosView(control.dataset.posOpenView || 'overview'));
+    });
+    setPosView(initialPosView(), { persist: false });
+}
+window.switchPosView = view => setPosView(view);
 function showLoginError(message) {
     const loginError = document.getElementById('login-error');
     if (!loginError) return;
@@ -200,6 +242,12 @@ function clearLoginError() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    initPosViewSwitcher();
+    window.addEventListener('hashchange', () => {
+        if (window.location.hash === '#pos-sales') setPosView('sales', { persist: false });
+        if (window.location.hash === '#pos-overview') setPosView('overview', { persist: false });
+    });
+
     const loginScreen = document.getElementById('admin-login');
     const emailLoginForm = document.getElementById('email-login-form');
     const btnLogin = document.getElementById('btn-admin-login');

@@ -6,7 +6,7 @@
     <title>Eden POS | Eden OS</title>
     <link rel="icon" href="Images/Logo.webp" type="image/webp">
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="pos.css?v=4">
+    <link rel="stylesheet" href="pos.css?v=5">
 </head>
 <body>
     <div id="admin-login" style="display: none;">
@@ -55,16 +55,28 @@
         </header>
 
         <main class="pos-main">
+            <nav class="pos-view-switcher" aria-label="เลือกหน้าการทำงาน POS">
+                <button class="pos-view-tab active" type="button" data-pos-target="overview" aria-pressed="true" onclick="switchPosView('overview')">
+                    <span>Overview</span>
+                    ภาพรวม Eden OS
+                </button>
+                <button class="pos-view-tab" type="button" data-pos-target="sales" aria-pressed="false" onclick="switchPosView('sales')">
+                    <span>Live POS</span>
+                    ขายหน้าร้าน POS
+                </button>
+            </nav>
+
+            <section id="pos-overview-view" class="pos-view-section active" data-pos-view="overview">
             <section class="pos-hero">
                 <span class="pos-badge">Eden OS · iPad-first Cafe Operation</span>
                 <h2>ศูนย์ควบคุมร้าน Eden Cafe</h2>
                 <p>ขายหน้าร้าน เปิดโต๊ะ รับ QR Order จองโต๊ะ ส่งออเดอร์ไป Bar/Kitchen/Bakery และต่อยอด Membership, Wellness, Inventory และ Franchise-ready ในระบบเดียว</p>
                 <div class="pos-hero-actions" aria-label="Eden POS quick modes">
-                    <a href="#pos-sales">POS Mode</a>
-                    <a href="#table-mode">Table Mode</a>
-                    <a href="#kitchen-mode">Kitchen Mode</a>
-                    <a href="#manager-mode">Manager Mode</a>
-                    <a href="#hq-mode">HQ Mode</a>
+                    <button type="button" data-pos-open-view="sales" onclick="switchPosView('sales')">POS Mode</button>
+                    <a href="#table-mode" data-pos-open-view="overview" onclick="switchPosView('overview')">Table Mode</a>
+                    <a href="#kitchen-mode" data-pos-open-view="overview" onclick="switchPosView('overview')">Kitchen Mode</a>
+                    <a href="#manager-mode" data-pos-open-view="overview" onclick="switchPosView('overview')">Manager Mode</a>
+                    <a href="#hq-mode" data-pos-open-view="overview" onclick="switchPosView('overview')">HQ Mode</a>
                 </div>
             </section>
 
@@ -212,7 +224,9 @@
                     </ul>
                 </article>
             </section>
+            </section>
 
+            <section id="pos-sales-view" class="pos-view-section" data-pos-view="sales" hidden>
             <section class="pos-shell" id="pos-sales">
                 <div class="pos-panel">
                     <div class="section-header">
@@ -275,9 +289,10 @@
                     <div id="pos-receipt" class="pos-receipt" style="display:none;"></div>
                 </aside>
             </section>
+            </section>
         </main>
     </div>
 
-    <script type="module" src="js/pos.js?v=5"></script>
+    <script type="module" src="js/pos.js?v=6"></script>
 </body>
 </html>

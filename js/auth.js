@@ -247,7 +247,7 @@ function checkLoginStatus() {
         const adminLabel = isEn ? 'Admin Dashboard' : 'จัดการหลังบ้าน (Admin)';
         const posLabel = isEn ? 'Counter POS' : 'POS หน้าร้าน';
         const adminLink = isAdmin ? `<a href="/admin" target="_blank" style="color:var(--accent-color); font-weight:500;">${adminLabel}</a>` : '';
-        const posLink = canUsePos ? `<a href="/pos" target="_blank" class="profile-pos-link">${posLabel}</a>` : '';
+        const posLink = canUsePos ? `<a href="/pos?view=sales" target="_blank" class="profile-pos-link">${posLabel}</a>` : '';
 
         container.innerHTML = `
             <div class="user-profile-menu">
