@@ -1,4 +1,5 @@
 import { auth, provider, db } from './firebase-config.js';
+import qrcodeFactory from './qrcode-generator.esm.js';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, setDoc, addDoc, query, orderBy, onSnapshot, getDoc, serverTimestamp, runTransaction, where, limit, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -444,6 +445,12 @@ function setPromptPayStatus(message, state = '') {
 }
 
 async function createQrDataUrl(payload) {
+    if (typeof qrcodeFactory === 'function') {
+        const qr = qrcodeFactory(0, 'M');
+        qr.addData(payload);
+        qr.make();
+        return qr.createDataURL(8, 1);
+    }
     if (window.QRCode?.toDataURL) {
         return window.QRCode.toDataURL(payload, {
             errorCorrectionLevel: 'M',
