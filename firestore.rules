@@ -117,6 +117,77 @@ service cloud.firestore {
         && request.resource.data.timestamp == request.time
         && (!request.resource.data.keys().hasAny(['createdAt']) || request.resource.data.createdAt == request.time);
     }
+    function isValidPosOrderCreate() {
+      return (hasAdminPermission('pos') || hasAdminPermission('orders'))
+        && request.resource.data.keys().hasOnly([
+          'id', 'date', 'items', 'total', 'totalAmount', 'uid', 'timestamp',
+          'customerName', 'phone', 'address', 'status',
+          'source', 'orderType', 'receiptNo', 'paymentStatus', 'paymentMethod',
+          'paymentLabel', 'customerUid', 'customerEmail', 'customerLineId',
+          'customerTier', 'customerMemberCode', 'customerProfileSynced',
+          'subtotal', 'discount', 'taxIncluded', 'paidAmount', 'changeAmount',
+          'note', 'cashierUid', 'cashierName', 'cashierEmail',
+          'isTestOrder', 'softLaunch', 'stockAdjusted', 'stockAdjustments',
+          'stockMode', 'billStatus', 'isOpenBill', 'orderMode',
+          'openedAt', 'updatedAt', 'updatedBy',
+          'closedAt', 'closedBy', 'closedByName', 'createdAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'id', 'date', 'items', 'totalAmount', 'uid',
+          'status', 'source', 'orderType'
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.source == 'pos'
+        && request.resource.data.orderType == 'pos'
+        && isShortString(request.resource.data.id, 80)
+        && isShortString(request.resource.data.date, 80)
+        && request.resource.data.items is list
+        && request.resource.data.items.size() > 0
+        && request.resource.data.items.size() <= 200
+        && request.resource.data.totalAmount is number
+        && request.resource.data.totalAmount >= 0
+        && request.resource.data.totalAmount <= 1000000
+        && request.resource.data.status in ['pending', 'processing', 'completed', 'cancelled']
+        && (!request.resource.data.keys().hasAny(['paymentStatus']) || request.resource.data.paymentStatus in ['pending', 'paid', 'failed', 'refunded'])
+        && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'qr', 'card', 'other'])
+        && (!request.resource.data.keys().hasAny(['paymentLabel']) || (request.resource.data.paymentLabel is string && request.resource.data.paymentLabel.size() <= 80))
+        && (!request.resource.data.keys().hasAny(['receiptNo']) || (request.resource.data.receiptNo is string && request.resource.data.receiptNo.size() > 0 && request.resource.data.receiptNo.size() <= 80))
+        && (!request.resource.data.keys().hasAny(['customerName']) || (request.resource.data.customerName is string && request.resource.data.customerName.size() <= 120))
+        && (!request.resource.data.keys().hasAny(['phone']) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['address']) || (request.resource.data.address is string && request.resource.data.address.size() <= 250))
+        && (!request.resource.data.keys().hasAny(['note']) || (request.resource.data.note is string && request.resource.data.note.size() <= 500))
+        && (!request.resource.data.keys().hasAny(['customerUid']) || (request.resource.data.customerUid is string && request.resource.data.customerUid.size() <= 120))
+        && (!request.resource.data.keys().hasAny(['customerEmail']) || (request.resource.data.customerEmail is string && request.resource.data.customerEmail.size() <= 180))
+        && (!request.resource.data.keys().hasAny(['customerLineId']) || (request.resource.data.customerLineId is string && request.resource.data.customerLineId.size() <= 80))
+        && (!request.resource.data.keys().hasAny(['customerTier']) || (request.resource.data.customerTier is string && request.resource.data.customerTier.size() <= 30))
+        && (!request.resource.data.keys().hasAny(['customerMemberCode']) || (request.resource.data.customerMemberCode is string && request.resource.data.customerMemberCode.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['customerProfileSynced']) || request.resource.data.customerProfileSynced is bool)
+        && (!request.resource.data.keys().hasAny(['subtotal']) || (request.resource.data.subtotal is number && request.resource.data.subtotal >= 0 && request.resource.data.subtotal <= 1000000))
+        && (!request.resource.data.keys().hasAny(['discount']) || (request.resource.data.discount is number && request.resource.data.discount >= 0 && request.resource.data.discount <= 1000000))
+        && (!request.resource.data.keys().hasAny(['taxIncluded']) || (request.resource.data.taxIncluded is number && request.resource.data.taxIncluded >= 0 && request.resource.data.taxIncluded <= 1000000))
+        && (!request.resource.data.keys().hasAny(['paidAmount']) || (request.resource.data.paidAmount is number && request.resource.data.paidAmount >= 0 && request.resource.data.paidAmount <= 1000000))
+        && (!request.resource.data.keys().hasAny(['changeAmount']) || (request.resource.data.changeAmount is number && request.resource.data.changeAmount >= 0 && request.resource.data.changeAmount <= 1000000))
+        && (!request.resource.data.keys().hasAny(['total']) || (request.resource.data.total is number && request.resource.data.total >= 0 && request.resource.data.total <= 1000000))
+        && (!request.resource.data.keys().hasAny(['cashierUid']) || request.resource.data.cashierUid == request.auth.uid)
+        && (!request.resource.data.keys().hasAny(['cashierName']) || (request.resource.data.cashierName is string && request.resource.data.cashierName.size() <= 120))
+        && (!request.resource.data.keys().hasAny(['cashierEmail']) || (request.resource.data.cashierEmail is string && request.resource.data.cashierEmail.size() <= 180))
+        && (!request.resource.data.keys().hasAny(['isTestOrder']) || request.resource.data.isTestOrder is bool)
+        && (!request.resource.data.keys().hasAny(['softLaunch']) || request.resource.data.softLaunch is bool)
+        && (!request.resource.data.keys().hasAny(['stockAdjusted']) || request.resource.data.stockAdjusted is bool)
+        && (!request.resource.data.keys().hasAny(['stockAdjustments']) || (request.resource.data.stockAdjustments is list && request.resource.data.stockAdjustments.size() <= 200))
+        && (!request.resource.data.keys().hasAny(['stockMode']) || (request.resource.data.stockMode is string && request.resource.data.stockMode.size() <= 60))
+        && (!request.resource.data.keys().hasAny(['billStatus']) || request.resource.data.billStatus in ['open', 'paid', 'cancelled'])
+        && (!request.resource.data.keys().hasAny(['isOpenBill']) || request.resource.data.isOpenBill is bool)
+        && (!request.resource.data.keys().hasAny(['orderMode']) || request.resource.data.orderMode in ['pay_now', 'open_bill'])
+        && (!request.resource.data.keys().hasAny(['timestamp']) || request.resource.data.timestamp is timestamp)
+        && (!request.resource.data.keys().hasAny(['createdAt']) || request.resource.data.createdAt is timestamp)
+        && (!request.resource.data.keys().hasAny(['openedAt']) || request.resource.data.openedAt is timestamp)
+        && (!request.resource.data.keys().hasAny(['updatedAt']) || request.resource.data.updatedAt is timestamp)
+        && (!request.resource.data.keys().hasAny(['updatedBy']) || request.resource.data.updatedBy == request.auth.uid)
+        && (!request.resource.data.keys().hasAny(['closedAt']) || request.resource.data.closedAt is timestamp)
+        && (!request.resource.data.keys().hasAny(['closedBy']) || request.resource.data.closedBy == request.auth.uid)
+        && (!request.resource.data.keys().hasAny(['closedByName']) || (request.resource.data.closedByName is string && request.resource.data.closedByName.size() <= 120));
+    }
     function isValidPosProductStockUpdate() {
       return (hasAdminPermission('pos') || hasAdminPermission('orders'))
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -163,6 +234,7 @@ service cloud.firestore {
         && request.resource.data.uid is string
         && affected.hasOnly([
           'id', 'date', 'items', 'total', 'totalAmount', 'uid',
+          'source', 'orderType',
           'customerName', 'phone', 'address', 'status',
           'receiptNo', 'paymentStatus', 'paymentMethod', 'paymentLabel',
           'customerUid', 'customerEmail', 'customerLineId',
@@ -171,6 +243,7 @@ service cloud.firestore {
           'note', 'cashierUid', 'cashierName', 'cashierEmail',
           'isTestOrder', 'softLaunch', 'stockAdjusted', 'stockAdjustments',
           'stockMode', 'billStatus', 'isOpenBill', 'orderMode',
+          'openedAt', 'timestamp', 'createdAt',
           'updatedAt', 'updatedBy', 'closedAt', 'closedBy', 'closedByName'
         ])
         && request.resource.data.items is list
@@ -207,11 +280,14 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['isTestOrder']) || request.resource.data.isTestOrder is bool)
         && (!request.resource.data.keys().hasAny(['softLaunch']) || request.resource.data.softLaunch is bool)
         && (!request.resource.data.keys().hasAny(['stockAdjusted']) || request.resource.data.stockAdjusted is bool)
-        && (!request.resource.data.keys().hasAny(['stockAdjustments']) || (request.resource.data.stockAdjustments is list && request.resource.data.stockAdjustments.size() <= 150))
-        && (!request.resource.data.keys().hasAny(['stockMode']) || (request.resource.data.stockMode is string && request.resource.data.stockMode.size() <= 40))
-        && (!affected.hasAny(['updatedAt']) || request.resource.data.updatedAt == request.time)
+        && (!request.resource.data.keys().hasAny(['stockAdjustments']) || (request.resource.data.stockAdjustments is list && request.resource.data.stockAdjustments.size() <= 200))
+        && (!request.resource.data.keys().hasAny(['stockMode']) || (request.resource.data.stockMode is string && request.resource.data.stockMode.size() <= 60))
+        && (!affected.hasAny(['updatedAt']) || request.resource.data.updatedAt is timestamp)
         && (!affected.hasAny(['updatedBy']) || request.resource.data.updatedBy == request.auth.uid)
-        && (!affected.hasAny(['closedAt']) || request.resource.data.closedAt == request.time)
+        && (!affected.hasAny(['openedAt']) || request.resource.data.openedAt is timestamp)
+        && (!affected.hasAny(['timestamp']) || request.resource.data.timestamp is timestamp)
+        && (!affected.hasAny(['createdAt']) || request.resource.data.createdAt is timestamp)
+        && (!affected.hasAny(['closedAt']) || request.resource.data.closedAt is timestamp)
         && (!affected.hasAny(['closedBy']) || request.resource.data.closedBy == request.auth.uid)
         && (!request.resource.data.keys().hasAny(['closedByName']) || (request.resource.data.closedByName is string && request.resource.data.closedByName.size() <= 120));
     }    function ownsResource() {
@@ -336,7 +412,8 @@ service cloud.firestore {
     
     // User data (orders, bookings)
     match /orders/{docId} {
-      allow create: if ((hasAdminPermission('orders') || hasAdminPermission('pos')) && isValidAdminOrderCreate())
+      allow create: if isValidPosOrderCreate()
+        || ((hasAdminPermission('orders') || hasAdminPermission('pos')) && isValidAdminOrderCreate())
         || (isSignedIn()
         && request.resource.data.keys().hasOnly([
           'id', 'date', 'items', 'total', 'totalAmount', 'uid', 'timestamp',
