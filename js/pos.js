@@ -1415,7 +1415,7 @@ window.savePosOpenBill = async () => {
         }
         renderPosCart();
         renderPosOpenBills();
-        await refreshOpenBillsOnce();
+        await refreshOpenBillsOnce().catch(error => console.warn('Unable to refresh open bills after save:', error));
     } catch (error) {
         console.error('Save POS open bill failed:', error);
         alert('บันทึกบิลค้างชำระไม่สำเร็จ: ' + error.message);
@@ -1556,6 +1556,8 @@ window.checkoutPosOrder = async () => {
         if (!posActiveBill) {
             orderData.timestamp = serverTimestamp();
             orderData.createdAt = serverTimestamp();
+        } else {
+            orderData.uid = posActiveBill.uid || user.uid;
         }
 
         const wasOpenBill = !!posActiveBill?.firestoreId;
