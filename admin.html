@@ -337,6 +337,37 @@
         .footer-preview-social a:hover { background: rgba(255,255,255,0.4); }
         .footer-settings-full { grid-column: 1 / -1; }
         @media (max-width: 900px) { .footer-settings-grid { grid-template-columns: 1fr; } .footer-preview-grid { grid-template-columns: 1fr; } }
+
+        /* PromptPay Settings */
+        .promptpay-admin-shell { position: relative; overflow: hidden; padding: 0; background: radial-gradient(circle at top left, rgba(255, 214, 102, 0.22), transparent 34%), linear-gradient(135deg, #ffffff 0%, #f6fff8 100%); }
+        .promptpay-admin-shell::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(rgba(44, 62, 80, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(44, 62, 80, 0.035) 1px, transparent 1px); background-size: 28px 28px; pointer-events: none; }
+        .promptpay-admin-header { position: relative; z-index: 1; align-items: flex-start; padding: 28px 30px 10px; margin-bottom: 0; }
+        .promptpay-admin-kicker { color: #0f8a4c; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 8px; }
+        .promptpay-admin-header h2 { color: #0b3d2a; font-size: 2rem; line-height: 1.2; }
+        .promptpay-admin-grid { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.8fr); gap: 22px; padding: 20px 30px 30px; }
+        .promptpay-admin-card, .promptpay-preview-card { background: rgba(255, 255, 255, 0.88); border: 1px solid #dceee1; border-radius: 22px; box-shadow: 0 18px 45px rgba(26, 147, 69, 0.08); padding: 24px; backdrop-filter: blur(10px); }
+        .promptpay-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+        .promptpay-toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid #dceee1; background: #fbfff8; border-radius: 18px; padding: 14px 16px; margin-bottom: 16px; }
+        .promptpay-toggle strong { color: #0b3d2a; display: block; }
+        .promptpay-toggle span { color: #67766c; font-size: 0.88rem; }
+        .promptpay-toggle input { width: 22px; height: 22px; accent-color: #129657; }
+        .promptpay-help { color: #6a786f; font-size: 0.86rem; line-height: 1.6; margin-top: -6px; margin-bottom: 16px; }
+        .promptpay-settings-status { min-height: 22px; color: #607568; font-weight: 600; margin-top: 12px; }
+        .promptpay-settings-status.success { color: #0f8a4c; }
+        .promptpay-settings-status.error { color: #c62828; }
+        .promptpay-settings-status.warning { color: #b26a00; }
+        .promptpay-preview-card { background: linear-gradient(145deg, rgba(7, 78, 48, 0.96), rgba(18, 150, 87, 0.88)); color: white; }
+        .promptpay-preview-top { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
+        .promptpay-preview-top span, .promptpay-preview-meta span { color: rgba(255,255,255,0.7); font-size: 0.78rem; letter-spacing: 0.16em; text-transform: uppercase; font-weight: 800; }
+        .promptpay-preview-top strong { font-size: 1.35rem; letter-spacing: 0.03em; }
+        .promptpay-preview-qr { display: grid; place-items: center; min-height: 220px; border-radius: 22px; background: #fffef7; color: #0b3d2a; margin-bottom: 18px; }
+        .promptpay-preview-mark { display: grid; place-items: center; width: 128px; height: 128px; border: 14px solid #0b3d2a; border-radius: 24px; font-family: 'Playfair Display', serif; font-size: 2rem; font-weight: 800; }
+        .promptpay-preview-meta { display: grid; gap: 8px; }
+        .promptpay-preview-meta strong { display: block; font-size: 1.05rem; margin-top: 2px; }
+        .promptpay-preview-note { border-top: 1px solid rgba(255,255,255,0.18); margin-top: 16px; padding-top: 14px; color: rgba(255,255,255,0.78); font-size: 0.9rem; line-height: 1.6; }
+        @media (max-width: 980px) { .promptpay-admin-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 640px) { .promptpay-admin-header, .promptpay-admin-grid { padding-left: 18px; padding-right: 18px; } .promptpay-form-row { grid-template-columns: 1fr; } }
+
     </style>
 </head>
 <body>
@@ -395,6 +426,7 @@
             <li onclick="switchTab('shop-categories', this)">📦 หมวดหมู่ Shop</li>
             <li onclick="switchTab('blogs', this)">📝 จัดการบทความ (Blogs)</li>
             <li onclick="switchTab('faqs', this)">❓ คำถามที่พบบ่อย (FAQ)</li>
+            <li onclick="switchTab('promptpay', this)">&#128184; &#x0E08;&#x0E31;&#x0E14;&#x0E01;&#x0E32;&#x0E23;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C; (PromptPay)</li>
             <li onclick="switchTab('footer-settings', this)">🦶 จัดการ Footer</li>
         </ul>
         <div class="sidebar-footer">
@@ -970,6 +1002,71 @@
             </div>
         </div>
 
+        <!-- PromptPay Settings Section -->
+        <div id="promptpay" class="content-section">
+            <div class="section-container promptpay-admin-shell">
+                <div class="section-header promptpay-admin-header">
+                    <div>
+                        <p class="promptpay-admin-kicker">Payment Control</p>
+                        <h2>&#x0E08;&#x0E31;&#x0E14;&#x0E01;&#x0E32;&#x0E23;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C;</h2>
+                        <p style="color:#667; margin-top:8px;">&#x0E01;&#x0E33;&#x0E2B;&#x0E19;&#x0E14;&#x0E40;&#x0E25;&#x0E02;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C;&#x0E41;&#x0E25;&#x0E30;&#x0E02;&#x0E49;&#x0E2D;&#x0E21;&#x0E39;&#x0E25;&#x0E23;&#x0E49;&#x0E32;&#x0E19;&#x0E17;&#x0E35;&#x0E48;&#x0E43;&#x0E0A;&#x0E49;&#x0E2A;&#x0E23;&#x0E49;&#x0E32;&#x0E07; QR Payment &#x0E43;&#x0E19;&#x0E2B;&#x0E19;&#x0E49;&#x0E32; POS</p>
+                    </div>
+                    <button class="btn-action btn-view" type="button" onclick="loadPromptPaySettings()">&#x0E42;&#x0E2B;&#x0E25;&#x0E14;&#x0E02;&#x0E49;&#x0E2D;&#x0E21;&#x0E39;&#x0E25;&#x0E1B;&#x0E31;&#x0E08;&#x0E08;&#x0E38;&#x0E1A;&#x0E31;&#x0E19;</button>
+                </div>
+
+                <div class="promptpay-admin-grid">
+                    <form id="promptpaySettingsForm" class="promptpay-admin-card">
+                        <label class="promptpay-toggle">
+                            <span>
+                                <strong>&#x0E40;&#x0E1B;&#x0E34;&#x0E14;&#x0E43;&#x0E0A;&#x0E49; QR PromptPay</strong>
+                                <span>&#x0E16;&#x0E49;&#x0E32;&#x0E1B;&#x0E34;&#x0E14; POS &#x0E08;&#x0E30;&#x0E44;&#x0E21;&#x0E48;&#x0E2A;&#x0E23;&#x0E49;&#x0E32;&#x0E07; QR &#x0E2A;&#x0E33;&#x0E2B;&#x0E23;&#x0E31;&#x0E1A;&#x0E01;&#x0E32;&#x0E23;&#x0E0A;&#x0E33;&#x0E23;&#x0E30;</span>
+                            </span>
+                            <input type="checkbox" id="promptpay-enabled" checked>
+                        </label>
+
+                        <div class="form-group">
+                            <label for="promptpay-id">&#x0E40;&#x0E25;&#x0E02;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C;</label>
+                            <input type="text" id="promptpay-id" inputmode="numeric" autocomplete="off" value="057556001655" placeholder="057556001655" required>
+                        </div>
+                        <p class="promptpay-help">&#x0E23;&#x0E2D;&#x0E07;&#x0E23;&#x0E31;&#x0E1A;&#x0E40;&#x0E1A;&#x0E2D;&#x0E23;&#x0E4C;&#x0E42;&#x0E17;&#x0E23; 10 &#x0E2B;&#x0E25;&#x0E31;&#x0E01;, &#x0E40;&#x0E25;&#x0E02;&#x0E1A;&#x0E31;&#x0E15;&#x0E23;&#x0E1B;&#x0E23;&#x0E30;&#x0E0A;&#x0E32;&#x0E0A;&#x0E19; 13 &#x0E2B;&#x0E25;&#x0E31;&#x0E01; &#x0E2B;&#x0E23;&#x0E37;&#x0E2D; e-Wallet ID 15 &#x0E2B;&#x0E25;&#x0E31;&#x0E01;</p>
+
+                        <div class="promptpay-form-row">
+                            <div class="form-group">
+                                <label for="promptpay-merchant-name">&#x0E0A;&#x0E37;&#x0E48;&#x0E2D;&#x0E23;&#x0E49;&#x0E32;&#x0E19;&#x0E43;&#x0E19; QR</label>
+                                <input type="text" id="promptpay-merchant-name" value="EDEN CAFE" maxlength="25" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="promptpay-city">&#x0E40;&#x0E21;&#x0E37;&#x0E2D;&#x0E07;</label>
+                                <input type="text" id="promptpay-city" value="CHIANG RAI" maxlength="15" required>
+                            </div>
+                        </div>
+
+                        <div style="display:flex; gap:12px; justify-content:flex-end; flex-wrap:wrap; margin-top:10px;">
+                            <button type="button" class="btn-action" style="background:#789; padding: 10px 22px;" onclick="resetPromptPaySettingsForm()">&#x0E01;&#x0E25;&#x0E31;&#x0E1A;&#x0E04;&#x0E48;&#x0E32;&#x0E15;&#x0E31;&#x0E49;&#x0E07;&#x0E15;&#x0E49;&#x0E19;</button>
+                            <button type="submit" class="btn-submit" style="width:auto; padding:10px 28px; background:var(--accent-color);">&#x0E1A;&#x0E31;&#x0E19;&#x0E17;&#x0E36;&#x0E01;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C;</button>
+                        </div>
+                        <p id="promptpay-settings-status" class="promptpay-settings-status"></p>
+                    </form>
+
+                    <aside class="promptpay-preview-card">
+                        <div class="promptpay-preview-top">
+                            <span>PromptPay</span>
+                            <strong id="promptpay-preview-id">057556001655</strong>
+                        </div>
+                        <div class="promptpay-preview-qr">
+                            <div class="promptpay-preview-mark">QR</div>
+                        </div>
+                        <div class="promptpay-preview-meta">
+                            <div><span>Merchant</span><strong id="promptpay-preview-merchant">EDEN CAFE</strong></div>
+                            <div><span>City</span><strong id="promptpay-preview-city">CHIANG RAI</strong></div>
+                            <div><span>Status</span><strong id="promptpay-preview-enabled">&#x0E40;&#x0E1B;&#x0E34;&#x0E14;&#x0E43;&#x0E0A;&#x0E49;&#x0E07;&#x0E32;&#x0E19;</strong></div>
+                        </div>
+                        <p class="promptpay-preview-note">&#x0E2B;&#x0E19;&#x0E49;&#x0E32; POS &#x0E08;&#x0E30;&#x0E14;&#x0E36;&#x0E07;&#x0E04;&#x0E48;&#x0E32;&#x0E19;&#x0E35;&#x0E49;&#x0E40;&#x0E1E;&#x0E37;&#x0E48;&#x0E2D;&#x0E2A;&#x0E23;&#x0E49;&#x0E32;&#x0E07; QR &#x0E15;&#x0E32;&#x0E21;&#x0E22;&#x0E2D;&#x0E14;&#x0E2A;&#x0E38;&#x0E17;&#x0E18;&#x0E34;&#x0E02;&#x0E2D;&#x0E07;&#x0E1A;&#x0E34;&#x0E25;&#x0E41;&#x0E15;&#x0E48;&#x0E25;&#x0E30;&#x0E23;&#x0E32;&#x0E22;&#x0E01;&#x0E32;&#x0E23;</p>
+                    </aside>
+                </div>
+            </div>
+        </div>
+
         <!-- Footer Settings Section -->
         <div id="footer-settings" class="content-section">
             <div class="section-container">
@@ -1500,7 +1597,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=40"></script>
+    <script type="module" src="js/admin.js?v=41"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {

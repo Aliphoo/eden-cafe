@@ -117,6 +117,7 @@ const ADMIN_PERMISSION_LABELS = {
     shop: 'สินค้าออนไลน์',
     blogs: 'บทความ',
     faqs: 'FAQ',
+    promptpay: '\u0e08\u0e31\u0e14\u0e01\u0e32\u0e23\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e40\u0e1e\u0e22\u0e4c',
     footer: 'Footer'
 };
 const ADMIN_ROLE_LABELS = {
@@ -139,6 +140,7 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
         shop: false,
         blogs: false,
         faqs: false,
+        promptpay: false,
         footer: false
     }
 };
@@ -158,6 +160,7 @@ const ADMIN_TAB_PERMISSIONS = {
     'shop-categories': 'shop',
     blogs: 'blogs',
     faqs: 'faqs',
+    promptpay: 'promptpay',
     'footer-settings': 'footer'
 };
 
@@ -942,6 +945,7 @@ function initializeAdminModules() {
         setupRealtimeShopProducts();
     }
     if (canAdmin('members')) setupRealtimeMembers();
+    if (canAdmin('promptpay') && typeof window.loadPromptPaySettings === 'function') window.loadPromptPaySettings();
     if (isOwnerAccess()) setupRealtimeAdminAccess();
     initXLSXTools();
     installAdminRefreshButtons();
@@ -1082,6 +1086,9 @@ window.refreshAdminSection = async (tabId, button = null) => {
                 break;
             case 'faqs':
                 if (typeof window.fetchFaqsFromCloud === 'function') window.fetchFaqsFromCloud();
+                break;
+            case 'promptpay':
+                if (typeof window.loadPromptPaySettings === 'function') await window.loadPromptPaySettings();
                 break;
             case 'footer-settings':
                 if (typeof window.loadFooterSettings === 'function') await window.loadFooterSettings();
@@ -5047,6 +5054,158 @@ onAuthStateChanged(auth, (user) => {
         if(typeof loadFooterSettings === 'function') loadFooterSettings();
     }
 });
+
+// ==========================================
+// PromptPay Settings Management Logic
+// ==========================================
+
+const PROMPTPAY_SETTINGS_DEFAULTS = Object.freeze({
+    enabled: true,
+    promptPayId: '057556001655',
+    merchantName: 'EDEN CAFE',
+    city: 'CHIANG RAI'
+});
+const promptPaySettingsForm = document.getElementById('promptpaySettingsForm');
+
+function cleanPromptPayId(value) {
+    return String(value ?? '').replace(/\D/g, '');
+}
+
+function isValidPromptPayId(value) {
+    const id = cleanPromptPayId(value);
+    return /^0\d{9}$/.test(id) || /^\d{13}$/.test(id) || /^\d{15}$/.test(id);
+}
+
+function normalizePromptPaySettings(data = {}) {
+    const cleanedId = cleanPromptPayId(data.promptPayId || data.id || PROMPTPAY_SETTINGS_DEFAULTS.promptPayId);
+    return {
+        enabled: data.enabled !== false,
+        promptPayId: isValidPromptPayId(cleanedId) ? cleanedId : PROMPTPAY_SETTINGS_DEFAULTS.promptPayId,
+        merchantName: String(data.merchantName || PROMPTPAY_SETTINGS_DEFAULTS.merchantName).trim().slice(0, 25) || PROMPTPAY_SETTINGS_DEFAULTS.merchantName,
+        city: String(data.city || PROMPTPAY_SETTINGS_DEFAULTS.city).trim().slice(0, 15) || PROMPTPAY_SETTINGS_DEFAULTS.city
+    };
+}
+
+function setPromptPayAdminStatus(message = '', state = '') {
+    const status = document.getElementById('promptpay-settings-status');
+    if (!status) return;
+    status.textContent = message;
+    status.className = ['promptpay-settings-status', state].filter(Boolean).join(' ');
+}
+
+function getPromptPaySettingsFromForm() {
+    return {
+        enabled: document.getElementById('promptpay-enabled')?.checked !== false,
+        promptPayId: cleanPromptPayId(document.getElementById('promptpay-id')?.value || ''),
+        merchantName: String(document.getElementById('promptpay-merchant-name')?.value || '').trim(),
+        city: String(document.getElementById('promptpay-city')?.value || '').trim()
+    };
+}
+
+function applyPromptPaySettingsToForm(settings = PROMPTPAY_SETTINGS_DEFAULTS) {
+    const normalized = normalizePromptPaySettings(settings);
+    const enabledEl = document.getElementById('promptpay-enabled');
+    const idEl = document.getElementById('promptpay-id');
+    const merchantEl = document.getElementById('promptpay-merchant-name');
+    const cityEl = document.getElementById('promptpay-city');
+    if (enabledEl) enabledEl.checked = normalized.enabled;
+    if (idEl) idEl.value = normalized.promptPayId;
+    if (merchantEl) merchantEl.value = normalized.merchantName;
+    if (cityEl) cityEl.value = normalized.city;
+    updatePromptPaySettingsPreview(normalized);
+}
+
+function updatePromptPaySettingsPreview(settings = getPromptPaySettingsFromForm()) {
+    const normalized = normalizePromptPaySettings(settings);
+    const previewId = document.getElementById('promptpay-preview-id');
+    const previewMerchant = document.getElementById('promptpay-preview-merchant');
+    const previewCity = document.getElementById('promptpay-preview-city');
+    const previewEnabled = document.getElementById('promptpay-preview-enabled');
+    if (previewId) previewId.textContent = cleanPromptPayId(settings.promptPayId) || PROMPTPAY_SETTINGS_DEFAULTS.promptPayId;
+    if (previewMerchant) previewMerchant.textContent = settings.merchantName || normalized.merchantName;
+    if (previewCity) previewCity.textContent = settings.city || normalized.city;
+    if (previewEnabled) previewEnabled.textContent = settings.enabled === false ? '\u0e1b\u0e34\u0e14\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19' : '\u0e40\u0e1b\u0e34\u0e14\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19';
+}
+
+window.loadPromptPaySettings = async function() {
+    if (!canAdmin('promptpay')) {
+        setPromptPayAdminStatus('This account cannot manage PromptPay settings.', 'error');
+        return null;
+    }
+    setPromptPayAdminStatus('Loading PromptPay settings...', 'warning');
+    try {
+        const snap = await getDoc(doc(db, 'site_settings', 'promptpay'));
+        const settings = normalizePromptPaySettings(snap.exists() ? snap.data() : PROMPTPAY_SETTINGS_DEFAULTS);
+        applyPromptPaySettingsToForm(settings);
+        setPromptPayAdminStatus(snap.exists() ? 'PromptPay settings loaded.' : 'Using default PromptPay settings. Save once to publish them.', snap.exists() ? 'success' : 'warning');
+        return settings;
+    } catch (error) {
+        console.error('Error loading PromptPay settings:', error);
+        applyPromptPaySettingsToForm(PROMPTPAY_SETTINGS_DEFAULTS);
+        setPromptPayAdminStatus('Unable to load PromptPay settings: ' + error.message, 'error');
+        return null;
+    }
+};
+
+window.resetPromptPaySettingsForm = function() {
+    applyPromptPaySettingsToForm(PROMPTPAY_SETTINGS_DEFAULTS);
+    setPromptPayAdminStatus('Default PromptPay values restored in the form. Click Save to publish.', 'warning');
+};
+
+promptPaySettingsForm?.addEventListener('input', () => {
+    updatePromptPaySettingsPreview(getPromptPaySettingsFromForm());
+});
+
+promptPaySettingsForm?.addEventListener('change', () => {
+    updatePromptPaySettingsPreview(getPromptPaySettingsFromForm());
+});
+
+promptPaySettingsForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!canAdmin('promptpay')) {
+        setPromptPayAdminStatus('This account cannot manage PromptPay settings.', 'error');
+        return;
+    }
+    const settings = getPromptPaySettingsFromForm();
+    if (!isValidPromptPayId(settings.promptPayId)) {
+        setPromptPayAdminStatus('PromptPay ID must be a 10-digit phone number, 13-digit citizen ID, or 15-digit e-Wallet ID.', 'error');
+        document.getElementById('promptpay-id')?.focus();
+        return;
+    }
+    if (!settings.merchantName || !settings.city) {
+        setPromptPayAdminStatus('Merchant name and city are required.', 'error');
+        return;
+    }
+
+    const submitBtn = promptPaySettingsForm.querySelector('button[type="submit"]');
+    const originalText = submitBtn?.textContent || '';
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+    }
+
+    try {
+        const payload = normalizePromptPaySettings(settings);
+        await setDoc(doc(db, 'site_settings', 'promptpay'), {
+            ...payload,
+            updatedAt: serverTimestamp(),
+            updatedBy: auth.currentUser?.uid || '',
+            updatedByEmail: auth.currentUser?.email || ''
+        }, { merge: true });
+        applyPromptPaySettingsToForm(payload);
+        setPromptPayAdminStatus('PromptPay settings saved. Open POS screens will update automatically.', 'success');
+    } catch (error) {
+        console.error('Error saving PromptPay settings:', error);
+        setPromptPayAdminStatus('Unable to save PromptPay settings: ' + error.message, 'error');
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+        }
+    }
+});
+
+applyPromptPaySettingsToForm(PROMPTPAY_SETTINGS_DEFAULTS);
 
 // ==========================================
 // Footer Settings Management Logic

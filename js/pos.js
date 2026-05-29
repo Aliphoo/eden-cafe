@@ -8,13 +8,13 @@ const ADMIN_COLLECTION = 'admin_users';
 const ADMIN_PERMISSION_LABELS = {
     dashboard: 'ภาพรวมระบบ', members: 'จัดการสมาชิก', pos: 'POS หน้าร้าน', orders: 'ออเดอร์สินค้า',
     bookings: 'คิวจองโต๊ะ/ห้อง', tables: 'จัดการโต๊ะ/โซน', rooms: 'จัดการห้องรับรอง',
-    products: 'เมนูและหมวดหมู่', shop: 'สินค้าออนไลน์', blogs: 'บทความ', faqs: 'FAQ', footer: 'Footer'
+    products: 'เมนูและหมวดหมู่', shop: 'สินค้าออนไลน์', blogs: 'บทความ', faqs: 'FAQ', promptpay: '\u0e08\u0e31\u0e14\u0e01\u0e32\u0e23\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e40\u0e1e\u0e22\u0e4c', footer: 'Footer'
 };
 const ADMIN_ROLE_LABELS = { owner: 'Owner', head_manager: 'Head Manager', manager: 'Manager' };
 const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
     owner: Object.fromEntries(Object.keys(ADMIN_PERMISSION_LABELS).map(key => [key, true])),
     head_manager: Object.fromEntries(Object.keys(ADMIN_PERMISSION_LABELS).map(key => [key, true])),
-    manager: { dashboard: true, members: false, pos: true, orders: true, bookings: true, tables: false, rooms: false, products: false, shop: false, blogs: false, faqs: false, footer: false }
+    manager: { dashboard: true, members: false, pos: true, orders: true, bookings: true, tables: false, rooms: false, products: false, shop: false, blogs: false, faqs: false, promptpay: false, footer: false }
 };
 
 let currentAdminAccess = null;
@@ -24,6 +24,7 @@ let categoriesData = {};
 let categoriesUnsubscribe = null;
 let productsUnsubscribe = null;
 let openBillsUnsubscribe = null;
+let promptPaySettingsUnsubscribe = null;
 let posSelectedCategory = 'all';
 let posSearchTerm = '';
 let posCart = [];
@@ -47,6 +48,13 @@ const POS_PAYMENT_METHODS = {
 const POS_PROMPTPAY_ID = '057556001655';
 const POS_PROMPTPAY_MERCHANT_NAME = 'EDEN CAFE';
 const POS_PROMPTPAY_CITY = 'CHIANG RAI';
+const POS_PROMPTPAY_DEFAULTS = Object.freeze({
+    enabled: true,
+    promptPayId: POS_PROMPTPAY_ID,
+    merchantName: POS_PROMPTPAY_MERCHANT_NAME,
+    city: POS_PROMPTPAY_CITY
+});
+let posPromptPaySettings = { ...POS_PROMPTPAY_DEFAULTS };
 let posPromptPayRenderToken = 0;
 
 function escapeHTML(value) {
@@ -153,9 +161,11 @@ function cleanupRealtimeListeners() {
     if (categoriesUnsubscribe) categoriesUnsubscribe();
     if (productsUnsubscribe) productsUnsubscribe();
     if (openBillsUnsubscribe) openBillsUnsubscribe();
+    if (promptPaySettingsUnsubscribe) promptPaySettingsUnsubscribe();
     categoriesUnsubscribe = null;
     productsUnsubscribe = null;
     openBillsUnsubscribe = null;
+    promptPaySettingsUnsubscribe = null;
 }
 function renderCategoriesSnapshot(snapshot) {
     categoriesData = {};
@@ -385,6 +395,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (adminName) adminName.textContent = (currentAdminAccess.displayName || user.displayName || 'Admin') + ' (' + (ADMIN_ROLE_LABELS[currentAdminAccess.role] || currentAdminAccess.role) + ')';
             if (adminAvatar) adminAvatar.src = user.photoURL || 'Images/Logo.webp';
             clearLoginError();
+            await loadPosPromptPaySettings();
+            setupRealtimePromptPaySettings();
             setPosAppReady(true);
             setupRealtimeCategories();
             setupRealtimeProducts();
@@ -458,6 +470,60 @@ function emvQrField(id, value) {
     return String(id).padStart(2, '0') + String(text.length).padStart(2, '0') + text;
 }
 
+function cleanPosPromptPayId(value) {
+    return String(value ?? '').replace(/\D/g, '');
+}
+
+function isValidPosPromptPayId(value) {
+    const id = cleanPosPromptPayId(value);
+    return /^0\d{9}$/.test(id) || /^\d{13}$/.test(id) || /^\d{15}$/.test(id);
+}
+
+function normalizePosPromptPaySettings(data = {}) {
+    const cleanedId = cleanPosPromptPayId(data.promptPayId || data.id || POS_PROMPTPAY_DEFAULTS.promptPayId);
+    return {
+        enabled: data.enabled !== false,
+        promptPayId: isValidPosPromptPayId(cleanedId) ? cleanedId : POS_PROMPTPAY_DEFAULTS.promptPayId,
+        merchantName: String(data.merchantName || POS_PROMPTPAY_DEFAULTS.merchantName).trim().slice(0, 25) || POS_PROMPTPAY_DEFAULTS.merchantName,
+        city: String(data.city || POS_PROMPTPAY_DEFAULTS.city).trim().slice(0, 15) || POS_PROMPTPAY_DEFAULTS.city
+    };
+}
+
+function currentPosPromptPaySettings() {
+    posPromptPaySettings = normalizePosPromptPaySettings(posPromptPaySettings);
+    return posPromptPaySettings;
+}
+
+function updatePosPromptPayCopy() {
+    const settings = currentPosPromptPaySettings();
+    const idEl = document.getElementById('pos-promptpay-id');
+    if (idEl) idEl.textContent = settings.promptPayId;
+}
+
+async function loadPosPromptPaySettings() {
+    try {
+        const snap = await getDoc(doc(db, 'site_settings', 'promptpay'));
+        posPromptPaySettings = normalizePosPromptPaySettings(snap.exists() ? snap.data() : POS_PROMPTPAY_DEFAULTS);
+    } catch (error) {
+        console.warn('Unable to load PromptPay settings, using defaults:', error);
+        posPromptPaySettings = { ...POS_PROMPTPAY_DEFAULTS };
+    }
+    updatePosPromptPayCopy();
+    renderPosPromptPayQr(posCartTotals());
+    return posPromptPaySettings;
+}
+
+function setupRealtimePromptPaySettings() {
+    if (promptPaySettingsUnsubscribe) return;
+    promptPaySettingsUnsubscribe = onSnapshot(doc(db, 'site_settings', 'promptpay'), (snap) => {
+        posPromptPaySettings = normalizePosPromptPaySettings(snap.exists() ? snap.data() : POS_PROMPTPAY_DEFAULTS);
+        updatePosPromptPayCopy();
+        renderPosPromptPayQr(posCartTotals());
+    }, (error) => {
+        console.warn('Unable to listen to PromptPay settings, keeping current values:', error);
+    });
+}
+
 function promptPayProxyField(promptPayId = POS_PROMPTPAY_ID) {
     const id = String(promptPayId ?? '').replace(/\D/g, '');
     if (/^0\d{9}$/.test(id)) return emvQrField('01', '0066' + id.slice(1));
@@ -479,8 +545,9 @@ function promptPayCrc16(payload) {
 }
 
 function buildPromptPayPayload(amount) {
+    const settings = currentPosPromptPaySettings();
     const total = posRound(amount);
-    const merchantInfo = emvQrField('00', 'A000000677010111') + promptPayProxyField(POS_PROMPTPAY_ID);
+    const merchantInfo = emvQrField('00', 'A000000677010111') + promptPayProxyField(settings.promptPayId);
     let payload = ''
         + emvQrField('00', '01')
         + emvQrField('01', total > 0 ? '12' : '11')
@@ -488,8 +555,8 @@ function buildPromptPayPayload(amount) {
         + emvQrField('53', '764');
     if (total > 0) payload += emvQrField('54', total.toFixed(2));
     payload += emvQrField('58', 'TH')
-        + emvQrField('59', POS_PROMPTPAY_MERCHANT_NAME.slice(0, 25))
-        + emvQrField('60', POS_PROMPTPAY_CITY.slice(0, 15))
+        + emvQrField('59', settings.merchantName.slice(0, 25))
+        + emvQrField('60', settings.city.slice(0, 15))
         + '6304';
     return payload + promptPayCrc16(payload);
 }
@@ -539,12 +606,18 @@ async function renderPosPromptPayQr(totals = posCartTotals()) {
     const amountEl = document.getElementById('pos-promptpay-amount');
     const idEl = document.getElementById('pos-promptpay-id');
     const payloadEl = document.getElementById('pos-promptpay-payload');
+    const settings = currentPosPromptPaySettings();
     const amount = posRound(totals.total);
 
-    if (idEl) idEl.textContent = POS_PROMPTPAY_ID;
+    if (idEl) idEl.textContent = settings.promptPayId;
     if (amountEl) amountEl.textContent = posMoney(amount);
     if (payloadEl) payloadEl.value = '';
     if (qrImg) qrImg.removeAttribute('src');
+
+    if (settings.enabled === false) {
+        setPromptPayStatus('\u0e1b\u0e34\u0e14\u0e01\u0e32\u0e23\u0e43\u0e0a\u0e49 QR PromptPay \u0e08\u0e32\u0e01\u0e2b\u0e25\u0e31\u0e07\u0e1a\u0e49\u0e32\u0e19', 'warning');
+        return;
+    }
 
     if (!posCart.length || amount <= 0) {
         setPromptPayStatus('เลือกสินค้าเพื่อสร้าง QR ตามยอดชำระ', 'warning');
@@ -560,7 +633,7 @@ async function renderPosPromptPayQr(totals = posCartTotals()) {
         const dataUrl = await createQrDataUrl(payload);
         if (token !== posPromptPayRenderToken) return;
         if (qrImg) qrImg.src = dataUrl;
-        setPromptPayStatus('พร้อมสแกนชำระผ่าน PromptPay 057556001655', 'ready');
+        setPromptPayStatus('\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e2a\u0e41\u0e01\u0e19\u0e0a\u0e33\u0e23\u0e30\u0e1c\u0e48\u0e32\u0e19 PromptPay ' + settings.promptPayId, 'ready');
     } catch (error) {
         console.error('PromptPay QR generation failed:', error);
         setPromptPayStatus('สร้าง QR ไม่สำเร็จ: ' + error.message, 'error');
@@ -1262,6 +1335,7 @@ function renderPosScreen() {
 
 function initPosModule() {
     if (posControlsBound) {
+        updatePosPromptPayCopy();
         syncPosReceiptDateInput();
         renderPosScreen();
         renderPosReceiptManager();
@@ -1270,6 +1344,7 @@ function initPosModule() {
     }
     restorePosCart();
     restorePosActiveBill();
+    updatePosPromptPayCopy();
     syncPosReceiptDateInput();
     document.getElementById('pos-search-input')?.addEventListener('input', (event) => {
         posSearchTerm = event.target.value || '';
