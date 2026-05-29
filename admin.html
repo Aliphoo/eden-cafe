@@ -447,6 +447,7 @@
             <li onclick="switchTab('faqs', this)">❓ คำถามที่พบบ่อย (FAQ)</li>
             <li onclick="switchTab('promptpay', this)">&#128184; &#x0E08;&#x0E31;&#x0E14;&#x0E01;&#x0E32;&#x0E23;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C; (PromptPay)</li>
             <li onclick="switchTab('footer-settings', this)">🦶 จัดการ Footer</li>
+            <li onclick="switchTab('marketing-settings', this)">Marketing Tools</li>
         </ul>
         <div class="sidebar-footer">
             <div class="logout-btn" id="btn-admin-logout">🚪 ออกจากระบบ</div>
@@ -1107,6 +1108,88 @@
             </div>
         </div>
 
+        <!-- Marketing Settings Section -->
+        <div id="marketing-settings" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <div>
+                        <h2>Marketing Tools</h2>
+                        <p style="color:#667; margin-top:4px;">Connect Google Tag Manager, GA4, Google Ads, and Meta Pixel. Public pages will load these tools only after visitor consent.</p>
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button class="btn-action btn-view" type="button" onclick="loadMarketingSettings()">Load Current Settings</button>
+                    </div>
+                </div>
+
+                <div class="footer-preview-strip" id="marketing-live-preview">
+                    <p style="font-size: 0.78rem; opacity: 0.7; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.1em;">Marketing runtime preview</p>
+                    <div class="footer-preview-grid">
+                        <div>
+                            <h4>Consent-first loading</h4>
+                            <p>Scripts stay blocked until the visitor accepts analytics or marketing cookies.</p>
+                        </div>
+                        <div>
+                            <h4>Status</h4>
+                            <p id="marketing-preview-status">Disabled</p>
+                        </div>
+                        <div>
+                            <h4>Configured tools</h4>
+                            <p id="marketing-preview-ids">No marketing IDs configured</p>
+                        </div>
+                    </div>
+                </div>
+
+                <form id="marketingSettingsForm">
+                    <div class="footer-settings-grid">
+                        <div class="footer-settings-card">
+                            <h3>Runtime</h3>
+                            <div class="form-group">
+                                <label style="display:flex; gap:10px; align-items:center; font-weight:600;">
+                                    <input type="checkbox" id="marketing-enabled" oninput="updateMarketingPreview()" style="width:auto;">
+                                    Enable marketing integrations
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label style="display:flex; gap:10px; align-items:center; font-weight:600;">
+                                    <input type="checkbox" id="marketing-debug" style="width:auto;">
+                                    Debug events in browser console
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="footer-settings-card">
+                            <h3>Google</h3>
+                            <div class="form-group">
+                                <label for="marketing-gtm-id">Google Tag Manager ID</label>
+                                <input type="text" id="marketing-gtm-id" placeholder="GTM-XXXXXXX" oninput="updateMarketingPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="marketing-ga-id">GA4 Measurement ID</label>
+                                <input type="text" id="marketing-ga-id" placeholder="G-XXXXXXXXXX" oninput="updateMarketingPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="marketing-ads-id">Google Ads ID</label>
+                                <input type="text" id="marketing-ads-id" placeholder="AW-XXXXXXXXXX" oninput="updateMarketingPreview()">
+                            </div>
+                        </div>
+
+                        <div class="footer-settings-card footer-settings-full">
+                            <h3>Meta</h3>
+                            <div class="form-group">
+                                <label for="marketing-meta-pixel-id">Meta Pixel ID</label>
+                                <input type="text" id="marketing-meta-pixel-id" placeholder="123456789012345" oninput="updateMarketingPreview()">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 10px;">
+                        <button type="button" class="btn-action" style="background:#789; padding: 10px 24px;" onclick="loadMarketingSettings()">Cancel / Reload</button>
+                        <button type="submit" class="btn-submit" style="width: auto; padding: 10px 32px; background: var(--accent-color);">Save Marketing Settings</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <!-- Footer Settings Section -->
         <div id="footer-settings" class="content-section">
             <div class="section-container">
@@ -1637,7 +1720,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=42"></script>
+    <script type="module" src="js/admin.js?v=43"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {

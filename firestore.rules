@@ -350,7 +350,9 @@ service cloud.firestore {
     }
     match /site_settings/{docId} {
       allow read: if true;
-      allow write: if hasAdminPermission('footer');
+      allow write: if (docId == 'footer' && hasAdminPermission('footer'))
+        || (docId == 'promptpay' && hasAdminPermission('promptpay'))
+        || (docId == 'marketing' && hasAdminPermission('marketing'));
     }
     match /categories/{docId} {
       allow read: if true;

@@ -423,6 +423,7 @@ ${renderHeader('blog')}
 ${renderFooter()}
 ${renderMobileNavScript()}
 <script type="module" src="/js/blog.js?v=4"></script>
+<script type="module" src="/js/marketing-consent.js?v=1"></script>
 <script src="/js/cart.js?v=1"></script>
 <script type="module" src="/js/auth.js?v=7"></script>
 </body>
@@ -540,6 +541,7 @@ ${renderHeader('blog')}
 ${renderFooter()}
 ${renderMobileNavScript()}
 <script type="module" src="/js/blog.js?v=4"></script>
+<script type="module" src="/js/marketing-consent.js?v=1"></script>
 <script src="/js/cart.js?v=1"></script>
 <script type="module" src="/js/auth.js?v=7"></script>
 </body>
@@ -580,6 +582,7 @@ ${renderHeader('blog')}
 ${renderFooter()}
 ${renderMobileNavScript()}
 <script type="module" src="/js/blog.js?v=4"></script>
+<script type="module" src="/js/marketing-consent.js?v=1"></script>
 <script src="/js/cart.js?v=1"></script>
 <script type="module" src="/js/auth.js?v=7"></script>
 </body>

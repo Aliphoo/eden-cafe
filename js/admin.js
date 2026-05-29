@@ -118,6 +118,7 @@ const ADMIN_PERMISSION_LABELS = {
     blogs: 'บทความ',
     faqs: 'FAQ',
     promptpay: '\u0e08\u0e31\u0e14\u0e01\u0e32\u0e23\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e40\u0e1e\u0e22\u0e4c',
+    marketing: 'Marketing Tools',
     footer: 'Footer'
 };
 const ADMIN_ROLE_LABELS = {
@@ -141,6 +142,7 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
         blogs: false,
         faqs: false,
         promptpay: false,
+        marketing: false,
         footer: false
     }
 };
@@ -161,6 +163,7 @@ const ADMIN_TAB_PERMISSIONS = {
     blogs: 'blogs',
     faqs: 'faqs',
     promptpay: 'promptpay',
+    'marketing-settings': 'marketing',
     'footer-settings': 'footer'
 };
 
@@ -946,6 +949,7 @@ function initializeAdminModules() {
     }
     if (canAdmin('members')) setupRealtimeMembers();
     if (canAdmin('promptpay') && typeof window.loadPromptPaySettings === 'function') window.loadPromptPaySettings();
+    if (canAdmin('marketing') && typeof window.loadMarketingSettings === 'function') window.loadMarketingSettings();
     if (isOwnerAccess()) setupRealtimeAdminAccess();
     initXLSXTools();
     installAdminRefreshButtons();
@@ -1089,6 +1093,9 @@ window.refreshAdminSection = async (tabId, button = null) => {
                 break;
             case 'promptpay':
                 if (typeof window.loadPromptPaySettings === 'function') await window.loadPromptPaySettings();
+                break;
+            case 'marketing-settings':
+                if (typeof window.loadMarketingSettings === 'function') await window.loadMarketingSettings();
                 break;
             case 'footer-settings':
                 if (typeof window.loadFooterSettings === 'function') await window.loadFooterSettings();
@@ -5454,6 +5461,99 @@ promptPaySettingsForm?.addEventListener('submit', async (event) => {
 });
 
 applyPromptPaySettingsToForm(defaultPromptPaySettings());
+
+// ==========================================
+// Marketing Settings Management Logic
+// ==========================================
+
+const marketingSettingsForm = document.getElementById('marketingSettingsForm');
+
+function marketingFieldValue(id) {
+    return String(document.getElementById(id)?.value || '').trim();
+}
+
+function setMarketingFieldValue(id, value = '') {
+    const input = document.getElementById(id);
+    if (input) input.value = value || '';
+}
+
+function setMarketingCheckbox(id, value = false) {
+    const input = document.getElementById(id);
+    if (input) input.checked = value === true;
+}
+
+window.updateMarketingPreview = function() {
+    const enabled = document.getElementById('marketing-enabled')?.checked === true;
+    const googleTagManagerId = marketingFieldValue('marketing-gtm-id');
+    const googleAnalyticsId = marketingFieldValue('marketing-ga-id');
+    const googleAdsId = marketingFieldValue('marketing-ads-id');
+    const metaPixelId = marketingFieldValue('marketing-meta-pixel-id');
+    const tools = [
+        googleTagManagerId ? 'GTM' : '',
+        googleAnalyticsId ? 'GA4' : '',
+        googleAdsId ? 'Google Ads' : '',
+        metaPixelId ? 'Meta Pixel' : ''
+    ].filter(Boolean);
+    const status = document.getElementById('marketing-preview-status');
+    const ids = document.getElementById('marketing-preview-ids');
+    if (status) status.textContent = enabled ? 'Enabled after visitor consent' : 'Disabled';
+    if (ids) ids.textContent = tools.length ? tools.join(' / ') : 'No marketing IDs configured';
+};
+
+window.loadMarketingSettings = async function() {
+    try {
+        const snap = await getDoc(doc(db, 'site_settings', 'marketing'));
+        const data = snap.exists() ? snap.data() : {};
+        setMarketingCheckbox('marketing-enabled', data.enabled === true);
+        setMarketingFieldValue('marketing-gtm-id', data.googleTagManagerId);
+        setMarketingFieldValue('marketing-ga-id', data.googleAnalyticsId);
+        setMarketingFieldValue('marketing-ads-id', data.googleAdsId);
+        setMarketingFieldValue('marketing-meta-pixel-id', data.metaPixelId);
+        setMarketingCheckbox('marketing-debug', data.debug === true);
+        updateMarketingPreview();
+    } catch (error) {
+        console.error('Error loading marketing settings:', error);
+    }
+};
+
+marketingSettingsForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!canAdmin('marketing')) {
+        alert('This account cannot edit marketing settings.');
+        return;
+    }
+
+    const submitBtn = marketingSettingsForm.querySelector('button[type="submit"]');
+    const originalText = submitBtn?.textContent;
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+    }
+
+    const marketingData = {
+        enabled: document.getElementById('marketing-enabled')?.checked === true,
+        googleTagManagerId: marketingFieldValue('marketing-gtm-id').toUpperCase(),
+        googleAnalyticsId: marketingFieldValue('marketing-ga-id').toUpperCase(),
+        googleAdsId: marketingFieldValue('marketing-ads-id').toUpperCase(),
+        metaPixelId: marketingFieldValue('marketing-meta-pixel-id'),
+        debug: document.getElementById('marketing-debug')?.checked === true,
+        updatedAt: new Date().toISOString(),
+        updatedBy: auth.currentUser?.email || 'unknown'
+    };
+
+    try {
+        await setDoc(doc(db, 'site_settings', 'marketing'), marketingData, { merge: true });
+        alert('Marketing settings saved. Public pages will load the tools only after visitor consent.');
+        updateMarketingPreview();
+    } catch (error) {
+        alert('Unable to save marketing settings: ' + error.message);
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+        }
+    }
+});
 
 // ==========================================
 // Footer Settings Management Logic
