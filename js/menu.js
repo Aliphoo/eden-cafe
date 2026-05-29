@@ -1,5 +1,12 @@
-import { db } from './firebase-config.js';
-import { collection, getDocs, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { auth, db } from './firebase-config.js';
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { collection, doc, getDoc, getDocs, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
+const ADMIN_ORDER_ROLES = ['owner', 'head_manager', 'manager'];
+const MENU_ORDER_ACCESS_EVENT = 'eden:menu-order-access-changed';
+let menuOrderAccess = { ready: false, allowed: false, reason: 'checking' };
+let lastMenuRender = { container: null, items: [], note: '', categories: [] };
 
 const FALLBACK_MENU = [
     { id: 'm-coffee-1', category: 'coffee', categoryNameTh: '\u0e01\u0e32\u0e41\u0e1f', categoryNameEn: 'Coffee', nameTh: 'Drip Coffee Thai Arabica', nameEn: 'Drip Coffee Thai Arabica', descriptionTh: '\u0e01\u0e32\u0e41\u0e1f\u0e14\u0e23\u0e34\u0e1b\u0e40\u0e21\u0e25\u0e47\u0e14\u0e44\u0e17\u0e22\u0e2d\u0e32\u0e23\u0e32\u0e1a\u0e34\u0e01\u0e49\u0e32', descriptionEn: 'Thai Arabica pour-over with gentle floral and fruity notes.', price: 80, imageUrl: 'https://images.unsplash.com/photo-1497935586351-b67a49e012bf?auto=format&fit=crop&w=600&q=80' },
@@ -41,6 +48,133 @@ function parseMenuBool(value, fallback = false) {
     if (value === undefined || value === null || String(value).trim() === '') return fallback;
     const text = String(value).trim().toLowerCase();
     return ['true', '1', 'yes', 'y', 'available', 'sale', 'on', '\u0e40\u0e1b\u0e34\u0e14', '\u0e02\u0e32\u0e22', '\u0e43\u0e0a\u0e48'].includes(text);
+}
+
+function normalizeEmail(value) {
+    return String(value ?? '').trim().toLowerCase();
+}
+
+function getStoredMenuUser() {
+    try {
+        return JSON.parse(localStorage.getItem('eden_user') || 'null');
+    } catch {
+        return null;
+    }
+}
+
+function adminAccessCanOrder(access = {}) {
+    if (!access || access.status !== 'active') return false;
+    if (ADMIN_ORDER_ROLES.includes(access.role)) {
+        if (access.role === 'owner' || access.role === 'head_manager') return true;
+        return access.permissions?.pos === true || access.permissions?.orders === true || access.role === 'manager';
+    }
+    return access.permissions?.pos === true || access.permissions?.orders === true;
+}
+
+function storedUserCanOrder() {
+    const user = getStoredMenuUser();
+    if (!user) return false;
+    const role = String(user.adminRole || user.role || '').trim();
+    return user.canUsePos === true
+        || user.isAdmin === true
+        || ADMIN_ORDER_ROLES.includes(role)
+        || user.permissions?.pos === true
+        || user.permissions?.orders === true;
+}
+
+function setMenuOrderAccess(nextAccess = {}) {
+    const normalized = {
+        ready: nextAccess.ready === true,
+        allowed: nextAccess.allowed === true,
+        reason: nextAccess.reason || 'guest',
+        role: nextAccess.role || ''
+    };
+    const changed = normalized.ready !== menuOrderAccess.ready
+        || normalized.allowed !== menuOrderAccess.allowed
+        || normalized.reason !== menuOrderAccess.reason
+        || normalized.role !== menuOrderAccess.role;
+    menuOrderAccess = normalized;
+    window.EdenMenuOrderAccess = { ...menuOrderAccess };
+    if (changed) window.dispatchEvent(new CustomEvent(MENU_ORDER_ACCESS_EVENT, { detail: window.EdenMenuOrderAccess }));
+    if (changed && lastMenuRender.container) {
+        renderMenu(lastMenuRender.container, lastMenuRender.items, lastMenuRender.note, lastMenuRender.categories);
+    }
+}
+
+async function resolveMenuOrderAccess(user) {
+    if (!user) {
+        setMenuOrderAccess({ ready: true, allowed: false, reason: 'guest' });
+        return;
+    }
+
+    const email = normalizeEmail(user.email);
+    if (ADMIN_EMAILS.includes(email) || storedUserCanOrder()) {
+        setMenuOrderAccess({ ready: true, allowed: true, reason: 'authorized', role: 'staff' });
+        return;
+    }
+
+    if (!db) {
+        setMenuOrderAccess({ ready: true, allowed: false, reason: 'no-db' });
+        return;
+    }
+
+    try {
+        const accessSnap = await getDoc(doc(db, 'admin_users', user.uid));
+        const access = accessSnap.exists() ? accessSnap.data() : null;
+        const allowed = adminAccessCanOrder(access);
+        setMenuOrderAccess({
+            ready: true,
+            allowed,
+            reason: allowed ? 'authorized' : 'member-only',
+            role: access?.role || ''
+        });
+    } catch (error) {
+        console.warn('Unable to verify menu ordering access:', error);
+        setMenuOrderAccess({ ready: true, allowed: false, reason: 'permission-error' });
+    }
+}
+
+function initMenuOrderAccessWatcher() {
+    window.EdenMenuOrderAccess = { ...menuOrderAccess };
+
+    if (storedUserCanOrder()) {
+        setMenuOrderAccess({ ready: true, allowed: true, reason: 'authorized', role: 'staff' });
+    }
+
+    if (auth) {
+        onAuthStateChanged(auth, user => {
+            setMenuOrderAccess({ ready: false, allowed: false, reason: 'checking' });
+            resolveMenuOrderAccess(user);
+        });
+    } else {
+        setMenuOrderAccess({ ready: true, allowed: storedUserCanOrder(), reason: storedUserCanOrder() ? 'authorized' : 'guest' });
+    }
+
+    window.addEventListener('eden:user-changed', () => {
+        if (auth?.currentUser) resolveMenuOrderAccess(auth.currentUser);
+        else setMenuOrderAccess({ ready: true, allowed: storedUserCanOrder(), reason: storedUserCanOrder() ? 'authorized' : 'guest' });
+    });
+}
+
+function menuAccessNoticeHTML(en) {
+    if (!menuOrderAccess.ready) {
+        return '<div class="menu-order-access-note is-checking">'
+            + '<strong>' + (en ? 'Checking order permission' : '\u0e01\u0e33\u0e25\u0e31\u0e07\u0e15\u0e23\u0e27\u0e08\u0e2a\u0e2d\u0e1a\u0e2a\u0e34\u0e17\u0e18\u0e34\u0e4c\u0e01\u0e32\u0e23\u0e2a\u0e31\u0e48\u0e07') + '</strong>'
+            + '<span>' + (en ? 'Menu browsing is open to everyone. Add to cart will unlock for authorized store staff only.' : '\u0e14\u0e39\u0e40\u0e21\u0e19\u0e39\u0e44\u0e14\u0e49\u0e17\u0e38\u0e01\u0e04\u0e19 \u0e41\u0e15\u0e48\u0e1b\u0e38\u0e48\u0e21\u0e40\u0e1e\u0e34\u0e48\u0e21\u0e25\u0e07\u0e15\u0e30\u0e01\u0e23\u0e49\u0e32\u0e08\u0e30\u0e40\u0e1b\u0e34\u0e14\u0e40\u0e09\u0e1e\u0e32\u0e30\u0e1e\u0e19\u0e31\u0e01\u0e07\u0e32\u0e19\u0e17\u0e35\u0e48\u0e44\u0e14\u0e49\u0e23\u0e31\u0e1a\u0e2a\u0e34\u0e17\u0e18\u0e34\u0e4c') + '</span>'
+            + '</div>';
+    }
+
+    if (menuOrderAccess.allowed) {
+        return '<div class="menu-order-access-note is-allowed">'
+            + '<strong>' + (en ? 'Staff order mode enabled' : '\u0e42\u0e2b\u0e21\u0e14\u0e2a\u0e31\u0e48\u0e07\u0e40\u0e21\u0e19\u0e39\u0e2a\u0e33\u0e2b\u0e23\u0e31\u0e1a\u0e1e\u0e19\u0e31\u0e01\u0e07\u0e32\u0e19\u0e40\u0e1b\u0e34\u0e14\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19') + '</strong>'
+            + '<span>' + (en ? 'This account can add menu items to cart for in-store ordering.' : '\u0e1a\u0e31\u0e0d\u0e0a\u0e35\u0e19\u0e35\u0e49\u0e21\u0e35\u0e2a\u0e34\u0e17\u0e18\u0e34\u0e4c\u0e40\u0e1e\u0e34\u0e48\u0e21\u0e40\u0e21\u0e19\u0e39\u0e25\u0e07\u0e15\u0e30\u0e01\u0e23\u0e49\u0e32\u0e40\u0e1e\u0e37\u0e48\u0e2d\u0e2a\u0e31\u0e48\u0e07\u0e43\u0e19\u0e23\u0e49\u0e32\u0e19') + '</span>'
+            + '</div>';
+    }
+
+    return '<div class="menu-order-access-note is-locked">'
+        + '<strong>' + (en ? 'Browse-only menu' : '\u0e40\u0e21\u0e19\u0e39\u0e2a\u0e33\u0e2b\u0e23\u0e31\u0e1a\u0e14\u0e39\u0e23\u0e32\u0e22\u0e01\u0e32\u0e23') + '</strong>'
+        + '<span>' + (en ? 'Add to cart is reserved for authorized store staff ordering inside Eden Cafe.' : '\u0e1b\u0e38\u0e48\u0e21\u0e40\u0e1e\u0e34\u0e48\u0e21\u0e25\u0e07\u0e15\u0e30\u0e01\u0e23\u0e49\u0e32\u0e2a\u0e07\u0e27\u0e19\u0e2a\u0e34\u0e17\u0e18\u0e34\u0e4c\u0e40\u0e09\u0e1e\u0e32\u0e30\u0e1e\u0e19\u0e31\u0e01\u0e07\u0e32\u0e19/\u0e1c\u0e39\u0e49\u0e44\u0e14\u0e49\u0e23\u0e31\u0e1a\u0e2a\u0e34\u0e17\u0e18\u0e34\u0e4c\u0e2a\u0e31\u0e48\u0e07\u0e20\u0e32\u0e22\u0e43\u0e19\u0e23\u0e49\u0e32\u0e19 Eden Cafe') + '</span>'
+        + '</div>';
 }
 
 function normalizeMenuOptions(item) {
@@ -232,7 +366,10 @@ function syncVariantSelection(select, en) {
     const priceEl = card?.querySelector('.menu-item-price');
     if (!selectedOption || !button) return;
 
-    const locked = button.dataset.menuLocked === 'true';
+    const stockLocked = button.dataset.menuStockLocked === 'true';
+    const accessLocked = button.dataset.menuAccessLocked === 'true';
+    const lockLabel = button.dataset.menuLockLabel || (en ? 'Staff only' : '\u0e40\u0e09\u0e1e\u0e32\u0e30\u0e1e\u0e19\u0e31\u0e01\u0e07\u0e32\u0e19');
+    const unavailableLabel = button.dataset.menuUnavailableLabel || (en ? 'Sold out' : '\u0e2b\u0e21\u0e14');
     const available = selectedOption.dataset.available !== 'false' && !selectedOption.disabled;
     const price = Number(selectedOption.dataset.price) || 0;
     const baseId = select.dataset.baseId || button.dataset.baseId || button.dataset.id || '';
@@ -247,10 +384,14 @@ function syncVariantSelection(select, en) {
     button.dataset.variantName = variantName;
     button.dataset.sku = selectedOption.dataset.sku || '';
 
-    if (locked || !available) {
+    if (stockLocked || !available) {
         button.disabled = true;
         button.style.background = '#ccc';
-        button.textContent = en ? 'Sold out' : '\u0e2b\u0e21\u0e14';
+        button.textContent = unavailableLabel;
+    } else if (accessLocked) {
+        button.disabled = true;
+        button.style.background = '';
+        button.textContent = lockLabel;
     } else {
         button.disabled = false;
         button.style.background = '';
@@ -281,19 +422,28 @@ function renderMenu(container, items, note = '', categories = []) {
     const en = isEnglishPage();
     const fallbackMode = Boolean(note);
     const categoryFilters = buildCategoryFilters(items, categories);
+    lastMenuRender = { container, items, note, categories };
 
     const cardsHTML = items.map(item => {
-        const disabled = fallbackMode || !item.canSell;
+        const stockDisabled = fallbackMode || !item.canSell;
+        const accessLocked = !stockDisabled && (!menuOrderAccess.ready || !menuOrderAccess.allowed);
+        const disabled = stockDisabled || accessLocked;
         const defaultVariant = getDefaultVariant(item);
         const displayPrice = defaultVariant ? defaultVariant.price : item.price;
         const cartId = getVariantCartId(item, defaultVariant);
         const cartName = getVariantCartName(item, defaultVariant);
-        const variantSelector = renderVariantSelector(item, disabled, en);
+        const variantSelector = renderVariantSelector(item, stockDisabled, en);
         const optionText = !item.variants.length && item.options.length ? item.options.map(option => (option.name + (option.name && option.value ? ': ' : '') + option.value)).join(' / ') : '';
         const stockText = item.trackStock ? (en ? 'Stock: ' + item.stock : '\u0e40\u0e2b\u0e25\u0e37\u0e2d ' + item.stock) : '';
+        const accessLockLabel = !menuOrderAccess.ready
+            ? (en ? 'Checking...' : '\u0e01\u0e33\u0e25\u0e31\u0e07\u0e15\u0e23\u0e27\u0e08\u0e2a\u0e2d\u0e1a')
+            : (en ? 'Staff only' : '\u0e40\u0e09\u0e1e\u0e32\u0e30\u0e1e\u0e19\u0e31\u0e01\u0e07\u0e32\u0e19');
+        const unavailableLabel = fallbackMode
+            ? (en ? 'Unavailable' : '\u0e22\u0e31\u0e07\u0e44\u0e21\u0e48\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e02\u0e32\u0e22')
+            : (en ? 'Sold out' : '\u0e2b\u0e21\u0e14');
         const buttonText = fallbackMode
             ? (en ? 'Unavailable' : '\u0e22\u0e31\u0e07\u0e44\u0e21\u0e48\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e02\u0e32\u0e22')
-            : (!item.canSell ? (en ? 'Sold out' : '\u0e2b\u0e21\u0e14') : (en ? 'Add to Cart' : '\u0e40\u0e1e\u0e34\u0e48\u0e21\u0e25\u0e07\u0e15\u0e30\u0e01\u0e23\u0e49\u0e32'));
+            : (!item.canSell ? (en ? 'Sold out' : '\u0e2b\u0e21\u0e14') : (accessLocked ? accessLockLabel : (en ? 'Add to Cart' : '\u0e40\u0e1e\u0e34\u0e48\u0e21\u0e25\u0e07\u0e15\u0e30\u0e01\u0e23\u0e49\u0e32')));
 
         return '<div class="shop-card menu-card" data-category="cat-' + escapeHTML(item.category) + '">'
             + '<div class="shop-img-wrapper"><img loading="lazy" src="' + safeImageURL(item.imageUrl) + '" alt="' + escapeHTML(item.name) + '" class="shop-img"></div>'
@@ -306,11 +456,20 @@ function renderMenu(container, items, note = '', categories = []) {
             + (stockText ? '<p style="font-size:0.85rem; color:' + (item.canSell ? '#0f7a3d' : '#b91c1c') + '; margin-top:6px;">' + escapeHTML(stockText) + '</p>' : '')
             + '<div class="shop-action">'
             + '<span class="shop-price menu-item-price">' + formatMenuPrice(displayPrice) + '</span>'
-            + '<button class="btn btn-add-cart" ' + (disabled ? 'disabled style="background:#ccc;"' : '') + ' data-menu-locked="' + (disabled ? 'true' : 'false') + '" data-base-id="' + escapeHTML(item.id) + '" data-base-name="' + escapeHTML(item.name) + '" data-id="' + escapeHTML(cartId) + '" data-name="' + escapeHTML(cartName) + '" data-price="' + displayPrice + '">' + buttonText + '</button>'
+            + '<button class="btn btn-add-cart' + (accessLocked ? ' menu-order-locked' : '') + '" '
+            + (disabled ? 'disabled' + (stockDisabled ? ' style="background:#ccc;"' : '') : '')
+            + ' data-menu-requires-access="true"'
+            + ' data-menu-stock-locked="' + (stockDisabled ? 'true' : 'false') + '"'
+            + ' data-menu-access-locked="' + (accessLocked ? 'true' : 'false') + '"'
+            + ' data-menu-lock-label="' + escapeHTML(accessLockLabel) + '"'
+            + ' data-menu-unavailable-label="' + escapeHTML(unavailableLabel) + '"'
+            + ' data-menu-locked="' + (disabled ? 'true' : 'false') + '"'
+            + ' data-base-id="' + escapeHTML(item.id) + '" data-base-name="' + escapeHTML(item.name) + '" data-id="' + escapeHTML(cartId) + '" data-name="' + escapeHTML(cartName) + '" data-price="' + displayPrice + '">' + buttonText + '</button>'
             + '</div></div></div>';
     }).join('');
 
     container.innerHTML = (note ? '<div class="shop-data-note" style="background:#fff8e1; border:1px solid #f1d58a; color:#6b4f00; padding:12px 16px; border-radius:12px; margin-bottom:18px;">' + escapeHTML(note) + '</div>' : '')
+        + menuAccessNoticeHTML(en)
         + '<div class="category-filters menu-category-filters">'
         + '<button class="filter-btn active" data-filter="all">' + (en ? 'All' : '\u0e17\u0e31\u0e49\u0e07\u0e2b\u0e21\u0e14') + '</button>'
         + categoryFilters.map(category => '<button class="filter-btn" data-filter="cat-' + escapeHTML(category.id) + '">' + escapeHTML(category.name) + '</button>').join('')
@@ -338,6 +497,8 @@ function renderMenu(container, items, note = '', categories = []) {
 document.addEventListener('DOMContentLoaded', async () => {
     const container = document.getElementById('menu-products');
     if (!container) return;
+
+    initMenuOrderAccessWatcher();
 
     const en = isEnglishPage();
     container.innerHTML = '<div style="text-align:center; padding:40px;">' + (en ? 'Loading menu...' : '\u0e01\u0e33\u0e25\u0e31\u0e07\u0e42\u0e2b\u0e25\u0e14\u0e40\u0e21\u0e19\u0e39...') + '</div>';

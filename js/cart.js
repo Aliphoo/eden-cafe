@@ -114,6 +114,17 @@
         location.href = isEnglishPage() ? '/checkout-en' : '/checkout';
     }
 
+    function canUseMenuOrderButton(button) {
+        if (button?.dataset?.menuRequiresAccess !== 'true') return true;
+        return window.EdenMenuOrderAccess?.allowed === true;
+    }
+
+    function menuOrderDeniedMessage() {
+        return isEnglishPage()
+            ? 'Add to cart from the menu is available only for authorized Eden Cafe staff ordering inside the store.'
+            : 'ปุ่มเพิ่มลงตะกร้าหน้าเมนูเปิดใช้เฉพาะพนักงาน/ผู้ได้รับสิทธิ์สั่งภายในร้าน Eden Cafe เท่านั้น';
+    }
+
     window.cart = readCart();
     window.addToCart = addToCart;
     window.updateCartUI = renderCart;
@@ -123,6 +134,11 @@
     document.addEventListener('click', event => {
         const addButton = event.target.closest('.btn-add-cart');
         if (addButton && !addButton.disabled && addButton.dataset.cartHandledByShop !== 'true') {
+            if (!canUseMenuOrderButton(addButton)) {
+                event.preventDefault();
+                alert(menuOrderDeniedMessage());
+                return;
+            }
             addToCart(addButton.dataset.id || addButton.dataset.name, addButton.dataset.name, addButton.dataset.price);
             const original = addButton.textContent;
             addButton.textContent = isEnglishPage() ? 'Added ✓' : 'เพิ่มแล้ว ✓';
