@@ -6,7 +6,7 @@
     <title>Eden POS | Eden OS</title>
     <link rel="icon" href="Images/Logo.webp" type="image/webp">
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="pos.css?v=15">
+    <link rel="stylesheet" href="pos.css?v=17">
 </head>
 <body>
     <div id="admin-login" style="display: none;">
@@ -110,6 +110,168 @@
                     <p>เมนูกลาง, ราคากลาง, สูตรกลาง, branch ranking, royalty และ franchise audit</p>
                     <strong>Franchise-ready</strong>
                 </article>
+            </section>
+
+
+            <section class="pos-printer-control" id="pos-printer-control" aria-label="POS printer management">
+                <div class="pos-printer-head">
+                    <div>
+                        <span class="system-kicker">Printer Control</span>
+                        <h2>POS Printer Management</h2>
+                        <p>Set up Bluetooth BLE, WiFi/LAN, USB, Serial, and browser fallback printing for Eden POS receipts. Settings are saved on this cashier device.</p>
+                    </div>
+                    <div class="pos-printer-head-actions">
+                        <button id="pos-printer-bridge-check" class="btn-action btn-view" type="button">Check Bridge</button>
+                        <button id="pos-printer-test" class="btn-action" type="button">Test Print</button>
+                    </div>
+                </div>
+
+                <div class="pos-printer-status-grid" aria-label="Printer status cards">
+                    <article>
+                        <span>Active Printer</span>
+                        <strong id="pos-printer-active-label">Not configured</strong>
+                        <small id="pos-printer-active-type">Choose a printer profile below</small>
+                    </article>
+                    <article>
+                        <span>Direct Browser APIs</span>
+                        <strong id="pos-printer-browser-status">Checking...</strong>
+                        <small>Serial / USB / Bluetooth BLE availability</small>
+                    </article>
+                    <article>
+                        <span>Eden Print Bridge</span>
+                        <strong id="pos-printer-bridge-status">Not checked</strong>
+                        <small>Required for WiFi/LAN raw ESC/POS printing</small>
+                    </article>
+                </div>
+
+                <div class="pos-printer-layout">
+                    <article class="pos-printer-panel">
+                        <div class="pos-printer-panel-title">
+                            <span>01</span>
+                            <div>
+                                <strong>Terminal Settings</strong>
+                                <small>Enable printing and select the active profile for this POS device.</small>
+                            </div>
+                        </div>
+                        <label class="pos-printer-switch">
+                            <input id="pos-printer-enabled" type="checkbox">
+                            <span>Use POS printer before browser print</span>
+                        </label>
+                        <label class="pos-printer-switch">
+                            <input id="pos-printer-auto" type="checkbox">
+                            <span>Auto print after checkout when possible</span>
+                        </label>
+                        <label class="pos-printer-field">
+                            <span>Active profile</span>
+                            <select id="pos-printer-active-select"></select>
+                        </label>
+                        <div id="pos-printer-list" class="pos-printer-list"></div>
+                    </article>
+
+                    <article class="pos-printer-panel pos-printer-editor">
+                        <div class="pos-printer-panel-title">
+                            <span>02</span>
+                            <div>
+                                <strong>Printer Profile</strong>
+                                <small>Create profiles for LAN, USB/Serial, WebUSB, Bluetooth BLE, or browser print.</small>
+                            </div>
+                        </div>
+                        <div class="pos-printer-form-grid">
+                            <label class="pos-printer-field">
+                                <span>Profile name</span>
+                                <input id="pos-printer-name" type="text" placeholder="Counter Printer 80mm">
+                            </label>
+                            <label class="pos-printer-field">
+                                <span>Connection</span>
+                                <select id="pos-printer-connection">
+                                    <option value="bridge-network">WiFi/LAN via Eden Print Bridge</option>
+                                    <option value="browser-serial">Cable / Bluetooth SPP via Web Serial</option>
+                                    <option value="browser-usb">USB via WebUSB</option>
+                                    <option value="browser-bluetooth">Bluetooth BLE via Web Bluetooth</option>
+                                    <option value="browser-print">Browser print window fallback</option>
+                                </select>
+                            </label>
+                            <label class="pos-printer-field">
+                                <span>Paper width</span>
+                                <select id="pos-printer-paper">
+                                    <option value="80">80mm / 42 columns</option>
+                                    <option value="58">58mm / 32 columns</option>
+                                </select>
+                            </label>
+                            <label class="pos-printer-field">
+                                <span>Copies</span>
+                                <input id="pos-printer-copies" type="number" min="1" max="4" step="1" value="1">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="endpoint">
+                                <span>Bridge URL</span>
+                                <input id="pos-printer-endpoint" type="url" placeholder="http://127.0.0.1:8787">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="host">
+                                <span>LAN printer IP</span>
+                                <input id="pos-printer-host" type="text" placeholder="192.168.1.50">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="port">
+                                <span>LAN port</span>
+                                <input id="pos-printer-port" type="number" min="1" max="65535" value="9100">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="baud">
+                                <span>Serial baud rate</span>
+                                <input id="pos-printer-baud" type="number" min="1200" step="1" value="9600">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="vendor">
+                                <span>USB Vendor ID</span>
+                                <input id="pos-printer-vendor" type="text" placeholder="0x04b8">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="interface">
+                                <span>USB interface</span>
+                                <input id="pos-printer-interface" type="number" min="0" step="1" value="0">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="endpoint-number">
+                                <span>USB OUT endpoint</span>
+                                <input id="pos-printer-endpoint-number" type="number" min="1" step="1" value="1">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="service">
+                                <span>BLE service UUID</span>
+                                <input id="pos-printer-service" type="text" placeholder="0000ffe0-0000-1000-8000-00805f9b34fb">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="characteristic">
+                                <span>BLE write characteristic</span>
+                                <input id="pos-printer-characteristic" type="text" placeholder="0000ffe1-0000-1000-8000-00805f9b34fb">
+                            </label>
+                            <label class="pos-printer-field">
+                                <span>ESC/POS code page</span>
+                                <select id="pos-printer-codepage">
+                                    <option value="thai42">Thai Character Code 42 (ESC t 20)</option>
+                                    <option value="cp874">CP874 bytes only</option>
+                                    <option value="ascii">ASCII safe mode</option>
+                                    <option value="utf8">UTF-8 bytes</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="pos-printer-actions">
+                            <button id="pos-printer-new" class="btn-action btn-view" type="button">New Profile</button>
+                            <button id="pos-printer-save" class="btn-action" type="button">Save Profile</button>
+                            <button id="pos-printer-delete" class="btn-action pos-printer-danger" type="button">Delete</button>
+                        </div>
+                    </article>
+
+                    <article class="pos-printer-panel pos-printer-help">
+                        <div class="pos-printer-panel-title">
+                            <span>03</span>
+                            <div>
+                                <strong>Quick Setup</strong>
+                                <small>Practical paths that work inside a web POS.</small>
+                            </div>
+                        </div>
+                        <ul>
+                            <li><strong>WiFi/LAN:</strong> run Eden Print Bridge, set printer IP and port 9100.</li>
+                            <li><strong>Cable:</strong> use Web Serial for USB-to-serial printers or WebUSB for compatible devices.</li>
+                            <li><strong>Bluetooth:</strong> Web Bluetooth supports BLE printers. Classic Bluetooth SPP usually appears through Web Serial instead.</li>
+                            <li><strong>Fallback:</strong> browser print still works for normal printer drivers and PDF testing.</li>
+                        </ul>
+                        <div id="pos-printer-status" class="pos-printer-status">Printer settings loaded.</div>
+                    </article>
+                </div>
             </section>
 
             <section class="pos-receipt-control" aria-label="จัดการใบเสร็จและบิลค้างชำระ">
@@ -436,6 +598,6 @@
             return false;
         };
     </script>
-    <script type="module" src="js/pos.js?v=21"></script>
+    <script type="module" src="js/pos.js?v=23"></script>
 </body>
 </html>

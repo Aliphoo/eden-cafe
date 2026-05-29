@@ -1221,13 +1221,225 @@ body.pos-ready .pos-app { opacity: 1; transform: none; }
 }
 .pos-error { color: #b3261e; }
 
+
+.pos-printer-control {
+    margin-bottom: 22px;
+    padding: clamp(18px, 3vw, 28px);
+    border: 1px solid rgba(255,255,255,0.78);
+    border-radius: 32px;
+    background:
+        radial-gradient(circle at 92% 12%, rgba(19, 146, 85, .16), transparent 30%),
+        radial-gradient(circle at 8% 10%, rgba(242, 192, 95, .22), transparent 28%),
+        linear-gradient(135deg, rgba(255,255,255,.94), rgba(238,250,242,.9));
+    box-shadow: 0 22px 58px rgba(21, 73, 44, 0.12);
+    backdrop-filter: blur(14px);
+}
+.pos-printer-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 18px;
+}
+.pos-printer-head h2 {
+    color: var(--forest);
+    font-size: clamp(1.55rem, 3vw, 2.4rem);
+    line-height: 1.08;
+    letter-spacing: -.03em;
+    margin: 6px 0 8px;
+}
+.pos-printer-head p { color: var(--muted); max-width: 820px; line-height: 1.65; }
+.pos-printer-head-actions,
+.pos-printer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: flex-end;
+}
+.pos-printer-status-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.pos-printer-status-grid article,
+.pos-printer-panel {
+    border: 1px solid rgba(31, 82, 52, .10);
+    background: rgba(255,255,255,.74);
+    box-shadow: 0 16px 42px rgba(21, 73, 44, 0.08);
+}
+.pos-printer-status-grid article {
+    padding: 16px;
+    border-radius: 22px;
+}
+.pos-printer-status-grid span,
+.pos-printer-panel-title small {
+    display: block;
+    color: #5f876f;
+    font-size: .76rem;
+    font-weight: 900;
+}
+.pos-printer-status-grid span {
+    letter-spacing: .12em;
+    text-transform: uppercase;
+}
+.pos-printer-status-grid strong {
+    display: block;
+    margin-top: 7px;
+    color: var(--forest);
+    font-size: clamp(1.05rem, 2vw, 1.45rem);
+    line-height: 1.1;
+}
+.pos-printer-status-grid small { color: var(--muted); font-weight: 800; }
+.pos-printer-layout {
+    display: grid;
+    grid-template-columns: minmax(260px, .86fr) minmax(420px, 1.36fr) minmax(260px, .78fr);
+    gap: 14px;
+    align-items: stretch;
+}
+.pos-printer-panel {
+    padding: 18px;
+    border-radius: 26px;
+}
+.pos-printer-panel-title {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.pos-printer-panel-title > span {
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    flex: 0 0 auto;
+    border-radius: 14px;
+    color: #fff;
+    background: linear-gradient(135deg, var(--forest), var(--leaf));
+    font-weight: 900;
+    box-shadow: 0 12px 22px rgba(19,146,85,.18);
+}
+.pos-printer-panel-title strong {
+    display: block;
+    color: var(--forest);
+    font-size: 1.05rem;
+    line-height: 1.2;
+}
+.pos-printer-switch {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 10px 0;
+    padding: 12px 13px;
+    border: 1px solid rgba(15,107,67,.12);
+    border-radius: 18px;
+    background: rgba(248,253,249,.86);
+    color: #284835;
+    font-weight: 900;
+}
+.pos-printer-switch input { width: auto; accent-color: var(--leaf); }
+.pos-printer-field {
+    display: grid;
+    gap: 7px;
+    color: #274532;
+    font-weight: 900;
+}
+.pos-printer-field span {
+    color: #395a47;
+    font-size: .82rem;
+}
+.pos-printer-field input,
+.pos-printer-field select {
+    width: 100%;
+    min-height: 44px;
+    border: 1px solid rgba(31, 82, 52, .13);
+    border-radius: 14px;
+    background: rgba(255,255,255,.9);
+    color: var(--ink);
+    font: inherit;
+    outline: none;
+    padding: 10px 12px;
+}
+.pos-printer-field input:focus,
+.pos-printer-field select:focus {
+    border-color: rgba(19,146,85,.52);
+    box-shadow: 0 0 0 4px rgba(19,146,85,.12);
+}
+.pos-printer-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+.pos-printer-list {
+    display: grid;
+    gap: 10px;
+    margin-top: 14px;
+    max-height: 260px;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+.pos-printer-profile {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid rgba(31,82,52,.10);
+    border-radius: 18px;
+    background: rgba(255,255,255,.76);
+}
+.pos-printer-profile.active {
+    border-color: rgba(19,146,85,.34);
+    background: linear-gradient(135deg, #effaf2, #fffdf2);
+}
+.pos-printer-profile strong { color: var(--forest); }
+.pos-printer-profile small { display: block; color: var(--muted); font-weight: 800; margin-top: 3px; }
+.pos-printer-profile button,
+.pos-printer-mini-btn {
+    border: 1px solid rgba(15,107,67,.12);
+    border-radius: 999px;
+    padding: 8px 12px;
+    color: var(--forest);
+    background: #effaf2;
+    font: inherit;
+    font-size: .82rem;
+    font-weight: 900;
+    cursor: pointer;
+}
+.pos-printer-actions { margin-top: 14px; }
+.pos-printer-danger {
+    color: #9b2d1f;
+    background: rgba(255,246,240,.9);
+}
+.pos-printer-help ul {
+    display: grid;
+    gap: 10px;
+    margin-left: 18px;
+    color: #315443;
+    line-height: 1.55;
+}
+.pos-printer-help li::marker { color: var(--leaf); }
+.pos-printer-status {
+    margin-top: 16px;
+    padding: 12px 13px;
+    border: 1px solid rgba(15,107,67,.12);
+    border-radius: 18px;
+    background: #f8fdf9;
+    color: #315443;
+    font-weight: 900;
+}
+.pos-printer-status.ready { color: var(--leaf); background: #effaf2; }
+.pos-printer-status.warning { color: #8a6516; background: #fff8de; }
+.pos-printer-status.error { color: #b3261e; background: #fff0ed; }
+
 @media (max-width: 1180px) {
     .pos-topbar { grid-template-columns: 1fr; }
     .pos-view-switcher { max-width: none; }
     .eden-os-strip,
     .pos-system-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .pos-intelligence-grid,
-    .pos-receipt-workspace { grid-template-columns: 1fr; }
+    .pos-receipt-workspace,
+    .pos-printer-layout { grid-template-columns: 1fr; }
     .pos-shell { grid-template-columns: 1fr; }
     .pos-cart { position: static; max-height: none; overflow: visible; padding-right: 22px; }
     .pos-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); max-height: 620px; }
@@ -1237,14 +1449,19 @@ body.pos-ready .pos-app { opacity: 1; transform: none; }
     .pos-topbar,
     .section-header,
     .pos-receipt-control-head,
-    .pos-receipt-preview-head { align-items: stretch; flex-direction: column; }
-    .pos-receipt-controls { justify-content: stretch; }
+    .pos-receipt-preview-head,
+    .pos-printer-head { align-items: stretch; flex-direction: column; }
+    .pos-receipt-controls,
+    .pos-printer-head-actions,
+    .pos-printer-actions { justify-content: stretch; }
     .pos-receipt-controls > *,
     .pos-receipt-date-field { width: 100%; justify-content: center; }
     .top-actions { justify-content: flex-start; }
     .eden-os-strip,
     .pos-system-grid,
     .pos-receipt-stats,
+    .pos-printer-status-grid,
+    .pos-printer-form-grid,
     .reservation-rules,
     .mini-seat-map { grid-template-columns: 1fr; }
     .os-mode-card { min-height: 168px; }

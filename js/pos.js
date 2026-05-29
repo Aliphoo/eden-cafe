@@ -66,6 +66,21 @@ const POS_PROMPTPAY_DEFAULTS = Object.freeze({
 });
 let posPromptPaySettings = { ...POS_PROMPTPAY_DEFAULTS };
 let posPromptPayRenderToken = 0;
+const POS_PRINTER_STORAGE_KEY = 'edenPosPrinterSettingsV1';
+const POS_PRINTER_BRIDGE_DEFAULT = 'http://127.0.0.1:8787';
+const POS_PRINTER_DEFAULT_BLE_SERVICE = '0000ffe0-0000-1000-8000-00805f9b34fb';
+const POS_PRINTER_DEFAULT_BLE_CHARACTERISTIC = '0000ffe1-0000-1000-8000-00805f9b34fb';
+const POS_PRINTER_CONNECTION_LABELS = Object.freeze({
+    'bridge-network': 'WiFi/LAN Bridge',
+    'browser-serial': 'Web Serial Cable/SPP',
+    'browser-usb': 'WebUSB Cable',
+    'browser-bluetooth': 'Bluetooth BLE',
+    'browser-print': 'Browser Print'
+});
+let posPrinterSettings = null;
+let posPrinterEditingId = '';
+let posPrinterControlsBound = false;
+let posPrinterRuntime = { serialPort: null, usbDevice: null, bleDevice: null };
 
 function escapeHTML(value) {
     return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -365,6 +380,7 @@ document.addEventListener('DOMContentLoaded', () => {
     syncPosReceiptDateInput();
     renderPosReceiptManager();
     renderPosOverviewOpenBills();
+    initPosPrinterManager();
     window.addEventListener('hashchange', () => {
         if (window.location.hash === '#pos-sales') setPosView('sales', { persist: false });
         if (window.location.hash === '#pos-overview') setPosView('overview', { persist: false });
@@ -540,6 +556,563 @@ function updatePosPromptPayCopy() {
     const idEl = document.getElementById('pos-promptpay-id');
     if (idEl) idEl.textContent = settings.promptPayId;
 }
+
+function createPosPrinterId() {
+    if (window.crypto?.randomUUID) return 'printer-' + window.crypto.randomUUID();
+    return 'printer-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+
+function defaultPosPrinterProfile(overrides = {}) {
+    return {
+        id: overrides.id || createPosPrinterId(),
+        name: overrides.name || 'Eden LAN Printer',
+        connection: overrides.connection || 'bridge-network',
+        endpoint: overrides.endpoint || POS_PRINTER_BRIDGE_DEFAULT,
+        host: overrides.host || '',
+        port: safeNumber(overrides.port, 9100),
+        baudRate: safeNumber(overrides.baudRate, 9600),
+        vendorId: String(overrides.vendorId || '').trim(),
+        interfaceNumber: safeNumber(overrides.interfaceNumber, 0),
+        endpointNumber: safeNumber(overrides.endpointNumber, 1),
+        serviceUuid: overrides.serviceUuid || POS_PRINTER_DEFAULT_BLE_SERVICE,
+        characteristicUuid: overrides.characteristicUuid || POS_PRINTER_DEFAULT_BLE_CHARACTERISTIC,
+        paperWidth: safeNumber(overrides.paperWidth, 80) === 58 ? 58 : 80,
+        copies: Math.min(4, Math.max(1, Math.round(safeNumber(overrides.copies, 1)))),
+        codepage: ['thai42', 'cp874', 'ascii', 'utf8'].includes(overrides.codepage) ? overrides.codepage : 'thai42'
+    };
+}
+
+function normalizePosPrinterProfile(profile = {}, index = 0) {
+    const allowedConnections = Object.keys(POS_PRINTER_CONNECTION_LABELS);
+    const normalized = defaultPosPrinterProfile({
+        ...profile,
+        id: String(profile.id || '').trim() || 'printer-' + (index + 1),
+        name: String(profile.name || profile.label || '').trim() || 'POS Printer ' + (index + 1),
+        connection: allowedConnections.includes(profile.connection) ? profile.connection : 'bridge-network'
+    });
+    return normalized;
+}
+
+function normalizePosPrinterSettings(data = {}) {
+    const rawPrinters = Array.isArray(data.printers) ? data.printers : [];
+    const printers = rawPrinters.length
+        ? rawPrinters.map((profile, index) => normalizePosPrinterProfile(profile, index))
+        : [defaultPosPrinterProfile({ id: 'eden-default-lan', name: 'Eden LAN Printer' })];
+    let activePrinterId = String(data.activePrinterId || '').trim();
+    if (!printers.some(printer => printer.id === activePrinterId)) activePrinterId = printers[0]?.id || '';
+    return {
+        enabled: data.enabled !== false,
+        autoPrint: data.autoPrint === true,
+        activePrinterId,
+        printers
+    };
+}
+
+function loadPosPrinterSettings() {
+    if (posPrinterSettings) return posPrinterSettings;
+    try {
+        const saved = JSON.parse(localStorage.getItem(POS_PRINTER_STORAGE_KEY) || '{}');
+        posPrinterSettings = normalizePosPrinterSettings(saved);
+    } catch (error) {
+        console.warn('Unable to load POS printer settings:', error);
+        posPrinterSettings = normalizePosPrinterSettings({});
+    }
+    if (!posPrinterEditingId) posPrinterEditingId = posPrinterSettings.activePrinterId || posPrinterSettings.printers[0]?.id || '';
+    return posPrinterSettings;
+}
+
+function savePosPrinterSettings(settings = posPrinterSettings) {
+    posPrinterSettings = normalizePosPrinterSettings(settings || {});
+    try {
+        localStorage.setItem(POS_PRINTER_STORAGE_KEY, JSON.stringify(posPrinterSettings));
+    } catch (error) {
+        console.warn('Unable to save POS printer settings:', error);
+    }
+    return posPrinterSettings;
+}
+
+function currentPosPrinterSettings() {
+    return loadPosPrinterSettings();
+}
+
+function currentPosPrinter() {
+    const settings = currentPosPrinterSettings();
+    return settings.printers.find(printer => printer.id === settings.activePrinterId) || settings.printers[0] || null;
+}
+
+function editingPosPrinter() {
+    const settings = currentPosPrinterSettings();
+    return settings.printers.find(printer => printer.id === posPrinterEditingId) || currentPosPrinter() || settings.printers[0] || null;
+}
+
+function setPosPrinterStatus(message, tone = '') {
+    const status = document.getElementById('pos-printer-status');
+    if (!status) return;
+    status.textContent = message;
+    status.className = 'pos-printer-status' + (tone ? ' ' + tone : '');
+}
+
+function describePosPrinter(printer = null) {
+    if (!printer) return 'Not configured';
+    const label = POS_PRINTER_CONNECTION_LABELS[printer.connection] || printer.connection || 'Printer';
+    if (printer.connection === 'bridge-network') return label + (printer.host ? ' @ ' + printer.host + ':' + printer.port : ' - set printer IP');
+    if (printer.connection === 'browser-serial') return label + ' @ ' + printer.baudRate + ' baud';
+    if (printer.connection === 'browser-usb') return label + (printer.vendorId ? ' vendor ' + printer.vendorId : ' - set vendor ID');
+    if (printer.connection === 'browser-bluetooth') return label + ' BLE';
+    return label;
+}
+
+function updatePosPrinterCapabilityStatus() {
+    const browserStatus = document.getElementById('pos-printer-browser-status');
+    if (!browserStatus) return;
+    const flags = [];
+    flags.push('Serial ' + (navigator.serial ? 'OK' : 'No'));
+    flags.push('USB ' + (navigator.usb ? 'OK' : 'No'));
+    flags.push('BLE ' + (navigator.bluetooth ? 'OK' : 'No'));
+    browserStatus.textContent = flags.join(' / ');
+}
+
+function updatePosPrinterConnectionFields() {
+    const connection = document.getElementById('pos-printer-connection')?.value || 'bridge-network';
+    const visible = new Set();
+    if (connection === 'bridge-network') ['endpoint', 'host', 'port'].forEach(key => visible.add(key));
+    if (connection === 'browser-serial') visible.add('baud');
+    if (connection === 'browser-usb') ['vendor', 'interface', 'endpoint-number'].forEach(key => visible.add(key));
+    if (connection === 'browser-bluetooth') ['service', 'characteristic'].forEach(key => visible.add(key));
+    document.querySelectorAll('[data-printer-field]').forEach(field => {
+        field.style.display = visible.has(field.dataset.printerField) ? '' : 'none';
+    });
+}
+
+function fillPosPrinterForm(printer = editingPosPrinter()) {
+    const profile = printer || defaultPosPrinterProfile();
+    const valueMap = {
+        'pos-printer-name': profile.name,
+        'pos-printer-connection': profile.connection,
+        'pos-printer-paper': String(profile.paperWidth),
+        'pos-printer-copies': String(profile.copies),
+        'pos-printer-endpoint': profile.endpoint,
+        'pos-printer-host': profile.host,
+        'pos-printer-port': String(profile.port),
+        'pos-printer-baud': String(profile.baudRate),
+        'pos-printer-vendor': profile.vendorId,
+        'pos-printer-interface': String(profile.interfaceNumber),
+        'pos-printer-endpoint-number': String(profile.endpointNumber),
+        'pos-printer-service': profile.serviceUuid,
+        'pos-printer-characteristic': profile.characteristicUuid,
+        'pos-printer-codepage': profile.codepage
+    };
+    Object.entries(valueMap).forEach(([id, value]) => {
+        const input = document.getElementById(id);
+        if (input) input.value = value ?? '';
+    });
+    updatePosPrinterConnectionFields();
+}
+
+function readPosPrinterForm() {
+    const existing = editingPosPrinter() || defaultPosPrinterProfile();
+    return normalizePosPrinterProfile({
+        ...existing,
+        id: existing.id || createPosPrinterId(),
+        name: document.getElementById('pos-printer-name')?.value || existing.name,
+        connection: document.getElementById('pos-printer-connection')?.value || existing.connection,
+        paperWidth: safeNumber(document.getElementById('pos-printer-paper')?.value, existing.paperWidth),
+        copies: safeNumber(document.getElementById('pos-printer-copies')?.value, existing.copies),
+        endpoint: document.getElementById('pos-printer-endpoint')?.value || POS_PRINTER_BRIDGE_DEFAULT,
+        host: document.getElementById('pos-printer-host')?.value || '',
+        port: safeNumber(document.getElementById('pos-printer-port')?.value, 9100),
+        baudRate: safeNumber(document.getElementById('pos-printer-baud')?.value, 9600),
+        vendorId: document.getElementById('pos-printer-vendor')?.value || '',
+        interfaceNumber: safeNumber(document.getElementById('pos-printer-interface')?.value, 0),
+        endpointNumber: safeNumber(document.getElementById('pos-printer-endpoint-number')?.value, 1),
+        serviceUuid: document.getElementById('pos-printer-service')?.value || POS_PRINTER_DEFAULT_BLE_SERVICE,
+        characteristicUuid: document.getElementById('pos-printer-characteristic')?.value || POS_PRINTER_DEFAULT_BLE_CHARACTERISTIC,
+        codepage: document.getElementById('pos-printer-codepage')?.value || 'thai42'
+    });
+}
+
+function renderPosPrinterManager() {
+    const settings = currentPosPrinterSettings();
+    const active = currentPosPrinter();
+    const enabled = document.getElementById('pos-printer-enabled');
+    const auto = document.getElementById('pos-printer-auto');
+    const activeSelect = document.getElementById('pos-printer-active-select');
+    const activeLabel = document.getElementById('pos-printer-active-label');
+    const activeType = document.getElementById('pos-printer-active-type');
+    const list = document.getElementById('pos-printer-list');
+    if (enabled) enabled.checked = settings.enabled;
+    if (auto) auto.checked = settings.autoPrint;
+    if (activeSelect) {
+        activeSelect.innerHTML = settings.printers.map(printer => `<option value="${escapeHTML(printer.id)}" ${printer.id === settings.activePrinterId ? 'selected' : ''}>${escapeHTML(printer.name)}</option>`).join('');
+    }
+    if (activeLabel) activeLabel.textContent = active?.name || 'Not configured';
+    if (activeType) activeType.textContent = describePosPrinter(active);
+    if (list) {
+        list.innerHTML = settings.printers.map(printer => `
+            <div class="pos-printer-profile ${printer.id === settings.activePrinterId ? 'active' : ''}">
+                <div>
+                    <strong>${escapeHTML(printer.name)}</strong>
+                    <small>${escapeHTML(describePosPrinter(printer))}</small>
+                </div>
+                <button type="button" onclick="editPosPrinterProfile('${escapeJSString(printer.id)}')">Edit</button>
+            </div>
+        `).join('') || '<div class="pos-empty">No printer profiles yet.</div>';
+    }
+    if (!editingPosPrinter() && settings.printers[0]) posPrinterEditingId = settings.printers[0].id;
+    fillPosPrinterForm(editingPosPrinter());
+    updatePosPrinterCapabilityStatus();
+}
+
+function savePosPrinterGlobalToggles() {
+    const settings = currentPosPrinterSettings();
+    settings.enabled = document.getElementById('pos-printer-enabled')?.checked !== false;
+    settings.autoPrint = document.getElementById('pos-printer-auto')?.checked === true;
+    settings.activePrinterId = document.getElementById('pos-printer-active-select')?.value || settings.activePrinterId;
+    posPrinterEditingId = posPrinterEditingId || settings.activePrinterId;
+    savePosPrinterSettings(settings);
+    renderPosPrinterManager();
+}
+
+function upsertPosPrinterProfile(profile) {
+    const settings = currentPosPrinterSettings();
+    const index = settings.printers.findIndex(printer => printer.id === profile.id);
+    if (index >= 0) settings.printers[index] = profile;
+    else settings.printers.push(profile);
+    if (!settings.activePrinterId || index < 0) settings.activePrinterId = profile.id;
+    posPrinterEditingId = profile.id;
+    savePosPrinterSettings(settings);
+    renderPosPrinterManager();
+    setPosPrinterStatus('Printer profile saved.', 'ready');
+}
+
+function removePosPrinterProfile(id) {
+    const settings = currentPosPrinterSettings();
+    if (settings.printers.length <= 1) {
+        setPosPrinterStatus('Keep at least one printer profile.', 'warning');
+        return;
+    }
+    settings.printers = settings.printers.filter(printer => printer.id !== id);
+    if (!settings.printers.some(printer => printer.id === settings.activePrinterId)) settings.activePrinterId = settings.printers[0]?.id || '';
+    posPrinterEditingId = settings.activePrinterId;
+    savePosPrinterSettings(settings);
+    renderPosPrinterManager();
+    setPosPrinterStatus('Printer profile deleted.', 'warning');
+}
+
+function normalizeBridgeEndpoint(endpoint) {
+    return String(endpoint || POS_PRINTER_BRIDGE_DEFAULT).trim().replace(/\/+$/, '') || POS_PRINTER_BRIDGE_DEFAULT;
+}
+
+async function checkPosPrintBridge() {
+    const printer = currentPosPrinter() || defaultPosPrinterProfile();
+    const endpoint = normalizeBridgeEndpoint(printer.endpoint);
+    const statusEl = document.getElementById('pos-printer-bridge-status');
+    try {
+        const response = await fetch(endpoint + '/health', { method: 'GET' });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok === false) throw new Error(data.error || 'Bridge health check failed');
+        if (statusEl) statusEl.textContent = 'Online';
+        setPosPrinterStatus('Eden Print Bridge is online at ' + endpoint + '.', 'ready');
+        return true;
+    } catch (error) {
+        if (statusEl) statusEl.textContent = 'Offline';
+        setPosPrinterStatus('Bridge offline: ' + error.message, 'warning');
+        return false;
+    }
+}
+
+function receiptMoneyText(value) {
+    return 'B' + safeNumber(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function receiptLineWidth(printer = {}) {
+    return safeNumber(printer.paperWidth, 80) === 58 ? 32 : 42;
+}
+
+function cleanReceiptText(value) {
+    return String(value ?? '').replace(/\r/g, '').replace(/[\t ]+/g, ' ').trim();
+}
+
+function centerReceiptText(text, width) {
+    const clean = cleanReceiptText(text);
+    if (clean.length >= width) return clean.slice(0, width);
+    const left = Math.floor((width - clean.length) / 2);
+    return ' '.repeat(left) + clean;
+}
+
+function twoColumnReceiptText(left, right, width) {
+    const cleanLeft = cleanReceiptText(left);
+    const cleanRight = cleanReceiptText(right);
+    const maxLeft = Math.max(1, width - cleanRight.length - 1);
+    const clippedLeft = cleanLeft.length > maxLeft ? cleanLeft.slice(0, maxLeft - 1) + '.' : cleanLeft;
+    return clippedLeft + ' '.repeat(Math.max(1, width - clippedLeft.length - cleanRight.length)) + cleanRight;
+}
+
+function wrapReceiptText(text, width) {
+    const clean = cleanReceiptText(text);
+    if (!clean) return [''];
+    const lines = [];
+    let rest = clean;
+    while (rest.length > width) {
+        let cut = rest.lastIndexOf(' ', width);
+        if (cut < width * 0.45) cut = width;
+        lines.push(rest.slice(0, cut).trim());
+        rest = rest.slice(cut).trim();
+    }
+    lines.push(rest);
+    return lines;
+}
+
+function encodeEscPosText(text, codepage = 'thai42') {
+    if (codepage === 'utf8') return Array.from(new TextEncoder().encode(String(text ?? '')));
+    const bytes = [];
+    for (const char of String(text ?? '')) {
+        const code = char.codePointAt(0);
+        if (code === 10 || code === 13 || code === 9 || (code >= 32 && code <= 126)) {
+            bytes.push(code);
+        } else if (codepage !== 'ascii' && code >= 0x0E01 && code <= 0x0E5B) {
+            bytes.push(code - 0x0D60);
+        } else if (codepage !== 'ascii' && code === 0x0E3F) {
+            bytes.push(0x80);
+        } else if (code === 0x2013 || code === 0x2014 || code === 0x2212) {
+            bytes.push(45);
+        } else if (code === 0x2022) {
+            bytes.push(42);
+        } else {
+            bytes.push(63);
+        }
+    }
+    return bytes;
+}
+
+function pushEscPosLine(target, text = '', printer = {}) {
+    target.push(...encodeEscPosText(text, printer.codepage), 10);
+}
+
+function buildEscPosReceiptBytes(order = {}, printer = {}) {
+    const width = receiptLineWidth(printer);
+    const items = Array.isArray(order.items) ? order.items : [];
+    const bytes = [];
+    const line = '-'.repeat(width);
+    bytes.push(0x1B, 0x40);
+    if (printer.codepage === 'thai42') bytes.push(0x1B, 0x74, 20);
+    bytes.push(0x1B, 0x61, 1, 0x1B, 0x45, 1);
+    pushEscPosLine(bytes, 'Eden Cafe', printer);
+    bytes.push(0x1B, 0x45, 0);
+    pushEscPosLine(bytes, order.isTestOrder ? 'POS Receipt (TEST)' : 'POS Receipt', printer);
+    bytes.push(0x1B, 0x61, 0);
+    pushEscPosLine(bytes, line, printer);
+    pushEscPosLine(bytes, 'Receipt: ' + (order.receiptNo || order.id || '-'), printer);
+    pushEscPosLine(bytes, 'Time: ' + (order.date || posOrderDateText(order) || new Date().toLocaleString('th-TH')), printer);
+    pushEscPosLine(bytes, 'Cashier: ' + (order.cashierName || '-'), printer);
+    pushEscPosLine(bytes, line, printer);
+    items.forEach(item => {
+        const quantity = safeNumber(item.quantity, 1);
+        const name = cleanReceiptText((item.name || 'Item') + (item.variantName ? ' / ' + item.variantName : '') + ' x' + quantity);
+        const amount = receiptMoneyText(item.lineTotal ?? (safeNumber(item.price) * quantity));
+        const itemLines = wrapReceiptText(name, Math.max(12, width - amount.length - 1));
+        pushEscPosLine(bytes, twoColumnReceiptText(itemLines[0], amount, width), printer);
+        itemLines.slice(1).forEach(extra => pushEscPosLine(bytes, extra, printer));
+    });
+    pushEscPosLine(bytes, line, printer);
+    pushEscPosLine(bytes, twoColumnReceiptText('Subtotal', receiptMoneyText(order.subtotal), width), printer);
+    pushEscPosLine(bytes, twoColumnReceiptText('Discount', '-' + receiptMoneyText(order.discount), width), printer);
+    pushEscPosLine(bytes, twoColumnReceiptText('VAT included', receiptMoneyText(order.taxIncluded), width), printer);
+    bytes.push(0x1B, 0x45, 1);
+    pushEscPosLine(bytes, twoColumnReceiptText('Total', receiptMoneyText(order.totalAmount ?? order.total), width), printer);
+    bytes.push(0x1B, 0x45, 0);
+    pushEscPosLine(bytes, twoColumnReceiptText('Payment', order.paymentLabel || posPaymentLabel(order.paymentMethod) || '-', width), printer);
+    pushEscPosLine(bytes, twoColumnReceiptText('Paid', receiptMoneyText(order.paidAmount), width), printer);
+    pushEscPosLine(bytes, twoColumnReceiptText('Change', receiptMoneyText(order.changeAmount), width), printer);
+    pushEscPosLine(bytes, line, printer);
+    bytes.push(0x1B, 0x61, 1);
+    pushEscPosLine(bytes, centerReceiptText('Thank you for supporting Eden Cafe', width), printer);
+    bytes.push(0x1B, 0x61, 0, 10, 10, 10, 0x1D, 0x56, 0x42, 0x00);
+    return new Uint8Array(bytes);
+}
+
+function bytesToBase64(bytes) {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+        const chunk = bytes.subarray(i, i + 0x8000);
+        binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+}
+
+async function printViaBridgeNetwork(printer, bytes) {
+    if (!printer.host) throw new Error('LAN printer IP is required.');
+    const endpoint = normalizeBridgeEndpoint(printer.endpoint);
+    const response = await fetch(endpoint + '/print/network', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: printer.host, port: printer.port || 9100, payloadBase64: bytesToBase64(bytes) })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) throw new Error(data.error || 'Bridge print failed');
+    return data;
+}
+
+async function printViaBrowserSerial(printer, bytes) {
+    if (!navigator.serial) throw new Error('Web Serial is not available in this browser.');
+    const port = posPrinterRuntime.serialPort || await navigator.serial.requestPort();
+    posPrinterRuntime.serialPort = port;
+    if (!port.writable) await port.open({ baudRate: Math.max(1200, safeNumber(printer.baudRate, 9600)) });
+    const writer = port.writable.getWriter();
+    try {
+        await writer.write(bytes);
+    } finally {
+        writer.releaseLock();
+    }
+    try { await port.close(); } catch (error) { console.warn('Serial close skipped:', error); }
+    posPrinterRuntime.serialPort = null;
+}
+
+function parseUsbVendorId(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (!text) return null;
+    const number = text.startsWith('0x') ? parseInt(text.slice(2), 16) : parseInt(text, 10);
+    return Number.isFinite(number) ? number : null;
+}
+
+async function printViaBrowserUsb(printer, bytes) {
+    if (!navigator.usb) throw new Error('WebUSB is not available in this browser.');
+    const vendorId = parseUsbVendorId(printer.vendorId);
+    if (!vendorId) throw new Error('USB Vendor ID is required for WebUSB.');
+    const device = await navigator.usb.requestDevice({ filters: [{ vendorId }] });
+    await device.open();
+    if (!device.configuration) await device.selectConfiguration(1);
+    const interfaceNumber = Math.max(0, Math.round(safeNumber(printer.interfaceNumber, 0)));
+    const endpointNumber = Math.max(1, Math.round(safeNumber(printer.endpointNumber, 1)));
+    await device.claimInterface(interfaceNumber);
+    await device.transferOut(endpointNumber, bytes);
+    try { await device.releaseInterface(interfaceNumber); } catch (error) { console.warn('USB release skipped:', error); }
+    try { await device.close(); } catch (error) { console.warn('USB close skipped:', error); }
+}
+
+async function printViaBluetoothBle(printer, bytes) {
+    if (!navigator.bluetooth) throw new Error('Web Bluetooth is not available in this browser.');
+    const serviceUuid = printer.serviceUuid || POS_PRINTER_DEFAULT_BLE_SERVICE;
+    const characteristicUuid = printer.characteristicUuid || POS_PRINTER_DEFAULT_BLE_CHARACTERISTIC;
+    const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [serviceUuid] }], optionalServices: [serviceUuid] });
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(serviceUuid);
+    const characteristic = await service.getCharacteristic(characteristicUuid);
+    const chunkSize = 180;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+        await characteristic.writeValue(bytes.slice(offset, offset + chunkSize));
+    }
+    if (device.gatt?.connected) device.gatt.disconnect();
+}
+
+async function printEscPosBytes(printer, bytes) {
+    if (printer.connection === 'bridge-network') return printViaBridgeNetwork(printer, bytes);
+    if (printer.connection === 'browser-serial') return printViaBrowserSerial(printer, bytes);
+    if (printer.connection === 'browser-usb') return printViaBrowserUsb(printer, bytes);
+    if (printer.connection === 'browser-bluetooth') return printViaBluetoothBle(printer, bytes);
+    throw new Error('This profile uses browser print fallback.');
+}
+
+function buildPosPrinterTestOrder() {
+    const now = new Date();
+    return {
+        receiptNo: 'TEST-' + now.getFullYear() + String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0') + '-' + String(now.getHours()).padStart(2, '0') + String(now.getMinutes()).padStart(2, '0'),
+        date: now.toLocaleString('th-TH'),
+        cashierName: currentAdminAccess?.displayName || auth.currentUser?.displayName || 'Eden POS',
+        paymentMethod: 'cash',
+        paymentLabel: 'Cash',
+        items: [{ name: 'Eden POS test print', quantity: 1, lineTotal: 1 }],
+        subtotal: 1,
+        discount: 0,
+        taxIncluded: 0.07,
+        totalAmount: 1,
+        paidAmount: 1,
+        changeAmount: 0,
+        isTestOrder: true
+    };
+}
+
+async function printOrderViaActivePosPrinter(order, options = {}) {
+    if (!order) return false;
+    const settings = currentPosPrinterSettings();
+    const printer = currentPosPrinter();
+    const fallback = options.fallback !== false;
+    if (!settings.enabled || !printer || printer.connection === 'browser-print') {
+        if (fallback && !options.silent) return openPosReceiptPrintWindow(order);
+        return false;
+    }
+    try {
+        const bytes = buildEscPosReceiptBytes(order, printer);
+        const copies = Math.min(4, Math.max(1, Math.round(safeNumber(printer.copies, 1))));
+        for (let copy = 0; copy < copies; copy += 1) await printEscPosBytes(printer, bytes);
+        setPosPrinterStatus('Printed on ' + printer.name + '.', 'ready');
+        return true;
+    } catch (error) {
+        console.warn('POS printer failed:', error);
+        setPosPrinterStatus('Printer failed: ' + error.message, 'error');
+        if (fallback && !options.silent) return openPosReceiptPrintWindow(order);
+        return false;
+    }
+}
+
+async function autoPrintPosReceipt(order) {
+    const settings = currentPosPrinterSettings();
+    if (!settings.enabled || !settings.autoPrint) return false;
+    return printOrderViaActivePosPrinter(order, { fallback: false, silent: true });
+}
+
+async function testActivePosPrinter() {
+    const printer = currentPosPrinter();
+    if (!printer) {
+        setPosPrinterStatus('Create or select a printer profile first.', 'warning');
+        return;
+    }
+    if (printer.connection === 'browser-print') {
+        openPosReceiptPrintWindow(buildPosPrinterTestOrder());
+        return;
+    }
+    await printOrderViaActivePosPrinter(buildPosPrinterTestOrder(), { fallback: false });
+}
+
+function initPosPrinterManager() {
+    loadPosPrinterSettings();
+    renderPosPrinterManager();
+    if (posPrinterControlsBound) return;
+    posPrinterControlsBound = true;
+    document.getElementById('pos-printer-enabled')?.addEventListener('change', savePosPrinterGlobalToggles);
+    document.getElementById('pos-printer-auto')?.addEventListener('change', savePosPrinterGlobalToggles);
+    document.getElementById('pos-printer-active-select')?.addEventListener('change', event => {
+        const settings = currentPosPrinterSettings();
+        settings.activePrinterId = event.target.value;
+        posPrinterEditingId = event.target.value;
+        savePosPrinterSettings(settings);
+        renderPosPrinterManager();
+        setPosPrinterStatus('Active printer changed.', 'ready');
+    });
+    document.getElementById('pos-printer-connection')?.addEventListener('change', updatePosPrinterConnectionFields);
+    document.getElementById('pos-printer-new')?.addEventListener('click', () => {
+        const profile = defaultPosPrinterProfile({ id: createPosPrinterId(), name: 'New POS Printer' });
+        posPrinterEditingId = profile.id;
+        const settings = currentPosPrinterSettings();
+        settings.printers.push(profile);
+        settings.activePrinterId = profile.id;
+        savePosPrinterSettings(settings);
+        renderPosPrinterManager();
+        setPosPrinterStatus('New printer profile ready to edit.', 'ready');
+    });
+    document.getElementById('pos-printer-save')?.addEventListener('click', () => upsertPosPrinterProfile(readPosPrinterForm()));
+    document.getElementById('pos-printer-delete')?.addEventListener('click', () => removePosPrinterProfile(posPrinterEditingId));
+    document.getElementById('pos-printer-test')?.addEventListener('click', () => testActivePosPrinter().catch(error => setPosPrinterStatus('Test print failed: ' + error.message, 'error')));
+    document.getElementById('pos-printer-bridge-check')?.addEventListener('click', () => checkPosPrintBridge());
+}
+
+window.editPosPrinterProfile = id => {
+    posPrinterEditingId = id;
+    fillPosPrinterForm(editingPosPrinter());
+    setPosPrinterStatus('Editing printer profile.', 'ready');
+};
+window.checkPosPrintBridge = checkPosPrintBridge;
+window.testActivePosPrinter = testActivePosPrinter;
 
 async function loadPosPromptPaySettings() {
     try {
@@ -2233,6 +2806,7 @@ window.checkoutPosOrder = async () => {
             receipt.style.display = 'block';
         }
         if (printBtn) printBtn.style.display = 'block';
+        await autoPrintPosReceipt(posLastReceipt).catch(error => console.warn('Unable to auto print POS receipt:', error));
         posCart = [];
         setPosActiveBill(null);
         persistPosCart();
@@ -2279,21 +2853,21 @@ function openPosReceiptPrintWindow(order) {
     return true;
 }
 
-window.printPosReceipt = () => {
+window.printPosReceipt = async () => {
     if (!posLastReceipt) {
-        alert('ยังไม่มีใบเสร็จล่าสุดให้พิมพ์');
+        alert('No latest receipt to print.');
         return;
     }
-    openPosReceiptPrintWindow(posLastReceipt);
+    await printOrderViaActivePosPrinter(posLastReceipt, { fallback: true });
 };
 
-window.printSelectedPosReceipt = () => {
+window.printSelectedPosReceipt = async () => {
     const selected = posReceiptOrders.find(order => order.firestoreId === posSelectedReceiptId);
     if (!selected) {
-        alert('กรุณาเลือกใบเสร็จก่อนพิมพ์ซ้ำ');
+        alert('Please select a receipt before printing.');
         return;
     }
-    openPosReceiptPrintWindow(selected);
+    await printOrderViaActivePosPrinter(selected, { fallback: true });
 };
 
 document.documentElement.dataset.posModule = 'ready';
