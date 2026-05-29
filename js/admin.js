@@ -1337,7 +1337,7 @@ function setupRealtimeOrders() {
         const todayStr = new Date().toLocaleDateString('th-TH');
 
         if (snapshot.empty) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">ไม่มีข้อมูลออเดอร์</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">ไม่มีข้อมูลออเดอร์</td></tr>';
             return;
         }
 
@@ -1345,13 +1345,16 @@ function setupRealtimeOrders() {
             const order = docSnap.data();
             const id = docSnap.id;
             const status = order.status || 'pending';
+            const paymentStatus = order.paymentStatus || (order.source === 'pos' ? 'paid' : 'pending');
+            const paymentLabel = order.paymentLabel || order.paymentMethod || '-';
             const isTestOrder = !!order.isTestOrder;
             const displayId = order.receiptNo || order.orderNumber || id.substring(0,8).toUpperCase();
             const sourceLabel = order.source === 'pos' ? (isTestOrder ? 'POS TEST' : 'POS') : 'Online';
             const canVoidPos = order.source === 'pos' && status !== 'cancelled';
             const orderDateStr = order.timestamp ? (order.timestamp.toDate ? order.timestamp.toDate().toLocaleDateString('th-TH') : new Date(order.timestamp).toLocaleDateString('th-TH')) : '';
+            const isRevenueOrder = paymentStatus === 'paid' || status === 'completed';
             
-            if (!isTestOrder && orderDateStr === todayStr) {
+            if (!isTestOrder && isRevenueOrder && status !== 'cancelled' && orderDateStr === todayStr) {
                 todayOrders++;
                 todayRevenue += (order.totalAmount || 0);
             }
@@ -1361,6 +1364,7 @@ function setupRealtimeOrders() {
                 <td style="font-family: monospace;">${escapeHTML(displayId)}</td>
                 <td>${escapeHTML(order.customerName || 'Customer')}<br><small style="color:#888;">${escapeHTML([order.phone || '', sourceLabel].filter(Boolean).join(' | '))}</small></td>
                 <td style="font-weight: 500;">฿${safeNumber(order.totalAmount || order.total).toLocaleString()}</td>
+                <td>${getPaymentStatusBadgeHTML(paymentStatus)}<br><small style="color:#888;">${escapeHTML(paymentLabel)}</small></td>
                 <td>${formatDate(order.timestamp)}</td>
                 <td>${getStatusBadgeHTML(status, 'order')}</td>
                 <td>
@@ -1382,7 +1386,7 @@ function setupRealtimeOrders() {
     }, (error) => {
         console.error("Error listening to orders:", error);
         const tbody = document.getElementById('orders-table-body');
-        if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">ไม่มีสิทธิ์เข้าถึงข้อมูล หรือเกิดข้อผิดพลาด</td></tr>';
+        if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:red;">ไม่มีสิทธิ์เข้าถึงข้อมูล หรือเกิดข้อผิดพลาด</td></tr>';
     });
 }
 
@@ -1500,6 +1504,20 @@ async function updateBookingTable(bookingId, tableNo) {
 window.updateBookingTable = updateBookingTable;
 
 // HTML Helper for Status Badges
+function getPaymentStatusBadgeHTML(status = 'pending') {
+    switch (String(status || 'pending').toLowerCase()) {
+        case 'paid':
+            return '<span class="status-badge status-completed">ชำระแล้ว</span>';
+        case 'failed':
+            return '<span class="status-badge status-cancelled">ชำระไม่สำเร็จ</span>';
+        case 'refunded':
+            return '<span class="status-badge status-cancelled">คืนเงินแล้ว</span>';
+        case 'pending':
+        default:
+            return '<span class="status-badge status-pending">รอชำระ</span>';
+    }
+}
+
 function getStatusBadgeHTML(status, type) {
     if (type === 'order') {
         switch(status) {

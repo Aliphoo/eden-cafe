@@ -170,6 +170,7 @@
             })();
             if (pendingOrder) {
                 pendingOrder.status = 'paid';
+                pendingOrder.paymentStatus = 'paid';
                 pendingOrder.paidAt = new Date().toISOString();
                 const history = (() => {
                     try {
@@ -249,7 +250,7 @@
     }
 
     async function waitForSaveOrder() {
-        for (let i = 0; i < 20; i += 1) {
+        for (let i = 0; i < 80; i += 1) {
             if (typeof window.saveOrderToCloud === 'function') return window.saveOrderToCloud;
             await new Promise(resolve => setTimeout(resolve, 100));
         }
@@ -301,24 +302,35 @@
         }
 
         const orderId = '#ED' + Date.now().toString().slice(-8);
+        const sub = subtotal(cart);
+        const fee = shippingFee();
         const orderData = {
             id: orderId,
             date: new Date().toISOString(),
             items: cart.map(item => ({ id: item.id, name: item.name, price: Number(item.price) || 0, quantity: Number(item.quantity) || 0 })),
+            subtotal: sub,
+            discount,
+            shippingFee: fee,
             totalAmount: latestTotal,
+            total: latestTotal,
             uid: user.uid,
             customerName: name,
             phone,
             address: addressText,
             fulfillmentMethod,
-            shippingFee: shippingFee(),
-            status: 'pending_payment'
+            source: 'online',
+            orderType: 'shop',
+            paymentMethod: 'other',
+            paymentLabel: 'Feelfreepay',
+            paymentStatus: 'pending',
+            status: 'pending'
         };
 
         try {
             const saveOrder = await waitForSaveOrder();
-            if (saveOrder) await saveOrder(orderData);
-            localStorage.setItem('eden_pending_order', JSON.stringify(orderData));
+            if (!saveOrder) throw new Error('Order service is not ready');
+            const firestoreId = await saveOrder(orderData);
+            localStorage.setItem('eden_pending_order', JSON.stringify({ ...orderData, firestoreId }));
             location.href = '/feelfreepay?amount=' + encodeURIComponent(latestTotal) + '&order=' + encodeURIComponent(orderId) + '&lang=' + (isEnglishPage() ? 'en' : 'th');
         } catch (error) {
             console.error('Order create failed:', error);
