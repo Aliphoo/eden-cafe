@@ -8,13 +8,13 @@ const ADMIN_COLLECTION = 'admin_users';
 const ADMIN_PERMISSION_LABELS = {
     dashboard: 'ภาพรวมระบบ', members: 'จัดการสมาชิก', pos: 'POS หน้าร้าน', orders: 'ออเดอร์สินค้า',
     bookings: 'คิวจองโต๊ะ/ห้อง', tables: 'จัดการโต๊ะ/โซน', rooms: 'จัดการห้องรับรอง',
-    products: 'เมนูและหมวดหมู่', shop: 'สินค้าออนไลน์', blogs: 'บทความ', faqs: 'FAQ', footer: 'Footer'
+    products: 'เมนูและหมวดหมู่', shop: 'สินค้าออนไลน์', blogs: 'บทความ', faqs: 'FAQ', promptpay: '\u0e08\u0e31\u0e14\u0e01\u0e32\u0e23\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e40\u0e1e\u0e22\u0e4c', footer: 'Footer'
 };
 const ADMIN_ROLE_LABELS = { owner: 'Owner', head_manager: 'Head Manager', manager: 'Manager' };
 const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
     owner: Object.fromEntries(Object.keys(ADMIN_PERMISSION_LABELS).map(key => [key, true])),
     head_manager: Object.fromEntries(Object.keys(ADMIN_PERMISSION_LABELS).map(key => [key, true])),
-    manager: { dashboard: true, members: false, pos: true, orders: true, bookings: true, tables: false, rooms: false, products: false, shop: false, blogs: false, faqs: false, footer: false }
+    manager: { dashboard: true, members: false, pos: true, orders: true, bookings: true, tables: false, rooms: false, products: false, shop: false, blogs: false, faqs: false, promptpay: false, footer: false }
 };
 
 let currentAdminAccess = null;
@@ -24,6 +24,7 @@ let categoriesData = {};
 let categoriesUnsubscribe = null;
 let productsUnsubscribe = null;
 let openBillsUnsubscribe = null;
+let promptPaySettingsUnsubscribe = null;
 let posSelectedCategory = 'all';
 let posSearchTerm = '';
 let posCart = [];
@@ -32,6 +33,10 @@ let posSelectedCustomer = null;
 let posOpenBills = [];
 let posActiveBill = null;
 let posControlsBound = false;
+let posReceiptOrders = [];
+let posSelectedReceiptId = '';
+let posReceiptSearchTerm = '';
+let posReceiptBusinessDate = posTodayBusinessDate();
 const POS_VIEW_KEY = 'edenPosActiveView';
 const POS_PAYMENT_METHODS = {
     cash: { label: 'เงินสด', hint: 'รับเงินสดและคำนวณเงินทอน' },
@@ -43,7 +48,39 @@ const POS_PAYMENT_METHODS = {
 const POS_PROMPTPAY_ID = '057556001655';
 const POS_PROMPTPAY_MERCHANT_NAME = 'EDEN CAFE';
 const POS_PROMPTPAY_CITY = 'CHIANG RAI';
+const POS_PROMPTPAY_DEFAULT_ACCOUNT = Object.freeze({
+    id: 'eden-main',
+    label: 'Eden Cafe Main',
+    promptPayId: POS_PROMPTPAY_ID,
+    merchantName: POS_PROMPTPAY_MERCHANT_NAME,
+    city: POS_PROMPTPAY_CITY,
+    order: 1
+});
+const POS_PROMPTPAY_DEFAULTS = Object.freeze({
+    enabled: true,
+    activeAccountId: POS_PROMPTPAY_DEFAULT_ACCOUNT.id,
+    accounts: [POS_PROMPTPAY_DEFAULT_ACCOUNT],
+    promptPayId: POS_PROMPTPAY_ID,
+    merchantName: POS_PROMPTPAY_MERCHANT_NAME,
+    city: POS_PROMPTPAY_CITY
+});
+let posPromptPaySettings = { ...POS_PROMPTPAY_DEFAULTS };
 let posPromptPayRenderToken = 0;
+const POS_PRINTER_STORAGE_KEY = 'edenPosPrinterSettingsV1';
+const POS_PRINTER_BRIDGE_DEFAULT = 'http://127.0.0.1:8787';
+const POS_PRINTER_DEFAULT_BLE_SERVICE = '0000ffe0-0000-1000-8000-00805f9b34fb';
+const POS_PRINTER_DEFAULT_BLE_CHARACTERISTIC = '0000ffe1-0000-1000-8000-00805f9b34fb';
+const POS_PRINTER_CONNECTION_LABELS = Object.freeze({
+    'bridge-network': 'WiFi/LAN Bridge',
+    'browser-serial': 'Web Serial Cable/SPP',
+    'browser-usb': 'WebUSB Cable',
+    'browser-bluetooth': 'Bluetooth BLE',
+    'browser-print': 'Browser Print'
+});
+let posPrinterSettings = null;
+let posPrinterEditingId = '';
+let posPrinterControlsBound = false;
+let posPrinterRuntime = { serialPort: null, usbDevice: null, bleDevice: null };
 
 function escapeHTML(value) {
     return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -149,9 +186,11 @@ function cleanupRealtimeListeners() {
     if (categoriesUnsubscribe) categoriesUnsubscribe();
     if (productsUnsubscribe) productsUnsubscribe();
     if (openBillsUnsubscribe) openBillsUnsubscribe();
+    if (promptPaySettingsUnsubscribe) promptPaySettingsUnsubscribe();
     categoriesUnsubscribe = null;
     productsUnsubscribe = null;
     openBillsUnsubscribe = null;
+    promptPaySettingsUnsubscribe = null;
 }
 function renderCategoriesSnapshot(snapshot) {
     categoriesData = {};
@@ -210,6 +249,53 @@ function posTimestampMillis(value) {
     const parsed = Date.parse(value);
     return Number.isFinite(parsed) ? parsed : 0;
 }
+function posBusinessDateFromDate(date = new Date()) {
+    const safeDate = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
+    const year = safeDate.getFullYear();
+    const month = String(safeDate.getMonth() + 1).padStart(2, '0');
+    const day = String(safeDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+function posTodayBusinessDate() {
+    return posBusinessDateFromDate(new Date());
+}
+function posDateFromBusinessDate(value) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return null;
+    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+function posBusinessDateLabel(value = posReceiptBusinessDate) {
+    const date = posDateFromBusinessDate(value);
+    return date ? date.toLocaleDateString('th-TH', { dateStyle: 'long' }) : '-';
+}
+function posBusinessDateFromOrderDateText(value) {
+    const text = String(value || '').trim();
+    const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    if (!match) return '';
+    let year = Number(match[3]);
+    if (year < 100) year += 2500;
+    if (year > 2400) year -= 543;
+    const date = new Date(year, Number(match[2]) - 1, Number(match[1]));
+    return Number.isNaN(date.getTime()) ? '' : posBusinessDateFromDate(date);
+}
+function posOrderBusinessDate(order = {}) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(order.businessDate || ''))) return order.businessDate;
+    const timestamp = posOrderTimestamp(order);
+    if (timestamp) return posBusinessDateFromDate(new Date(timestamp));
+    return posBusinessDateFromOrderDateText(order.date);
+}
+function posOrderMatchesReceiptDate(order = {}) {
+    return posOrderBusinessDate(order) === posReceiptBusinessDate;
+}
+function posOrderTimestamp(order = {}) {
+    return posTimestampMillis(order.closedAt || order.updatedAt || order.createdAt || order.timestamp) || posTimestampMillis(order.date);
+}
+function posOrderDateText(order = {}) {
+    const timestamp = posOrderTimestamp(order);
+    if (timestamp) return new Date(timestamp).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+    return order.date || '-';
+}
 function renderOpenBillsSnapshot(snapshot) {
     const docs = snapshot?.docs ? snapshot.docs : [];
     posOpenBills = docs
@@ -217,6 +303,7 @@ function renderOpenBillsSnapshot(snapshot) {
         .filter(order => order.source === 'pos' && order.billStatus === 'open' && order.paymentStatus !== 'paid')
         .sort((a, b) => posTimestampMillis(b.updatedAt || b.createdAt || b.timestamp) - posTimestampMillis(a.updatedAt || a.createdAt || a.timestamp));
     renderPosOpenBills();
+    renderPosOverviewOpenBills();
 }
 async function refreshOpenBillsOnce() {
     const snapshot = await getDocs(query(collection(db, 'orders'), where('billStatus', '==', 'open'), limit(80)));
@@ -228,6 +315,8 @@ function setupRealtimeOpenBills() {
         console.error('Error listening to POS open bills:', error);
         const container = document.getElementById('pos-open-bills-list');
         if (container) container.innerHTML = '<div class="pos-empty pos-error">โหลดบิลค้างชำระไม่สำเร็จ: ' + escapeHTML(error.message) + '</div>';
+        const overviewContainer = document.getElementById('pos-overview-open-bills-list');
+        if (overviewContainer) overviewContainer.innerHTML = '<div class="pos-empty pos-error">โหลดบิลค้างชำระไม่สำเร็จ: ' + escapeHTML(error.message) + '</div>';
     });
 }
 function setPosAppReady(isReady) {
@@ -288,6 +377,10 @@ function clearLoginError() {
 
 document.addEventListener('DOMContentLoaded', () => {
     initPosViewSwitcher();
+    syncPosReceiptDateInput();
+    renderPosReceiptManager();
+    renderPosOverviewOpenBills();
+    initPosPrinterManager();
     window.addEventListener('hashchange', () => {
         if (window.location.hash === '#pos-sales') setPosView('sales', { persist: false });
         if (window.location.hash === '#pos-overview') setPosView('overview', { persist: false });
@@ -328,6 +421,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (adminName) adminName.textContent = (currentAdminAccess.displayName || user.displayName || 'Admin') + ' (' + (ADMIN_ROLE_LABELS[currentAdminAccess.role] || currentAdminAccess.role) + ')';
             if (adminAvatar) adminAvatar.src = user.photoURL || 'Images/Logo.webp';
             clearLoginError();
+            await loadPosPromptPaySettings();
+            setupRealtimePromptPaySettings();
             setPosAppReady(true);
             setupRealtimeCategories();
             setupRealtimeProducts();
@@ -401,6 +496,648 @@ function emvQrField(id, value) {
     return String(id).padStart(2, '0') + String(text.length).padStart(2, '0') + text;
 }
 
+function cleanPosPromptPayId(value) {
+    return String(value ?? '').replace(/\D/g, '');
+}
+
+function isValidPosPromptPayId(value) {
+    const id = cleanPosPromptPayId(value);
+    return /^0\d{9}$/.test(id) || /^\d{13}$/.test(id) || /^\d{15}$/.test(id);
+}
+
+function normalizePosPromptPayAccount(account = {}, index = 0) {
+    const cleanedId = cleanPosPromptPayId(account.promptPayId || account.idValue || account.number || account.promptpay || POS_PROMPTPAY_DEFAULTS.promptPayId);
+    return {
+        id: String(account.id || account.key || ('promptpay-' + (index + 1))).trim(),
+        label: String(account.label || account.name || account.accountName || ('PromptPay ' + (index + 1))).trim().slice(0, 80) || ('PromptPay ' + (index + 1)),
+        promptPayId: isValidPosPromptPayId(cleanedId) ? cleanedId : POS_PROMPTPAY_DEFAULTS.promptPayId,
+        merchantName: String(account.merchantName || POS_PROMPTPAY_DEFAULTS.merchantName).trim().slice(0, 25) || POS_PROMPTPAY_DEFAULTS.merchantName,
+        city: String(account.city || POS_PROMPTPAY_DEFAULTS.city).trim().slice(0, 15) || POS_PROMPTPAY_DEFAULTS.city,
+        order: Number.isFinite(Number(account.order)) ? Number(account.order) : index + 1
+    };
+}
+
+function normalizePosPromptPaySettings(data = {}) {
+    const legacyAccount = {
+        id: data.accountId || data.activeAccountId || POS_PROMPTPAY_DEFAULT_ACCOUNT.id,
+        label: data.label || data.accountName || POS_PROMPTPAY_DEFAULT_ACCOUNT.label,
+        promptPayId: data.promptPayId,
+        merchantName: data.merchantName,
+        city: data.city,
+        order: 1
+    };
+    const rawAccounts = Array.isArray(data.accounts) && data.accounts.length ? data.accounts : [legacyAccount];
+    const accounts = rawAccounts
+        .map((account, index) => normalizePosPromptPayAccount(account, index))
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+        .map((account, index) => ({ ...account, order: index + 1 }));
+    if (!accounts.length) accounts.push(normalizePosPromptPayAccount(POS_PROMPTPAY_DEFAULT_ACCOUNT, 0));
+
+    let activeAccountId = String(data.activeAccountId || data.selectedAccountId || data.accountId || '').trim();
+    if (!accounts.some(account => account.id === activeAccountId)) activeAccountId = accounts[0].id;
+    const activeAccount = accounts.find(account => account.id === activeAccountId) || accounts[0] || normalizePosPromptPayAccount(POS_PROMPTPAY_DEFAULT_ACCOUNT, 0);
+    return {
+        enabled: data.enabled !== false,
+        activeAccountId,
+        accounts,
+        promptPayId: activeAccount.promptPayId,
+        merchantName: activeAccount.merchantName,
+        city: activeAccount.city
+    };
+}
+
+function currentPosPromptPaySettings() {
+    posPromptPaySettings = normalizePosPromptPaySettings(posPromptPaySettings);
+    return posPromptPaySettings;
+}
+
+function updatePosPromptPayCopy() {
+    const settings = currentPosPromptPaySettings();
+    const idEl = document.getElementById('pos-promptpay-id');
+    if (idEl) idEl.textContent = settings.promptPayId;
+}
+
+function createPosPrinterId() {
+    if (window.crypto?.randomUUID) return 'printer-' + window.crypto.randomUUID();
+    return 'printer-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+
+function defaultPosPrinterProfile(overrides = {}) {
+    return {
+        id: overrides.id || createPosPrinterId(),
+        name: overrides.name || 'Eden LAN Printer',
+        connection: overrides.connection || 'bridge-network',
+        endpoint: overrides.endpoint || POS_PRINTER_BRIDGE_DEFAULT,
+        host: overrides.host || '',
+        port: safeNumber(overrides.port, 9100),
+        baudRate: safeNumber(overrides.baudRate, 9600),
+        vendorId: String(overrides.vendorId || '').trim(),
+        interfaceNumber: safeNumber(overrides.interfaceNumber, 0),
+        endpointNumber: safeNumber(overrides.endpointNumber, 1),
+        serviceUuid: overrides.serviceUuid || POS_PRINTER_DEFAULT_BLE_SERVICE,
+        characteristicUuid: overrides.characteristicUuid || POS_PRINTER_DEFAULT_BLE_CHARACTERISTIC,
+        paperWidth: safeNumber(overrides.paperWidth, 80) === 58 ? 58 : 80,
+        copies: Math.min(4, Math.max(1, Math.round(safeNumber(overrides.copies, 1)))),
+        codepage: ['thai42', 'cp874', 'ascii', 'utf8'].includes(overrides.codepage) ? overrides.codepage : 'thai42'
+    };
+}
+
+function normalizePosPrinterProfile(profile = {}, index = 0) {
+    const allowedConnections = Object.keys(POS_PRINTER_CONNECTION_LABELS);
+    const normalized = defaultPosPrinterProfile({
+        ...profile,
+        id: String(profile.id || '').trim() || 'printer-' + (index + 1),
+        name: String(profile.name || profile.label || '').trim() || 'POS Printer ' + (index + 1),
+        connection: allowedConnections.includes(profile.connection) ? profile.connection : 'bridge-network'
+    });
+    return normalized;
+}
+
+function normalizePosPrinterSettings(data = {}) {
+    const rawPrinters = Array.isArray(data.printers) ? data.printers : [];
+    const printers = rawPrinters.length
+        ? rawPrinters.map((profile, index) => normalizePosPrinterProfile(profile, index))
+        : [defaultPosPrinterProfile({ id: 'eden-default-lan', name: 'Eden LAN Printer' })];
+    let activePrinterId = String(data.activePrinterId || '').trim();
+    if (!printers.some(printer => printer.id === activePrinterId)) activePrinterId = printers[0]?.id || '';
+    return {
+        enabled: data.enabled !== false,
+        autoPrint: data.autoPrint === true,
+        activePrinterId,
+        printers
+    };
+}
+
+function loadPosPrinterSettings() {
+    if (posPrinterSettings) return posPrinterSettings;
+    try {
+        const saved = JSON.parse(localStorage.getItem(POS_PRINTER_STORAGE_KEY) || '{}');
+        posPrinterSettings = normalizePosPrinterSettings(saved);
+    } catch (error) {
+        console.warn('Unable to load POS printer settings:', error);
+        posPrinterSettings = normalizePosPrinterSettings({});
+    }
+    if (!posPrinterEditingId) posPrinterEditingId = posPrinterSettings.activePrinterId || posPrinterSettings.printers[0]?.id || '';
+    return posPrinterSettings;
+}
+
+function savePosPrinterSettings(settings = posPrinterSettings) {
+    posPrinterSettings = normalizePosPrinterSettings(settings || {});
+    try {
+        localStorage.setItem(POS_PRINTER_STORAGE_KEY, JSON.stringify(posPrinterSettings));
+    } catch (error) {
+        console.warn('Unable to save POS printer settings:', error);
+    }
+    return posPrinterSettings;
+}
+
+function currentPosPrinterSettings() {
+    return loadPosPrinterSettings();
+}
+
+function currentPosPrinter() {
+    const settings = currentPosPrinterSettings();
+    return settings.printers.find(printer => printer.id === settings.activePrinterId) || settings.printers[0] || null;
+}
+
+function editingPosPrinter() {
+    const settings = currentPosPrinterSettings();
+    return settings.printers.find(printer => printer.id === posPrinterEditingId) || currentPosPrinter() || settings.printers[0] || null;
+}
+
+function setPosPrinterStatus(message, tone = '') {
+    const status = document.getElementById('pos-printer-status');
+    if (!status) return;
+    status.textContent = message;
+    status.className = 'pos-printer-status' + (tone ? ' ' + tone : '');
+}
+
+function describePosPrinter(printer = null) {
+    if (!printer) return 'Not configured';
+    const label = POS_PRINTER_CONNECTION_LABELS[printer.connection] || printer.connection || 'Printer';
+    if (printer.connection === 'bridge-network') return label + (printer.host ? ' @ ' + printer.host + ':' + printer.port : ' - set printer IP');
+    if (printer.connection === 'browser-serial') return label + ' @ ' + printer.baudRate + ' baud';
+    if (printer.connection === 'browser-usb') return label + (printer.vendorId ? ' vendor ' + printer.vendorId : ' - set vendor ID');
+    if (printer.connection === 'browser-bluetooth') return label + ' BLE';
+    return label;
+}
+
+function updatePosPrinterCapabilityStatus() {
+    const browserStatus = document.getElementById('pos-printer-browser-status');
+    if (!browserStatus) return;
+    const flags = [];
+    flags.push('Serial ' + (navigator.serial ? 'OK' : 'No'));
+    flags.push('USB ' + (navigator.usb ? 'OK' : 'No'));
+    flags.push('BLE ' + (navigator.bluetooth ? 'OK' : 'No'));
+    browserStatus.textContent = flags.join(' / ');
+}
+
+function updatePosPrinterConnectionFields() {
+    const connection = document.getElementById('pos-printer-connection')?.value || 'bridge-network';
+    const visible = new Set();
+    if (connection === 'bridge-network') ['endpoint', 'host', 'port'].forEach(key => visible.add(key));
+    if (connection === 'browser-serial') visible.add('baud');
+    if (connection === 'browser-usb') ['vendor', 'interface', 'endpoint-number'].forEach(key => visible.add(key));
+    if (connection === 'browser-bluetooth') ['service', 'characteristic'].forEach(key => visible.add(key));
+    document.querySelectorAll('[data-printer-field]').forEach(field => {
+        field.style.display = visible.has(field.dataset.printerField) ? '' : 'none';
+    });
+}
+
+function fillPosPrinterForm(printer = editingPosPrinter()) {
+    const profile = printer || defaultPosPrinterProfile();
+    const valueMap = {
+        'pos-printer-name': profile.name,
+        'pos-printer-connection': profile.connection,
+        'pos-printer-paper': String(profile.paperWidth),
+        'pos-printer-copies': String(profile.copies),
+        'pos-printer-endpoint': profile.endpoint,
+        'pos-printer-host': profile.host,
+        'pos-printer-port': String(profile.port),
+        'pos-printer-baud': String(profile.baudRate),
+        'pos-printer-vendor': profile.vendorId,
+        'pos-printer-interface': String(profile.interfaceNumber),
+        'pos-printer-endpoint-number': String(profile.endpointNumber),
+        'pos-printer-service': profile.serviceUuid,
+        'pos-printer-characteristic': profile.characteristicUuid,
+        'pos-printer-codepage': profile.codepage
+    };
+    Object.entries(valueMap).forEach(([id, value]) => {
+        const input = document.getElementById(id);
+        if (input) input.value = value ?? '';
+    });
+    updatePosPrinterConnectionFields();
+}
+
+function readPosPrinterForm() {
+    const existing = editingPosPrinter() || defaultPosPrinterProfile();
+    return normalizePosPrinterProfile({
+        ...existing,
+        id: existing.id || createPosPrinterId(),
+        name: document.getElementById('pos-printer-name')?.value || existing.name,
+        connection: document.getElementById('pos-printer-connection')?.value || existing.connection,
+        paperWidth: safeNumber(document.getElementById('pos-printer-paper')?.value, existing.paperWidth),
+        copies: safeNumber(document.getElementById('pos-printer-copies')?.value, existing.copies),
+        endpoint: document.getElementById('pos-printer-endpoint')?.value || POS_PRINTER_BRIDGE_DEFAULT,
+        host: document.getElementById('pos-printer-host')?.value || '',
+        port: safeNumber(document.getElementById('pos-printer-port')?.value, 9100),
+        baudRate: safeNumber(document.getElementById('pos-printer-baud')?.value, 9600),
+        vendorId: document.getElementById('pos-printer-vendor')?.value || '',
+        interfaceNumber: safeNumber(document.getElementById('pos-printer-interface')?.value, 0),
+        endpointNumber: safeNumber(document.getElementById('pos-printer-endpoint-number')?.value, 1),
+        serviceUuid: document.getElementById('pos-printer-service')?.value || POS_PRINTER_DEFAULT_BLE_SERVICE,
+        characteristicUuid: document.getElementById('pos-printer-characteristic')?.value || POS_PRINTER_DEFAULT_BLE_CHARACTERISTIC,
+        codepage: document.getElementById('pos-printer-codepage')?.value || 'thai42'
+    });
+}
+
+function renderPosPrinterManager() {
+    const settings = currentPosPrinterSettings();
+    const active = currentPosPrinter();
+    const enabled = document.getElementById('pos-printer-enabled');
+    const auto = document.getElementById('pos-printer-auto');
+    const activeSelect = document.getElementById('pos-printer-active-select');
+    const activeLabel = document.getElementById('pos-printer-active-label');
+    const activeType = document.getElementById('pos-printer-active-type');
+    const list = document.getElementById('pos-printer-list');
+    if (enabled) enabled.checked = settings.enabled;
+    if (auto) auto.checked = settings.autoPrint;
+    if (activeSelect) {
+        activeSelect.innerHTML = settings.printers.map(printer => `<option value="${escapeHTML(printer.id)}" ${printer.id === settings.activePrinterId ? 'selected' : ''}>${escapeHTML(printer.name)}</option>`).join('');
+    }
+    if (activeLabel) activeLabel.textContent = active?.name || 'Not configured';
+    if (activeType) activeType.textContent = describePosPrinter(active);
+    if (list) {
+        list.innerHTML = settings.printers.map(printer => `
+            <div class="pos-printer-profile ${printer.id === settings.activePrinterId ? 'active' : ''}">
+                <div>
+                    <strong>${escapeHTML(printer.name)}</strong>
+                    <small>${escapeHTML(describePosPrinter(printer))}</small>
+                </div>
+                <button type="button" onclick="editPosPrinterProfile('${escapeJSString(printer.id)}')">Edit</button>
+            </div>
+        `).join('') || '<div class="pos-empty">No printer profiles yet.</div>';
+    }
+    if (!editingPosPrinter() && settings.printers[0]) posPrinterEditingId = settings.printers[0].id;
+    fillPosPrinterForm(editingPosPrinter());
+    updatePosPrinterCapabilityStatus();
+}
+
+function savePosPrinterGlobalToggles() {
+    const settings = currentPosPrinterSettings();
+    settings.enabled = document.getElementById('pos-printer-enabled')?.checked !== false;
+    settings.autoPrint = document.getElementById('pos-printer-auto')?.checked === true;
+    settings.activePrinterId = document.getElementById('pos-printer-active-select')?.value || settings.activePrinterId;
+    posPrinterEditingId = posPrinterEditingId || settings.activePrinterId;
+    savePosPrinterSettings(settings);
+    renderPosPrinterManager();
+}
+
+function upsertPosPrinterProfile(profile) {
+    const settings = currentPosPrinterSettings();
+    const index = settings.printers.findIndex(printer => printer.id === profile.id);
+    if (index >= 0) settings.printers[index] = profile;
+    else settings.printers.push(profile);
+    if (!settings.activePrinterId || index < 0) settings.activePrinterId = profile.id;
+    posPrinterEditingId = profile.id;
+    savePosPrinterSettings(settings);
+    renderPosPrinterManager();
+    setPosPrinterStatus('Printer profile saved.', 'ready');
+}
+
+function removePosPrinterProfile(id) {
+    const settings = currentPosPrinterSettings();
+    if (settings.printers.length <= 1) {
+        setPosPrinterStatus('Keep at least one printer profile.', 'warning');
+        return;
+    }
+    settings.printers = settings.printers.filter(printer => printer.id !== id);
+    if (!settings.printers.some(printer => printer.id === settings.activePrinterId)) settings.activePrinterId = settings.printers[0]?.id || '';
+    posPrinterEditingId = settings.activePrinterId;
+    savePosPrinterSettings(settings);
+    renderPosPrinterManager();
+    setPosPrinterStatus('Printer profile deleted.', 'warning');
+}
+
+function normalizeBridgeEndpoint(endpoint) {
+    return String(endpoint || POS_PRINTER_BRIDGE_DEFAULT).trim().replace(/\/+$/, '') || POS_PRINTER_BRIDGE_DEFAULT;
+}
+
+async function checkPosPrintBridge() {
+    const printer = currentPosPrinter() || defaultPosPrinterProfile();
+    const endpoint = normalizeBridgeEndpoint(printer.endpoint);
+    const statusEl = document.getElementById('pos-printer-bridge-status');
+    try {
+        const response = await fetch(endpoint + '/health', { method: 'GET' });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok === false) throw new Error(data.error || 'Bridge health check failed');
+        if (statusEl) statusEl.textContent = 'Online';
+        setPosPrinterStatus('Eden Print Bridge is online at ' + endpoint + '.', 'ready');
+        return true;
+    } catch (error) {
+        if (statusEl) statusEl.textContent = 'Offline';
+        setPosPrinterStatus('Bridge offline: ' + error.message, 'warning');
+        return false;
+    }
+}
+
+function receiptMoneyText(value) {
+    return 'B' + safeNumber(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function receiptLineWidth(printer = {}) {
+    return safeNumber(printer.paperWidth, 80) === 58 ? 32 : 42;
+}
+
+function cleanReceiptText(value) {
+    return String(value ?? '').replace(/\r/g, '').replace(/[\t ]+/g, ' ').trim();
+}
+
+function centerReceiptText(text, width) {
+    const clean = cleanReceiptText(text);
+    if (clean.length >= width) return clean.slice(0, width);
+    const left = Math.floor((width - clean.length) / 2);
+    return ' '.repeat(left) + clean;
+}
+
+function twoColumnReceiptText(left, right, width) {
+    const cleanLeft = cleanReceiptText(left);
+    const cleanRight = cleanReceiptText(right);
+    const maxLeft = Math.max(1, width - cleanRight.length - 1);
+    const clippedLeft = cleanLeft.length > maxLeft ? cleanLeft.slice(0, maxLeft - 1) + '.' : cleanLeft;
+    return clippedLeft + ' '.repeat(Math.max(1, width - clippedLeft.length - cleanRight.length)) + cleanRight;
+}
+
+function wrapReceiptText(text, width) {
+    const clean = cleanReceiptText(text);
+    if (!clean) return [''];
+    const lines = [];
+    let rest = clean;
+    while (rest.length > width) {
+        let cut = rest.lastIndexOf(' ', width);
+        if (cut < width * 0.45) cut = width;
+        lines.push(rest.slice(0, cut).trim());
+        rest = rest.slice(cut).trim();
+    }
+    lines.push(rest);
+    return lines;
+}
+
+function encodeEscPosText(text, codepage = 'thai42') {
+    if (codepage === 'utf8') return Array.from(new TextEncoder().encode(String(text ?? '')));
+    const bytes = [];
+    for (const char of String(text ?? '')) {
+        const code = char.codePointAt(0);
+        if (code === 10 || code === 13 || code === 9 || (code >= 32 && code <= 126)) {
+            bytes.push(code);
+        } else if (codepage !== 'ascii' && code >= 0x0E01 && code <= 0x0E5B) {
+            bytes.push(code - 0x0D60);
+        } else if (codepage !== 'ascii' && code === 0x0E3F) {
+            bytes.push(0x80);
+        } else if (code === 0x2013 || code === 0x2014 || code === 0x2212) {
+            bytes.push(45);
+        } else if (code === 0x2022) {
+            bytes.push(42);
+        } else {
+            bytes.push(63);
+        }
+    }
+    return bytes;
+}
+
+function pushEscPosLine(target, text = '', printer = {}) {
+    target.push(...encodeEscPosText(text, printer.codepage), 10);
+}
+
+function buildEscPosReceiptBytes(order = {}, printer = {}) {
+    const width = receiptLineWidth(printer);
+    const items = Array.isArray(order.items) ? order.items : [];
+    const bytes = [];
+    const line = '-'.repeat(width);
+    bytes.push(0x1B, 0x40);
+    if (printer.codepage === 'thai42') bytes.push(0x1B, 0x74, 20);
+    bytes.push(0x1B, 0x61, 1, 0x1B, 0x45, 1);
+    pushEscPosLine(bytes, 'Eden Cafe', printer);
+    bytes.push(0x1B, 0x45, 0);
+    pushEscPosLine(bytes, order.isTestOrder ? 'POS Receipt (TEST)' : 'POS Receipt', printer);
+    bytes.push(0x1B, 0x61, 0);
+    pushEscPosLine(bytes, line, printer);
+    pushEscPosLine(bytes, 'Receipt: ' + (order.receiptNo || order.id || '-'), printer);
+    pushEscPosLine(bytes, 'Time: ' + (order.date || posOrderDateText(order) || new Date().toLocaleString('th-TH')), printer);
+    pushEscPosLine(bytes, 'Cashier: ' + (order.cashierName || '-'), printer);
+    pushEscPosLine(bytes, line, printer);
+    items.forEach(item => {
+        const quantity = safeNumber(item.quantity, 1);
+        const name = cleanReceiptText((item.name || 'Item') + (item.variantName ? ' / ' + item.variantName : '') + ' x' + quantity);
+        const amount = receiptMoneyText(item.lineTotal ?? (safeNumber(item.price) * quantity));
+        const itemLines = wrapReceiptText(name, Math.max(12, width - amount.length - 1));
+        pushEscPosLine(bytes, twoColumnReceiptText(itemLines[0], amount, width), printer);
+        itemLines.slice(1).forEach(extra => pushEscPosLine(bytes, extra, printer));
+    });
+    pushEscPosLine(bytes, line, printer);
+    pushEscPosLine(bytes, twoColumnReceiptText('Subtotal', receiptMoneyText(order.subtotal), width), printer);
+    pushEscPosLine(bytes, twoColumnReceiptText('Discount', '-' + receiptMoneyText(order.discount), width), printer);
+    pushEscPosLine(bytes, twoColumnReceiptText('VAT included', receiptMoneyText(order.taxIncluded), width), printer);
+    bytes.push(0x1B, 0x45, 1);
+    pushEscPosLine(bytes, twoColumnReceiptText('Total', receiptMoneyText(order.totalAmount ?? order.total), width), printer);
+    bytes.push(0x1B, 0x45, 0);
+    pushEscPosLine(bytes, twoColumnReceiptText('Payment', order.paymentLabel || posPaymentLabel(order.paymentMethod) || '-', width), printer);
+    pushEscPosLine(bytes, twoColumnReceiptText('Paid', receiptMoneyText(order.paidAmount), width), printer);
+    pushEscPosLine(bytes, twoColumnReceiptText('Change', receiptMoneyText(order.changeAmount), width), printer);
+    pushEscPosLine(bytes, line, printer);
+    bytes.push(0x1B, 0x61, 1);
+    pushEscPosLine(bytes, centerReceiptText('Thank you for supporting Eden Cafe', width), printer);
+    bytes.push(0x1B, 0x61, 0, 10, 10, 10, 0x1D, 0x56, 0x42, 0x00);
+    return new Uint8Array(bytes);
+}
+
+function bytesToBase64(bytes) {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+        const chunk = bytes.subarray(i, i + 0x8000);
+        binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+}
+
+async function printViaBridgeNetwork(printer, bytes) {
+    if (!printer.host) throw new Error('LAN printer IP is required.');
+    const endpoint = normalizeBridgeEndpoint(printer.endpoint);
+    const response = await fetch(endpoint + '/print/network', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: printer.host, port: printer.port || 9100, payloadBase64: bytesToBase64(bytes) })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) throw new Error(data.error || 'Bridge print failed');
+    return data;
+}
+
+async function printViaBrowserSerial(printer, bytes) {
+    if (!navigator.serial) throw new Error('Web Serial is not available in this browser.');
+    const port = posPrinterRuntime.serialPort || await navigator.serial.requestPort();
+    posPrinterRuntime.serialPort = port;
+    if (!port.writable) await port.open({ baudRate: Math.max(1200, safeNumber(printer.baudRate, 9600)) });
+    const writer = port.writable.getWriter();
+    try {
+        await writer.write(bytes);
+    } finally {
+        writer.releaseLock();
+    }
+    try { await port.close(); } catch (error) { console.warn('Serial close skipped:', error); }
+    posPrinterRuntime.serialPort = null;
+}
+
+function parseUsbVendorId(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (!text) return null;
+    const number = text.startsWith('0x') ? parseInt(text.slice(2), 16) : parseInt(text, 10);
+    return Number.isFinite(number) ? number : null;
+}
+
+async function printViaBrowserUsb(printer, bytes) {
+    if (!navigator.usb) throw new Error('WebUSB is not available in this browser.');
+    const vendorId = parseUsbVendorId(printer.vendorId);
+    if (!vendorId) throw new Error('USB Vendor ID is required for WebUSB.');
+    const device = await navigator.usb.requestDevice({ filters: [{ vendorId }] });
+    await device.open();
+    if (!device.configuration) await device.selectConfiguration(1);
+    const interfaceNumber = Math.max(0, Math.round(safeNumber(printer.interfaceNumber, 0)));
+    const endpointNumber = Math.max(1, Math.round(safeNumber(printer.endpointNumber, 1)));
+    await device.claimInterface(interfaceNumber);
+    await device.transferOut(endpointNumber, bytes);
+    try { await device.releaseInterface(interfaceNumber); } catch (error) { console.warn('USB release skipped:', error); }
+    try { await device.close(); } catch (error) { console.warn('USB close skipped:', error); }
+}
+
+async function printViaBluetoothBle(printer, bytes) {
+    if (!navigator.bluetooth) throw new Error('Web Bluetooth is not available in this browser.');
+    const serviceUuid = printer.serviceUuid || POS_PRINTER_DEFAULT_BLE_SERVICE;
+    const characteristicUuid = printer.characteristicUuid || POS_PRINTER_DEFAULT_BLE_CHARACTERISTIC;
+    const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [serviceUuid] }], optionalServices: [serviceUuid] });
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(serviceUuid);
+    const characteristic = await service.getCharacteristic(characteristicUuid);
+    const chunkSize = 180;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+        await characteristic.writeValue(bytes.slice(offset, offset + chunkSize));
+    }
+    if (device.gatt?.connected) device.gatt.disconnect();
+}
+
+async function printEscPosBytes(printer, bytes) {
+    if (printer.connection === 'bridge-network') return printViaBridgeNetwork(printer, bytes);
+    if (printer.connection === 'browser-serial') return printViaBrowserSerial(printer, bytes);
+    if (printer.connection === 'browser-usb') return printViaBrowserUsb(printer, bytes);
+    if (printer.connection === 'browser-bluetooth') return printViaBluetoothBle(printer, bytes);
+    throw new Error('This profile uses browser print fallback.');
+}
+
+function buildPosPrinterTestOrder() {
+    const now = new Date();
+    return {
+        receiptNo: 'TEST-' + now.getFullYear() + String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0') + '-' + String(now.getHours()).padStart(2, '0') + String(now.getMinutes()).padStart(2, '0'),
+        date: now.toLocaleString('th-TH'),
+        cashierName: currentAdminAccess?.displayName || auth.currentUser?.displayName || 'Eden POS',
+        paymentMethod: 'cash',
+        paymentLabel: 'Cash',
+        items: [{ name: 'Eden POS test print', quantity: 1, lineTotal: 1 }],
+        subtotal: 1,
+        discount: 0,
+        taxIncluded: 0.07,
+        totalAmount: 1,
+        paidAmount: 1,
+        changeAmount: 0,
+        isTestOrder: true
+    };
+}
+
+async function printOrderViaActivePosPrinter(order, options = {}) {
+    if (!order) return false;
+    const settings = currentPosPrinterSettings();
+    const printer = currentPosPrinter();
+    const fallback = options.fallback !== false;
+    if (!settings.enabled || !printer || printer.connection === 'browser-print') {
+        if (fallback && !options.silent) return openPosReceiptPrintWindow(order);
+        return false;
+    }
+    try {
+        const bytes = buildEscPosReceiptBytes(order, printer);
+        const copies = Math.min(4, Math.max(1, Math.round(safeNumber(printer.copies, 1))));
+        for (let copy = 0; copy < copies; copy += 1) await printEscPosBytes(printer, bytes);
+        setPosPrinterStatus('Printed on ' + printer.name + '.', 'ready');
+        return true;
+    } catch (error) {
+        console.warn('POS printer failed:', error);
+        setPosPrinterStatus('Printer failed: ' + error.message, 'error');
+        if (fallback && !options.silent) return openPosReceiptPrintWindow(order);
+        return false;
+    }
+}
+
+async function autoPrintPosReceipt(order) {
+    const settings = currentPosPrinterSettings();
+    if (!settings.enabled || !settings.autoPrint) return false;
+    return printOrderViaActivePosPrinter(order, { fallback: false, silent: true });
+}
+
+async function testActivePosPrinter() {
+    const printer = currentPosPrinter();
+    if (!printer) {
+        setPosPrinterStatus('Create or select a printer profile first.', 'warning');
+        return;
+    }
+    if (printer.connection === 'browser-print') {
+        openPosReceiptPrintWindow(buildPosPrinterTestOrder());
+        return;
+    }
+    await printOrderViaActivePosPrinter(buildPosPrinterTestOrder(), { fallback: false });
+}
+
+function initPosPrinterManager() {
+    loadPosPrinterSettings();
+    renderPosPrinterManager();
+    if (posPrinterControlsBound) return;
+    posPrinterControlsBound = true;
+    document.getElementById('pos-printer-enabled')?.addEventListener('change', savePosPrinterGlobalToggles);
+    document.getElementById('pos-printer-auto')?.addEventListener('change', savePosPrinterGlobalToggles);
+    document.getElementById('pos-printer-active-select')?.addEventListener('change', event => {
+        const settings = currentPosPrinterSettings();
+        settings.activePrinterId = event.target.value;
+        posPrinterEditingId = event.target.value;
+        savePosPrinterSettings(settings);
+        renderPosPrinterManager();
+        setPosPrinterStatus('Active printer changed.', 'ready');
+    });
+    document.getElementById('pos-printer-connection')?.addEventListener('change', updatePosPrinterConnectionFields);
+    document.getElementById('pos-printer-new')?.addEventListener('click', () => {
+        const profile = defaultPosPrinterProfile({ id: createPosPrinterId(), name: 'New POS Printer' });
+        posPrinterEditingId = profile.id;
+        const settings = currentPosPrinterSettings();
+        settings.printers.push(profile);
+        settings.activePrinterId = profile.id;
+        savePosPrinterSettings(settings);
+        renderPosPrinterManager();
+        setPosPrinterStatus('New printer profile ready to edit.', 'ready');
+    });
+    document.getElementById('pos-printer-save')?.addEventListener('click', () => upsertPosPrinterProfile(readPosPrinterForm()));
+    document.getElementById('pos-printer-delete')?.addEventListener('click', () => removePosPrinterProfile(posPrinterEditingId));
+    document.getElementById('pos-printer-test')?.addEventListener('click', () => testActivePosPrinter().catch(error => setPosPrinterStatus('Test print failed: ' + error.message, 'error')));
+    document.getElementById('pos-printer-bridge-check')?.addEventListener('click', () => checkPosPrintBridge());
+}
+
+window.editPosPrinterProfile = id => {
+    posPrinterEditingId = id;
+    fillPosPrinterForm(editingPosPrinter());
+    setPosPrinterStatus('Editing printer profile.', 'ready');
+};
+window.checkPosPrintBridge = checkPosPrintBridge;
+window.testActivePosPrinter = testActivePosPrinter;
+
+async function loadPosPromptPaySettings() {
+    try {
+        const snap = await getDoc(doc(db, 'site_settings', 'promptpay'));
+        posPromptPaySettings = normalizePosPromptPaySettings(snap.exists() ? snap.data() : POS_PROMPTPAY_DEFAULTS);
+    } catch (error) {
+        console.warn('Unable to load PromptPay settings, using defaults:', error);
+        posPromptPaySettings = { ...POS_PROMPTPAY_DEFAULTS };
+    }
+    updatePosPromptPayCopy();
+    renderPosPromptPayQr(posCartTotals());
+    return posPromptPaySettings;
+}
+
+function setupRealtimePromptPaySettings() {
+    if (promptPaySettingsUnsubscribe) return;
+    promptPaySettingsUnsubscribe = onSnapshot(doc(db, 'site_settings', 'promptpay'), (snap) => {
+        posPromptPaySettings = normalizePosPromptPaySettings(snap.exists() ? snap.data() : POS_PROMPTPAY_DEFAULTS);
+        updatePosPromptPayCopy();
+        renderPosPromptPayQr(posCartTotals());
+    }, (error) => {
+        console.warn('Unable to listen to PromptPay settings, keeping current values:', error);
+    });
+}
+
 function promptPayProxyField(promptPayId = POS_PROMPTPAY_ID) {
     const id = String(promptPayId ?? '').replace(/\D/g, '');
     if (/^0\d{9}$/.test(id)) return emvQrField('01', '0066' + id.slice(1));
@@ -422,8 +1159,9 @@ function promptPayCrc16(payload) {
 }
 
 function buildPromptPayPayload(amount) {
+    const settings = currentPosPromptPaySettings();
     const total = posRound(amount);
-    const merchantInfo = emvQrField('00', 'A000000677010111') + promptPayProxyField(POS_PROMPTPAY_ID);
+    const merchantInfo = emvQrField('00', 'A000000677010111') + promptPayProxyField(settings.promptPayId);
     let payload = ''
         + emvQrField('00', '01')
         + emvQrField('01', total > 0 ? '12' : '11')
@@ -431,8 +1169,8 @@ function buildPromptPayPayload(amount) {
         + emvQrField('53', '764');
     if (total > 0) payload += emvQrField('54', total.toFixed(2));
     payload += emvQrField('58', 'TH')
-        + emvQrField('59', POS_PROMPTPAY_MERCHANT_NAME.slice(0, 25))
-        + emvQrField('60', POS_PROMPTPAY_CITY.slice(0, 15))
+        + emvQrField('59', settings.merchantName.slice(0, 25))
+        + emvQrField('60', settings.city.slice(0, 15))
         + '6304';
     return payload + promptPayCrc16(payload);
 }
@@ -482,12 +1220,18 @@ async function renderPosPromptPayQr(totals = posCartTotals()) {
     const amountEl = document.getElementById('pos-promptpay-amount');
     const idEl = document.getElementById('pos-promptpay-id');
     const payloadEl = document.getElementById('pos-promptpay-payload');
+    const settings = currentPosPromptPaySettings();
     const amount = posRound(totals.total);
 
-    if (idEl) idEl.textContent = POS_PROMPTPAY_ID;
+    if (idEl) idEl.textContent = settings.promptPayId;
     if (amountEl) amountEl.textContent = posMoney(amount);
     if (payloadEl) payloadEl.value = '';
     if (qrImg) qrImg.removeAttribute('src');
+
+    if (settings.enabled === false) {
+        setPromptPayStatus('\u0e1b\u0e34\u0e14\u0e01\u0e32\u0e23\u0e43\u0e0a\u0e49 QR PromptPay \u0e08\u0e32\u0e01\u0e2b\u0e25\u0e31\u0e07\u0e1a\u0e49\u0e32\u0e19', 'warning');
+        return;
+    }
 
     if (!posCart.length || amount <= 0) {
         setPromptPayStatus('เลือกสินค้าเพื่อสร้าง QR ตามยอดชำระ', 'warning');
@@ -503,7 +1247,7 @@ async function renderPosPromptPayQr(totals = posCartTotals()) {
         const dataUrl = await createQrDataUrl(payload);
         if (token !== posPromptPayRenderToken) return;
         if (qrImg) qrImg.src = dataUrl;
-        setPromptPayStatus('พร้อมสแกนชำระผ่าน PromptPay 057556001655', 'ready');
+        setPromptPayStatus('\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e2a\u0e41\u0e01\u0e19\u0e0a\u0e33\u0e23\u0e30\u0e1c\u0e48\u0e32\u0e19 PromptPay ' + settings.promptPayId, 'ready');
     } catch (error) {
         console.error('PromptPay QR generation failed:', error);
         setPromptPayStatus('สร้าง QR ไม่สำเร็จ: ' + error.message, 'error');
@@ -564,6 +1308,36 @@ function posStorageKey() {
     return 'edenAdminPosCartV1';
 }
 
+function posActiveBillStorageKey() {
+    return 'edenAdminPosActiveBillV1';
+}
+
+function serializePosActiveBill(order = null) {
+    if (!order) return null;
+    return {
+        firestoreId: order.firestoreId || '',
+        id: order.id || '',
+        receiptNo: order.receiptNo || '',
+        uid: order.uid || '',
+        customerName: order.customerName || '',
+        phone: order.phone || '',
+        note: order.note || '',
+        customerUid: order.customerUid || '',
+        customerEmail: order.customerEmail || '',
+        customerLineId: order.customerLineId || '',
+        customerTier: order.customerTier || '',
+        customerMemberCode: order.customerMemberCode || '',
+        customerProfileSynced: !!order.customerProfileSynced,
+        paymentMethod: order.paymentMethod || 'cash',
+        discount: safeNumber(order.discount),
+        source: order.source || 'pos',
+        orderType: order.orderType || 'pos',
+        billStatus: order.billStatus || 'open',
+        paymentStatus: order.paymentStatus || 'pending',
+        items: Array.isArray(order.items) ? order.items : []
+    };
+}
+
 function restorePosCart() {
     try {
         const saved = JSON.parse(sessionStorage.getItem(posStorageKey()) || '[]');
@@ -579,6 +1353,33 @@ function persistPosCart() {
         sessionStorage.setItem(posStorageKey(), JSON.stringify(posCart));
     } catch (error) {
         console.warn('Unable to persist POS cart:', error);
+    }
+}
+
+function restorePosActiveBill() {
+    try {
+        const saved = JSON.parse(sessionStorage.getItem(posActiveBillStorageKey()) || 'null');
+        if (!saved || !saved.firestoreId) {
+            posActiveBill = null;
+            return;
+        }
+        posActiveBill = serializePosActiveBill(saved);
+        if (!posCart.length && Array.isArray(posActiveBill.items) && posActiveBill.items.length) {
+            posCart = posActiveBill.items.map(buildPosCartItemFromOrderItem);
+        }
+    } catch (error) {
+        console.warn('Unable to restore POS active bill:', error);
+        posActiveBill = null;
+    }
+}
+
+function persistPosActiveBill(order = posActiveBill) {
+    try {
+        const payload = serializePosActiveBill(order);
+        if (payload) sessionStorage.setItem(posActiveBillStorageKey(), JSON.stringify(payload));
+        else sessionStorage.removeItem(posActiveBillStorageKey());
+    } catch (error) {
+        console.warn('Unable to persist POS active bill:', error);
     }
 }
 
@@ -705,8 +1506,8 @@ function filteredPosProductRows() {
 }
 
 function renderPosCategories(rows = posProductRows()) {
+    const select = document.getElementById('pos-category-select');
     const container = document.getElementById('pos-category-list');
-    if (!container) return;
     const categories = new Map();
     rows.forEach(row => {
         const categoryId = row.product.category || 'other';
@@ -721,12 +1522,23 @@ function renderPosCategories(rows = posProductRows()) {
         if (aOrder !== bOrder) return aOrder - bOrder;
         return String(aName).localeCompare(String(bName), 'th');
     });
-    container.innerHTML = [
-        `<button class="pos-category-btn ${posSelectedCategory === 'all' ? 'active' : ''}" type="button" onclick="setPosCategory('all')">ทั้งหมด</button>`,
-        ...sortedCategories.map(([id, name]) => `
-            <button class="pos-category-btn ${posSelectedCategory === id ? 'active' : ''}" type="button" onclick="setPosCategory('${escapeJSString(id)}')">${escapeHTML(name)}</button>
-        `)
-    ].join('');
+
+    if (select) {
+        select.innerHTML = [
+            '<option value="all">หมวดหมู่ทั้งหมด</option>',
+            ...sortedCategories.map(([id, name]) => `<option value="${escapeHTML(id)}">${escapeHTML(name)}</option>`)
+        ].join('');
+        select.value = posSelectedCategory;
+    }
+
+    if (container) {
+        container.innerHTML = [
+            `<button class="pos-category-btn ${posSelectedCategory === 'all' ? 'active' : ''}" type="button" onclick="setPosCategory('all')">ทั้งหมด</button>`,
+            ...sortedCategories.map(([id, name]) => `
+                <button class="pos-category-btn ${posSelectedCategory === id ? 'active' : ''}" type="button" onclick="setPosCategory('${escapeJSString(id)}')">${escapeHTML(name)}</button>
+            `)
+        ].join('');
+    }
 }
 
 function renderPosProducts() {
@@ -819,7 +1631,40 @@ function buildPosCartItemFromOrderItem(item = {}, index = 0) {
 
 function setPosActiveBill(order = null) {
     posActiveBill = order ? { ...order } : null;
+    persistPosActiveBill(posActiveBill);
     renderPosActiveBill();
+}
+
+function findLoadedPosOpenBill(orderId) {
+    const id = String(orderId || '').trim();
+    if (!id) return null;
+    return posOpenBills.find(order =>
+        order.firestoreId === id
+        || order.id === id
+        || order.receiptNo === id
+    ) || null;
+}
+
+function upsertLoadedPosOpenBill(order = null) {
+    if (!order?.firestoreId) return;
+    const index = posOpenBills.findIndex(item => item.firestoreId === order.firestoreId);
+    if (index >= 0) posOpenBills[index] = { ...posOpenBills[index], ...order };
+    else posOpenBills.unshift(order);
+}
+
+function activatePosSalesCheckout(focusPayment = false) {
+    setPosView('sales');
+    const target = focusPayment
+        ? (document.querySelector('.pos-cart') || document.getElementById('pos-sales'))
+        : document.getElementById('pos-sales');
+    requestAnimationFrame(() => {
+        target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if (focusPayment) {
+            window.setTimeout(() => {
+                document.getElementById('pos-payment-method')?.focus();
+            }, 180);
+        }
+    });
 }
 
 function renderPosActiveBill() {
@@ -863,12 +1708,162 @@ function renderPosOpenBills() {
                 </div>
                 <small>${escapeHTML(order.customerName || 'Walk-in Customer')} · ${itemCount.toLocaleString('th-TH')} รายการ · ${escapeHTML(updatedText)}</small>
                 <div class="pos-open-bill-actions">
-                    <button class="pos-open-bill-load" type="button" onclick="loadPosOpenBill('${escapeJSString(order.firestoreId)}')">เรียกบิล</button>
-                    <button class="pos-open-bill-pay" type="button" onclick="loadPosOpenBill('${escapeJSString(order.firestoreId)}', true)">เรียกมาชำระ</button>
+                    <button class="pos-open-bill-load" type="button" data-pos-open-bill-id="${escapeHTML(order.firestoreId)}" onclick="return handlePosOpenBillClick(event, this)">เรียกบิล</button>
+                    <button class="pos-open-bill-pay" type="button" data-pos-open-bill-id="${escapeHTML(order.firestoreId)}" data-pos-open-bill-pay="true" onclick="return handlePosOpenBillClick(event, this)">เรียกมาชำระ</button>
                 </div>
             </article>
         `;
     }).join('');
+}
+
+function renderPosOverviewOpenBills() {
+    const list = document.getElementById('pos-overview-open-bills-list');
+    const countEl = document.getElementById('pos-overview-open-count');
+    const totalEl = document.getElementById('pos-overview-open-total');
+    const dailyOpenBills = posOpenBills.filter(posOrderMatchesReceiptDate);
+    const openTotal = dailyOpenBills.reduce((sum, order) => sum + safeNumber(order.totalAmount ?? order.total), 0);
+    if (countEl) countEl.textContent = dailyOpenBills.length.toLocaleString('th-TH');
+    if (totalEl) totalEl.textContent = 'รวม ' + posMoney(openTotal);
+    if (!list) return;
+    if (!dailyOpenBills.length) {
+        list.innerHTML = `<div class="pos-empty">ไม่มีบิลค้างชำระประจำวันที่ ${escapeHTML(posBusinessDateLabel())}</div>`;
+        return;
+    }
+    list.innerHTML = dailyOpenBills.slice(0, 40).map((order, index) => {
+        const itemCount = Array.isArray(order.items) ? order.items.reduce((sum, item) => sum + safeNumber(item.quantity, 1), 0) : 0;
+        return `
+            <article class="pos-overview-open-card">
+                <div class="pos-numbered-line">
+                    <span class="pos-list-index">${(index + 1).toLocaleString('th-TH')}</span>
+                    <span>
+                        <strong>${escapeHTML(order.receiptNo || order.id || order.firestoreId)}</strong>
+                        <small>${escapeHTML(order.customerName || 'Walk-in Customer')} · ${itemCount.toLocaleString('th-TH')} รายการ · ${escapeHTML(posOrderDateText(order))}</small>
+                    </span>
+                </div>
+                <div class="pos-overview-open-actions">
+                    <strong>${posMoney(order.totalAmount ?? order.total)}</strong>
+                    <button type="button" data-pos-open-bill-id="${escapeHTML(order.firestoreId)}" data-pos-open-bill-pay="true" onclick="return handlePosOpenBillClick(event, this)">เรียกมาชำระ</button>
+                </div>
+            </article>
+        `;
+    }).join('');
+}
+
+function renderReceiptsSnapshot(snapshot) {
+    const docs = snapshot?.docs ? snapshot.docs : [];
+    posReceiptOrders = docs
+        .map(docSnap => ({ firestoreId: docSnap.id, ...(docSnap.data() || {}) }))
+        .filter(order => order.source === 'pos' && (order.billStatus === 'paid' || order.paymentStatus === 'paid'))
+        .filter(posOrderMatchesReceiptDate)
+        .sort((a, b) => posOrderTimestamp(b) - posOrderTimestamp(a));
+    if (posSelectedReceiptId && !posReceiptOrders.some(order => order.firestoreId === posSelectedReceiptId)) {
+        posSelectedReceiptId = '';
+    }
+    if (!posSelectedReceiptId && posReceiptOrders.length) {
+        posSelectedReceiptId = posReceiptOrders[0].firestoreId;
+    }
+    renderPosReceiptManager();
+}
+
+async function refreshPosReceiptsOnce() {
+    const snapshot = await getDocs(query(collection(db, 'orders'), where('billStatus', '==', 'paid'), limit(500)));
+    renderReceiptsSnapshot(snapshot);
+}
+
+function receiptSearchText(order = {}) {
+    return [
+        order.receiptNo,
+        order.id,
+        order.firestoreId,
+        order.customerName,
+        order.phone,
+        order.customerEmail,
+        order.paymentLabel,
+        order.paymentMethod,
+        order.cashierName,
+        order.date
+    ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function filteredPosReceipts() {
+    const term = posReceiptSearchTerm.trim().toLowerCase();
+    return posReceiptOrders.filter(order => !term || receiptSearchText(order).includes(term));
+}
+
+function renderPosReceiptManager() {
+    const list = document.getElementById('pos-receipt-list');
+    const preview = document.getElementById('pos-selected-receipt-preview');
+    const title = document.getElementById('pos-selected-receipt-title');
+    const printBtn = document.getElementById('pos-selected-receipt-print');
+    const countEl = document.getElementById('pos-receipt-count');
+    const totalEl = document.getElementById('pos-receipt-total');
+    const dateLabelEl = document.getElementById('pos-receipt-date-label');
+    const receipts = filteredPosReceipts();
+    const receiptTotal = posReceiptOrders.reduce((sum, order) => sum + safeNumber(order.totalAmount ?? order.total), 0);
+    if (countEl) countEl.textContent = posReceiptOrders.length.toLocaleString('th-TH');
+    if (totalEl) totalEl.textContent = posMoney(receiptTotal);
+    if (dateLabelEl) dateLabelEl.textContent = 'ประจำวันที่ ' + posBusinessDateLabel();
+
+    if (list) {
+        if (!posReceiptOrders.length) {
+            list.innerHTML = `<div class="pos-empty">ยังไม่มีใบเสร็จประจำวันที่ ${escapeHTML(posBusinessDateLabel())}</div>`;
+        } else if (!receipts.length) {
+            list.innerHTML = `<div class="pos-empty">ไม่พบใบเสร็จตามคำค้นหาในวันที่ ${escapeHTML(posBusinessDateLabel())}</div>`;
+        } else {
+            list.innerHTML = receipts.slice(0, 120).map((order, index) => {
+                const active = order.firestoreId === posSelectedReceiptId;
+                const itemCount = Array.isArray(order.items) ? order.items.reduce((sum, item) => sum + safeNumber(item.quantity, 1), 0) : 0;
+                return `
+                    <article class="pos-receipt-card ${active ? 'active' : ''}">
+                        <button type="button" onclick="selectPosReceipt('${escapeJSString(order.firestoreId)}')">
+                            <span class="pos-numbered-line">
+                                <span class="pos-list-index">${(index + 1).toLocaleString('th-TH')}</span>
+                                <span>
+                                    <strong>${escapeHTML(order.receiptNo || order.id || order.firestoreId)}</strong>
+                                    <small>${escapeHTML(order.customerName || 'Walk-in Customer')} · ${itemCount.toLocaleString('th-TH')} รายการ · ${escapeHTML(posOrderDateText(order))}</small>
+                                </span>
+                            </span>
+                            <strong>${posMoney(order.totalAmount ?? order.total)}</strong>
+                        </button>
+                    </article>
+                `;
+            }).join('');
+        }
+    }
+
+    let selected = receipts.find(order => order.firestoreId === posSelectedReceiptId) || receipts[0] || null;
+    if (!selected && !posReceiptSearchTerm.trim()) {
+        selected = posReceiptOrders.find(order => order.firestoreId === posSelectedReceiptId) || posReceiptOrders[0] || null;
+    }
+    if (selected) posSelectedReceiptId = selected.firestoreId;
+    if (title) title.textContent = selected ? (selected.receiptNo || selected.id || selected.firestoreId) : 'ยังไม่ได้เลือกใบเสร็จ';
+    if (printBtn) printBtn.disabled = !selected;
+    if (preview) {
+        preview.innerHTML = selected
+            ? buildPosReceiptHTML(selected)
+            : '<div class="pos-empty">เลือกใบเสร็จจากรายการด้านซ้ายเพื่อดูรายละเอียด</div>';
+    }
+}
+
+function syncPosReceiptDateInput() {
+    const input = document.getElementById('pos-receipt-date');
+    if (input && input.value !== posReceiptBusinessDate) input.value = posReceiptBusinessDate;
+}
+
+async function setPosReceiptBusinessDate(value = posTodayBusinessDate(), options = {}) {
+    const nextDate = /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value) : posTodayBusinessDate();
+    const changed = nextDate !== posReceiptBusinessDate;
+    posReceiptBusinessDate = nextDate;
+    syncPosReceiptDateInput();
+    if (changed) posSelectedReceiptId = '';
+    renderPosReceiptManager();
+    renderPosOverviewOpenBills();
+    if (options.reload !== false) {
+        await Promise.allSettled([
+            refreshPosReceiptsOnce(),
+            refreshOpenBillsOnce()
+        ]);
+    }
 }
 
 function posCartTotals() {
@@ -954,12 +1949,23 @@ function renderPosScreen() {
 
 function initPosModule() {
     if (posControlsBound) {
+        updatePosPromptPayCopy();
+        syncPosReceiptDateInput();
         renderPosScreen();
+        renderPosReceiptManager();
+        renderPosOverviewOpenBills();
         return;
     }
     restorePosCart();
+    restorePosActiveBill();
+    updatePosPromptPayCopy();
+    syncPosReceiptDateInput();
     document.getElementById('pos-search-input')?.addEventListener('input', (event) => {
         posSearchTerm = event.target.value || '';
+        renderPosProducts();
+    });
+    document.getElementById('pos-category-select')?.addEventListener('change', (event) => {
+        posSelectedCategory = event.target.value || 'all';
         renderPosProducts();
     });
     ['pos-discount', 'pos-paid-amount', 'pos-payment-method'].forEach(id => {
@@ -983,6 +1989,21 @@ function initPosModule() {
         if (paidInput) paidInput.value = totals.total ? String(totals.total) : '';
         renderPosCart();
     });
+    document.getElementById('pos-receipt-search')?.addEventListener('input', (event) => {
+        posReceiptSearchTerm = event.target.value || '';
+        renderPosReceiptManager();
+    });
+    document.getElementById('pos-receipt-date')?.addEventListener('change', (event) => {
+        setPosReceiptBusinessDate(event.target.value).catch(error => {
+            console.error('Unable to load daily receipt data:', error);
+            alert('โหลดข้อมูลรายวันไม่สำเร็จ: ' + error.message);
+        });
+    });
+    document.addEventListener('click', (event) => {
+        const button = event.target.closest?.('[data-pos-open-bill-id]');
+        if (!button) return;
+        window.handlePosOpenBillClick(event, button);
+    });
     document.getElementById('pos-customer-search')?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
             event.preventDefault();
@@ -1001,6 +2022,13 @@ function initPosModule() {
     });
     posControlsBound = true;
     renderPosScreen();
+    renderPosReceiptManager();
+    renderPosOverviewOpenBills();
+    refreshPosReceiptsOnce().catch(error => {
+        console.error('Initial receipt load failed:', error);
+        const list = document.getElementById('pos-receipt-list');
+        if (list) list.innerHTML = '<div class="pos-empty pos-error">โหลดใบเสร็จไม่สำเร็จ: ' + escapeHTML(error.message) + '</div>';
+    });
 }
 
 window.setPosCategory = (categoryId = 'all') => {
@@ -1142,6 +2170,7 @@ function buildPosOrderFields(user, options = {}) {
     const orderItems = currentPosOrderItems();
     const now = new Date();
     const receiptNo = options.receiptNo || generatePosReceiptNo();
+    const businessDate = options.businessDate || posBusinessDateFromDate(now);
     const paymentStatus = options.paymentStatus || 'paid';
     const pendingPayment = paymentStatus === 'pending';
     const paidAmount = pendingPayment
@@ -1162,6 +2191,8 @@ function buildPosOrderFields(user, options = {}) {
             id: receiptNo,
             receiptNo,
             date: options.date || now.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }),
+            businessDate,
+            businessDateLabel: posBusinessDateLabel(businessDate),
             source: 'pos',
             orderType: 'pos',
             status: options.status || 'completed',
@@ -1457,29 +2488,110 @@ window.refreshPosOpenBills = async () => {
     }
 };
 
-window.loadPosOpenBill = async (orderId, focusPayment = false) => {
+window.refreshPosReceipts = async () => {
+    const list = document.getElementById('pos-receipt-list');
+    const button = document.getElementById('pos-receipt-refresh-btn');
+    const originalText = button?.textContent || '';
+    if (list) list.innerHTML = `<div class="pos-empty">กำลังรีเฟรชใบเสร็จประจำวันที่ ${escapeHTML(posBusinessDateLabel())}...</div>`;
     try {
-        const orderSnap = await getDoc(doc(db, 'orders', orderId));
-        if (!orderSnap.exists()) throw new Error('ไม่พบบิลนี้แล้ว');
-        const order = { firestoreId: orderSnap.id, ...(orderSnap.data() || {}) };
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'กำลังรีเฟรช...';
+        }
+        await Promise.all([
+            refreshPosReceiptsOnce(),
+            refreshOpenBillsOnce()
+        ]);
+    } catch (error) {
+        console.error('Refresh POS receipts failed:', error);
+        if (list) list.innerHTML = '<div class="pos-empty pos-error">รีเฟรชใบเสร็จไม่สำเร็จ: ' + escapeHTML(error.message) + '</div>';
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText || 'รีเฟรชใบเสร็จ';
+        }
+    }
+};
+
+window.setPosReceiptDateToday = () => {
+    setPosReceiptBusinessDate(posTodayBusinessDate()).catch(error => {
+        console.error('Unable to load today receipt data:', error);
+        alert('โหลดข้อมูลวันนี้ไม่สำเร็จ: ' + error.message);
+    });
+};
+
+window.selectPosReceipt = (orderId) => {
+    posSelectedReceiptId = orderId || '';
+    renderPosReceiptManager();
+};
+
+window.handlePosOpenBillClick = (event, button) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (!button || button.dataset.posOpenBillBusy === 'true') return false;
+    const orderId = button.dataset.posOpenBillId || '';
+    const focusPayment = button.dataset.posOpenBillPay === 'true';
+    window.loadPosOpenBill(orderId, focusPayment, button);
+    return false;
+};
+
+window.loadPosOpenBill = async (orderId, focusPayment = false, sourceButton = null) => {
+    const originalButtonText = sourceButton?.textContent || '';
+    try {
+        if (sourceButton) {
+            sourceButton.dataset.posOpenBillBusy = 'true';
+            sourceButton.disabled = true;
+            sourceButton.textContent = 'กำลังโหลด...';
+        }
+        if (!orderId) throw new Error('ไม่พบรหัสบิลที่ต้องการเรียก');
+        let order = findLoadedPosOpenBill(orderId);
+        if (!order) {
+            const orderSnap = await getDoc(doc(db, 'orders', orderId));
+            if (!orderSnap.exists()) throw new Error('ไม่พบบิลนี้แล้ว');
+            order = { firestoreId: orderSnap.id, ...(orderSnap.data() || {}) };
+        }
         if (order.source !== 'pos' || order.billStatus !== 'open' || order.paymentStatus === 'paid') {
             throw new Error('บิลนี้ไม่อยู่ในสถานะค้างชำระ');
         }
         posCart = Array.isArray(order.items) ? order.items.map(buildPosCartItemFromOrderItem) : [];
         applyPosOpenBillToForm(order);
         setPosActiveBill(order);
-        setPosView('sales');
+        upsertLoadedPosOpenBill(order);
         renderPosCart();
         renderPosOpenBills();
+        renderPosOverviewOpenBills();
+        activatePosSalesCheckout(focusPayment);
         if (focusPayment) {
-            document.getElementById('pos-paid-amount')?.focus();
-            alert('โหลดบิลแล้ว เลือกช่องทางชำระเงินและกด "ชำระเงินทันที" เพื่อปิดยอด');
+            const status = document.getElementById('pos-customer-sync-status');
+            if (status) {
+                status.textContent = 'โหลดบิลค้างชำระแล้ว เลือกช่องทางชำระเงินและกดปุ่มยืนยันเพื่อปิดยอด';
+                status.className = 'pos-sync-status success';
+            }
         }
     } catch (error) {
         console.error('Load POS open bill failed:', error);
         alert('เรียกบิลค้างชำระไม่สำเร็จ: ' + error.message);
+    } finally {
+        if (sourceButton) {
+            sourceButton.dataset.posOpenBillBusy = 'false';
+            sourceButton.disabled = false;
+            sourceButton.textContent = originalButtonText || (focusPayment ? 'เรียกมาชำระ' : 'เรียกบิล');
+        }
     }
 };
+
+window.addEventListener('eden:load-pos-open-bill', (event) => {
+    const detail = event.detail || {};
+    if (!detail.orderId) return;
+    window.__pendingPosOpenBillAction = null;
+    window.loadPosOpenBill(detail.orderId, !!detail.focusPayment, detail.button || null);
+});
+
+if (window.__pendingPosOpenBillAction?.orderId) {
+    const pending = window.__pendingPosOpenBillAction;
+    window.__pendingPosOpenBillAction = null;
+    window.loadPosOpenBill(pending.orderId, !!pending.focusPayment, pending.button || null);
+}
 
 window.savePosOpenBill = async () => {
     if (!posCart.length) {
@@ -1694,12 +2806,14 @@ window.checkoutPosOrder = async () => {
             receipt.style.display = 'block';
         }
         if (printBtn) printBtn.style.display = 'block';
+        await autoPrintPosReceipt(posLastReceipt).catch(error => console.warn('Unable to auto print POS receipt:', error));
         posCart = [];
         setPosActiveBill(null);
         persistPosCart();
         renderPosCart();
         renderPosOpenBills();
         await refreshOpenBillsOnce().catch(error => console.warn('Unable to refresh open bills after checkout:', error));
+        await refreshPosReceiptsOnce().catch(error => console.warn('Unable to refresh receipts after checkout:', error));
         alert(wasOpenBill ? 'ปิดบิลและออกใบเสร็จสำเร็จ' : (isTestOrder ? 'บันทึกออเดอร์ทดสอบ POS สำเร็จ' : 'บันทึกออเดอร์ POS สำเร็จ'));
     } catch (error) {
         console.error('POS checkout failed:', error);
@@ -1712,33 +2826,48 @@ window.checkoutPosOrder = async () => {
         renderPosActiveBill();
     }
 };
-window.printPosReceipt = () => {
-    if (!posLastReceipt) {
-        alert('ยังไม่มีใบเสร็จล่าสุดให้พิมพ์');
-        return;
-    }
+function openPosReceiptPrintWindow(order) {
+    if (!order) return false;
     const printWindow = window.open('', '_blank', 'width=420,height=720');
     if (!printWindow) {
         alert('เบราว์เซอร์บล็อกหน้าต่างพิมพ์ กรุณาอนุญาต Pop-up');
-        return;
+        return false;
     }
     printWindow.document.write(`
         <!doctype html>
         <html>
         <head>
             <meta charset="utf-8">
-            <title>${escapeHTML(posLastReceipt.receiptNo || 'POS Receipt')}</title>
+            <title>${escapeHTML(order.receiptNo || 'POS Receipt')}</title>
             <style>
                 body { font-family: Arial, sans-serif; margin: 18px; color: #111; }
                 @media print { body { margin: 0; } }
             </style>
         </head>
-        <body>${buildPosReceiptHTML(posLastReceipt)}</body>
+        <body>${buildPosReceiptHTML(order)}</body>
         </html>
     `);
     printWindow.document.close();
     printWindow.focus();
     printWindow.print();
+    return true;
+}
+
+window.printPosReceipt = async () => {
+    if (!posLastReceipt) {
+        alert('No latest receipt to print.');
+        return;
+    }
+    await printOrderViaActivePosPrinter(posLastReceipt, { fallback: true });
+};
+
+window.printSelectedPosReceipt = async () => {
+    const selected = posReceiptOrders.find(order => order.firestoreId === posSelectedReceiptId);
+    if (!selected) {
+        alert('Please select a receipt before printing.');
+        return;
+    }
+    await printOrderViaActivePosPrinter(selected, { fallback: true });
 };
 
 document.documentElement.dataset.posModule = 'ready';

@@ -6,7 +6,7 @@
     <title>Eden POS | Eden OS</title>
     <link rel="icon" href="Images/Logo.webp" type="image/webp">
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="pos.css?v=7">
+    <link rel="stylesheet" href="pos.css?v=17">
 </head>
 <body>
     <div id="admin-login" style="display: none;">
@@ -44,6 +44,16 @@
                     <p>หน้าแคชเชียร์แยกจาก Admin Dashboard</p>
                 </div>
             </div>
+            <nav class="pos-view-switcher" aria-label="เลือกหน้าการทำงาน POS">
+                <button class="pos-view-tab active" type="button" data-pos-target="overview" aria-pressed="true" onclick="switchPosView('overview')">
+                    <span>Overview</span>
+                    ภาพรวม Eden OS
+                </button>
+                <button class="pos-view-tab" type="button" data-pos-target="sales" aria-pressed="false" onclick="switchPosView('sales')">
+                    <span>Live POS</span>
+                    ขายหน้าร้าน POS
+                </button>
+            </nav>
             <div class="top-actions">
                 <a class="top-link" href="admin.html">กลับ Admin</a>
                 <div class="admin-profile">
@@ -55,17 +65,6 @@
         </header>
 
         <main class="pos-main">
-            <nav class="pos-view-switcher" aria-label="เลือกหน้าการทำงาน POS">
-                <button class="pos-view-tab active" type="button" data-pos-target="overview" aria-pressed="true" onclick="switchPosView('overview')">
-                    <span>Overview</span>
-                    ภาพรวม Eden OS
-                </button>
-                <button class="pos-view-tab" type="button" data-pos-target="sales" aria-pressed="false" onclick="switchPosView('sales')">
-                    <span>Live POS</span>
-                    ขายหน้าร้าน POS
-                </button>
-            </nav>
-
             <section id="pos-overview-view" class="pos-view-section active" data-pos-view="overview">
             <section class="pos-hero">
                 <span class="pos-badge">Eden OS · iPad-first Cafe Operation</span>
@@ -111,6 +110,239 @@
                     <p>เมนูกลาง, ราคากลาง, สูตรกลาง, branch ranking, royalty และ franchise audit</p>
                     <strong>Franchise-ready</strong>
                 </article>
+            </section>
+
+
+            <section class="pos-printer-control" id="pos-printer-control" aria-label="POS printer management">
+                <div class="pos-printer-head">
+                    <div>
+                        <span class="system-kicker">Printer Control</span>
+                        <h2>POS Printer Management</h2>
+                        <p>Set up Bluetooth BLE, WiFi/LAN, USB, Serial, and browser fallback printing for Eden POS receipts. Settings are saved on this cashier device.</p>
+                    </div>
+                    <div class="pos-printer-head-actions">
+                        <button id="pos-printer-bridge-check" class="btn-action btn-view" type="button">Check Bridge</button>
+                        <button id="pos-printer-test" class="btn-action" type="button">Test Print</button>
+                    </div>
+                </div>
+
+                <div class="pos-printer-status-grid" aria-label="Printer status cards">
+                    <article>
+                        <span>Active Printer</span>
+                        <strong id="pos-printer-active-label">Not configured</strong>
+                        <small id="pos-printer-active-type">Choose a printer profile below</small>
+                    </article>
+                    <article>
+                        <span>Direct Browser APIs</span>
+                        <strong id="pos-printer-browser-status">Checking...</strong>
+                        <small>Serial / USB / Bluetooth BLE availability</small>
+                    </article>
+                    <article>
+                        <span>Eden Print Bridge</span>
+                        <strong id="pos-printer-bridge-status">Not checked</strong>
+                        <small>Required for WiFi/LAN raw ESC/POS printing</small>
+                    </article>
+                </div>
+
+                <div class="pos-printer-layout">
+                    <article class="pos-printer-panel">
+                        <div class="pos-printer-panel-title">
+                            <span>01</span>
+                            <div>
+                                <strong>Terminal Settings</strong>
+                                <small>Enable printing and select the active profile for this POS device.</small>
+                            </div>
+                        </div>
+                        <label class="pos-printer-switch">
+                            <input id="pos-printer-enabled" type="checkbox">
+                            <span>Use POS printer before browser print</span>
+                        </label>
+                        <label class="pos-printer-switch">
+                            <input id="pos-printer-auto" type="checkbox">
+                            <span>Auto print after checkout when possible</span>
+                        </label>
+                        <label class="pos-printer-field">
+                            <span>Active profile</span>
+                            <select id="pos-printer-active-select"></select>
+                        </label>
+                        <div id="pos-printer-list" class="pos-printer-list"></div>
+                    </article>
+
+                    <article class="pos-printer-panel pos-printer-editor">
+                        <div class="pos-printer-panel-title">
+                            <span>02</span>
+                            <div>
+                                <strong>Printer Profile</strong>
+                                <small>Create profiles for LAN, USB/Serial, WebUSB, Bluetooth BLE, or browser print.</small>
+                            </div>
+                        </div>
+                        <div class="pos-printer-form-grid">
+                            <label class="pos-printer-field">
+                                <span>Profile name</span>
+                                <input id="pos-printer-name" type="text" placeholder="Counter Printer 80mm">
+                            </label>
+                            <label class="pos-printer-field">
+                                <span>Connection</span>
+                                <select id="pos-printer-connection">
+                                    <option value="bridge-network">WiFi/LAN via Eden Print Bridge</option>
+                                    <option value="browser-serial">Cable / Bluetooth SPP via Web Serial</option>
+                                    <option value="browser-usb">USB via WebUSB</option>
+                                    <option value="browser-bluetooth">Bluetooth BLE via Web Bluetooth</option>
+                                    <option value="browser-print">Browser print window fallback</option>
+                                </select>
+                            </label>
+                            <label class="pos-printer-field">
+                                <span>Paper width</span>
+                                <select id="pos-printer-paper">
+                                    <option value="80">80mm / 42 columns</option>
+                                    <option value="58">58mm / 32 columns</option>
+                                </select>
+                            </label>
+                            <label class="pos-printer-field">
+                                <span>Copies</span>
+                                <input id="pos-printer-copies" type="number" min="1" max="4" step="1" value="1">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="endpoint">
+                                <span>Bridge URL</span>
+                                <input id="pos-printer-endpoint" type="url" placeholder="http://127.0.0.1:8787">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="host">
+                                <span>LAN printer IP</span>
+                                <input id="pos-printer-host" type="text" placeholder="192.168.1.50">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="port">
+                                <span>LAN port</span>
+                                <input id="pos-printer-port" type="number" min="1" max="65535" value="9100">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="baud">
+                                <span>Serial baud rate</span>
+                                <input id="pos-printer-baud" type="number" min="1200" step="1" value="9600">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="vendor">
+                                <span>USB Vendor ID</span>
+                                <input id="pos-printer-vendor" type="text" placeholder="0x04b8">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="interface">
+                                <span>USB interface</span>
+                                <input id="pos-printer-interface" type="number" min="0" step="1" value="0">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="endpoint-number">
+                                <span>USB OUT endpoint</span>
+                                <input id="pos-printer-endpoint-number" type="number" min="1" step="1" value="1">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="service">
+                                <span>BLE service UUID</span>
+                                <input id="pos-printer-service" type="text" placeholder="0000ffe0-0000-1000-8000-00805f9b34fb">
+                            </label>
+                            <label class="pos-printer-field" data-printer-field="characteristic">
+                                <span>BLE write characteristic</span>
+                                <input id="pos-printer-characteristic" type="text" placeholder="0000ffe1-0000-1000-8000-00805f9b34fb">
+                            </label>
+                            <label class="pos-printer-field">
+                                <span>ESC/POS code page</span>
+                                <select id="pos-printer-codepage">
+                                    <option value="thai42">Thai Character Code 42 (ESC t 20)</option>
+                                    <option value="cp874">CP874 bytes only</option>
+                                    <option value="ascii">ASCII safe mode</option>
+                                    <option value="utf8">UTF-8 bytes</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="pos-printer-actions">
+                            <button id="pos-printer-new" class="btn-action btn-view" type="button">New Profile</button>
+                            <button id="pos-printer-save" class="btn-action" type="button">Save Profile</button>
+                            <button id="pos-printer-delete" class="btn-action pos-printer-danger" type="button">Delete</button>
+                        </div>
+                    </article>
+
+                    <article class="pos-printer-panel pos-printer-help">
+                        <div class="pos-printer-panel-title">
+                            <span>03</span>
+                            <div>
+                                <strong>Quick Setup</strong>
+                                <small>Practical paths that work inside a web POS.</small>
+                            </div>
+                        </div>
+                        <ul>
+                            <li><strong>WiFi/LAN:</strong> run Eden Print Bridge, set printer IP and port 9100.</li>
+                            <li><strong>Cable:</strong> use Web Serial for USB-to-serial printers or WebUSB for compatible devices.</li>
+                            <li><strong>Bluetooth:</strong> Web Bluetooth supports BLE printers. Classic Bluetooth SPP usually appears through Web Serial instead.</li>
+                            <li><strong>Fallback:</strong> browser print still works for normal printer drivers and PDF testing.</li>
+                        </ul>
+                        <div id="pos-printer-status" class="pos-printer-status">Printer settings loaded.</div>
+                    </article>
+                </div>
+            </section>
+
+            <section class="pos-receipt-control" aria-label="จัดการใบเสร็จและบิลค้างชำระ">
+                <div class="pos-receipt-control-head">
+                    <div>
+                        <span class="system-kicker">Receipt Control</span>
+                        <h2>จัดการใบเสร็จและบิลค้างชำระ</h2>
+                        <p>เลือกวันที่เพื่อดึงข้อมูลรายวัน ค้นหาใบเสร็จ POS พิมพ์ซ้ำ และเรียกบิลค้างชำระกลับไปปิดยอดได้จากหน้าภาพรวม</p>
+                    </div>
+                    <div class="pos-receipt-controls">
+                        <label class="pos-receipt-date-field" for="pos-receipt-date">
+                            <span>ประจำวันที่</span>
+                            <input id="pos-receipt-date" type="date" required>
+                        </label>
+                        <button id="pos-receipt-today-btn" class="btn-action btn-view" type="button" onclick="setPosReceiptDateToday()">วันนี้</button>
+                        <button id="pos-receipt-refresh-btn" class="btn-action btn-view" type="button" onclick="refreshPosReceipts()">รีเฟรชใบเสร็จ</button>
+                    </div>
+                </div>
+                <div class="pos-receipt-stats">
+                    <article>
+                        <span>ใบเสร็จรายวัน</span>
+                        <strong id="pos-receipt-count">0</strong>
+                        <small id="pos-receipt-date-label">ประจำวันที่ -</small>
+                    </article>
+                    <article>
+                        <span>ยอดรับชำระ</span>
+                        <strong id="pos-receipt-total">฿0.00</strong>
+                        <small>ยอดรับชำระรายวัน</small>
+                    </article>
+                    <article>
+                        <span>บิลค้างชำระ</span>
+                        <strong id="pos-overview-open-count">0</strong>
+                        <small id="pos-overview-open-total">รวม ฿0.00</small>
+                    </article>
+                </div>
+                <div class="pos-receipt-workspace">
+                    <aside class="pos-receipt-browser">
+                        <div class="pos-receipt-search-row">
+                            <input id="pos-receipt-search" type="search" placeholder="ค้นหาในวันที่เลือก: เลขใบเสร็จ / ลูกค้า / วิธีชำระ">
+                        </div>
+                        <div id="pos-receipt-list" class="pos-receipt-list">
+                            <div class="pos-empty">กำลังโหลดใบเสร็จ...</div>
+                        </div>
+                        <div class="pos-scroll-hint">เลื่อนลงเพื่อดูรายการเพิ่มเติม ↓</div>
+                    </aside>
+                    <article class="pos-receipt-preview-card">
+                        <div class="pos-receipt-preview-head">
+                            <div>
+                                <span>Receipt Preview</span>
+                                <strong id="pos-selected-receipt-title">ยังไม่ได้เลือกใบเสร็จ</strong>
+                            </div>
+                            <button id="pos-selected-receipt-print" type="button" onclick="printSelectedPosReceipt()" disabled>พิมพ์ซ้ำ</button>
+                        </div>
+                        <div id="pos-selected-receipt-preview" class="pos-receipt-preview">
+                            <div class="pos-empty">เลือกใบเสร็จจากรายการด้านซ้ายเพื่อดูรายละเอียด</div>
+                        </div>
+                    </article>
+                    <aside class="pos-overview-open-bills">
+                        <div class="pos-receipt-preview-head">
+                            <div>
+                                <span>Outstanding Bills</span>
+                                <strong>บิลค้างชำระ</strong>
+                            </div>
+                            <button type="button" onclick="refreshPosOpenBills()">รีเฟรชบิล</button>
+                        </div>
+                        <div id="pos-overview-open-bills-list" class="pos-overview-open-bills-list">
+                            <div class="pos-empty">กำลังโหลดบิลค้างชำระ...</div>
+                        </div>
+                        <div class="pos-scroll-hint">เลื่อนลงเพื่อดูบิลเพิ่มเติม ↓</div>
+                    </aside>
+                </div>
             </section>
 
             <section class="pos-intelligence-grid">
@@ -229,29 +461,13 @@
             <section id="pos-sales-view" class="pos-view-section" data-pos-view="sales" hidden>
             <section class="pos-shell" id="pos-sales">
                 <div class="pos-panel">
-                    <div class="section-header">
-                        <div>
-                            <span class="system-kicker">POS Mode · ขายหน้าร้าน</span>
-                            <h2>เลือกสินค้า</h2>
-                            <p>ดึงข้อมูลจากเมนูในระบบ และแสดงเฉพาะรายการที่เปิดขายบน POS พร้อมรองรับ modifier และ variant จากหลังบ้าน</p>
-                        </div>
+                    <div class="pos-sales-controls" aria-label="ค้นหาสินค้า POS">
+                        <input id="pos-search-input" class="pos-search" type="search" placeholder="ค้นหาชื่อสินค้า / SKU / หมวดหมู่">
+                        <select id="pos-category-select" class="pos-category-select" aria-label="เลือกหมวดหมู่สินค้า">
+                            <option value="all">หมวดหมู่ทั้งหมด</option>
+                        </select>
                         <button class="btn-action btn-view" type="button" onclick="refreshPosProducts()">รีเฟรช POS</button>
                     </div>
-                    <div class="pos-command-pills" aria-label="POS quick action roadmap">
-                        <span>เปิดโต๊ะ</span>
-                        <span>Takeaway</span>
-                        <span>Delivery</span>
-                        <span>Staff Order</span>
-                        <span>Coupon</span>
-                        <span>Happy Hour</span>
-                        <span>แยกบิล</span>
-                        <span>ส่ง Bar/Kitchen</span>
-                    </div>
-                    <div class="pos-toolbar">
-                        <input id="pos-search-input" class="pos-search" type="search" placeholder="ค้นหาชื่อสินค้า / SKU / หมวดหมู่">
-                        <div class="pos-counter"><span id="pos-product-count">0</span> รายการ POS</div>
-                    </div>
-                    <div id="pos-category-list" class="pos-category-list"></div>
                     <div id="pos-product-grid" class="pos-grid">
                         <div class="pos-empty">กำลังโหลดสินค้า POS...</div>
                     </div>
@@ -366,6 +582,22 @@
         </main>
     </div>
 
-    <script type="module" src="js/pos.js?v=12"></script>
+    <script>
+        window.handlePosOpenBillClick = window.handlePosOpenBillClick || function(event, button) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            const detail = {
+                orderId: button && button.dataset ? button.dataset.posOpenBillId || '' : '',
+                focusPayment: !!(button && button.dataset && button.dataset.posOpenBillPay === 'true'),
+                button: button || null
+            };
+            window.__pendingPosOpenBillAction = detail;
+            window.dispatchEvent(new CustomEvent('eden:load-pos-open-bill', { detail }));
+            return false;
+        };
+    </script>
+    <script type="module" src="js/pos.js?v=23"></script>
 </body>
 </html>
