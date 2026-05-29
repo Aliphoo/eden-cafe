@@ -48,8 +48,18 @@ const POS_PAYMENT_METHODS = {
 const POS_PROMPTPAY_ID = '057556001655';
 const POS_PROMPTPAY_MERCHANT_NAME = 'EDEN CAFE';
 const POS_PROMPTPAY_CITY = 'CHIANG RAI';
+const POS_PROMPTPAY_DEFAULT_ACCOUNT = Object.freeze({
+    id: 'eden-main',
+    label: 'Eden Cafe Main',
+    promptPayId: POS_PROMPTPAY_ID,
+    merchantName: POS_PROMPTPAY_MERCHANT_NAME,
+    city: POS_PROMPTPAY_CITY,
+    order: 1
+});
 const POS_PROMPTPAY_DEFAULTS = Object.freeze({
     enabled: true,
+    activeAccountId: POS_PROMPTPAY_DEFAULT_ACCOUNT.id,
+    accounts: [POS_PROMPTPAY_DEFAULT_ACCOUNT],
     promptPayId: POS_PROMPTPAY_ID,
     merchantName: POS_PROMPTPAY_MERCHANT_NAME,
     city: POS_PROMPTPAY_CITY
@@ -479,13 +489,44 @@ function isValidPosPromptPayId(value) {
     return /^0\d{9}$/.test(id) || /^\d{13}$/.test(id) || /^\d{15}$/.test(id);
 }
 
+function normalizePosPromptPayAccount(account = {}, index = 0) {
+    const cleanedId = cleanPosPromptPayId(account.promptPayId || account.idValue || account.number || account.promptpay || POS_PROMPTPAY_DEFAULTS.promptPayId);
+    return {
+        id: String(account.id || account.key || ('promptpay-' + (index + 1))).trim(),
+        label: String(account.label || account.name || account.accountName || ('PromptPay ' + (index + 1))).trim().slice(0, 80) || ('PromptPay ' + (index + 1)),
+        promptPayId: isValidPosPromptPayId(cleanedId) ? cleanedId : POS_PROMPTPAY_DEFAULTS.promptPayId,
+        merchantName: String(account.merchantName || POS_PROMPTPAY_DEFAULTS.merchantName).trim().slice(0, 25) || POS_PROMPTPAY_DEFAULTS.merchantName,
+        city: String(account.city || POS_PROMPTPAY_DEFAULTS.city).trim().slice(0, 15) || POS_PROMPTPAY_DEFAULTS.city,
+        order: Number.isFinite(Number(account.order)) ? Number(account.order) : index + 1
+    };
+}
+
 function normalizePosPromptPaySettings(data = {}) {
-    const cleanedId = cleanPosPromptPayId(data.promptPayId || data.id || POS_PROMPTPAY_DEFAULTS.promptPayId);
+    const legacyAccount = {
+        id: data.accountId || data.activeAccountId || POS_PROMPTPAY_DEFAULT_ACCOUNT.id,
+        label: data.label || data.accountName || POS_PROMPTPAY_DEFAULT_ACCOUNT.label,
+        promptPayId: data.promptPayId,
+        merchantName: data.merchantName,
+        city: data.city,
+        order: 1
+    };
+    const rawAccounts = Array.isArray(data.accounts) && data.accounts.length ? data.accounts : [legacyAccount];
+    const accounts = rawAccounts
+        .map((account, index) => normalizePosPromptPayAccount(account, index))
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+        .map((account, index) => ({ ...account, order: index + 1 }));
+    if (!accounts.length) accounts.push(normalizePosPromptPayAccount(POS_PROMPTPAY_DEFAULT_ACCOUNT, 0));
+
+    let activeAccountId = String(data.activeAccountId || data.selectedAccountId || data.accountId || '').trim();
+    if (!accounts.some(account => account.id === activeAccountId)) activeAccountId = accounts[0].id;
+    const activeAccount = accounts.find(account => account.id === activeAccountId) || accounts[0] || normalizePosPromptPayAccount(POS_PROMPTPAY_DEFAULT_ACCOUNT, 0);
     return {
         enabled: data.enabled !== false,
-        promptPayId: isValidPosPromptPayId(cleanedId) ? cleanedId : POS_PROMPTPAY_DEFAULTS.promptPayId,
-        merchantName: String(data.merchantName || POS_PROMPTPAY_DEFAULTS.merchantName).trim().slice(0, 25) || POS_PROMPTPAY_DEFAULTS.merchantName,
-        city: String(data.city || POS_PROMPTPAY_DEFAULTS.city).trim().slice(0, 15) || POS_PROMPTPAY_DEFAULTS.city
+        activeAccountId,
+        accounts,
+        promptPayId: activeAccount.promptPayId,
+        merchantName: activeAccount.merchantName,
+        city: activeAccount.city
     };
 }
 

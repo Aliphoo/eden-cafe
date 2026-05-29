@@ -5059,13 +5059,40 @@ onAuthStateChanged(auth, (user) => {
 // PromptPay Settings Management Logic
 // ==========================================
 
-const PROMPTPAY_SETTINGS_DEFAULTS = Object.freeze({
-    enabled: true,
+const PROMPTPAY_DEFAULT_ACCOUNT = Object.freeze({
+    id: 'eden-main',
+    label: 'Eden Cafe Main',
     promptPayId: '057556001655',
     merchantName: 'EDEN CAFE',
-    city: 'CHIANG RAI'
+    city: 'CHIANG RAI',
+    order: 1
+});
+const PROMPTPAY_SETTINGS_DEFAULTS = Object.freeze({
+    enabled: true,
+    activeAccountId: PROMPTPAY_DEFAULT_ACCOUNT.id,
+    promptPayId: PROMPTPAY_DEFAULT_ACCOUNT.promptPayId,
+    merchantName: PROMPTPAY_DEFAULT_ACCOUNT.merchantName,
+    city: PROMPTPAY_DEFAULT_ACCOUNT.city,
+    accounts: [PROMPTPAY_DEFAULT_ACCOUNT]
 });
 const promptPaySettingsForm = document.getElementById('promptpaySettingsForm');
+let promptPaySettingsState = defaultPromptPaySettings();
+let promptPayEditingAccountId = PROMPTPAY_DEFAULT_ACCOUNT.id;
+
+function defaultPromptPayAccount() {
+    return { ...PROMPTPAY_DEFAULT_ACCOUNT };
+}
+
+function defaultPromptPaySettings() {
+    return {
+        enabled: true,
+        activeAccountId: PROMPTPAY_DEFAULT_ACCOUNT.id,
+        promptPayId: PROMPTPAY_DEFAULT_ACCOUNT.promptPayId,
+        merchantName: PROMPTPAY_DEFAULT_ACCOUNT.merchantName,
+        city: PROMPTPAY_DEFAULT_ACCOUNT.city,
+        accounts: [defaultPromptPayAccount()]
+    };
+}
 
 function cleanPromptPayId(value) {
     return String(value ?? '').replace(/\D/g, '');
@@ -5076,14 +5103,79 @@ function isValidPromptPayId(value) {
     return /^0\d{9}$/.test(id) || /^\d{13}$/.test(id) || /^\d{15}$/.test(id);
 }
 
+function promptPaySlug(value) {
+    return String(value || 'promptpay')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 42) || 'promptpay';
+}
+
+function uniquePromptPayAccountId(seed, accounts = [], currentId = '') {
+    const base = promptPaySlug(seed || 'promptpay');
+    const used = new Set(accounts.map(account => account.id).filter(id => id && id !== currentId));
+    let candidate = base;
+    let suffix = 2;
+    while (used.has(candidate)) {
+        candidate = base + '-' + suffix;
+        suffix += 1;
+    }
+    return candidate;
+}
+
+function normalizePromptPayAccount(account = {}, index = 0) {
+    const cleanedId = cleanPromptPayId(account.promptPayId || account.idValue || account.number || account.promptpay || PROMPTPAY_DEFAULT_ACCOUNT.promptPayId);
+    const label = String(account.label || account.name || account.accountName || ('PromptPay ' + (index + 1))).trim().slice(0, 80) || ('PromptPay ' + (index + 1));
+    return {
+        id: String(account.id || account.key || '').trim(),
+        label,
+        promptPayId: isValidPromptPayId(cleanedId) ? cleanedId : PROMPTPAY_DEFAULT_ACCOUNT.promptPayId,
+        merchantName: String(account.merchantName || PROMPTPAY_DEFAULT_ACCOUNT.merchantName).trim().slice(0, 25) || PROMPTPAY_DEFAULT_ACCOUNT.merchantName,
+        city: String(account.city || PROMPTPAY_DEFAULT_ACCOUNT.city).trim().slice(0, 15) || PROMPTPAY_DEFAULT_ACCOUNT.city,
+        order: Number.isFinite(Number(account.order)) ? Number(account.order) : index + 1
+    };
+}
+
 function normalizePromptPaySettings(data = {}) {
-    const cleanedId = cleanPromptPayId(data.promptPayId || data.id || PROMPTPAY_SETTINGS_DEFAULTS.promptPayId);
+    const legacyAccount = {
+        id: data.accountId || data.activeAccountId || PROMPTPAY_DEFAULT_ACCOUNT.id,
+        label: data.label || data.accountName || PROMPTPAY_DEFAULT_ACCOUNT.label,
+        promptPayId: data.promptPayId,
+        merchantName: data.merchantName,
+        city: data.city,
+        order: 1
+    };
+    const rawAccounts = Array.isArray(data.accounts) && data.accounts.length ? data.accounts : [legacyAccount];
+    const used = [];
+    const accounts = rawAccounts
+        .map((account, index) => normalizePromptPayAccount(account, index))
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+        .map((account, index) => {
+            const seededId = account.id || account.label || account.promptPayId || ('promptpay-' + (index + 1));
+            const id = uniquePromptPayAccountId(seededId, used);
+            const normalized = { ...account, id, order: index + 1 };
+            used.push(normalized);
+            return normalized;
+        });
+
+    if (!accounts.length) accounts.push(defaultPromptPayAccount());
+    let activeAccountId = String(data.activeAccountId || data.selectedAccountId || data.accountId || '').trim();
+    if (!accounts.some(account => account.id === activeAccountId)) activeAccountId = accounts[0].id;
+    const activeAccount = accounts.find(account => account.id === activeAccountId) || accounts[0] || defaultPromptPayAccount();
     return {
         enabled: data.enabled !== false,
-        promptPayId: isValidPromptPayId(cleanedId) ? cleanedId : PROMPTPAY_SETTINGS_DEFAULTS.promptPayId,
-        merchantName: String(data.merchantName || PROMPTPAY_SETTINGS_DEFAULTS.merchantName).trim().slice(0, 25) || PROMPTPAY_SETTINGS_DEFAULTS.merchantName,
-        city: String(data.city || PROMPTPAY_SETTINGS_DEFAULTS.city).trim().slice(0, 15) || PROMPTPAY_SETTINGS_DEFAULTS.city
+        activeAccountId,
+        accounts,
+        promptPayId: activeAccount.promptPayId,
+        merchantName: activeAccount.merchantName,
+        city: activeAccount.city
     };
+}
+
+function activePromptPayAccount(settings = promptPaySettingsState) {
+    const normalized = normalizePromptPaySettings(settings);
+    return normalized.accounts.find(account => account.id === normalized.activeAccountId) || normalized.accounts[0] || defaultPromptPayAccount();
 }
 
 function setPromptPayAdminStatus(message = '', state = '') {
@@ -5093,38 +5185,139 @@ function setPromptPayAdminStatus(message = '', state = '') {
     status.className = ['promptpay-settings-status', state].filter(Boolean).join(' ');
 }
 
-function getPromptPaySettingsFromForm() {
-    return {
-        enabled: document.getElementById('promptpay-enabled')?.checked !== false,
-        promptPayId: cleanPromptPayId(document.getElementById('promptpay-id')?.value || ''),
-        merchantName: String(document.getElementById('promptpay-merchant-name')?.value || '').trim(),
-        city: String(document.getElementById('promptpay-city')?.value || '').trim()
-    };
+function readPromptPayAccountForm({ validate = true } = {}) {
+    const rawId = String(document.getElementById('promptpay-account-key')?.value || promptPayEditingAccountId || '').trim();
+    const promptPayId = cleanPromptPayId(document.getElementById('promptpay-id')?.value || '');
+    const label = String(document.getElementById('promptpay-account-label')?.value || '').trim();
+    const merchantName = String(document.getElementById('promptpay-merchant-name')?.value || '').trim();
+    const city = String(document.getElementById('promptpay-city')?.value || '').trim();
+
+    if (validate && !isValidPromptPayId(promptPayId)) {
+        throw new Error('PromptPay ID must be a 10-digit phone number, 13-digit citizen ID, or 15-digit e-Wallet ID.');
+    }
+    if (validate && (!merchantName || !city)) {
+        throw new Error('Merchant name and city are required.');
+    }
+
+    return normalizePromptPayAccount({
+        id: rawId,
+        label: label || 'PromptPay',
+        promptPayId: promptPayId || PROMPTPAY_DEFAULT_ACCOUNT.promptPayId,
+        merchantName: merchantName || PROMPTPAY_DEFAULT_ACCOUNT.merchantName,
+        city: city || PROMPTPAY_DEFAULT_ACCOUNT.city,
+        order: promptPaySettingsState.accounts.findIndex(account => account.id === rawId) + 1 || promptPaySettingsState.accounts.length + 1
+    });
 }
 
-function applyPromptPaySettingsToForm(settings = PROMPTPAY_SETTINGS_DEFAULTS) {
-    const normalized = normalizePromptPaySettings(settings);
-    const enabledEl = document.getElementById('promptpay-enabled');
+function applyPromptPayAccountToForm(account = defaultPromptPayAccount()) {
+    const normalized = normalizePromptPayAccount(account);
+    promptPayEditingAccountId = normalized.id;
+    const titleEl = document.getElementById('promptpay-editor-title');
+    const keyEl = document.getElementById('promptpay-account-key');
+    const labelEl = document.getElementById('promptpay-account-label');
     const idEl = document.getElementById('promptpay-id');
     const merchantEl = document.getElementById('promptpay-merchant-name');
     const cityEl = document.getElementById('promptpay-city');
-    if (enabledEl) enabledEl.checked = normalized.enabled;
-    if (idEl) idEl.value = normalized.promptPayId;
-    if (merchantEl) merchantEl.value = normalized.merchantName;
-    if (cityEl) cityEl.value = normalized.city;
-    updatePromptPaySettingsPreview(normalized);
+    if (titleEl) titleEl.textContent = normalized.id ? 'Edit PromptPay Account' : 'Add PromptPay Account';
+    if (keyEl) keyEl.value = normalized.id || '';
+    if (labelEl) labelEl.value = normalized.label || '';
+    if (idEl) idEl.value = normalized.promptPayId || '';
+    if (merchantEl) merchantEl.value = normalized.merchantName || '';
+    if (cityEl) cityEl.value = normalized.city || '';
+    updatePromptPaySettingsPreview({ ...normalized, enabled: document.getElementById('promptpay-enabled')?.checked !== false });
 }
 
-function updatePromptPaySettingsPreview(settings = getPromptPaySettingsFromForm()) {
-    const normalized = normalizePromptPaySettings(settings);
+function updatePromptPaySettingsPreview(settings = readPromptPayAccountForm({ validate: false })) {
+    const normalized = normalizePromptPayAccount(settings);
     const previewId = document.getElementById('promptpay-preview-id');
     const previewMerchant = document.getElementById('promptpay-preview-merchant');
     const previewCity = document.getElementById('promptpay-preview-city');
     const previewEnabled = document.getElementById('promptpay-preview-enabled');
-    if (previewId) previewId.textContent = cleanPromptPayId(settings.promptPayId) || PROMPTPAY_SETTINGS_DEFAULTS.promptPayId;
+    if (previewId) previewId.textContent = cleanPromptPayId(settings.promptPayId) || normalized.promptPayId;
     if (previewMerchant) previewMerchant.textContent = settings.merchantName || normalized.merchantName;
     if (previewCity) previewCity.textContent = settings.city || normalized.city;
-    if (previewEnabled) previewEnabled.textContent = settings.enabled === false ? '\u0e1b\u0e34\u0e14\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19' : '\u0e40\u0e1b\u0e34\u0e14\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19';
+    if (previewEnabled) previewEnabled.textContent = settings.enabled === false ? 'Disabled' : 'Enabled';
+}
+
+function renderPromptPayAccountOptions() {
+    const select = document.getElementById('promptpay-active-account');
+    if (!select) return;
+    select.innerHTML = promptPaySettingsState.accounts.map((account, index) => {
+        const selected = account.id === promptPaySettingsState.activeAccountId ? ' selected' : '';
+        const label = (index + 1) + '. ' + account.label + ' - ' + account.promptPayId;
+        return '<option value="' + escapeHTML(account.id) + '"' + selected + '>' + escapeHTML(label) + '</option>';
+    }).join('');
+}
+
+function renderPromptPayAccountList() {
+    const container = document.getElementById('promptpay-account-list');
+    if (!container) return;
+    if (!promptPaySettingsState.accounts.length) {
+        container.innerHTML = '<div class="promptpay-empty">No PromptPay accounts yet.</div>';
+        return;
+    }
+    container.innerHTML = promptPaySettingsState.accounts.map((account, index) => {
+        const active = account.id === promptPaySettingsState.activeAccountId;
+        return '<article class="promptpay-account-item' + (active ? ' active' : '') + '">'
+            + '<span class="promptpay-account-order">' + (index + 1) + '</span>'
+            + '<div class="promptpay-account-title"><strong>' + escapeHTML(account.label) + (active ? ' - Active' : '') + '</strong><small>' + escapeHTML(account.promptPayId + ' - ' + account.merchantName + ' - ' + account.city) + '</small></div>'
+            + '<div class="promptpay-account-actions">'
+            + '<button type="button" class="promptpay-mini-btn" onclick="setActivePromptPayAccount(\'' + escapeJSString(account.id) + '\')">Use</button>'
+            + '<button type="button" class="promptpay-mini-btn" onclick="editPromptPayAccount(\'' + escapeJSString(account.id) + '\')">Edit</button>'
+            + '<button type="button" class="promptpay-mini-btn danger" onclick="deletePromptPayAccount(\'' + escapeJSString(account.id) + '\')">Delete</button>'
+            + '</div></article>';
+    }).join('');
+}
+
+function renderPromptPaySettingsUI() {
+    promptPaySettingsState = normalizePromptPaySettings(promptPaySettingsState);
+    const enabledEl = document.getElementById('promptpay-enabled');
+    if (enabledEl) enabledEl.checked = promptPaySettingsState.enabled;
+    renderPromptPayAccountOptions();
+    renderPromptPayAccountList();
+}
+
+function applyPromptPaySettingsToForm(settings = defaultPromptPaySettings()) {
+    promptPaySettingsState = normalizePromptPaySettings(settings);
+    renderPromptPaySettingsUI();
+    applyPromptPayAccountToForm(activePromptPayAccount(promptPaySettingsState));
+}
+
+function upsertPromptPayCurrentAccount() {
+    const account = readPromptPayAccountForm({ validate: true });
+    const currentId = account.id || '';
+    const targetId = currentId || uniquePromptPayAccountId(account.label || account.promptPayId, promptPaySettingsState.accounts);
+    const nextAccount = { ...account, id: targetId };
+    const existingIndex = promptPaySettingsState.accounts.findIndex(item => item.id === targetId);
+    if (existingIndex >= 0) promptPaySettingsState.accounts[existingIndex] = nextAccount;
+    else promptPaySettingsState.accounts.push(nextAccount);
+    promptPaySettingsState.accounts = promptPaySettingsState.accounts.map((item, index) => ({ ...item, order: index + 1 }));
+    if (!promptPaySettingsState.activeAccountId || !promptPaySettingsState.accounts.some(item => item.id === promptPaySettingsState.activeAccountId)) {
+        promptPaySettingsState.activeAccountId = targetId;
+    }
+    promptPayEditingAccountId = targetId;
+    renderPromptPaySettingsUI();
+    applyPromptPayAccountToForm(nextAccount);
+    return nextAccount;
+}
+
+function buildPromptPaySettingsPayload() {
+    upsertPromptPayCurrentAccount();
+    const selectValue = document.getElementById('promptpay-active-account')?.value || promptPaySettingsState.activeAccountId;
+    if (promptPaySettingsState.accounts.some(account => account.id === selectValue)) {
+        promptPaySettingsState.activeAccountId = selectValue;
+    }
+    promptPaySettingsState.enabled = document.getElementById('promptpay-enabled')?.checked !== false;
+    promptPaySettingsState = normalizePromptPaySettings(promptPaySettingsState);
+    const activeAccount = activePromptPayAccount(promptPaySettingsState);
+    return {
+        enabled: promptPaySettingsState.enabled,
+        activeAccountId: activeAccount.id,
+        accounts: promptPaySettingsState.accounts.map((account, index) => ({ ...account, order: index + 1 })),
+        promptPayId: activeAccount.promptPayId,
+        merchantName: activeAccount.merchantName,
+        city: activeAccount.city
+    };
 }
 
 window.loadPromptPaySettings = async function() {
@@ -5135,45 +5328,100 @@ window.loadPromptPaySettings = async function() {
     setPromptPayAdminStatus('Loading PromptPay settings...', 'warning');
     try {
         const snap = await getDoc(doc(db, 'site_settings', 'promptpay'));
-        const settings = normalizePromptPaySettings(snap.exists() ? snap.data() : PROMPTPAY_SETTINGS_DEFAULTS);
+        const settings = normalizePromptPaySettings(snap.exists() ? snap.data() : defaultPromptPaySettings());
         applyPromptPaySettingsToForm(settings);
         setPromptPayAdminStatus(snap.exists() ? 'PromptPay settings loaded.' : 'Using default PromptPay settings. Save once to publish them.', snap.exists() ? 'success' : 'warning');
         return settings;
     } catch (error) {
         console.error('Error loading PromptPay settings:', error);
-        applyPromptPaySettingsToForm(PROMPTPAY_SETTINGS_DEFAULTS);
+        applyPromptPaySettingsToForm(defaultPromptPaySettings());
         setPromptPayAdminStatus('Unable to load PromptPay settings: ' + error.message, 'error');
         return null;
     }
 };
 
+window.addPromptPayAccount = function() {
+    promptPayEditingAccountId = '';
+    const newAccount = {
+        id: '',
+        label: 'PromptPay ' + (promptPaySettingsState.accounts.length + 1),
+        promptPayId: '',
+        merchantName: PROMPTPAY_DEFAULT_ACCOUNT.merchantName,
+        city: PROMPTPAY_DEFAULT_ACCOUNT.city,
+        order: promptPaySettingsState.accounts.length + 1
+    };
+    applyPromptPayAccountToForm(newAccount);
+    setPromptPayAdminStatus('Fill in the new PromptPay account, then save it into the list.', 'warning');
+};
+
+window.editPromptPayAccount = function(accountId) {
+    const account = promptPaySettingsState.accounts.find(item => item.id === accountId);
+    if (!account) return;
+    applyPromptPayAccountToForm(account);
+    setPromptPayAdminStatus('Editing ' + account.label + '. Save all to publish changes.', 'warning');
+};
+
+window.setActivePromptPayAccount = function(accountId) {
+    const account = promptPaySettingsState.accounts.find(item => item.id === accountId);
+    if (!account) return;
+    promptPaySettingsState.activeAccountId = account.id;
+    renderPromptPaySettingsUI();
+    applyPromptPayAccountToForm(account);
+    setPromptPayAdminStatus(account.label + ' selected for POS. Click Save All to publish.', 'warning');
+};
+
+window.deletePromptPayAccount = function(accountId) {
+    if (promptPaySettingsState.accounts.length <= 1) {
+        setPromptPayAdminStatus('At least one PromptPay account is required.', 'error');
+        return;
+    }
+    const account = promptPaySettingsState.accounts.find(item => item.id === accountId);
+    if (!account) return;
+    if (!confirm('Delete PromptPay account "' + account.label + '"?')) return;
+    promptPaySettingsState.accounts = promptPaySettingsState.accounts.filter(item => item.id !== accountId);
+    if (promptPaySettingsState.activeAccountId === accountId) {
+        promptPaySettingsState.activeAccountId = promptPaySettingsState.accounts[0]?.id || '';
+    }
+    renderPromptPaySettingsUI();
+    applyPromptPayAccountToForm(activePromptPayAccount(promptPaySettingsState));
+    setPromptPayAdminStatus('Account removed from the list. Click Save All to publish.', 'warning');
+};
+
+window.savePromptPayCurrentAccount = function() {
+    try {
+        const account = upsertPromptPayCurrentAccount();
+        setPromptPayAdminStatus(account.label + ' saved into the list. Click Save All to publish to POS.', 'success');
+    } catch (error) {
+        setPromptPayAdminStatus(error.message, 'error');
+        document.getElementById('promptpay-id')?.focus();
+    }
+};
+
 window.resetPromptPaySettingsForm = function() {
-    applyPromptPaySettingsToForm(PROMPTPAY_SETTINGS_DEFAULTS);
-    setPromptPayAdminStatus('Default PromptPay values restored in the form. Click Save to publish.', 'warning');
+    applyPromptPaySettingsToForm(defaultPromptPaySettings());
+    setPromptPayAdminStatus('Default PromptPay values restored in the form. Click Save All to publish.', 'warning');
 };
 
 promptPaySettingsForm?.addEventListener('input', () => {
-    updatePromptPaySettingsPreview(getPromptPaySettingsFromForm());
+    try {
+        updatePromptPaySettingsPreview({ ...readPromptPayAccountForm({ validate: false }), enabled: document.getElementById('promptpay-enabled')?.checked !== false });
+    } catch (error) {
+        console.warn('Unable to preview PromptPay form:', error);
+    }
 });
 
-promptPaySettingsForm?.addEventListener('change', () => {
-    updatePromptPaySettingsPreview(getPromptPaySettingsFromForm());
+promptPaySettingsForm?.addEventListener('change', (event) => {
+    if (event.target?.id === 'promptpay-active-account') {
+        window.setActivePromptPayAccount(event.target.value);
+        return;
+    }
+    updatePromptPaySettingsPreview({ ...readPromptPayAccountForm({ validate: false }), enabled: document.getElementById('promptpay-enabled')?.checked !== false });
 });
 
 promptPaySettingsForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!canAdmin('promptpay')) {
         setPromptPayAdminStatus('This account cannot manage PromptPay settings.', 'error');
-        return;
-    }
-    const settings = getPromptPaySettingsFromForm();
-    if (!isValidPromptPayId(settings.promptPayId)) {
-        setPromptPayAdminStatus('PromptPay ID must be a 10-digit phone number, 13-digit citizen ID, or 15-digit e-Wallet ID.', 'error');
-        document.getElementById('promptpay-id')?.focus();
-        return;
-    }
-    if (!settings.merchantName || !settings.city) {
-        setPromptPayAdminStatus('Merchant name and city are required.', 'error');
         return;
     }
 
@@ -5185,7 +5433,7 @@ promptPaySettingsForm?.addEventListener('submit', async (event) => {
     }
 
     try {
-        const payload = normalizePromptPaySettings(settings);
+        const payload = buildPromptPaySettingsPayload();
         await setDoc(doc(db, 'site_settings', 'promptpay'), {
             ...payload,
             updatedAt: serverTimestamp(),
@@ -5193,7 +5441,7 @@ promptPaySettingsForm?.addEventListener('submit', async (event) => {
             updatedByEmail: auth.currentUser?.email || ''
         }, { merge: true });
         applyPromptPaySettingsToForm(payload);
-        setPromptPayAdminStatus('PromptPay settings saved. Open POS screens will update automatically.', 'success');
+        setPromptPayAdminStatus('PromptPay settings saved. POS will use ' + activePromptPayAccount(payload).label + ' automatically.', 'success');
     } catch (error) {
         console.error('Error saving PromptPay settings:', error);
         setPromptPayAdminStatus('Unable to save PromptPay settings: ' + error.message, 'error');
@@ -5205,7 +5453,7 @@ promptPaySettingsForm?.addEventListener('submit', async (event) => {
     }
 });
 
-applyPromptPaySettingsToForm(PROMPTPAY_SETTINGS_DEFAULTS);
+applyPromptPaySettingsToForm(defaultPromptPaySettings());
 
 // ==========================================
 // Footer Settings Management Logic

@@ -352,6 +352,25 @@
         .promptpay-toggle span { color: #67766c; font-size: 0.88rem; }
         .promptpay-toggle input { width: 22px; height: 22px; accent-color: #129657; }
         .promptpay-help { color: #6a786f; font-size: 0.86rem; line-height: 1.6; margin-top: -6px; margin-bottom: 16px; }
+
+        .promptpay-active-select { border: 1px solid #dceee1; background: #ffffff; border-radius: 18px; padding: 16px; margin-bottom: 18px; }
+        .promptpay-active-select label { display: block; color: #0b3d2a; font-weight: 800; margin-bottom: 8px; }
+        .promptpay-active-select select { width: 100%; padding: 12px 14px; border: 1px solid #d8e7dd; border-radius: 12px; background: #fbfff8; color: #0b3d2a; font-weight: 700; }
+        .promptpay-account-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 18px 0 12px; }
+        .promptpay-account-toolbar h3 { color: #0b3d2a; font-size: 1.05rem; }
+        .promptpay-account-list { display: grid; gap: 10px; max-height: 280px; overflow: auto; padding-right: 4px; margin-bottom: 18px; }
+        .promptpay-account-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; border: 1px solid #e1ece3; border-radius: 16px; background: #fff; padding: 12px; }
+        .promptpay-account-item.active { border-color: #129657; background: linear-gradient(135deg, #fbfff8, #effbf2); box-shadow: 0 10px 24px rgba(18, 150, 87, 0.08); }
+        .promptpay-account-order { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 12px; background: #edf7ef; color: #0b7040; font-weight: 900; }
+        .promptpay-account-title strong { display: block; color: #0b3d2a; }
+        .promptpay-account-title small { display: block; color: #728178; margin-top: 2px; word-break: break-word; }
+        .promptpay-account-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+        .promptpay-mini-btn { border: 1px solid #d7e8dc; background: #f5fbf7; color: #0b4a30; border-radius: 999px; padding: 7px 12px; cursor: pointer; font-weight: 800; }
+        .promptpay-mini-btn:hover { background: #e5f7ea; border-color: #a7dcb8; }
+        .promptpay-mini-btn.danger { background: #fff3f1; border-color: #ffd4cc; color: #b3261e; }
+        .promptpay-account-editor { border-top: 1px dashed #d8e7dd; padding-top: 18px; margin-top: 14px; }
+        .promptpay-account-editor h3 { color: #0b3d2a; font-size: 1.05rem; margin-bottom: 12px; }
+        .promptpay-empty { border: 1px dashed #cfe3d4; border-radius: 16px; padding: 16px; color: #6b7a72; background: #fbfff8; }
         .promptpay-settings-status { min-height: 22px; color: #607568; font-weight: 600; margin-top: 12px; }
         .promptpay-settings-status.success { color: #0f8a4c; }
         .promptpay-settings-status.error { color: #c62828; }
@@ -1024,26 +1043,47 @@
                             <input type="checkbox" id="promptpay-enabled" checked>
                         </label>
 
-                        <div class="form-group">
-                            <label for="promptpay-id">&#x0E40;&#x0E25;&#x0E02;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C;</label>
-                            <input type="text" id="promptpay-id" inputmode="numeric" autocomplete="off" value="057556001655" placeholder="057556001655" required>
+                        <div class="promptpay-active-select">
+                            <label for="promptpay-active-account">&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C;&#x0E17;&#x0E35;&#x0E48;&#x0E43;&#x0E0A;&#x0E49;&#x0E07;&#x0E32;&#x0E19;&#x0E43;&#x0E19; POS</label>
+                            <select id="promptpay-active-account"></select>
+                            <p class="promptpay-help" style="margin:8px 0 0;">&#x0E40;&#x0E25;&#x0E37;&#x0E2D;&#x0E01;&#x0E1A;&#x0E31;&#x0E0D;&#x0E0A;&#x0E35;&#x0E17;&#x0E35;&#x0E48;&#x0E08;&#x0E30;&#x0E43;&#x0E0A;&#x0E49;&#x0E2A;&#x0E23;&#x0E49;&#x0E32;&#x0E07; QR Payment &#x0E43;&#x0E2B;&#x0E49;&#x0E25;&#x0E39;&#x0E01;&#x0E04;&#x0E49;&#x0E32;</p>
                         </div>
-                        <p class="promptpay-help">&#x0E23;&#x0E2D;&#x0E07;&#x0E23;&#x0E31;&#x0E1A;&#x0E40;&#x0E1A;&#x0E2D;&#x0E23;&#x0E4C;&#x0E42;&#x0E17;&#x0E23; 10 &#x0E2B;&#x0E25;&#x0E31;&#x0E01;, &#x0E40;&#x0E25;&#x0E02;&#x0E1A;&#x0E31;&#x0E15;&#x0E23;&#x0E1B;&#x0E23;&#x0E30;&#x0E0A;&#x0E32;&#x0E0A;&#x0E19; 13 &#x0E2B;&#x0E25;&#x0E31;&#x0E01; &#x0E2B;&#x0E23;&#x0E37;&#x0E2D; e-Wallet ID 15 &#x0E2B;&#x0E25;&#x0E31;&#x0E01;</p>
 
-                        <div class="promptpay-form-row">
+                        <div class="promptpay-account-toolbar">
+                            <h3>&#x0E1A;&#x0E31;&#x0E0D;&#x0E0A;&#x0E35;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C;&#x0E17;&#x0E31;&#x0E49;&#x0E07;&#x0E2B;&#x0E21;&#x0E14;</h3>
+                            <button type="button" class="promptpay-mini-btn" onclick="addPromptPayAccount()">+ &#x0E40;&#x0E1E;&#x0E34;&#x0E48;&#x0E21;&#x0E1A;&#x0E31;&#x0E0D;&#x0E0A;&#x0E35;</button>
+                        </div>
+                        <div id="promptpay-account-list" class="promptpay-account-list"></div>
+
+                        <div class="promptpay-account-editor">
+                            <h3 id="promptpay-editor-title">&#x0E41;&#x0E01;&#x0E49;&#x0E44;&#x0E02;&#x0E1A;&#x0E31;&#x0E0D;&#x0E0A;&#x0E35;</h3>
+                            <input type="hidden" id="promptpay-account-key">
                             <div class="form-group">
-                                <label for="promptpay-merchant-name">&#x0E0A;&#x0E37;&#x0E48;&#x0E2D;&#x0E23;&#x0E49;&#x0E32;&#x0E19;&#x0E43;&#x0E19; QR</label>
-                                <input type="text" id="promptpay-merchant-name" value="EDEN CAFE" maxlength="25" required>
+                                <label for="promptpay-account-label">&#x0E0A;&#x0E37;&#x0E48;&#x0E2D;&#x0E40;&#x0E23;&#x0E35;&#x0E22;&#x0E01;&#x0E1A;&#x0E31;&#x0E0D;&#x0E0A;&#x0E35;</label>
+                                <input type="text" id="promptpay-account-label" value="Eden Cafe Main" placeholder="Eden Cafe Main / Bar Counter / Roastery">
                             </div>
                             <div class="form-group">
-                                <label for="promptpay-city">&#x0E40;&#x0E21;&#x0E37;&#x0E2D;&#x0E07;</label>
-                                <input type="text" id="promptpay-city" value="CHIANG RAI" maxlength="15" required>
+                                <label for="promptpay-id">&#x0E40;&#x0E25;&#x0E02;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C;</label>
+                                <input type="text" id="promptpay-id" inputmode="numeric" autocomplete="off" value="057556001655" placeholder="057556001655" required>
+                            </div>
+                            <p class="promptpay-help">&#x0E23;&#x0E2D;&#x0E07;&#x0E23;&#x0E31;&#x0E1A;&#x0E40;&#x0E1A;&#x0E2D;&#x0E23;&#x0E4C;&#x0E42;&#x0E17;&#x0E23; 10 &#x0E2B;&#x0E25;&#x0E31;&#x0E01;, &#x0E40;&#x0E25;&#x0E02;&#x0E1A;&#x0E31;&#x0E15;&#x0E23;&#x0E1B;&#x0E23;&#x0E30;&#x0E0A;&#x0E32;&#x0E0A;&#x0E19; 13 &#x0E2B;&#x0E25;&#x0E31;&#x0E01; &#x0E2B;&#x0E23;&#x0E37;&#x0E2D; e-Wallet ID 15 &#x0E2B;&#x0E25;&#x0E31;&#x0E01;</p>
+
+                            <div class="promptpay-form-row">
+                                <div class="form-group">
+                                    <label for="promptpay-merchant-name">&#x0E0A;&#x0E37;&#x0E48;&#x0E2D;&#x0E23;&#x0E49;&#x0E32;&#x0E19;&#x0E43;&#x0E19; QR</label>
+                                    <input type="text" id="promptpay-merchant-name" value="EDEN CAFE" maxlength="25" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="promptpay-city">&#x0E40;&#x0E21;&#x0E37;&#x0E2D;&#x0E07;</label>
+                                    <input type="text" id="promptpay-city" value="CHIANG RAI" maxlength="15" required>
+                                </div>
                             </div>
                         </div>
 
                         <div style="display:flex; gap:12px; justify-content:flex-end; flex-wrap:wrap; margin-top:10px;">
-                            <button type="button" class="btn-action" style="background:#789; padding: 10px 22px;" onclick="resetPromptPaySettingsForm()">&#x0E01;&#x0E25;&#x0E31;&#x0E1A;&#x0E04;&#x0E48;&#x0E32;&#x0E15;&#x0E31;&#x0E49;&#x0E07;&#x0E15;&#x0E49;&#x0E19;</button>
-                            <button type="submit" class="btn-submit" style="width:auto; padding:10px 28px; background:var(--accent-color);">&#x0E1A;&#x0E31;&#x0E19;&#x0E17;&#x0E36;&#x0E01;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C;</button>
+                            <button type="button" class="btn-action" style="background:#789; padding: 10px 22px;" onclick="resetPromptPaySettingsForm()">&#x0E23;&#x0E35;&#x0E40;&#x0E0B;&#x0E47;&#x0E15;</button>
+                            <button type="button" class="btn-action btn-view" style="padding:10px 22px;" onclick="savePromptPayCurrentAccount()">&#x0E1A;&#x0E31;&#x0E19;&#x0E17;&#x0E36;&#x0E01;&#x0E1A;&#x0E31;&#x0E0D;&#x0E0A;&#x0E35;&#x0E43;&#x0E19;&#x0E23;&#x0E32;&#x0E22;&#x0E01;&#x0E32;&#x0E23;</button>
+                            <button type="submit" class="btn-submit" style="width:auto; padding:10px 28px; background:var(--accent-color);">&#x0E1A;&#x0E31;&#x0E19;&#x0E17;&#x0E36;&#x0E01;&#x0E17;&#x0E31;&#x0E49;&#x0E07;&#x0E2B;&#x0E21;&#x0E14;</button>
                         </div>
                         <p id="promptpay-settings-status" class="promptpay-settings-status"></p>
                     </form>
@@ -1597,7 +1637,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=41"></script>
+    <script type="module" src="js/admin.js?v=42"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {
