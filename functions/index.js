@@ -37,9 +37,11 @@ const ALLOWED_ORIGINS = new Set([
   'http://localhost:5000',
   'http://localhost:5173',
   'http://localhost:8080',
+  'http://localhost:8787',
   'http://127.0.0.1:5000',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:8080',
+  'http://127.0.0.1:8787',
 ]);
 
 function setCors(req, res) {
@@ -114,6 +116,55 @@ async function requireAdminAccess(req, permission = '') {
   const error = new Error('Admin permission required');
   error.statusCode = 403;
   throw error;
+}
+
+async function requireOwnerAccess(req) {
+  const decoded = await requireAdminAccess(req);
+  const email = String(decoded.email || '').trim().toLowerCase();
+  if (ADMIN_EMAILS.has(email)) return decoded;
+
+  const accessSnap = await db.collection('admin_users').doc(decoded.uid).get();
+  const access = accessSnap.exists ? accessSnap.data() || {} : {};
+  if (access.status === 'active' && access.role === 'owner') return decoded;
+
+  const error = new Error('Owner permission required');
+  error.statusCode = 403;
+  throw error;
+}
+
+function normalizeAdminRole(role) {
+  return ['owner', 'head_manager', 'manager'].includes(role) ? role : 'manager';
+}
+
+function normalizeAdminStatus(status) {
+  return status === 'paused' ? 'paused' : 'active';
+}
+
+function normalizeAdminPermissions(role, raw = {}) {
+  const allowed = [
+    'dashboard',
+    'members',
+    'pos',
+    'orders',
+    'bookings',
+    'tables',
+    'rooms',
+    'products',
+    'shop',
+    'blogs',
+    'faqs',
+    'promptpay',
+    'marketing',
+    'footer',
+  ];
+  const all = Object.fromEntries(allowed.map(key => [key, true]));
+  if (role === 'owner' || role === 'head_manager') return all;
+  return Object.fromEntries(allowed.map(key => [key, raw && raw[key] === true]));
+}
+
+function hasPasswordProvider(userRecord) {
+  return Array.isArray(userRecord?.providerData)
+    && userRecord.providerData.some(provider => provider.providerId === 'password');
 }
 
 function authMemberCode(uid) {
@@ -559,6 +610,152 @@ exports.uploadSpaceshipImage = onRequest(
       const status = error.statusCode || (/Missing|Invalid|Unsupported|large|configured/i.test(error.message) ? 400 : 500);
       logger.warn('Spaceship image upload failed', { message: error.message, status });
       res.status(status).json({ error: error.message || 'Spaceship image upload failed' });
+    }
+  }
+);
+
+exports.upsertAdminAccessUser = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const owner = await requireOwnerAccess(req);
+      const body = req.body || {};
+      const requestedUid = cleanString(body.uid || '', 128);
+      const email = cleanString(body.email || '', 180).toLowerCase();
+      const displayName = cleanString(body.displayName || email || 'Eden Manager', 120);
+      const password = String(body.password || '');
+      const role = normalizeAdminRole(body.role);
+      const status = normalizeAdminStatus(body.status);
+      const permissions = normalizeAdminPermissions(role, body.permissions || {});
+
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        const error = new Error('Valid manager email is required');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (requestedUid && requestedUid.includes('@')) {
+        const error = new Error('Firebase UID must not be an email address');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (password && (password.length < 8 || password.length > 128)) {
+        const error = new Error('Password must be 8-128 characters');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      let userRecord = null;
+      let createdAuthUser = false;
+      let passwordUpdated = false;
+
+      if (requestedUid) {
+        try {
+          userRecord = await admin.auth().getUser(requestedUid);
+        } catch (error) {
+          if (error.code !== 'auth/user-not-found') throw error;
+        }
+      }
+
+      let emailUserRecord = null;
+      try {
+        emailUserRecord = await admin.auth().getUserByEmail(email);
+      } catch (error) {
+        if (error.code !== 'auth/user-not-found') throw error;
+      }
+
+      if (userRecord && emailUserRecord && emailUserRecord.uid !== userRecord.uid) {
+        const error = new Error('This email already belongs to another Firebase Auth user');
+        error.statusCode = 409;
+        throw error;
+      }
+      if (!userRecord && emailUserRecord) userRecord = emailUserRecord;
+
+      if (!userRecord) {
+        if (!password) {
+          const error = new Error('Password is required for a new manager account');
+          error.statusCode = 400;
+          throw error;
+        }
+        userRecord = await admin.auth().createUser({
+          uid: requestedUid || undefined,
+          email,
+          password,
+          displayName,
+          emailVerified: false,
+          disabled: false,
+        });
+        createdAuthUser = true;
+        passwordUpdated = true;
+      } else {
+        const updatePayload = { email, displayName, disabled: false };
+        if (password) {
+          updatePayload.password = password;
+          passwordUpdated = true;
+        }
+        userRecord = await admin.auth().updateUser(userRecord.uid, updatePayload);
+      }
+
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      const accessRef = db.collection('admin_users').doc(userRecord.uid);
+      const accessSnap = await accessRef.get();
+      const accessPayload = {
+        uid: userRecord.uid,
+        email,
+        displayName,
+        role,
+        status,
+        permissions,
+        passwordLoginEnabled: passwordUpdated || hasPasswordProvider(userRecord),
+        authManagedAt: now,
+        authManagedBy: owner.uid || '',
+        updatedAt: now,
+        updatedBy: owner.uid || '',
+      };
+      if (passwordUpdated) accessPayload.passwordUpdatedAt = now;
+      if (!accessSnap.exists) {
+        accessPayload.createdAt = now;
+        accessPayload.createdBy = owner.uid || '';
+      }
+      await accessRef.set(accessPayload, { merge: true });
+
+      const userRef = db.collection('users').doc(userRecord.uid);
+      const userSnap = await userRef.get();
+      const memberPayload = authUserToMemberDoc(userRecord);
+      memberPayload.displayName = displayName;
+      memberPayload.email = email;
+      memberPayload.status = 'active';
+      memberPayload.updatedAt = now;
+      if (!userSnap.exists) memberPayload.createdAt = now;
+      await userRef.set(memberPayload, { merge: true });
+
+      logger.info('Admin access user upserted', {
+        uid: userRecord.uid,
+        email,
+        role,
+        createdAuthUser,
+        passwordUpdated,
+        ownerUid: owner.uid,
+      });
+      res.json({
+        ok: true,
+        uid: userRecord.uid,
+        email,
+        createdAuthUser,
+        passwordUpdated,
+        passwordLoginEnabled: accessPayload.passwordLoginEnabled,
+      });
+    } catch (error) {
+      const status = error.statusCode || (/required|valid|password|uid|email/i.test(error.message) ? 400 : 500);
+      logger.warn('Admin access user upsert failed', { message: error.message, status });
+      res.status(status).json({ error: error.message || 'Admin access user upsert failed' });
     }
   }
 );

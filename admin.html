@@ -281,9 +281,13 @@
         .access-role-manager { background: #e8f5e9; color: #2e7d32; }
         .access-status-active { color: #2e7d32; font-weight: 700; }
         .access-status-paused { color: #c62828; font-weight: 700; }
+        .access-auth-status { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; background: #eef7ef; color: #1b5e20; white-space: nowrap; }
+        .access-auth-status.pending { background: #fff8e1; color: #8a6500; }
+        .access-field-help { margin-top: 6px; color: #728077; font-size: 0.82rem; line-height: 1.45; }
+        .access-password-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         .access-disabled { opacity: 0.55; pointer-events: none; }
         @media (max-width: 1100px) { .access-layout { grid-template-columns: 1fr; } }
-        @media (max-width: 700px) { .access-permission-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 700px) { .access-permission-grid, .access-password-grid { grid-template-columns: 1fr; } }
 
         /* Modal Styles */
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); backdrop-filter: blur(5px); }
@@ -612,8 +616,9 @@
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label for="access-uid">Firebase UID</label>
-                                <input type="text" id="access-uid" placeholder="เช่น Zb4hnONKpBcEdPuJ36ad..." required>
+                                <label for="access-uid">Firebase UID <span style="color:#789; font-weight:400;">(เว้นว่างได้ถ้าสร้างจากอีเมล)</span></label>
+                                <input type="text" id="access-uid" placeholder="เช่น Zb4hnONKpBcEdPuJ36ad...">
+                                <div class="access-field-help">ถ้าเลือกสมาชิกจาก dropdown ระบบจะใส่ UID ให้เอง ถ้าเป็นผู้จัดการใหม่ให้กรอกอีเมลและตั้งรหัสผ่านได้เลย</div>
                             </div>
                             <div class="form-group">
                                 <label for="access-email">อีเมล</label>
@@ -622,6 +627,14 @@
                             <div class="form-group">
                                 <label for="access-display-name">ชื่อที่แสดง</label>
                                 <input type="text" id="access-display-name" placeholder="ชื่อผู้จัดการ">
+                            </div>
+                            <div class="form-group">
+                                <label>รหัสผ่านสำหรับ Login ด้วยอีเมล</label>
+                                <div class="access-password-grid">
+                                    <input type="password" id="access-password" placeholder="ตั้งรหัสผ่านใหม่ (อย่างน้อย 8 ตัว)" minlength="8" autocomplete="new-password">
+                                    <input type="password" id="access-password-confirm" placeholder="ยืนยันรหัสผ่าน" minlength="8" autocomplete="new-password">
+                                </div>
+                                <div class="access-field-help">รหัสผ่านจะถูกตั้งใน Firebase Authentication เท่านั้น ไม่เก็บลงฐานข้อมูล ถ้าเว้นว่างไว้ ระบบจะไม่เปลี่ยนรหัสผ่านเดิม</div>
                             </div>
                             <div class="form-group">
                                 <label for="access-role">ระดับสิทธิ์</label>
@@ -654,13 +667,14 @@
                                     <th>ผู้จัดการ</th>
                                     <th>ระดับ</th>
                                     <th>สิทธิ์</th>
+                                    <th>Email Login</th>
                                     <th>สถานะ</th>
                                     <th>อัปเดตล่าสุด</th>
                                     <th>จัดการ</th>
                                 </tr>
                             </thead>
                             <tbody id="admin-access-table-body">
-                                <tr><td colspan="6" style="text-align:center;">กำลังโหลดข้อมูลสิทธิ์...</td></tr>
+                                <tr><td colspan="7" style="text-align:center;">กำลังโหลดข้อมูลสิทธิ์...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -1721,7 +1735,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=44"></script>
+    <script type="module" src="js/admin.js?v=45"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {

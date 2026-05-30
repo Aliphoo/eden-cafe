@@ -101,6 +101,23 @@ async function uploadAdminImage(blob, folder, fileName) {
     return result.url;
 }
 
+async function callAdminFunction(functionName, payload = {}) {
+    const token = await auth.currentUser?.getIdToken(true);
+    if (!token) throw new Error('Please sign in as admin again before continuing');
+
+    const response = await fetch(FUNCTIONS_BASE_URL + '/' + functionName, {
+        method: 'POST',
+        headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Request failed');
+    return result;
+}
+
 
 const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
 const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net';
@@ -4423,7 +4440,7 @@ function renderAdminAccessTable() {
     setAdminAccessStats(rows);
 
     if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="6"><div class="member-empty-state">ยังไม่มีผู้จัดการในระบบ กรอก UID จาก Firebase Auth หรือเลือกจากสมาชิกเพื่อเริ่มต้น</div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7"><div class="member-empty-state">ยังไม่มีผู้จัดการในระบบ กรอกอีเมลและตั้งรหัสผ่าน หรือเลือกจากสมาชิกเพื่อเริ่มต้น</div></td></tr>';
         return;
     }
 
@@ -4435,11 +4452,15 @@ function renderAdminAccessTable() {
                 .map(([, label]) => label)
                 .join(', ') || '-';
         const canDelete = row.uid !== currentAdminAccess?.uid;
+        const passwordLoginText = row.passwordLoginEnabled
+            ? 'พร้อมใช้'
+            : 'ยังไม่ตั้งรหัส';
         return `
             <tr>
                 <td><strong>${escapeHTML(row.displayName || 'Manager')}</strong><br><small>${escapeHTML(row.email || '-')}<br>UID: ${escapeHTML(row.uid)}</small></td>
                 <td>${adminRoleBadgeHTML(row.role)}</td>
                 <td style="max-width:260px;">${escapeHTML(permissionText)}</td>
+                <td><span class="access-auth-status ${row.passwordLoginEnabled ? '' : 'pending'}">${escapeHTML(passwordLoginText)}</span></td>
                 <td><span class="access-status-${row.status === 'active' ? 'active' : 'paused'}">${escapeHTML(row.status || 'active')}</span></td>
                 <td>${formatDate(row.updatedAt || row.createdAt)}</td>
                 <td>
@@ -4485,6 +4506,10 @@ function bindAdminAccessForm() {
             document.getElementById('access-uid').value = uid;
             document.getElementById('access-email').value = member.email || '';
             document.getElementById('access-display-name').value = memberDisplayName(member);
+            const passwordEl = document.getElementById('access-password');
+            const confirmEl = document.getElementById('access-password-confirm');
+            if (passwordEl) passwordEl.value = '';
+            if (confirmEl) confirmEl.value = '';
         });
     }
 
@@ -4506,39 +4531,56 @@ async function saveAdminAccessFromForm() {
     const uid = document.getElementById('access-uid')?.value.trim();
     const email = normalizeEmail(document.getElementById('access-email')?.value);
     const displayName = document.getElementById('access-display-name')?.value.trim() || 'Manager';
+    const password = document.getElementById('access-password')?.value || '';
+    const passwordConfirm = document.getElementById('access-password-confirm')?.value || '';
     const role = document.getElementById('access-role')?.value || 'manager';
     const status = document.getElementById('access-status')?.value || 'active';
-    if (!uid || !email) {
-        alert('กรุณากรอก Firebase UID และอีเมล');
+    if (!email) {
+        alert('กรุณากรอกอีเมลผู้จัดการ');
         return;
     }
-    if (uid.includes('@')) {
+    if (uid && uid.includes('@')) {
         alert('Firebase UID ต้องไม่ใช่อีเมลครับ ให้ใช้ User UID จาก Firebase Authentication หรือเลือกจาก dropdown สมาชิก');
         return;
+    }
+    if (password || passwordConfirm) {
+        if (password !== passwordConfirm) {
+            alert('รหัสผ่านและยืนยันรหัสผ่านไม่ตรงกัน');
+            return;
+        }
+        if (password.length < 8) {
+            alert('รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร');
+            return;
+        }
     }
 
 
     const permissions = normalizePermissions(role, getSelectedAdminPermissions());
-    const existing = adminAccessData[uid];
     const payload = {
         uid,
         email,
         displayName,
         role,
         status,
-        permissions,
-        updatedAt: serverTimestamp(),
-        updatedBy: auth.currentUser?.uid || ''
+        permissions
     };
-    if (!existing) {
-        payload.createdAt = serverTimestamp();
-        payload.createdBy = auth.currentUser?.uid || '';
-    }
+    if (password) payload.password = password;
     try {
-        await setDoc(doc(db, ADMIN_COLLECTION, uid), payload, { merge: true });
-        adminAccessData[uid] = { ...payload, updatedAt: new Date().toISOString() };
+        const result = await callAdminFunction('upsertAdminAccessUser', payload);
+        const savedUid = result.uid || uid;
+        adminAccessData[savedUid] = {
+            ...(adminAccessData[savedUid] || {}),
+            uid: savedUid,
+            email,
+            displayName,
+            role,
+            status,
+            permissions,
+            passwordLoginEnabled: result.passwordLoginEnabled !== false,
+            updatedAt: new Date().toISOString()
+        };
         renderAdminAccessTable();
-        alert('บันทึกสิทธิ์ผู้จัดการเรียบร้อยแล้ว\n\nถ้าผู้จัดการยังเข้าไม่ได้ ให้เช็กว่า UID ตรงกับ Firebase Authentication ของบัญชีนั้น');
+        alert('บันทึกสิทธิ์ผู้จัดการเรียบร้อยแล้ว' + (result.passwordUpdated ? '\nตั้งรหัสผ่านสำหรับ Email Login แล้ว' : ''));
         resetAdminAccessForm();
     } catch (error) {
         console.error('Unable to save admin access:', error);
@@ -4553,6 +4595,10 @@ window.editAdminAccess = (uid) => {
     document.getElementById('access-uid').value = uid;
     document.getElementById('access-email').value = data.email || '';
     document.getElementById('access-display-name').value = data.displayName || '';
+    const passwordEl = document.getElementById('access-password');
+    const confirmEl = document.getElementById('access-password-confirm');
+    if (passwordEl) passwordEl.value = '';
+    if (confirmEl) confirmEl.value = '';
     document.getElementById('access-role').value = data.role || 'manager';
     document.getElementById('access-status').value = data.status || 'active';
     renderAdminPermissionInputs(normalizePermissions(data.role, data.permissions), data.role === 'owner' || data.role === 'head_manager');
@@ -4574,6 +4620,12 @@ window.deleteAdminAccess = async (uid) => {
 window.resetAdminAccessForm = () => {
     const form = document.getElementById('admin-access-form');
     if (form) form.reset();
+    const uidEl = document.getElementById('access-uid');
+    const passwordEl = document.getElementById('access-password');
+    const confirmEl = document.getElementById('access-password-confirm');
+    if (uidEl) uidEl.value = '';
+    if (passwordEl) passwordEl.value = '';
+    if (confirmEl) confirmEl.value = '';
     renderAdminPermissionInputs(adminRoleDefaults('manager'));
 };
 
@@ -4592,7 +4644,7 @@ function setupRealtimeAdminAccess() {
     }, (error) => {
         console.error('Error listening to admin access:', error);
         const tbody = document.getElementById('admin-access-table-body');
-        if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#c62828;">โหลดสิทธิ์ผู้จัดการไม่สำเร็จ: ${escapeHTML(error.message)}</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#c62828;">โหลดสิทธิ์ผู้จัดการไม่สำเร็จ: ${escapeHTML(error.message)}</td></tr>`;
     });
 }
 
