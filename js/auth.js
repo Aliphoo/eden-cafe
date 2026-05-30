@@ -5,6 +5,55 @@ import { collection, addDoc, doc, setDoc, getDoc, serverTimestamp, getDocs, quer
 const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net';
 const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
 
+async function getAuthHeaders({ json = false } = {}) {
+    const headers = {};
+    if (json) headers['Content-Type'] = 'application/json';
+    const user = auth?.currentUser;
+    if (user && typeof user.getIdToken === 'function') {
+        headers.Authorization = 'Bearer ' + await user.getIdToken();
+    }
+    return headers;
+}
+
+async function edenApiRequest(path, { method = 'GET', query: queryParams = {}, body = null } = {}) {
+    const url = new URL(FUNCTIONS_BASE_URL + path);
+    Object.entries(queryParams || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, value);
+    });
+
+    const response = await fetch(url.toString(), {
+        method,
+        headers: await getAuthHeaders({ json: !!body }),
+        body: body ? JSON.stringify(body) : undefined
+    });
+
+    let data = {};
+    try {
+        data = await response.json();
+    } catch (_) {
+        data = {};
+    }
+
+    if (!response.ok) {
+        const error = new Error(data.error || 'Eden API request failed');
+        error.status = response.status;
+        error.conflictIds = Array.isArray(data.conflictIds) ? data.conflictIds : [];
+        throw error;
+    }
+
+    return data;
+}
+
+window.EdenApi = {
+    ...(window.EdenApi || {}),
+    createBooking(bookingData) {
+        return edenApiRequest('/createBooking', { method: 'POST', body: bookingData });
+    },
+    tableAvailability({ date, time }) {
+        return edenApiRequest('/getTableAvailability', { query: { date, time } });
+    }
+};
+
 function escapeHTML(value) {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -65,7 +114,18 @@ async function getUserAdminAccess(user) {
 function adminAccessAllowsPermission(access, permission) {
     if (!access || access.status !== 'active') return false;
     if (access.role === 'owner' || access.role === 'head_manager') return true;
+    if (access.role !== 'manager') return false;
     return access.permissions?.[permission] === true;
+}
+
+function isBackOfficeAccess(access) {
+    return !!access
+        && access.status === 'active'
+        && ['owner', 'head_manager', 'manager'].includes(access.role);
+}
+
+function canUsePosAccess(access) {
+    return isBackOfficeAccess(access) && adminAccessAllowsPermission(access, 'pos');
 }
 
 async function loadProducts() {
@@ -242,8 +302,8 @@ function checkLoginStatus() {
         const profileUrl = isEn ? '/profile-en' : '/profile';
         const profileText = isEn ? 'Profile' : 'ข้อมูลส่วนตัว / Profile';
         const logoutText = isEn ? 'Logout' : 'ออกจากระบบ / Logout';
-        const isAdmin = user.isAdmin === true;
-        const canUsePos = user.canUsePos === true || user.adminRole === 'owner' || user.adminRole === 'head_manager' || isAdmin;
+        const isAdmin = user.isAdmin === true && ['owner', 'head_manager', 'manager'].includes(user.adminRole);
+        const canUsePos = isAdmin && user.canUsePos === true;
         const adminLabel = isEn ? 'Admin Dashboard' : 'จัดการหลังบ้าน (Admin)';
         const posLabel = isEn ? 'Counter POS' : 'POS หน้าร้าน';
         const adminLink = isAdmin ? `<a href="/admin" target="_blank" style="color:var(--accent-color); font-weight:500;">${adminLabel}</a>` : '';
@@ -384,11 +444,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 syncAuthUserProfile(user);
                 getUserAdminAccess(user).then(access => {
                     const storedUser = getStoredUser() || {};
+                    const isBackOffice = isBackOfficeAccess(access);
                     localStorage.setItem('eden_user', JSON.stringify({
                         ...storedUser,
-                        isAdmin: !!access,
+                        isAdmin: isBackOffice,
                         adminRole: access?.role || '',
-                        canUsePos: adminAccessAllowsPermission(access, 'pos')
+                        canUsePos: canUsePosAccess(access),
+                        canOrderMenu: access?.status === 'active' && access?.role === 'staff' && access?.permissions?.menuOrder === true
                     }));
                     checkLoginStatus();
                 });
@@ -402,7 +464,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     avatar: user.photoURL || 'https://ui-avatars.com/api/?name=Eden+Member&background=4caf50&color=fff',
                     isAdmin: !!bootstrapAccess,
                     adminRole: bootstrapAccess?.role || '',
-                    canUsePos: adminAccessAllowsPermission(bootstrapAccess, 'pos')
+                    canUsePos: canUsePosAccess(bootstrapAccess)
                 }));
             } else {
                 localStorage.removeItem('eden_user');

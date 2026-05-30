@@ -166,7 +166,8 @@ async function loadAdminAccess(user) {
     if (!snap.exists()) return null;
     const data = snap.data() || {};
     if (data.status !== 'active') return null;
-    const role = ADMIN_ROLE_LABELS[data.role] ? data.role : 'manager';
+    if (!ADMIN_ROLE_LABELS[data.role]) return null;
+    const role = data.role;
     return { uid: user.uid, email: normalizeEmail(data.email || user.email), displayName: data.displayName || user.displayName || 'Manager', role, status: data.status, permissions: { ...adminRoleDefaults(role), ...(data.permissions || {}) }, source: 'firestore' };
 }
 async function ensureBootstrapOwnerRecord(user) {

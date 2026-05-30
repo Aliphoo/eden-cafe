@@ -54,32 +54,14 @@ function normalizeEmail(value) {
     return String(value ?? '').trim().toLowerCase();
 }
 
-function getStoredMenuUser() {
-    try {
-        return JSON.parse(localStorage.getItem('eden_user') || 'null');
-    } catch {
-        return null;
-    }
-}
-
 function adminAccessCanOrder(access = {}) {
     if (!access || access.status !== 'active') return false;
+    if (access.role === 'staff') return access.permissions?.menuOrder === true;
     if (ADMIN_ORDER_ROLES.includes(access.role)) {
         if (access.role === 'owner' || access.role === 'head_manager') return true;
-        return access.permissions?.pos === true || access.permissions?.orders === true || access.role === 'manager';
+        return access.permissions?.pos === true || access.permissions?.orders === true;
     }
     return access.permissions?.pos === true || access.permissions?.orders === true;
-}
-
-function storedUserCanOrder() {
-    const user = getStoredMenuUser();
-    if (!user) return false;
-    const role = String(user.adminRole || user.role || '').trim();
-    return user.canUsePos === true
-        || user.isAdmin === true
-        || ADMIN_ORDER_ROLES.includes(role)
-        || user.permissions?.pos === true
-        || user.permissions?.orders === true;
 }
 
 function setMenuOrderAccess(nextAccess = {}) {
@@ -108,7 +90,7 @@ async function resolveMenuOrderAccess(user) {
     }
 
     const email = normalizeEmail(user.email);
-    if (ADMIN_EMAILS.includes(email) || storedUserCanOrder()) {
+    if (ADMIN_EMAILS.includes(email)) {
         setMenuOrderAccess({ ready: true, allowed: true, reason: 'authorized', role: 'staff' });
         return;
     }
@@ -137,22 +119,18 @@ async function resolveMenuOrderAccess(user) {
 function initMenuOrderAccessWatcher() {
     window.EdenMenuOrderAccess = { ...menuOrderAccess };
 
-    if (storedUserCanOrder()) {
-        setMenuOrderAccess({ ready: true, allowed: true, reason: 'authorized', role: 'staff' });
-    }
-
     if (auth) {
         onAuthStateChanged(auth, user => {
             setMenuOrderAccess({ ready: false, allowed: false, reason: 'checking' });
             resolveMenuOrderAccess(user);
         });
     } else {
-        setMenuOrderAccess({ ready: true, allowed: storedUserCanOrder(), reason: storedUserCanOrder() ? 'authorized' : 'guest' });
+        setMenuOrderAccess({ ready: true, allowed: false, reason: 'no-auth' });
     }
 
     window.addEventListener('eden:user-changed', () => {
         if (auth?.currentUser) resolveMenuOrderAccess(auth.currentUser);
-        else setMenuOrderAccess({ ready: true, allowed: storedUserCanOrder(), reason: storedUserCanOrder() ? 'authorized' : 'guest' });
+        else setMenuOrderAccess({ ready: true, allowed: false, reason: 'guest' });
     });
 }
 

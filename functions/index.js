@@ -110,6 +110,11 @@ async function requireAdminAccess(req, permission = '') {
     throw error;
   }
 
+  if (!['owner', 'head_manager', 'manager'].includes(access.role)) {
+    const error = new Error('Admin permission required');
+    error.statusCode = 403;
+    throw error;
+  }
   if (access.role === 'owner' || access.role === 'head_manager') return decoded;
   if (permission && access.permissions && access.permissions[permission] === true) return decoded;
 

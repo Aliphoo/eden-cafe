@@ -267,6 +267,12 @@
         .member-note-box { background: #fbfff8; border: 1px solid #dfeee1; border-radius: 14px; padding: 14px; margin-top: 14px; }
         .member-note-box textarea { min-height: 110px; }
         .member-empty-state { padding: 24px; text-align: center; color: #7b887f; background: #fbfffb; border: 1px dashed #d8e7db; border-radius: 14px; }
+        .member-staff-card { border-color: #cfe7d5; background: #f8fff9; }
+        .member-staff-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+        .member-staff-head h4 { color: var(--primary-color); margin: 0; }
+        .member-staff-summary { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; color: #52645a; font-size: 0.9rem; }
+        .member-staff-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+        .member-staff-hint { color: #66766d; font-size: 0.86rem; line-height: 1.5; margin-top: 8px; }
         @media (max-width: 920px) { .member-toolbar { grid-template-columns: 1fr; } .member-detail-grid, .member-mini-grid { grid-template-columns: 1fr; } }
 
         /* Admin Access Management */
@@ -279,6 +285,7 @@
         .access-role-owner { background: #123f2b; color: white; }
         .access-role-head_manager { background: #fff3cd; color: #7a5700; }
         .access-role-manager { background: #e8f5e9; color: #2e7d32; }
+        .access-role-staff { background: #e3f2fd; color: #1565c0; }
         .access-status-active { color: #2e7d32; font-weight: 700; }
         .access-status-paused { color: #c62828; font-weight: 700; }
         .access-auth-status { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; background: #eef7ef; color: #1b5e20; white-space: nowrap; }
@@ -568,12 +575,13 @@
                                 <th>ยอดใช้จ่าย</th>
                                 <th>ใช้บริการ</th>
                                 <th>สถานะ</th>
+                                <th>สิทธิ์พนักงาน</th>
                                 <th>ล่าสุด</th>
                                 <th>จัดการ</th>
                             </tr>
                         </thead>
                         <tbody id="members-table-body">
-                            <tr><td colspan="9" style="text-align:center;">กำลังโหลดข้อมูลสมาชิก...</td></tr>
+                            <tr><td colspan="10" style="text-align:center;">กำลังโหลดข้อมูลสมาชิก...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1735,7 +1743,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=45"></script>
+    <script type="module" src="js/admin.js?v=47"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {

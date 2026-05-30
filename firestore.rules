@@ -34,13 +34,17 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.status == 'active'
         && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'head_manager';
     }
+    function isManager() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/admin_users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.status == 'active'
+        && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'manager';
+    }
     function hasAdminPermission(permission) {
       return isOwner()
         || isHeadManager()
         || (
-          isSignedIn()
-          && exists(/databases/$(database)/documents/admin_users/$(request.auth.uid))
-          && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.status == 'active'
+          isManager()
           && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.permissions[permission] == true
         );
     }
@@ -383,7 +387,7 @@ service cloud.firestore {
         && request.resource.data.email is string
         && request.resource.data.email.size() > 0
         && request.resource.data.email.size() <= 180
-        && request.resource.data.role in ['owner', 'head_manager', 'manager']
+        && request.resource.data.role in ['owner', 'head_manager', 'manager', 'staff']
         && request.resource.data.status in ['active', 'paused']
         && request.resource.data.permissions is map;
       allow delete: if isOwner() && request.auth.uid != userId;

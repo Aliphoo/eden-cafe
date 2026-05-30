@@ -143,6 +143,9 @@ const ADMIN_ROLE_LABELS = {
     head_manager: 'Head Manager',
     manager: 'Manager'
 };
+const STAFF_ROLE_LABELS = {
+    staff: 'Staff'
+};
 const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
     owner: Object.fromEntries(Object.keys(ADMIN_PERMISSION_LABELS).map(key => [key, true])),
     head_manager: Object.fromEntries(Object.keys(ADMIN_PERMISSION_LABELS).map(key => [key, true])),
@@ -247,7 +250,8 @@ async function loadAdminAccess(user) {
     const data = snap.data();
     if (data.status !== 'active') return null;
 
-    const role = ADMIN_ROLE_LABELS[data.role] ? data.role : 'manager';
+    if (!ADMIN_ROLE_LABELS[data.role]) return null;
+    const role = data.role;
     return {
         uid: user.uid,
         email: normalizeEmail(data.email || user.email),
@@ -4392,6 +4396,9 @@ window.syncMembersFromAuth = async () => {
 // Admin Access / Manager Permission Logic
 // ==========================================
 function adminRoleBadgeHTML(role) {
+    if (STAFF_ROLE_LABELS[role]) {
+        return '<span class="access-role-badge access-role-staff">' + escapeHTML(STAFF_ROLE_LABELS[role]) + '</span>';
+    }
     const safeRole = ADMIN_ROLE_LABELS[role] ? role : 'manager';
     return '<span class="access-role-badge access-role-' + safeRole + '">' + escapeHTML(ADMIN_ROLE_LABELS[safeRole]) + '</span>';
 }
@@ -4641,6 +4648,7 @@ function setupRealtimeAdminAccess() {
             adminAccessData[docSnap.id] = { uid: docSnap.id, ...docSnap.data() };
         });
         renderAdminAccessTable();
+        renderMembersTable();
     }, (error) => {
         console.error('Error listening to admin access:', error);
         const tbody = document.getElementById('admin-access-table-body');
@@ -4713,6 +4721,114 @@ function statusBadgeHTML(status) {
     return '<span class="member-status-badge' + klass + '">' + escapeHTML(MEMBER_STATUS_LABELS[safeStatus]) + '</span>';
 }
 
+function memberStaffAccess(uid) {
+    return adminAccessData[uid] || null;
+}
+
+function memberStaffAccessBadgeHTML(uid) {
+    const access = memberStaffAccess(uid);
+    if (!access) return '<span class="member-status-badge">ลูกค้า</span>';
+    const statusText = access.status === 'active' ? 'Active' : 'Paused';
+    const statusClass = access.status === 'active' ? 'access-status-active' : 'access-status-paused';
+    return adminRoleBadgeHTML(access.role) + '<br><small class="' + statusClass + '">' + escapeHTML(statusText) + '</small>';
+}
+
+function getSelectedMemberStaffPermissions() {
+    const permissions = {};
+    document.querySelectorAll('[data-member-staff-permission]').forEach(input => {
+        permissions[input.dataset.memberStaffPermission] = input.checked === true;
+    });
+    return permissions;
+}
+
+function memberStaffPermissionInputsHTML(selected = adminRoleDefaults('manager'), disabled = false) {
+    return Object.entries(ADMIN_PERMISSION_LABELS).map(([key, label]) => `
+        <label>
+            <input type="checkbox" data-member-staff-permission="${escapeHTML(key)}" ${selected[key] ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
+            <span>${escapeHTML(label)}</span>
+        </label>
+    `).join('');
+}
+
+function canManageMemberStaffAccess(uid, access = memberStaffAccess(uid)) {
+    return isOwnerAccess()
+        && uid !== currentAdminAccess?.uid
+        && access?.role !== 'owner'
+        && access?.role !== 'head_manager';
+}
+
+function staffMenuOrderPermissions() {
+    return Object.fromEntries([
+        ...Object.keys(ADMIN_PERMISSION_LABELS).map(key => [key, false]),
+        ['menuOrder', true]
+    ]);
+}
+
+function memberStaffAccessHTML(uid, member) {
+    const access = memberStaffAccess(uid);
+    const isSelf = uid === currentAdminAccess?.uid;
+    const isOwnerRecord = access?.role === 'owner';
+    const canManage = canManageMemberStaffAccess(uid, access);
+    const status = access?.status || 'active';
+    const currentSummary = access
+        ? adminRoleBadgeHTML(access.role) + '<span class="access-status-' + (status === 'active' ? 'active' : 'paused') + '">' + escapeHTML(status) + '</span>'
+        : '<span class="member-status-badge">ยังไม่ได้เป็นพนักงาน</span>';
+
+    if (!isOwnerAccess()) {
+        return `
+            <div class="member-note-box member-staff-card">
+                <div class="member-staff-head">
+                    <div>
+                        <h4>Employee permissions</h4>
+                        <div class="member-staff-summary">${currentSummary}</div>
+                    </div>
+                </div>
+                <div class="member-staff-hint">เฉพาะ Owner เท่านั้นที่กำหนดสิทธิ์พนักงานได้</div>
+            </div>`;
+    }
+
+    if (isOwnerRecord || access?.role === 'head_manager' || isSelf) {
+        return `
+            <div class="member-note-box member-staff-card">
+                <div class="member-staff-head">
+                    <div>
+                        <h4>Employee permissions</h4>
+                        <div class="member-staff-summary">${currentSummary}</div>
+                    </div>
+                </div>
+                <div class="member-staff-hint">${isSelf ? 'บัญชีนี้คือบัญชีที่คุณกำลังใช้งานอยู่ จึงไม่เปิดให้เปลี่ยนสิทธิ์จากหน้า Members' : 'บัญชี Owner/Head Manager ให้จัดการจากหน้า Admin Access เพื่อป้องกันการลดสิทธิ์ผิดบัญชี'}</div>
+            </div>`;
+    }
+
+    return `
+        <div class="member-note-box member-staff-card">
+            <div class="member-staff-head">
+                <div>
+                    <h4>Employee permissions</h4>
+                    <div class="member-staff-summary">${currentSummary}</div>
+                    <div class="member-staff-hint">พนักงานจะปลดล็อกปุ่ม Add to cart บนหน้าเมนูเท่านั้น ไม่มีสิทธิ์เข้า Admin หรือ POS หลังบ้าน</div>
+                </div>
+            </div>
+            <form id="member-staff-access-form" onsubmit="return saveMemberStaffAccess(event, '${escapeJSString(uid)}')">
+                <div class="member-detail-grid">
+                    <div class="member-detail-item"><small>Role</small><span>Staff / Menu order only</span></div>
+                    <div class="form-group">
+                        <label>Status</label>
+                        <select id="member-staff-status">
+                            <option value="active" ${status === 'active' ? 'selected' : ''}>Active</option>
+                            <option value="paused" ${status === 'paused' ? 'selected' : ''}>Paused</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="member-staff-actions">
+                    <button type="submit" class="btn-submit" style="max-width:220px;">Save employee permissions</button>
+                    ${access?.role === 'staff' ? `<button type="button" class="btn-action btn-delete" onclick="deleteMemberStaffAccess('${escapeJSString(uid)}')">Remove staff access</button>` : ''}
+                    <span id="member-staff-save-status" style="color:#2e7d32;"></span>
+                </div>
+            </form>
+        </div>`;
+}
+
 function formatMemberCurrency(value) {
     return 'THB ' + safeNumber(value).toLocaleString('th-TH');
 }
@@ -4777,7 +4893,7 @@ function renderMembersTable() {
     if (countEl) countEl.textContent = rows.length.toLocaleString('th-TH') + ' records';
 
     if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="9"><div class="member-empty-state">No members match the selected filters.</div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10"><div class="member-empty-state">No members match the selected filters.</div></td></tr>';
         return;
     }
 
@@ -4800,8 +4916,9 @@ function renderMembersTable() {
                 <td>${formatMemberCurrency(member.totalSpent)}</td>
                 <td>${safeNumber(member.visitCount).toLocaleString('th-TH')}</td>
                 <td>${statusBadgeHTML(status)}</td>
+                <td>${memberStaffAccessBadgeHTML(uid)}</td>
                 <td>${formatDate(lastDate)}</td>
-                <td><button class="btn-action btn-view" onclick="openMemberModal('${escapeJSString(uid)}')">Details</button></td>
+                <td><button class="btn-action btn-view" onclick="openMemberModal('${escapeJSString(uid)}')">Details / สิทธิ์</button></td>
             </tr>`;
     }).join('');
 }
@@ -4820,7 +4937,7 @@ function setupRealtimeMembers() {
     }, (error) => {
         console.error('Error listening to members:', error);
         const tbody = document.getElementById('members-table-body');
-        if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#c62828;">Unable to load members: ${escapeHTML(error.message)}</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#c62828;">Unable to load members: ${escapeHTML(error.message)}</td></tr>`;
     });
 }
 
@@ -4942,6 +5059,8 @@ function renderMemberDetail(uid, member, activity = { orders: [], bookings: [] }
             </form>
         </div>
 
+        ${memberStaffAccessHTML(uid, member)}
+
         <div class="member-detail-grid">
             <div class="member-detail-item">
                 <small>Current benefits</small>
@@ -5018,6 +5137,109 @@ window.saveMemberAdminFields = async (event, uid) => {
         }
     }
     return false;
+};
+
+window.syncMemberStaffRolePermissions = (role) => {
+    const container = document.getElementById('member-staff-permissions');
+    if (!container) return;
+    const safeRole = role === 'head_manager' ? 'head_manager' : 'manager';
+    const disabled = safeRole === 'head_manager';
+    container.innerHTML = memberStaffPermissionInputsHTML(adminRoleDefaults(safeRole), disabled);
+};
+
+window.saveMemberStaffAccess = async (event, uid) => {
+    event.preventDefault();
+    const statusEl = document.getElementById('member-staff-save-status');
+    const member = membersData[uid];
+    const access = memberStaffAccess(uid);
+
+    if (!member) {
+        alert('ไม่พบสมาชิกคนนี้ในระบบ');
+        return false;
+    }
+    if (!canManageMemberStaffAccess(uid, access)) {
+        alert('เฉพาะ Owner เท่านั้นที่กำหนดสิทธิ์พนักงานได้ และไม่สามารถแก้บัญชีตัวเองหรือบัญชี Owner จากหน้า Members');
+        return false;
+    }
+
+    const email = normalizeEmail(member.email);
+    if (!email) {
+        alert('สมาชิกคนนี้ยังไม่มีอีเมล จึงยังเปิดสิทธิ์พนักงานไม่ได้');
+        return false;
+    }
+
+    const role = 'staff';
+    const status = document.getElementById('member-staff-status')?.value === 'paused' ? 'paused' : 'active';
+    const permissions = staffMenuOrderPermissions();
+    const payload = {
+        uid,
+        email,
+        displayName: memberDisplayName(member),
+        role,
+        status,
+        permissions
+    };
+
+    try {
+        if (statusEl) {
+            statusEl.textContent = 'Saving...';
+            statusEl.style.color = '#607466';
+        }
+        const accessPayload = {
+            uid,
+            email,
+            displayName: payload.displayName,
+            role,
+            status,
+            permissions,
+            createdAt: access?.createdAt || serverTimestamp(),
+            createdBy: access?.createdBy || auth.currentUser?.uid || '',
+            updatedAt: serverTimestamp(),
+            updatedBy: auth.currentUser?.uid || ''
+        };
+        await setDoc(doc(db, ADMIN_COLLECTION, uid), accessPayload);
+        adminAccessData[uid] = {
+            ...accessPayload,
+            updatedAt: new Date().toISOString()
+        };
+        renderMembersTable();
+        renderAdminAccessTable();
+        renderAdminUserOptions();
+        if (statusEl) {
+            statusEl.textContent = 'Saved';
+            statusEl.style.color = '#2e7d32';
+        }
+    } catch (error) {
+        console.error('Unable to save member staff access:', error);
+        if (statusEl) {
+            statusEl.textContent = 'Save failed: ' + error.message;
+            statusEl.style.color = '#c62828';
+        } else {
+            alert('Save failed: ' + error.message);
+        }
+    }
+    return false;
+};
+
+window.deleteMemberStaffAccess = async (uid) => {
+    const access = memberStaffAccess(uid);
+    if (!access) return;
+    if (!canManageMemberStaffAccess(uid, access)) {
+        alert('ไม่สามารถลบสิทธิ์บัญชีนี้จากหน้า Members ได้');
+        return;
+    }
+    if (!confirm('Remove staff access for this member?')) return;
+
+    try {
+        await deleteDoc(doc(db, ADMIN_COLLECTION, uid));
+        delete adminAccessData[uid];
+        renderMembersTable();
+        renderAdminAccessTable();
+        window.openMemberModal(uid);
+    } catch (error) {
+        console.error('Unable to remove member staff access:', error);
+        alert('Remove staff access failed: ' + error.message);
+    }
 };
 
 // ==========================================
