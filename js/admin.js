@@ -126,6 +126,7 @@ const ADMIN_PERMISSION_LABELS = {
     dashboard: 'ภาพรวมระบบ',
     members: 'จัดการสมาชิก',
     pos: 'POS หน้าร้าน',
+    discounts: 'จัดการส่วนลด',
     orders: 'ออเดอร์สินค้า',
     bookings: 'คิวจองโต๊ะ/ห้อง',
     tables: 'จัดการโต๊ะ/โซน',
@@ -143,6 +144,9 @@ const ADMIN_ROLE_LABELS = {
     head_manager: 'Head Manager',
     manager: 'Manager'
 };
+const STAFF_ROLE_LABELS = {
+    staff: 'Staff'
+};
 const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
     owner: Object.fromEntries(Object.keys(ADMIN_PERMISSION_LABELS).map(key => [key, true])),
     head_manager: Object.fromEntries(Object.keys(ADMIN_PERMISSION_LABELS).map(key => [key, true])),
@@ -150,6 +154,7 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
         dashboard: true,
         members: false,
         pos: true,
+        discounts: false,
         orders: true,
         bookings: true,
         tables: false,
@@ -166,6 +171,7 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
 const ADMIN_TAB_PERMISSIONS = {
     dashboard: 'dashboard',
     pos: 'pos',
+    discounts: 'discounts',
     members: 'members',
     'admin-access': 'adminAccess',
     orders: 'orders',
@@ -211,6 +217,22 @@ let currentAdminAccess = null;
 let adminAccessData = {};
 let adminAccessUnsubscribe = null;
 let adminAccessFormBound = false;
+let discountsData = {};
+let discountsUnsubscribe = null;
+let discountFormBound = false;
+let dashboardOrdersData = [];
+let activeSalesReport = 'product';
+let salesReportNavBound = false;
+const SALES_REPORT_LABELS = {
+    product: 'ยอดขายตามสินค้า',
+    category: 'ยอดขาย แยกตาม หมวดหมู่',
+    staff: 'ยอดขาย แยกตาม พนักงาน',
+    payment: 'ยอดขาย แยกตาม ประเภทการชำระเงิน',
+    receipts: 'ใบเสร็จรับเงิน',
+    options: 'ยอดขาย แยกตาม ตัวเลือกเพิ่มเติม',
+    discounts: 'ส่วนลด',
+    taxes: 'ภาษี'
+};
 
 function buildBootstrapOwnerAccess(user) {
     return {
@@ -247,7 +269,8 @@ async function loadAdminAccess(user) {
     const data = snap.data();
     if (data.status !== 'active') return null;
 
-    const role = ADMIN_ROLE_LABELS[data.role] ? data.role : 'manager';
+    if (!ADMIN_ROLE_LABELS[data.role]) return null;
+    const role = data.role;
     return {
         uid: user.uid,
         email: normalizeEmail(data.email || user.email),
@@ -950,7 +973,11 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function initializeAdminModules() {
-    if (canAdmin('dashboard')) fetchStats();
+    if (canAdmin('dashboard')) {
+        fetchStats();
+        bindSalesReportNav();
+        renderDashboardSalesReport();
+    }
     if (canAdmin('orders') || canAdmin('pos')) setupRealtimeOrders();
     if (canAdmin('bookings')) setupRealtimeBookings();
     if (canAdmin('products')) {
@@ -965,6 +992,7 @@ function initializeAdminModules() {
         setupRealtimeShopProducts();
     }
     if (canAdmin('members')) setupRealtimeMembers();
+    if (canAdmin('discounts')) setupRealtimeDiscounts();
     if (canAdmin('promptpay') && typeof window.loadPromptPaySettings === 'function') window.loadPromptPaySettings();
     if (canAdmin('marketing') && typeof window.loadMarketingSettings === 'function') window.loadMarketingSettings();
     if (isOwnerAccess()) setupRealtimeAdminAccess();
@@ -1065,6 +1093,10 @@ window.refreshAdminSection = async (tabId, button = null) => {
             case 'admin-access':
                 setupRealtimeAdminAccess();
                 break;
+            case 'discounts':
+                setupRealtimeDiscounts();
+                await refreshDiscountsOnce();
+                break;
             case 'pos':
                 if (!categoriesUnsubscribe) setupRealtimeCategories();
                 if (!productsUnsubscribe) setupRealtimeProducts();
@@ -1130,6 +1162,236 @@ window.refreshAdminSection = async (tabId, button = null) => {
         }
     }
 };
+
+const DEFAULT_POS_DISCOUNTS = Object.freeze([
+    { id: 'discount-1', label: 'ส่วนลด 1%', type: 'percent', value: 1, active: true, order: 10 },
+    { id: 'discount-2', label: 'ส่วนลด 2%', type: 'percent', value: 2, active: true, order: 20 },
+    { id: 'discount-5', label: 'ส่วนลด 5%', type: 'percent', value: 5, active: true, order: 30 },
+    { id: 'discount-10', label: 'ส่วนลด 10%', type: 'percent', value: 10, active: true, order: 40 },
+    { id: 'discount-15', label: 'ส่วนลด 15%', type: 'percent', value: 15, active: true, order: 50 },
+    { id: 'discount-20', label: 'ส่วนลด 20%', type: 'percent', value: 20, active: true, order: 60 },
+    { id: 'discount-30', label: 'ส่วนลด 30%', type: 'percent', value: 30, active: true, order: 70 },
+    { id: 'fish-35', label: 'ส่วนลดปลา 35%', type: 'percent', value: 35, active: true, order: 80 },
+    { id: 'project-5', label: 'โครงการผาฮี้ 5%', type: 'percent', value: 5, active: true, order: 90 },
+    { id: 'staff-25', label: 'ส่วนลดพนักงาน 25%', type: 'percent', value: 25, active: true, order: 100 }
+]);
+
+function normalizeDiscountType(value) {
+    return String(value || '').toLowerCase() === 'amount' ? 'amount' : 'percent';
+}
+
+function normalizeDiscountOption(id, data = {}) {
+    const type = normalizeDiscountType(data.type);
+    const rawValue = Math.max(0, safeNumber(data.value));
+    return {
+        id: String(id || data.id || '').trim(),
+        label: String(data.label || '').trim(),
+        type,
+        value: type === 'percent' ? Math.min(rawValue, 100) : Math.min(rawValue, 100000),
+        active: data.active !== false,
+        order: safeNumber(data.order, 999),
+        createdAt: data.createdAt || null,
+        updatedAt: data.updatedAt || null
+    };
+}
+
+function sortDiscountOptions(options = []) {
+    return options.slice().sort((a, b) => {
+        const orderDiff = safeNumber(a.order, 999) - safeNumber(b.order, 999);
+        if (orderDiff) return orderDiff;
+        return String(a.label || a.id).localeCompare(String(b.label || b.id), 'th');
+    });
+}
+
+function discountValueText(discount = {}) {
+    const value = safeNumber(discount.value);
+    return discount.type === 'amount'
+        ? `฿${value.toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
+        : `${value.toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}%`;
+}
+
+function discountBadgeHTML(discount = {}) {
+    const isAmount = normalizeDiscountType(discount.type) === 'amount';
+    return `<span class="discount-badge ${isAmount ? 'amount' : ''}">${isAmount ? '฿' : '%'} ${escapeHTML(isAmount ? 'จำนวนเงิน' : 'เปอร์เซ็นต์')}</span>`;
+}
+
+async function refreshDiscountsOnce() {
+    const snapshot = await getDocs(query(collection(db, 'pos_discounts')));
+    discountsData = {};
+    snapshot.forEach(docSnap => {
+        discountsData[docSnap.id] = normalizeDiscountOption(docSnap.id, docSnap.data() || {});
+    });
+    renderDiscountsTable();
+}
+
+function setupRealtimeDiscounts() {
+    setupDiscountForm();
+    if (discountsUnsubscribe) discountsUnsubscribe();
+    discountsUnsubscribe = onSnapshot(query(collection(db, 'pos_discounts')), snapshot => {
+        discountsData = {};
+        snapshot.forEach(docSnap => {
+            discountsData[docSnap.id] = normalizeDiscountOption(docSnap.id, docSnap.data() || {});
+        });
+        renderDiscountsTable();
+    }, error => {
+        console.error('Error listening to POS discounts:', error);
+        const body = document.getElementById('discount-table-body');
+        if (body) body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#c62828;">โหลดส่วนลดไม่สำเร็จ: ${escapeHTML(error.message)}</td></tr>`;
+    });
+}
+
+function setupDiscountForm() {
+    if (discountFormBound) return;
+    const form = document.getElementById('discount-form');
+    if (!form) return;
+    form.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (!canAdmin('discounts')) {
+            alert('บัญชีนี้ไม่มีสิทธิ์จัดการส่วนลด');
+            return;
+        }
+        const idInput = document.getElementById('discount-id');
+        const labelInput = document.getElementById('discount-label');
+        const valueInput = document.getElementById('discount-value');
+        const orderInput = document.getElementById('discount-order');
+        const activeInput = document.getElementById('discount-active');
+        const typeInput = document.querySelector('input[name="discount-type"]:checked');
+        const id = String(idInput?.value || '').trim();
+        const type = normalizeDiscountType(typeInput?.value);
+        const label = String(labelInput?.value || '').trim();
+        const value = safeNumber(valueInput?.value);
+        if (!label) {
+            alert('กรุณาระบุชื่อส่วนลด');
+            labelInput?.focus();
+            return;
+        }
+        if (value <= 0) {
+            alert('กรุณาระบุมูลค่าส่วนลดมากกว่า 0');
+            valueInput?.focus();
+            return;
+        }
+        if (type === 'percent' && value > 100) {
+            alert('ส่วนลดแบบเปอร์เซ็นต์ต้องไม่เกิน 100%');
+            valueInput?.focus();
+            return;
+        }
+        const payload = {
+            label,
+            type,
+            value: type === 'percent' ? Math.min(value, 100) : Math.min(value, 100000),
+            active: activeInput?.checked !== false,
+            order: safeNumber(orderInput?.value, 999),
+            updatedAt: serverTimestamp(),
+            updatedBy: auth.currentUser?.uid || ''
+        };
+        try {
+            if (id) {
+                await updateDoc(doc(db, 'pos_discounts', id), payload);
+            } else {
+                const newId = label.toLowerCase().replace(/[^a-z0-9ก-๙]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 50) || `discount-${Date.now()}`;
+                await setDoc(doc(db, 'pos_discounts', newId), {
+                    ...payload,
+                    id: newId,
+                    createdAt: serverTimestamp(),
+                    createdBy: auth.currentUser?.uid || ''
+                }, { merge: false });
+            }
+            resetDiscountForm();
+        } catch (error) {
+            console.error('Unable to save POS discount:', error);
+            alert('บันทึกส่วนลดไม่สำเร็จ: ' + error.message);
+        }
+    });
+    discountFormBound = true;
+}
+
+function renderDiscountsTable() {
+    const body = document.getElementById('discount-table-body');
+    if (!body) return;
+    const rows = sortDiscountOptions(Object.values(discountsData));
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="6"><div class="discount-empty">ยังไม่มีส่วนลด กด “เติมชุดมาตรฐาน” หรือเพิ่มส่วนลดใหม่ได้เลย</div></td></tr>';
+        return;
+    }
+    body.innerHTML = rows.map(discount => `
+        <tr class="${discount.active ? '' : 'discount-row-muted'}">
+            <td><strong>${escapeHTML(discount.label)}</strong><br><small style="color:#789;">${escapeHTML(discount.id)}</small></td>
+            <td>${discountBadgeHTML(discount)}</td>
+            <td><strong>${escapeHTML(discountValueText(discount))}</strong></td>
+            <td>${safeNumber(discount.order, 999).toLocaleString('th-TH')}</td>
+            <td>${discount.active ? '<span class="status-badge status-completed">Active</span>' : '<span class="status-badge status-cancelled">Paused</span>'}</td>
+            <td><div class="discount-actions">
+                <button class="btn-action btn-edit" type="button" onclick="editDiscount('${escapeJSString(discount.id)}')">แก้ไข</button>
+                <button class="btn-action btn-delete" type="button" onclick="deleteDiscount('${escapeJSString(discount.id)}')">ลบ</button>
+            </div></td>
+        </tr>
+    `).join('');
+}
+
+window.resetDiscountForm = function resetDiscountForm() {
+    const form = document.getElementById('discount-form');
+    if (form) form.reset();
+    const idInput = document.getElementById('discount-id');
+    const activeInput = document.getElementById('discount-active');
+    const title = document.getElementById('discount-form-title');
+    if (idInput) idInput.value = '';
+    if (activeInput) activeInput.checked = true;
+    if (title) title.textContent = 'เพิ่มส่วนลดใหม่';
+};
+
+window.editDiscount = function editDiscount(id) {
+    const discount = discountsData[id];
+    if (!discount) return;
+    document.getElementById('discount-id').value = discount.id;
+    document.getElementById('discount-label').value = discount.label;
+    document.getElementById('discount-value').value = String(discount.value);
+    document.getElementById('discount-order').value = String(discount.order);
+    document.getElementById('discount-active').checked = discount.active;
+    const type = normalizeDiscountType(discount.type);
+    const radio = document.querySelector(`input[name="discount-type"][value="${type}"]`);
+    if (radio) radio.checked = true;
+    const title = document.getElementById('discount-form-title');
+    if (title) title.textContent = 'แก้ไขส่วนลด';
+    document.getElementById('discount-label')?.focus();
+};
+
+window.deleteDiscount = async function deleteDiscount(id) {
+    const discount = discountsData[id];
+    if (!discount) return;
+    if (!confirm(`ลบส่วนลด "${discount.label}" ใช่ไหม?`)) return;
+    try {
+        await deleteDoc(doc(db, 'pos_discounts', id));
+    } catch (error) {
+        console.error('Unable to delete POS discount:', error);
+        alert('ลบส่วนลดไม่สำเร็จ: ' + error.message);
+    }
+};
+
+window.seedDefaultDiscounts = async function seedDefaultDiscounts() {
+    if (!canAdmin('discounts')) {
+        alert('บัญชีนี้ไม่มีสิทธิ์จัดการส่วนลด');
+        return;
+    }
+    try {
+        const batch = writeBatch(db);
+        DEFAULT_POS_DISCOUNTS.forEach(discount => {
+            batch.set(doc(db, 'pos_discounts', discount.id), {
+                ...discount,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+                createdBy: auth.currentUser?.uid || '',
+                updatedBy: auth.currentUser?.uid || ''
+            }, { merge: true });
+        });
+        await batch.commit();
+        alert('เติมชุดส่วนลดมาตรฐานเรียบร้อย');
+    } catch (error) {
+        console.error('Unable to seed POS discounts:', error);
+        alert('เติมชุดส่วนลดไม่สำเร็จ: ' + error.message);
+    }
+};
+
+window.refreshDiscounts = () => window.refreshAdminSection('discounts');
 
 function hasLoyverseImportMode() {
     return new URLSearchParams(window.location.search).has('menu-import');
@@ -1330,6 +1592,183 @@ async function fetchStats() {
     }
 }
 
+function adminMoney(value) {
+    const amount = safeNumber(value);
+    const hasSatang = Math.abs(amount % 1) > 0.001;
+    return '฿' + amount.toLocaleString('th-TH', {
+        minimumFractionDigits: hasSatang ? 2 : 0,
+        maximumFractionDigits: 2
+    });
+}
+
+function salesReportPaymentLabel(method, fallback = '') {
+    const labels = {
+        cash: 'เงินสด',
+        transfer: 'โอนเงิน',
+        qr: 'QR Payment',
+        card: 'บัตร',
+        other: 'อื่น ๆ'
+    };
+    return labels[String(method || '').toLowerCase()] || fallback || method || 'ไม่ระบุ';
+}
+
+function isSalesReportOrder(order = {}) {
+    const status = String(order.status || '').toLowerCase();
+    const paymentStatus = String(order.paymentStatus || (order.source === 'pos' ? 'paid' : '')).toLowerCase();
+    const billStatus = String(order.billStatus || '').toLowerCase();
+    if (order.isTestOrder || order.softLaunch || status === 'cancelled' || status === 'voided') return false;
+    if (billStatus === 'open' || paymentStatus === 'pending') return false;
+    return paymentStatus === 'paid' || status === 'completed';
+}
+
+function orderReportTotal(order = {}) {
+    return safeNumber(order.totalAmount ?? order.total ?? order.totals?.total);
+}
+
+function orderReportDateValue(order = {}) {
+    const raw = order.timestamp || order.createdAt || order.date;
+    if (raw?.toDate) return raw.toDate().getTime();
+    const parsed = new Date(raw).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function orderReportItems(order = {}) {
+    return Array.isArray(order.items) ? order.items.filter(Boolean) : [];
+}
+
+function itemReportAmount(item = {}) {
+    const quantity = Math.max(0, safeNumber(item.quantity, 1));
+    return safeNumber(item.lineTotal, safeNumber(item.price) * quantity);
+}
+
+function pushSalesReportGroup(groups, key, label, amount, quantity = 0) {
+    const safeKey = String(key || label || 'unknown');
+    const current = groups.get(safeKey) || { label: label || 'ไม่ระบุ', amount: 0, quantity: 0 };
+    current.amount += safeNumber(amount);
+    current.quantity += safeNumber(quantity);
+    groups.set(safeKey, current);
+}
+
+function sortedSalesReportGroups(groups) {
+    return Array.from(groups.values())
+        .sort((a, b) => (b.amount - a.amount) || (b.quantity - a.quantity) || String(a.label).localeCompare(String(b.label), 'th'));
+}
+
+function buildDashboardSalesReportRows(type, orders) {
+    const revenueOrders = orders.filter(isSalesReportOrder);
+    const groups = new Map();
+
+    if (type === 'receipts') {
+        return revenueOrders
+            .slice()
+            .sort((a, b) => orderReportDateValue(b) - orderReportDateValue(a))
+            .map(order => ({
+                label: order.receiptNo || order.orderNumber || order.id || order.firestoreId || 'ใบเสร็จ',
+                amount: orderReportTotal(order),
+                meta: [formatDate(order.timestamp || order.createdAt), order.cashierName || order.customerName || ''].filter(Boolean).join(' · ')
+            }));
+    }
+
+    if (type === 'discounts') {
+        revenueOrders.forEach(order => {
+            const discount = safeNumber(order.discount ?? order.totals?.discount);
+            if (!discount) return;
+            const label = order.totals?.discountLabel || order.discountLabel || 'ส่วนลดหน้าร้าน';
+            pushSalesReportGroup(groups, label, label, discount, 1);
+        });
+        return sortedSalesReportGroups(groups);
+    }
+
+    if (type === 'taxes') {
+        revenueOrders.forEach(order => {
+            const tax = safeNumber(order.taxIncluded ?? order.totals?.taxIncluded);
+            if (!tax) return;
+            const label = order.receiptNo || order.orderNumber || order.id || 'ภาษีรวมในราคา';
+            pushSalesReportGroup(groups, label, label, tax, 1);
+        });
+        return sortedSalesReportGroups(groups);
+    }
+
+    revenueOrders.forEach(order => {
+        if (type === 'staff') {
+            const label = order.cashierName || order.cashierEmail || 'ไม่ระบุพนักงาน';
+            pushSalesReportGroup(groups, label, label, orderReportTotal(order), 1);
+            return;
+        }
+        if (type === 'payment') {
+            const label = order.paymentLabel || salesReportPaymentLabel(order.paymentMethod);
+            pushSalesReportGroup(groups, label, label, orderReportTotal(order), 1);
+            return;
+        }
+
+        orderReportItems(order).forEach(item => {
+            const quantity = Math.max(0, safeNumber(item.quantity, 1));
+            const amount = itemReportAmount(item);
+            if (type === 'category') {
+                const categoryId = item.category || item.categoryId || '';
+                const label = item.categoryName || categoriesData[categoryId]?.name || categoryId || 'ไม่ระบุหมวดหมู่';
+                pushSalesReportGroup(groups, categoryId || label, label, amount, quantity);
+                return;
+            }
+            if (type === 'options') {
+                const label = item.variantName || item.optionName || 'ไม่มีตัวเลือกเพิ่มเติม';
+                pushSalesReportGroup(groups, label, label, amount, quantity);
+                return;
+            }
+            const label = [item.name || item.productName || 'ไม่ระบุสินค้า', item.variantName].filter(Boolean).join(' - ');
+            pushSalesReportGroup(groups, label, label, amount, quantity);
+        });
+    });
+
+    return sortedSalesReportGroups(groups);
+}
+
+function renderSalesReportRows(rows, type) {
+    if (!rows.length) return '<div class="sales-report-empty">ยังไม่มีข้อมูลยอดขาย</div>';
+    return rows.slice(0, 5).map(row => {
+        const quantityText = row.quantity
+            ? `${safeNumber(row.quantity).toLocaleString('th-TH')} รายการ`
+            : (row.meta || '');
+        return `
+            <div class="sales-report-row">
+                <div>
+                    <strong>${escapeHTML(row.label)}</strong>
+                    <small>${escapeHTML(quantityText || SALES_REPORT_LABELS[type] || '')}</small>
+                </div>
+                <em>${adminMoney(row.amount)}</em>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderDashboardSalesReport() {
+    const title = document.getElementById('sales-report-active-label');
+    const total = document.getElementById('sales-report-active-total');
+    const table = document.getElementById('sales-report-table');
+    if (!title || !total || !table) return;
+
+    const reportType = SALES_REPORT_LABELS[activeSalesReport] ? activeSalesReport : 'product';
+    const rows = buildDashboardSalesReportRows(reportType, dashboardOrdersData);
+    const amountTotal = rows.reduce((sum, row) => sum + safeNumber(row.amount), 0);
+    title.textContent = SALES_REPORT_LABELS[reportType];
+    total.textContent = adminMoney(amountTotal);
+    table.innerHTML = renderSalesReportRows(rows, reportType);
+}
+
+function bindSalesReportNav() {
+    if (salesReportNavBound) return;
+    const nav = document.querySelector('.sales-report-nav');
+    if (!nav) return;
+    nav.addEventListener('click', event => {
+        const button = event.target.closest('[data-sales-report]');
+        if (!button) return;
+        activeSalesReport = button.dataset.salesReport || 'product';
+        nav.querySelectorAll('[data-sales-report]').forEach(item => item.classList.toggle('active', item === button));
+        renderDashboardSalesReport();
+    });
+    salesReportNavBound = true;
+}
+
 // Format Date Helper
 function formatDate(timestamp) {
     if (!timestamp) return '-';
@@ -1351,16 +1790,22 @@ function setupRealtimeOrders() {
         
         let todayOrders = 0;
         let todayRevenue = 0;
+        const reportOrders = [];
         const todayStr = new Date().toLocaleDateString('th-TH');
 
         if (snapshot.empty) {
             tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">ไม่มีข้อมูลออเดอร์</td></tr>';
+            dashboardOrdersData = [];
+            renderDashboardSalesReport();
+            document.getElementById('stat-orders').innerText = todayOrders;
+            document.getElementById('stat-revenue').innerText = '฿' + todayRevenue.toLocaleString();
             return;
         }
 
         snapshot.forEach((docSnap) => {
             const order = docSnap.data();
             const id = docSnap.id;
+            reportOrders.push({ ...order, firestoreId: id });
             const status = order.status || 'pending';
             const paymentStatus = order.paymentStatus || (order.source === 'pos' ? 'paid' : 'pending');
             const paymentLabel = order.paymentLabel || order.paymentMethod || '-';
@@ -1398,6 +1843,8 @@ function setupRealtimeOrders() {
         });
 
         // Update Dashboard Stats
+        dashboardOrdersData = reportOrders;
+        renderDashboardSalesReport();
         document.getElementById('stat-orders').innerText = todayOrders;
         document.getElementById('stat-revenue').innerText = '฿' + todayRevenue.toLocaleString();
     }, (error) => {
@@ -4392,6 +4839,9 @@ window.syncMembersFromAuth = async () => {
 // Admin Access / Manager Permission Logic
 // ==========================================
 function adminRoleBadgeHTML(role) {
+    if (STAFF_ROLE_LABELS[role]) {
+        return '<span class="access-role-badge access-role-staff">' + escapeHTML(STAFF_ROLE_LABELS[role]) + '</span>';
+    }
     const safeRole = ADMIN_ROLE_LABELS[role] ? role : 'manager';
     return '<span class="access-role-badge access-role-' + safeRole + '">' + escapeHTML(ADMIN_ROLE_LABELS[safeRole]) + '</span>';
 }
@@ -4641,6 +5091,7 @@ function setupRealtimeAdminAccess() {
             adminAccessData[docSnap.id] = { uid: docSnap.id, ...docSnap.data() };
         });
         renderAdminAccessTable();
+        renderMembersTable();
     }, (error) => {
         console.error('Error listening to admin access:', error);
         const tbody = document.getElementById('admin-access-table-body');
@@ -4713,6 +5164,114 @@ function statusBadgeHTML(status) {
     return '<span class="member-status-badge' + klass + '">' + escapeHTML(MEMBER_STATUS_LABELS[safeStatus]) + '</span>';
 }
 
+function memberStaffAccess(uid) {
+    return adminAccessData[uid] || null;
+}
+
+function memberStaffAccessBadgeHTML(uid) {
+    const access = memberStaffAccess(uid);
+    if (!access) return '<span class="member-status-badge">ลูกค้า</span>';
+    const statusText = access.status === 'active' ? 'Active' : 'Paused';
+    const statusClass = access.status === 'active' ? 'access-status-active' : 'access-status-paused';
+    return adminRoleBadgeHTML(access.role) + '<br><small class="' + statusClass + '">' + escapeHTML(statusText) + '</small>';
+}
+
+function getSelectedMemberStaffPermissions() {
+    const permissions = {};
+    document.querySelectorAll('[data-member-staff-permission]').forEach(input => {
+        permissions[input.dataset.memberStaffPermission] = input.checked === true;
+    });
+    return permissions;
+}
+
+function memberStaffPermissionInputsHTML(selected = adminRoleDefaults('manager'), disabled = false) {
+    return Object.entries(ADMIN_PERMISSION_LABELS).map(([key, label]) => `
+        <label>
+            <input type="checkbox" data-member-staff-permission="${escapeHTML(key)}" ${selected[key] ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
+            <span>${escapeHTML(label)}</span>
+        </label>
+    `).join('');
+}
+
+function canManageMemberStaffAccess(uid, access = memberStaffAccess(uid)) {
+    return isOwnerAccess()
+        && uid !== currentAdminAccess?.uid
+        && access?.role !== 'owner'
+        && access?.role !== 'head_manager';
+}
+
+function staffMenuOrderPermissions() {
+    return Object.fromEntries([
+        ...Object.keys(ADMIN_PERMISSION_LABELS).map(key => [key, false]),
+        ['menuOrder', true]
+    ]);
+}
+
+function memberStaffAccessHTML(uid, member) {
+    const access = memberStaffAccess(uid);
+    const isSelf = uid === currentAdminAccess?.uid;
+    const isOwnerRecord = access?.role === 'owner';
+    const canManage = canManageMemberStaffAccess(uid, access);
+    const status = access?.status || 'active';
+    const currentSummary = access
+        ? adminRoleBadgeHTML(access.role) + '<span class="access-status-' + (status === 'active' ? 'active' : 'paused') + '">' + escapeHTML(status) + '</span>'
+        : '<span class="member-status-badge">ยังไม่ได้เป็นพนักงาน</span>';
+
+    if (!isOwnerAccess()) {
+        return `
+            <div class="member-note-box member-staff-card">
+                <div class="member-staff-head">
+                    <div>
+                        <h4>Employee permissions</h4>
+                        <div class="member-staff-summary">${currentSummary}</div>
+                    </div>
+                </div>
+                <div class="member-staff-hint">เฉพาะ Owner เท่านั้นที่กำหนดสิทธิ์พนักงานได้</div>
+            </div>`;
+    }
+
+    if (isOwnerRecord || access?.role === 'head_manager' || isSelf) {
+        return `
+            <div class="member-note-box member-staff-card">
+                <div class="member-staff-head">
+                    <div>
+                        <h4>Employee permissions</h4>
+                        <div class="member-staff-summary">${currentSummary}</div>
+                    </div>
+                </div>
+                <div class="member-staff-hint">${isSelf ? 'บัญชีนี้คือบัญชีที่คุณกำลังใช้งานอยู่ จึงไม่เปิดให้เปลี่ยนสิทธิ์จากหน้า Members' : 'บัญชี Owner/Head Manager ให้จัดการจากหน้า Admin Access เพื่อป้องกันการลดสิทธิ์ผิดบัญชี'}</div>
+            </div>`;
+    }
+
+    return `
+        <div class="member-note-box member-staff-card">
+            <div class="member-staff-head">
+                <div>
+                    <h4>Employee permissions</h4>
+                    <div class="member-staff-summary">${currentSummary}</div>
+                    <div class="member-staff-hint">พนักงานจะปลดล็อกปุ่ม Add to cart บนหน้าเมนูเท่านั้น ไม่มีสิทธิ์เข้า Admin หรือ POS หลังบ้าน</div>
+                </div>
+            </div>
+            <form id="member-staff-access-form" onsubmit="return saveMemberStaffAccess(event, '${escapeJSString(uid)}')">
+                <div class="member-detail-grid">
+                    <div class="member-detail-item"><small>Role</small><span>Staff / Menu order only</span></div>
+                    <div class="form-group">
+                        <label>Status</label>
+                        <select id="member-staff-status">
+                            <option value="active" ${status === 'active' ? 'selected' : ''}>Active</option>
+                            <option value="paused" ${status === 'paused' ? 'selected' : ''}>Paused</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="member-staff-actions">
+                    <button type="submit" class="btn-submit" style="max-width:220px;">Save employee permissions</button>
+                    ${access?.role === 'staff' ? `<button type="button" class="btn-action btn-delete" onclick="deleteMemberStaffAccess('${escapeJSString(uid)}')">Remove staff access</button>` : ''}
+                    <span id="member-staff-save-status" style="color:#2e7d32;"></span>
+                </div>
+            </form>
+        </div>`;
+}
+
 function formatMemberCurrency(value) {
     return 'THB ' + safeNumber(value).toLocaleString('th-TH');
 }
@@ -4777,7 +5336,7 @@ function renderMembersTable() {
     if (countEl) countEl.textContent = rows.length.toLocaleString('th-TH') + ' records';
 
     if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="9"><div class="member-empty-state">No members match the selected filters.</div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10"><div class="member-empty-state">No members match the selected filters.</div></td></tr>';
         return;
     }
 
@@ -4800,8 +5359,9 @@ function renderMembersTable() {
                 <td>${formatMemberCurrency(member.totalSpent)}</td>
                 <td>${safeNumber(member.visitCount).toLocaleString('th-TH')}</td>
                 <td>${statusBadgeHTML(status)}</td>
+                <td>${memberStaffAccessBadgeHTML(uid)}</td>
                 <td>${formatDate(lastDate)}</td>
-                <td><button class="btn-action btn-view" onclick="openMemberModal('${escapeJSString(uid)}')">Details</button></td>
+                <td><button class="btn-action btn-view" onclick="openMemberModal('${escapeJSString(uid)}')">Details / สิทธิ์</button></td>
             </tr>`;
     }).join('');
 }
@@ -4820,7 +5380,7 @@ function setupRealtimeMembers() {
     }, (error) => {
         console.error('Error listening to members:', error);
         const tbody = document.getElementById('members-table-body');
-        if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#c62828;">Unable to load members: ${escapeHTML(error.message)}</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#c62828;">Unable to load members: ${escapeHTML(error.message)}</td></tr>`;
     });
 }
 
@@ -4942,6 +5502,8 @@ function renderMemberDetail(uid, member, activity = { orders: [], bookings: [] }
             </form>
         </div>
 
+        ${memberStaffAccessHTML(uid, member)}
+
         <div class="member-detail-grid">
             <div class="member-detail-item">
                 <small>Current benefits</small>
@@ -5018,6 +5580,109 @@ window.saveMemberAdminFields = async (event, uid) => {
         }
     }
     return false;
+};
+
+window.syncMemberStaffRolePermissions = (role) => {
+    const container = document.getElementById('member-staff-permissions');
+    if (!container) return;
+    const safeRole = role === 'head_manager' ? 'head_manager' : 'manager';
+    const disabled = safeRole === 'head_manager';
+    container.innerHTML = memberStaffPermissionInputsHTML(adminRoleDefaults(safeRole), disabled);
+};
+
+window.saveMemberStaffAccess = async (event, uid) => {
+    event.preventDefault();
+    const statusEl = document.getElementById('member-staff-save-status');
+    const member = membersData[uid];
+    const access = memberStaffAccess(uid);
+
+    if (!member) {
+        alert('ไม่พบสมาชิกคนนี้ในระบบ');
+        return false;
+    }
+    if (!canManageMemberStaffAccess(uid, access)) {
+        alert('เฉพาะ Owner เท่านั้นที่กำหนดสิทธิ์พนักงานได้ และไม่สามารถแก้บัญชีตัวเองหรือบัญชี Owner จากหน้า Members');
+        return false;
+    }
+
+    const email = normalizeEmail(member.email);
+    if (!email) {
+        alert('สมาชิกคนนี้ยังไม่มีอีเมล จึงยังเปิดสิทธิ์พนักงานไม่ได้');
+        return false;
+    }
+
+    const role = 'staff';
+    const status = document.getElementById('member-staff-status')?.value === 'paused' ? 'paused' : 'active';
+    const permissions = staffMenuOrderPermissions();
+    const payload = {
+        uid,
+        email,
+        displayName: memberDisplayName(member),
+        role,
+        status,
+        permissions
+    };
+
+    try {
+        if (statusEl) {
+            statusEl.textContent = 'Saving...';
+            statusEl.style.color = '#607466';
+        }
+        const accessPayload = {
+            uid,
+            email,
+            displayName: payload.displayName,
+            role,
+            status,
+            permissions,
+            createdAt: access?.createdAt || serverTimestamp(),
+            createdBy: access?.createdBy || auth.currentUser?.uid || '',
+            updatedAt: serverTimestamp(),
+            updatedBy: auth.currentUser?.uid || ''
+        };
+        await setDoc(doc(db, ADMIN_COLLECTION, uid), accessPayload);
+        adminAccessData[uid] = {
+            ...accessPayload,
+            updatedAt: new Date().toISOString()
+        };
+        renderMembersTable();
+        renderAdminAccessTable();
+        renderAdminUserOptions();
+        if (statusEl) {
+            statusEl.textContent = 'Saved';
+            statusEl.style.color = '#2e7d32';
+        }
+    } catch (error) {
+        console.error('Unable to save member staff access:', error);
+        if (statusEl) {
+            statusEl.textContent = 'Save failed: ' + error.message;
+            statusEl.style.color = '#c62828';
+        } else {
+            alert('Save failed: ' + error.message);
+        }
+    }
+    return false;
+};
+
+window.deleteMemberStaffAccess = async (uid) => {
+    const access = memberStaffAccess(uid);
+    if (!access) return;
+    if (!canManageMemberStaffAccess(uid, access)) {
+        alert('ไม่สามารถลบสิทธิ์บัญชีนี้จากหน้า Members ได้');
+        return;
+    }
+    if (!confirm('Remove staff access for this member?')) return;
+
+    try {
+        await deleteDoc(doc(db, ADMIN_COLLECTION, uid));
+        delete adminAccessData[uid];
+        renderMembersTable();
+        renderAdminAccessTable();
+        window.openMemberModal(uid);
+    } catch (error) {
+        console.error('Unable to remove member staff access:', error);
+        alert('Remove staff access failed: ' + error.message);
+    }
 };
 
 // ==========================================
