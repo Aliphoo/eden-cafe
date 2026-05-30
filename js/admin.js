@@ -101,6 +101,23 @@ async function uploadAdminImage(blob, folder, fileName) {
     return result.url;
 }
 
+async function callAdminFunction(functionName, payload = {}) {
+    const token = await auth.currentUser?.getIdToken(true);
+    if (!token) throw new Error('Please sign in as admin again before continuing');
+
+    const response = await fetch(FUNCTIONS_BASE_URL + '/' + functionName, {
+        method: 'POST',
+        headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || 'Request failed');
+    return result;
+}
+
 
 const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
 const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net';
@@ -117,6 +134,8 @@ const ADMIN_PERMISSION_LABELS = {
     shop: 'สินค้าออนไลน์',
     blogs: 'บทความ',
     faqs: 'FAQ',
+    promptpay: '\u0e08\u0e31\u0e14\u0e01\u0e32\u0e23\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e40\u0e1e\u0e22\u0e4c',
+    marketing: 'Marketing Tools',
     footer: 'Footer'
 };
 const ADMIN_ROLE_LABELS = {
@@ -139,6 +158,8 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
         shop: false,
         blogs: false,
         faqs: false,
+        promptpay: false,
+        marketing: false,
         footer: false
     }
 };
@@ -158,6 +179,8 @@ const ADMIN_TAB_PERMISSIONS = {
     'shop-categories': 'shop',
     blogs: 'blogs',
     faqs: 'faqs',
+    promptpay: 'promptpay',
+    'marketing-settings': 'marketing',
     'footer-settings': 'footer'
 };
 
@@ -942,6 +965,8 @@ function initializeAdminModules() {
         setupRealtimeShopProducts();
     }
     if (canAdmin('members')) setupRealtimeMembers();
+    if (canAdmin('promptpay') && typeof window.loadPromptPaySettings === 'function') window.loadPromptPaySettings();
+    if (canAdmin('marketing') && typeof window.loadMarketingSettings === 'function') window.loadMarketingSettings();
     if (isOwnerAccess()) setupRealtimeAdminAccess();
     initXLSXTools();
     installAdminRefreshButtons();
@@ -1082,6 +1107,12 @@ window.refreshAdminSection = async (tabId, button = null) => {
                 break;
             case 'faqs':
                 if (typeof window.fetchFaqsFromCloud === 'function') window.fetchFaqsFromCloud();
+                break;
+            case 'promptpay':
+                if (typeof window.loadPromptPaySettings === 'function') await window.loadPromptPaySettings();
+                break;
+            case 'marketing-settings':
+                if (typeof window.loadMarketingSettings === 'function') await window.loadMarketingSettings();
                 break;
             case 'footer-settings':
                 if (typeof window.loadFooterSettings === 'function') await window.loadFooterSettings();
@@ -1323,7 +1354,7 @@ function setupRealtimeOrders() {
         const todayStr = new Date().toLocaleDateString('th-TH');
 
         if (snapshot.empty) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">ไม่มีข้อมูลออเดอร์</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">ไม่มีข้อมูลออเดอร์</td></tr>';
             return;
         }
 
@@ -1331,13 +1362,16 @@ function setupRealtimeOrders() {
             const order = docSnap.data();
             const id = docSnap.id;
             const status = order.status || 'pending';
+            const paymentStatus = order.paymentStatus || (order.source === 'pos' ? 'paid' : 'pending');
+            const paymentLabel = order.paymentLabel || order.paymentMethod || '-';
             const isTestOrder = !!order.isTestOrder;
             const displayId = order.receiptNo || order.orderNumber || id.substring(0,8).toUpperCase();
             const sourceLabel = order.source === 'pos' ? (isTestOrder ? 'POS TEST' : 'POS') : 'Online';
             const canVoidPos = order.source === 'pos' && status !== 'cancelled';
             const orderDateStr = order.timestamp ? (order.timestamp.toDate ? order.timestamp.toDate().toLocaleDateString('th-TH') : new Date(order.timestamp).toLocaleDateString('th-TH')) : '';
+            const isRevenueOrder = paymentStatus === 'paid' || status === 'completed';
             
-            if (!isTestOrder && orderDateStr === todayStr) {
+            if (!isTestOrder && isRevenueOrder && status !== 'cancelled' && orderDateStr === todayStr) {
                 todayOrders++;
                 todayRevenue += (order.totalAmount || 0);
             }
@@ -1347,6 +1381,7 @@ function setupRealtimeOrders() {
                 <td style="font-family: monospace;">${escapeHTML(displayId)}</td>
                 <td>${escapeHTML(order.customerName || 'Customer')}<br><small style="color:#888;">${escapeHTML([order.phone || '', sourceLabel].filter(Boolean).join(' | '))}</small></td>
                 <td style="font-weight: 500;">฿${safeNumber(order.totalAmount || order.total).toLocaleString()}</td>
+                <td>${getPaymentStatusBadgeHTML(paymentStatus)}<br><small style="color:#888;">${escapeHTML(paymentLabel)}</small></td>
                 <td>${formatDate(order.timestamp)}</td>
                 <td>${getStatusBadgeHTML(status, 'order')}</td>
                 <td>
@@ -1368,7 +1403,7 @@ function setupRealtimeOrders() {
     }, (error) => {
         console.error("Error listening to orders:", error);
         const tbody = document.getElementById('orders-table-body');
-        if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">ไม่มีสิทธิ์เข้าถึงข้อมูล หรือเกิดข้อผิดพลาด</td></tr>';
+        if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:red;">ไม่มีสิทธิ์เข้าถึงข้อมูล หรือเกิดข้อผิดพลาด</td></tr>';
     });
 }
 
@@ -1486,6 +1521,20 @@ async function updateBookingTable(bookingId, tableNo) {
 window.updateBookingTable = updateBookingTable;
 
 // HTML Helper for Status Badges
+function getPaymentStatusBadgeHTML(status = 'pending') {
+    switch (String(status || 'pending').toLowerCase()) {
+        case 'paid':
+            return '<span class="status-badge status-completed">ชำระแล้ว</span>';
+        case 'failed':
+            return '<span class="status-badge status-cancelled">ชำระไม่สำเร็จ</span>';
+        case 'refunded':
+            return '<span class="status-badge status-cancelled">คืนเงินแล้ว</span>';
+        case 'pending':
+        default:
+            return '<span class="status-badge status-pending">รอชำระ</span>';
+    }
+}
+
 function getStatusBadgeHTML(status, type) {
     if (type === 'order') {
         switch(status) {
@@ -4391,7 +4440,7 @@ function renderAdminAccessTable() {
     setAdminAccessStats(rows);
 
     if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="6"><div class="member-empty-state">ยังไม่มีผู้จัดการในระบบ กรอก UID จาก Firebase Auth หรือเลือกจากสมาชิกเพื่อเริ่มต้น</div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7"><div class="member-empty-state">ยังไม่มีผู้จัดการในระบบ กรอกอีเมลและตั้งรหัสผ่าน หรือเลือกจากสมาชิกเพื่อเริ่มต้น</div></td></tr>';
         return;
     }
 
@@ -4403,11 +4452,15 @@ function renderAdminAccessTable() {
                 .map(([, label]) => label)
                 .join(', ') || '-';
         const canDelete = row.uid !== currentAdminAccess?.uid;
+        const passwordLoginText = row.passwordLoginEnabled
+            ? 'พร้อมใช้'
+            : 'ยังไม่ตั้งรหัส';
         return `
             <tr>
                 <td><strong>${escapeHTML(row.displayName || 'Manager')}</strong><br><small>${escapeHTML(row.email || '-')}<br>UID: ${escapeHTML(row.uid)}</small></td>
                 <td>${adminRoleBadgeHTML(row.role)}</td>
                 <td style="max-width:260px;">${escapeHTML(permissionText)}</td>
+                <td><span class="access-auth-status ${row.passwordLoginEnabled ? '' : 'pending'}">${escapeHTML(passwordLoginText)}</span></td>
                 <td><span class="access-status-${row.status === 'active' ? 'active' : 'paused'}">${escapeHTML(row.status || 'active')}</span></td>
                 <td>${formatDate(row.updatedAt || row.createdAt)}</td>
                 <td>
@@ -4453,6 +4506,10 @@ function bindAdminAccessForm() {
             document.getElementById('access-uid').value = uid;
             document.getElementById('access-email').value = member.email || '';
             document.getElementById('access-display-name').value = memberDisplayName(member);
+            const passwordEl = document.getElementById('access-password');
+            const confirmEl = document.getElementById('access-password-confirm');
+            if (passwordEl) passwordEl.value = '';
+            if (confirmEl) confirmEl.value = '';
         });
     }
 
@@ -4474,39 +4531,56 @@ async function saveAdminAccessFromForm() {
     const uid = document.getElementById('access-uid')?.value.trim();
     const email = normalizeEmail(document.getElementById('access-email')?.value);
     const displayName = document.getElementById('access-display-name')?.value.trim() || 'Manager';
+    const password = document.getElementById('access-password')?.value || '';
+    const passwordConfirm = document.getElementById('access-password-confirm')?.value || '';
     const role = document.getElementById('access-role')?.value || 'manager';
     const status = document.getElementById('access-status')?.value || 'active';
-    if (!uid || !email) {
-        alert('กรุณากรอก Firebase UID และอีเมล');
+    if (!email) {
+        alert('กรุณากรอกอีเมลผู้จัดการ');
         return;
     }
-    if (uid.includes('@')) {
+    if (uid && uid.includes('@')) {
         alert('Firebase UID ต้องไม่ใช่อีเมลครับ ให้ใช้ User UID จาก Firebase Authentication หรือเลือกจาก dropdown สมาชิก');
         return;
+    }
+    if (password || passwordConfirm) {
+        if (password !== passwordConfirm) {
+            alert('รหัสผ่านและยืนยันรหัสผ่านไม่ตรงกัน');
+            return;
+        }
+        if (password.length < 8) {
+            alert('รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร');
+            return;
+        }
     }
 
 
     const permissions = normalizePermissions(role, getSelectedAdminPermissions());
-    const existing = adminAccessData[uid];
     const payload = {
         uid,
         email,
         displayName,
         role,
         status,
-        permissions,
-        updatedAt: serverTimestamp(),
-        updatedBy: auth.currentUser?.uid || ''
+        permissions
     };
-    if (!existing) {
-        payload.createdAt = serverTimestamp();
-        payload.createdBy = auth.currentUser?.uid || '';
-    }
+    if (password) payload.password = password;
     try {
-        await setDoc(doc(db, ADMIN_COLLECTION, uid), payload, { merge: true });
-        adminAccessData[uid] = { ...payload, updatedAt: new Date().toISOString() };
+        const result = await callAdminFunction('upsertAdminAccessUser', payload);
+        const savedUid = result.uid || uid;
+        adminAccessData[savedUid] = {
+            ...(adminAccessData[savedUid] || {}),
+            uid: savedUid,
+            email,
+            displayName,
+            role,
+            status,
+            permissions,
+            passwordLoginEnabled: result.passwordLoginEnabled !== false,
+            updatedAt: new Date().toISOString()
+        };
         renderAdminAccessTable();
-        alert('บันทึกสิทธิ์ผู้จัดการเรียบร้อยแล้ว\n\nถ้าผู้จัดการยังเข้าไม่ได้ ให้เช็กว่า UID ตรงกับ Firebase Authentication ของบัญชีนั้น');
+        alert('บันทึกสิทธิ์ผู้จัดการเรียบร้อยแล้ว' + (result.passwordUpdated ? '\nตั้งรหัสผ่านสำหรับ Email Login แล้ว' : ''));
         resetAdminAccessForm();
     } catch (error) {
         console.error('Unable to save admin access:', error);
@@ -4521,6 +4595,10 @@ window.editAdminAccess = (uid) => {
     document.getElementById('access-uid').value = uid;
     document.getElementById('access-email').value = data.email || '';
     document.getElementById('access-display-name').value = data.displayName || '';
+    const passwordEl = document.getElementById('access-password');
+    const confirmEl = document.getElementById('access-password-confirm');
+    if (passwordEl) passwordEl.value = '';
+    if (confirmEl) confirmEl.value = '';
     document.getElementById('access-role').value = data.role || 'manager';
     document.getElementById('access-status').value = data.status || 'active';
     renderAdminPermissionInputs(normalizePermissions(data.role, data.permissions), data.role === 'owner' || data.role === 'head_manager');
@@ -4542,6 +4620,12 @@ window.deleteAdminAccess = async (uid) => {
 window.resetAdminAccessForm = () => {
     const form = document.getElementById('admin-access-form');
     if (form) form.reset();
+    const uidEl = document.getElementById('access-uid');
+    const passwordEl = document.getElementById('access-password');
+    const confirmEl = document.getElementById('access-password-confirm');
+    if (uidEl) uidEl.value = '';
+    if (passwordEl) passwordEl.value = '';
+    if (confirmEl) confirmEl.value = '';
     renderAdminPermissionInputs(adminRoleDefaults('manager'));
 };
 
@@ -4560,7 +4644,7 @@ function setupRealtimeAdminAccess() {
     }, (error) => {
         console.error('Error listening to admin access:', error);
         const tbody = document.getElementById('admin-access-table-body');
-        if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#c62828;">โหลดสิทธิ์ผู้จัดการไม่สำเร็จ: ${escapeHTML(error.message)}</td></tr>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#c62828;">โหลดสิทธิ์ผู้จัดการไม่สำเร็จ: ${escapeHTML(error.message)}</td></tr>`;
     });
 }
 
@@ -5045,6 +5129,499 @@ onAuthStateChanged(auth, (user) => {
     if (user) {
         if(typeof fetchFaqsFromCloud === 'function') fetchFaqsFromCloud();
         if(typeof loadFooterSettings === 'function') loadFooterSettings();
+    }
+});
+
+// ==========================================
+// PromptPay Settings Management Logic
+// ==========================================
+
+const PROMPTPAY_DEFAULT_ACCOUNT = Object.freeze({
+    id: 'eden-main',
+    label: 'Eden Cafe Main',
+    promptPayId: '057556001655',
+    merchantName: 'EDEN CAFE',
+    city: 'CHIANG RAI',
+    order: 1
+});
+const PROMPTPAY_SETTINGS_DEFAULTS = Object.freeze({
+    enabled: true,
+    activeAccountId: PROMPTPAY_DEFAULT_ACCOUNT.id,
+    promptPayId: PROMPTPAY_DEFAULT_ACCOUNT.promptPayId,
+    merchantName: PROMPTPAY_DEFAULT_ACCOUNT.merchantName,
+    city: PROMPTPAY_DEFAULT_ACCOUNT.city,
+    accounts: [PROMPTPAY_DEFAULT_ACCOUNT]
+});
+const promptPaySettingsForm = document.getElementById('promptpaySettingsForm');
+let promptPaySettingsState = defaultPromptPaySettings();
+let promptPayEditingAccountId = PROMPTPAY_DEFAULT_ACCOUNT.id;
+
+function defaultPromptPayAccount() {
+    return { ...PROMPTPAY_DEFAULT_ACCOUNT };
+}
+
+function defaultPromptPaySettings() {
+    return {
+        enabled: true,
+        activeAccountId: PROMPTPAY_DEFAULT_ACCOUNT.id,
+        promptPayId: PROMPTPAY_DEFAULT_ACCOUNT.promptPayId,
+        merchantName: PROMPTPAY_DEFAULT_ACCOUNT.merchantName,
+        city: PROMPTPAY_DEFAULT_ACCOUNT.city,
+        accounts: [defaultPromptPayAccount()]
+    };
+}
+
+function cleanPromptPayId(value) {
+    return String(value ?? '').replace(/\D/g, '');
+}
+
+function isValidPromptPayId(value) {
+    const id = cleanPromptPayId(value);
+    return /^0\d{9}$/.test(id) || /^\d{13}$/.test(id) || /^\d{15}$/.test(id);
+}
+
+function promptPaySlug(value) {
+    return String(value || 'promptpay')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 42) || 'promptpay';
+}
+
+function uniquePromptPayAccountId(seed, accounts = [], currentId = '') {
+    const base = promptPaySlug(seed || 'promptpay');
+    const used = new Set(accounts.map(account => account.id).filter(id => id && id !== currentId));
+    let candidate = base;
+    let suffix = 2;
+    while (used.has(candidate)) {
+        candidate = base + '-' + suffix;
+        suffix += 1;
+    }
+    return candidate;
+}
+
+function normalizePromptPayAccount(account = {}, index = 0) {
+    const cleanedId = cleanPromptPayId(account.promptPayId || account.idValue || account.number || account.promptpay || PROMPTPAY_DEFAULT_ACCOUNT.promptPayId);
+    const label = String(account.label || account.name || account.accountName || ('PromptPay ' + (index + 1))).trim().slice(0, 80) || ('PromptPay ' + (index + 1));
+    return {
+        id: String(account.id || account.key || '').trim(),
+        label,
+        promptPayId: isValidPromptPayId(cleanedId) ? cleanedId : PROMPTPAY_DEFAULT_ACCOUNT.promptPayId,
+        merchantName: String(account.merchantName || PROMPTPAY_DEFAULT_ACCOUNT.merchantName).trim().slice(0, 25) || PROMPTPAY_DEFAULT_ACCOUNT.merchantName,
+        city: String(account.city || PROMPTPAY_DEFAULT_ACCOUNT.city).trim().slice(0, 15) || PROMPTPAY_DEFAULT_ACCOUNT.city,
+        order: Number.isFinite(Number(account.order)) ? Number(account.order) : index + 1
+    };
+}
+
+function normalizePromptPaySettings(data = {}) {
+    const legacyAccount = {
+        id: data.accountId || data.activeAccountId || PROMPTPAY_DEFAULT_ACCOUNT.id,
+        label: data.label || data.accountName || PROMPTPAY_DEFAULT_ACCOUNT.label,
+        promptPayId: data.promptPayId,
+        merchantName: data.merchantName,
+        city: data.city,
+        order: 1
+    };
+    const rawAccounts = Array.isArray(data.accounts) && data.accounts.length ? data.accounts : [legacyAccount];
+    const used = [];
+    const accounts = rawAccounts
+        .map((account, index) => normalizePromptPayAccount(account, index))
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+        .map((account, index) => {
+            const seededId = account.id || account.label || account.promptPayId || ('promptpay-' + (index + 1));
+            const id = uniquePromptPayAccountId(seededId, used);
+            const normalized = { ...account, id, order: index + 1 };
+            used.push(normalized);
+            return normalized;
+        });
+
+    if (!accounts.length) accounts.push(defaultPromptPayAccount());
+    let activeAccountId = String(data.activeAccountId || data.selectedAccountId || data.accountId || '').trim();
+    if (!accounts.some(account => account.id === activeAccountId)) activeAccountId = accounts[0].id;
+    const activeAccount = accounts.find(account => account.id === activeAccountId) || accounts[0] || defaultPromptPayAccount();
+    return {
+        enabled: data.enabled !== false,
+        activeAccountId,
+        accounts,
+        promptPayId: activeAccount.promptPayId,
+        merchantName: activeAccount.merchantName,
+        city: activeAccount.city
+    };
+}
+
+function activePromptPayAccount(settings = promptPaySettingsState) {
+    const normalized = normalizePromptPaySettings(settings);
+    return normalized.accounts.find(account => account.id === normalized.activeAccountId) || normalized.accounts[0] || defaultPromptPayAccount();
+}
+
+function setPromptPayAdminStatus(message = '', state = '') {
+    const status = document.getElementById('promptpay-settings-status');
+    if (!status) return;
+    status.textContent = message;
+    status.className = ['promptpay-settings-status', state].filter(Boolean).join(' ');
+}
+
+function readPromptPayAccountForm({ validate = true } = {}) {
+    const rawId = String(document.getElementById('promptpay-account-key')?.value || promptPayEditingAccountId || '').trim();
+    const promptPayId = cleanPromptPayId(document.getElementById('promptpay-id')?.value || '');
+    const label = String(document.getElementById('promptpay-account-label')?.value || '').trim();
+    const merchantName = String(document.getElementById('promptpay-merchant-name')?.value || '').trim();
+    const city = String(document.getElementById('promptpay-city')?.value || '').trim();
+
+    if (validate && !isValidPromptPayId(promptPayId)) {
+        throw new Error('PromptPay ID must be a 10-digit phone number, 13-digit citizen ID, or 15-digit e-Wallet ID.');
+    }
+    if (validate && (!merchantName || !city)) {
+        throw new Error('Merchant name and city are required.');
+    }
+
+    return normalizePromptPayAccount({
+        id: rawId,
+        label: label || 'PromptPay',
+        promptPayId: promptPayId || PROMPTPAY_DEFAULT_ACCOUNT.promptPayId,
+        merchantName: merchantName || PROMPTPAY_DEFAULT_ACCOUNT.merchantName,
+        city: city || PROMPTPAY_DEFAULT_ACCOUNT.city,
+        order: promptPaySettingsState.accounts.findIndex(account => account.id === rawId) + 1 || promptPaySettingsState.accounts.length + 1
+    });
+}
+
+function applyPromptPayAccountToForm(account = defaultPromptPayAccount()) {
+    const normalized = normalizePromptPayAccount(account);
+    promptPayEditingAccountId = normalized.id;
+    const titleEl = document.getElementById('promptpay-editor-title');
+    const keyEl = document.getElementById('promptpay-account-key');
+    const labelEl = document.getElementById('promptpay-account-label');
+    const idEl = document.getElementById('promptpay-id');
+    const merchantEl = document.getElementById('promptpay-merchant-name');
+    const cityEl = document.getElementById('promptpay-city');
+    if (titleEl) titleEl.textContent = normalized.id ? 'Edit PromptPay Account' : 'Add PromptPay Account';
+    if (keyEl) keyEl.value = normalized.id || '';
+    if (labelEl) labelEl.value = normalized.label || '';
+    if (idEl) idEl.value = normalized.promptPayId || '';
+    if (merchantEl) merchantEl.value = normalized.merchantName || '';
+    if (cityEl) cityEl.value = normalized.city || '';
+    updatePromptPaySettingsPreview({ ...normalized, enabled: document.getElementById('promptpay-enabled')?.checked !== false });
+}
+
+function updatePromptPaySettingsPreview(settings = readPromptPayAccountForm({ validate: false })) {
+    const normalized = normalizePromptPayAccount(settings);
+    const previewId = document.getElementById('promptpay-preview-id');
+    const previewMerchant = document.getElementById('promptpay-preview-merchant');
+    const previewCity = document.getElementById('promptpay-preview-city');
+    const previewEnabled = document.getElementById('promptpay-preview-enabled');
+    if (previewId) previewId.textContent = cleanPromptPayId(settings.promptPayId) || normalized.promptPayId;
+    if (previewMerchant) previewMerchant.textContent = settings.merchantName || normalized.merchantName;
+    if (previewCity) previewCity.textContent = settings.city || normalized.city;
+    if (previewEnabled) previewEnabled.textContent = settings.enabled === false ? 'Disabled' : 'Enabled';
+}
+
+function renderPromptPayAccountOptions() {
+    const select = document.getElementById('promptpay-active-account');
+    if (!select) return;
+    select.innerHTML = promptPaySettingsState.accounts.map((account, index) => {
+        const selected = account.id === promptPaySettingsState.activeAccountId ? ' selected' : '';
+        const label = (index + 1) + '. ' + account.label + ' - ' + account.promptPayId;
+        return '<option value="' + escapeHTML(account.id) + '"' + selected + '>' + escapeHTML(label) + '</option>';
+    }).join('');
+}
+
+function renderPromptPayAccountList() {
+    const container = document.getElementById('promptpay-account-list');
+    if (!container) return;
+    if (!promptPaySettingsState.accounts.length) {
+        container.innerHTML = '<div class="promptpay-empty">No PromptPay accounts yet.</div>';
+        return;
+    }
+    container.innerHTML = promptPaySettingsState.accounts.map((account, index) => {
+        const active = account.id === promptPaySettingsState.activeAccountId;
+        return '<article class="promptpay-account-item' + (active ? ' active' : '') + '">'
+            + '<span class="promptpay-account-order">' + (index + 1) + '</span>'
+            + '<div class="promptpay-account-title"><strong>' + escapeHTML(account.label) + (active ? ' - Active' : '') + '</strong><small>' + escapeHTML(account.promptPayId + ' - ' + account.merchantName + ' - ' + account.city) + '</small></div>'
+            + '<div class="promptpay-account-actions">'
+            + '<button type="button" class="promptpay-mini-btn" onclick="setActivePromptPayAccount(\'' + escapeJSString(account.id) + '\')">Use</button>'
+            + '<button type="button" class="promptpay-mini-btn" onclick="editPromptPayAccount(\'' + escapeJSString(account.id) + '\')">Edit</button>'
+            + '<button type="button" class="promptpay-mini-btn danger" onclick="deletePromptPayAccount(\'' + escapeJSString(account.id) + '\')">Delete</button>'
+            + '</div></article>';
+    }).join('');
+}
+
+function renderPromptPaySettingsUI() {
+    promptPaySettingsState = normalizePromptPaySettings(promptPaySettingsState);
+    const enabledEl = document.getElementById('promptpay-enabled');
+    if (enabledEl) enabledEl.checked = promptPaySettingsState.enabled;
+    renderPromptPayAccountOptions();
+    renderPromptPayAccountList();
+}
+
+function applyPromptPaySettingsToForm(settings = defaultPromptPaySettings()) {
+    promptPaySettingsState = normalizePromptPaySettings(settings);
+    renderPromptPaySettingsUI();
+    applyPromptPayAccountToForm(activePromptPayAccount(promptPaySettingsState));
+}
+
+function upsertPromptPayCurrentAccount() {
+    const account = readPromptPayAccountForm({ validate: true });
+    const currentId = account.id || '';
+    const targetId = currentId || uniquePromptPayAccountId(account.label || account.promptPayId, promptPaySettingsState.accounts);
+    const nextAccount = { ...account, id: targetId };
+    const existingIndex = promptPaySettingsState.accounts.findIndex(item => item.id === targetId);
+    if (existingIndex >= 0) promptPaySettingsState.accounts[existingIndex] = nextAccount;
+    else promptPaySettingsState.accounts.push(nextAccount);
+    promptPaySettingsState.accounts = promptPaySettingsState.accounts.map((item, index) => ({ ...item, order: index + 1 }));
+    if (!promptPaySettingsState.activeAccountId || !promptPaySettingsState.accounts.some(item => item.id === promptPaySettingsState.activeAccountId)) {
+        promptPaySettingsState.activeAccountId = targetId;
+    }
+    promptPayEditingAccountId = targetId;
+    renderPromptPaySettingsUI();
+    applyPromptPayAccountToForm(nextAccount);
+    return nextAccount;
+}
+
+function buildPromptPaySettingsPayload() {
+    upsertPromptPayCurrentAccount();
+    const selectValue = document.getElementById('promptpay-active-account')?.value || promptPaySettingsState.activeAccountId;
+    if (promptPaySettingsState.accounts.some(account => account.id === selectValue)) {
+        promptPaySettingsState.activeAccountId = selectValue;
+    }
+    promptPaySettingsState.enabled = document.getElementById('promptpay-enabled')?.checked !== false;
+    promptPaySettingsState = normalizePromptPaySettings(promptPaySettingsState);
+    const activeAccount = activePromptPayAccount(promptPaySettingsState);
+    return {
+        enabled: promptPaySettingsState.enabled,
+        activeAccountId: activeAccount.id,
+        accounts: promptPaySettingsState.accounts.map((account, index) => ({ ...account, order: index + 1 })),
+        promptPayId: activeAccount.promptPayId,
+        merchantName: activeAccount.merchantName,
+        city: activeAccount.city
+    };
+}
+
+window.loadPromptPaySettings = async function() {
+    if (!canAdmin('promptpay')) {
+        setPromptPayAdminStatus('This account cannot manage PromptPay settings.', 'error');
+        return null;
+    }
+    setPromptPayAdminStatus('Loading PromptPay settings...', 'warning');
+    try {
+        const snap = await getDoc(doc(db, 'site_settings', 'promptpay'));
+        const settings = normalizePromptPaySettings(snap.exists() ? snap.data() : defaultPromptPaySettings());
+        applyPromptPaySettingsToForm(settings);
+        setPromptPayAdminStatus(snap.exists() ? 'PromptPay settings loaded.' : 'Using default PromptPay settings. Save once to publish them.', snap.exists() ? 'success' : 'warning');
+        return settings;
+    } catch (error) {
+        console.error('Error loading PromptPay settings:', error);
+        applyPromptPaySettingsToForm(defaultPromptPaySettings());
+        setPromptPayAdminStatus('Unable to load PromptPay settings: ' + error.message, 'error');
+        return null;
+    }
+};
+
+window.addPromptPayAccount = function() {
+    promptPayEditingAccountId = '';
+    const newAccount = {
+        id: '',
+        label: 'PromptPay ' + (promptPaySettingsState.accounts.length + 1),
+        promptPayId: '',
+        merchantName: PROMPTPAY_DEFAULT_ACCOUNT.merchantName,
+        city: PROMPTPAY_DEFAULT_ACCOUNT.city,
+        order: promptPaySettingsState.accounts.length + 1
+    };
+    applyPromptPayAccountToForm(newAccount);
+    setPromptPayAdminStatus('Fill in the new PromptPay account, then save it into the list.', 'warning');
+};
+
+window.editPromptPayAccount = function(accountId) {
+    const account = promptPaySettingsState.accounts.find(item => item.id === accountId);
+    if (!account) return;
+    applyPromptPayAccountToForm(account);
+    setPromptPayAdminStatus('Editing ' + account.label + '. Save all to publish changes.', 'warning');
+};
+
+window.setActivePromptPayAccount = function(accountId) {
+    const account = promptPaySettingsState.accounts.find(item => item.id === accountId);
+    if (!account) return;
+    promptPaySettingsState.activeAccountId = account.id;
+    renderPromptPaySettingsUI();
+    applyPromptPayAccountToForm(account);
+    setPromptPayAdminStatus(account.label + ' selected for POS. Click Save All to publish.', 'warning');
+};
+
+window.deletePromptPayAccount = function(accountId) {
+    if (promptPaySettingsState.accounts.length <= 1) {
+        setPromptPayAdminStatus('At least one PromptPay account is required.', 'error');
+        return;
+    }
+    const account = promptPaySettingsState.accounts.find(item => item.id === accountId);
+    if (!account) return;
+    if (!confirm('Delete PromptPay account "' + account.label + '"?')) return;
+    promptPaySettingsState.accounts = promptPaySettingsState.accounts.filter(item => item.id !== accountId);
+    if (promptPaySettingsState.activeAccountId === accountId) {
+        promptPaySettingsState.activeAccountId = promptPaySettingsState.accounts[0]?.id || '';
+    }
+    renderPromptPaySettingsUI();
+    applyPromptPayAccountToForm(activePromptPayAccount(promptPaySettingsState));
+    setPromptPayAdminStatus('Account removed from the list. Click Save All to publish.', 'warning');
+};
+
+window.savePromptPayCurrentAccount = function() {
+    try {
+        const account = upsertPromptPayCurrentAccount();
+        setPromptPayAdminStatus(account.label + ' saved into the list. Click Save All to publish to POS.', 'success');
+    } catch (error) {
+        setPromptPayAdminStatus(error.message, 'error');
+        document.getElementById('promptpay-id')?.focus();
+    }
+};
+
+window.resetPromptPaySettingsForm = function() {
+    applyPromptPaySettingsToForm(defaultPromptPaySettings());
+    setPromptPayAdminStatus('Default PromptPay values restored in the form. Click Save All to publish.', 'warning');
+};
+
+promptPaySettingsForm?.addEventListener('input', () => {
+    try {
+        updatePromptPaySettingsPreview({ ...readPromptPayAccountForm({ validate: false }), enabled: document.getElementById('promptpay-enabled')?.checked !== false });
+    } catch (error) {
+        console.warn('Unable to preview PromptPay form:', error);
+    }
+});
+
+promptPaySettingsForm?.addEventListener('change', (event) => {
+    if (event.target?.id === 'promptpay-active-account') {
+        window.setActivePromptPayAccount(event.target.value);
+        return;
+    }
+    updatePromptPaySettingsPreview({ ...readPromptPayAccountForm({ validate: false }), enabled: document.getElementById('promptpay-enabled')?.checked !== false });
+});
+
+promptPaySettingsForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!canAdmin('promptpay')) {
+        setPromptPayAdminStatus('This account cannot manage PromptPay settings.', 'error');
+        return;
+    }
+
+    const submitBtn = promptPaySettingsForm.querySelector('button[type="submit"]');
+    const originalText = submitBtn?.textContent || '';
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+    }
+
+    try {
+        const payload = buildPromptPaySettingsPayload();
+        await setDoc(doc(db, 'site_settings', 'promptpay'), {
+            ...payload,
+            updatedAt: serverTimestamp(),
+            updatedBy: auth.currentUser?.uid || '',
+            updatedByEmail: auth.currentUser?.email || ''
+        }, { merge: true });
+        applyPromptPaySettingsToForm(payload);
+        setPromptPayAdminStatus('PromptPay settings saved. POS will use ' + activePromptPayAccount(payload).label + ' automatically.', 'success');
+    } catch (error) {
+        console.error('Error saving PromptPay settings:', error);
+        setPromptPayAdminStatus('Unable to save PromptPay settings: ' + error.message, 'error');
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+        }
+    }
+});
+
+applyPromptPaySettingsToForm(defaultPromptPaySettings());
+
+// ==========================================
+// Marketing Settings Management Logic
+// ==========================================
+
+const marketingSettingsForm = document.getElementById('marketingSettingsForm');
+
+function marketingFieldValue(id) {
+    return String(document.getElementById(id)?.value || '').trim();
+}
+
+function setMarketingFieldValue(id, value = '') {
+    const input = document.getElementById(id);
+    if (input) input.value = value || '';
+}
+
+function setMarketingCheckbox(id, value = false) {
+    const input = document.getElementById(id);
+    if (input) input.checked = value === true;
+}
+
+window.updateMarketingPreview = function() {
+    const enabled = document.getElementById('marketing-enabled')?.checked === true;
+    const googleTagManagerId = marketingFieldValue('marketing-gtm-id');
+    const googleAnalyticsId = marketingFieldValue('marketing-ga-id');
+    const googleAdsId = marketingFieldValue('marketing-ads-id');
+    const metaPixelId = marketingFieldValue('marketing-meta-pixel-id');
+    const tools = [
+        googleTagManagerId ? 'GTM' : '',
+        googleAnalyticsId ? 'GA4' : '',
+        googleAdsId ? 'Google Ads' : '',
+        metaPixelId ? 'Meta Pixel' : ''
+    ].filter(Boolean);
+    const status = document.getElementById('marketing-preview-status');
+    const ids = document.getElementById('marketing-preview-ids');
+    if (status) status.textContent = enabled ? 'Enabled after visitor consent' : 'Disabled';
+    if (ids) ids.textContent = tools.length ? tools.join(' / ') : 'No marketing IDs configured';
+};
+
+window.loadMarketingSettings = async function() {
+    try {
+        const snap = await getDoc(doc(db, 'site_settings', 'marketing'));
+        const data = snap.exists() ? snap.data() : {};
+        setMarketingCheckbox('marketing-enabled', data.enabled === true);
+        setMarketingFieldValue('marketing-gtm-id', data.googleTagManagerId);
+        setMarketingFieldValue('marketing-ga-id', data.googleAnalyticsId);
+        setMarketingFieldValue('marketing-ads-id', data.googleAdsId);
+        setMarketingFieldValue('marketing-meta-pixel-id', data.metaPixelId);
+        setMarketingCheckbox('marketing-debug', data.debug === true);
+        updateMarketingPreview();
+    } catch (error) {
+        console.error('Error loading marketing settings:', error);
+    }
+};
+
+marketingSettingsForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!canAdmin('marketing')) {
+        alert('This account cannot edit marketing settings.');
+        return;
+    }
+
+    const submitBtn = marketingSettingsForm.querySelector('button[type="submit"]');
+    const originalText = submitBtn?.textContent;
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+    }
+
+    const marketingData = {
+        enabled: document.getElementById('marketing-enabled')?.checked === true,
+        googleTagManagerId: marketingFieldValue('marketing-gtm-id').toUpperCase(),
+        googleAnalyticsId: marketingFieldValue('marketing-ga-id').toUpperCase(),
+        googleAdsId: marketingFieldValue('marketing-ads-id').toUpperCase(),
+        metaPixelId: marketingFieldValue('marketing-meta-pixel-id'),
+        debug: document.getElementById('marketing-debug')?.checked === true,
+        updatedAt: new Date().toISOString(),
+        updatedBy: auth.currentUser?.email || 'unknown'
+    };
+
+    try {
+        await setDoc(doc(db, 'site_settings', 'marketing'), marketingData, { merge: true });
+        alert('Marketing settings saved. Public pages will load the tools only after visitor consent.');
+        updateMarketingPreview();
+    } catch (error) {
+        alert('Unable to save marketing settings: ' + error.message);
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+        }
     }
 });
 

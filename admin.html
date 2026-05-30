@@ -281,9 +281,13 @@
         .access-role-manager { background: #e8f5e9; color: #2e7d32; }
         .access-status-active { color: #2e7d32; font-weight: 700; }
         .access-status-paused { color: #c62828; font-weight: 700; }
+        .access-auth-status { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; background: #eef7ef; color: #1b5e20; white-space: nowrap; }
+        .access-auth-status.pending { background: #fff8e1; color: #8a6500; }
+        .access-field-help { margin-top: 6px; color: #728077; font-size: 0.82rem; line-height: 1.45; }
+        .access-password-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         .access-disabled { opacity: 0.55; pointer-events: none; }
         @media (max-width: 1100px) { .access-layout { grid-template-columns: 1fr; } }
-        @media (max-width: 700px) { .access-permission-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 700px) { .access-permission-grid, .access-password-grid { grid-template-columns: 1fr; } }
 
         /* Modal Styles */
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); backdrop-filter: blur(5px); }
@@ -337,6 +341,56 @@
         .footer-preview-social a:hover { background: rgba(255,255,255,0.4); }
         .footer-settings-full { grid-column: 1 / -1; }
         @media (max-width: 900px) { .footer-settings-grid { grid-template-columns: 1fr; } .footer-preview-grid { grid-template-columns: 1fr; } }
+
+        /* PromptPay Settings */
+        .promptpay-admin-shell { position: relative; overflow: hidden; padding: 0; background: radial-gradient(circle at top left, rgba(255, 214, 102, 0.22), transparent 34%), linear-gradient(135deg, #ffffff 0%, #f6fff8 100%); }
+        .promptpay-admin-shell::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(rgba(44, 62, 80, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(44, 62, 80, 0.035) 1px, transparent 1px); background-size: 28px 28px; pointer-events: none; }
+        .promptpay-admin-header { position: relative; z-index: 1; align-items: flex-start; padding: 28px 30px 10px; margin-bottom: 0; }
+        .promptpay-admin-kicker { color: #0f8a4c; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 8px; }
+        .promptpay-admin-header h2 { color: #0b3d2a; font-size: 2rem; line-height: 1.2; }
+        .promptpay-admin-grid { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.8fr); gap: 22px; padding: 20px 30px 30px; }
+        .promptpay-admin-card, .promptpay-preview-card { background: rgba(255, 255, 255, 0.88); border: 1px solid #dceee1; border-radius: 22px; box-shadow: 0 18px 45px rgba(26, 147, 69, 0.08); padding: 24px; backdrop-filter: blur(10px); }
+        .promptpay-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+        .promptpay-toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid #dceee1; background: #fbfff8; border-radius: 18px; padding: 14px 16px; margin-bottom: 16px; }
+        .promptpay-toggle strong { color: #0b3d2a; display: block; }
+        .promptpay-toggle span { color: #67766c; font-size: 0.88rem; }
+        .promptpay-toggle input { width: 22px; height: 22px; accent-color: #129657; }
+        .promptpay-help { color: #6a786f; font-size: 0.86rem; line-height: 1.6; margin-top: -6px; margin-bottom: 16px; }
+
+        .promptpay-active-select { border: 1px solid #dceee1; background: #ffffff; border-radius: 18px; padding: 16px; margin-bottom: 18px; }
+        .promptpay-active-select label { display: block; color: #0b3d2a; font-weight: 800; margin-bottom: 8px; }
+        .promptpay-active-select select { width: 100%; padding: 12px 14px; border: 1px solid #d8e7dd; border-radius: 12px; background: #fbfff8; color: #0b3d2a; font-weight: 700; }
+        .promptpay-account-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 18px 0 12px; }
+        .promptpay-account-toolbar h3 { color: #0b3d2a; font-size: 1.05rem; }
+        .promptpay-account-list { display: grid; gap: 10px; max-height: 280px; overflow: auto; padding-right: 4px; margin-bottom: 18px; }
+        .promptpay-account-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; border: 1px solid #e1ece3; border-radius: 16px; background: #fff; padding: 12px; }
+        .promptpay-account-item.active { border-color: #129657; background: linear-gradient(135deg, #fbfff8, #effbf2); box-shadow: 0 10px 24px rgba(18, 150, 87, 0.08); }
+        .promptpay-account-order { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 12px; background: #edf7ef; color: #0b7040; font-weight: 900; }
+        .promptpay-account-title strong { display: block; color: #0b3d2a; }
+        .promptpay-account-title small { display: block; color: #728178; margin-top: 2px; word-break: break-word; }
+        .promptpay-account-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+        .promptpay-mini-btn { border: 1px solid #d7e8dc; background: #f5fbf7; color: #0b4a30; border-radius: 999px; padding: 7px 12px; cursor: pointer; font-weight: 800; }
+        .promptpay-mini-btn:hover { background: #e5f7ea; border-color: #a7dcb8; }
+        .promptpay-mini-btn.danger { background: #fff3f1; border-color: #ffd4cc; color: #b3261e; }
+        .promptpay-account-editor { border-top: 1px dashed #d8e7dd; padding-top: 18px; margin-top: 14px; }
+        .promptpay-account-editor h3 { color: #0b3d2a; font-size: 1.05rem; margin-bottom: 12px; }
+        .promptpay-empty { border: 1px dashed #cfe3d4; border-radius: 16px; padding: 16px; color: #6b7a72; background: #fbfff8; }
+        .promptpay-settings-status { min-height: 22px; color: #607568; font-weight: 600; margin-top: 12px; }
+        .promptpay-settings-status.success { color: #0f8a4c; }
+        .promptpay-settings-status.error { color: #c62828; }
+        .promptpay-settings-status.warning { color: #b26a00; }
+        .promptpay-preview-card { background: linear-gradient(145deg, rgba(7, 78, 48, 0.96), rgba(18, 150, 87, 0.88)); color: white; }
+        .promptpay-preview-top { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
+        .promptpay-preview-top span, .promptpay-preview-meta span { color: rgba(255,255,255,0.7); font-size: 0.78rem; letter-spacing: 0.16em; text-transform: uppercase; font-weight: 800; }
+        .promptpay-preview-top strong { font-size: 1.35rem; letter-spacing: 0.03em; }
+        .promptpay-preview-qr { display: grid; place-items: center; min-height: 220px; border-radius: 22px; background: #fffef7; color: #0b3d2a; margin-bottom: 18px; }
+        .promptpay-preview-mark { display: grid; place-items: center; width: 128px; height: 128px; border: 14px solid #0b3d2a; border-radius: 24px; font-family: 'Playfair Display', serif; font-size: 2rem; font-weight: 800; }
+        .promptpay-preview-meta { display: grid; gap: 8px; }
+        .promptpay-preview-meta strong { display: block; font-size: 1.05rem; margin-top: 2px; }
+        .promptpay-preview-note { border-top: 1px solid rgba(255,255,255,0.18); margin-top: 16px; padding-top: 14px; color: rgba(255,255,255,0.78); font-size: 0.9rem; line-height: 1.6; }
+        @media (max-width: 980px) { .promptpay-admin-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 640px) { .promptpay-admin-header, .promptpay-admin-grid { padding-left: 18px; padding-right: 18px; } .promptpay-form-row { grid-template-columns: 1fr; } }
+
     </style>
 </head>
 <body>
@@ -395,7 +449,9 @@
             <li onclick="switchTab('shop-categories', this)">📦 หมวดหมู่ Shop</li>
             <li onclick="switchTab('blogs', this)">📝 จัดการบทความ (Blogs)</li>
             <li onclick="switchTab('faqs', this)">❓ คำถามที่พบบ่อย (FAQ)</li>
+            <li onclick="switchTab('promptpay', this)">&#128184; &#x0E08;&#x0E31;&#x0E14;&#x0E01;&#x0E32;&#x0E23;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C; (PromptPay)</li>
             <li onclick="switchTab('footer-settings', this)">🦶 จัดการ Footer</li>
+            <li onclick="switchTab('marketing-settings', this)">Marketing Tools</li>
         </ul>
         <div class="sidebar-footer">
             <div class="logout-btn" id="btn-admin-logout">🚪 ออกจากระบบ</div>
@@ -560,8 +616,9 @@
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label for="access-uid">Firebase UID</label>
-                                <input type="text" id="access-uid" placeholder="เช่น Zb4hnONKpBcEdPuJ36ad..." required>
+                                <label for="access-uid">Firebase UID <span style="color:#789; font-weight:400;">(เว้นว่างได้ถ้าสร้างจากอีเมล)</span></label>
+                                <input type="text" id="access-uid" placeholder="เช่น Zb4hnONKpBcEdPuJ36ad...">
+                                <div class="access-field-help">ถ้าเลือกสมาชิกจาก dropdown ระบบจะใส่ UID ให้เอง ถ้าเป็นผู้จัดการใหม่ให้กรอกอีเมลและตั้งรหัสผ่านได้เลย</div>
                             </div>
                             <div class="form-group">
                                 <label for="access-email">อีเมล</label>
@@ -570,6 +627,14 @@
                             <div class="form-group">
                                 <label for="access-display-name">ชื่อที่แสดง</label>
                                 <input type="text" id="access-display-name" placeholder="ชื่อผู้จัดการ">
+                            </div>
+                            <div class="form-group">
+                                <label>รหัสผ่านสำหรับ Login ด้วยอีเมล</label>
+                                <div class="access-password-grid">
+                                    <input type="password" id="access-password" placeholder="ตั้งรหัสผ่านใหม่ (อย่างน้อย 8 ตัว)" minlength="8" autocomplete="new-password">
+                                    <input type="password" id="access-password-confirm" placeholder="ยืนยันรหัสผ่าน" minlength="8" autocomplete="new-password">
+                                </div>
+                                <div class="access-field-help">รหัสผ่านจะถูกตั้งใน Firebase Authentication เท่านั้น ไม่เก็บลงฐานข้อมูล ถ้าเว้นว่างไว้ ระบบจะไม่เปลี่ยนรหัสผ่านเดิม</div>
                             </div>
                             <div class="form-group">
                                 <label for="access-role">ระดับสิทธิ์</label>
@@ -602,13 +667,14 @@
                                     <th>ผู้จัดการ</th>
                                     <th>ระดับ</th>
                                     <th>สิทธิ์</th>
+                                    <th>Email Login</th>
                                     <th>สถานะ</th>
                                     <th>อัปเดตล่าสุด</th>
                                     <th>จัดการ</th>
                                 </tr>
                             </thead>
                             <tbody id="admin-access-table-body">
-                                <tr><td colspan="6" style="text-align:center;">กำลังโหลดข้อมูลสิทธิ์...</td></tr>
+                                <tr><td colspan="7" style="text-align:center;">กำลังโหลดข้อมูลสิทธิ์...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -630,6 +696,7 @@
                                 <th>รหัสสั่งซื้อ</th>
                                 <th>ลูกค้า</th>
                                 <th>ยอดรวม</th>
+                                <th>ชำระเงิน</th>
                                 <th>เวลา</th>
                                 <th>สถานะ</th>
                                 <th>จัดการ</th>
@@ -967,6 +1034,174 @@
                         <!-- Data injected via JS -->
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <!-- PromptPay Settings Section -->
+        <div id="promptpay" class="content-section">
+            <div class="section-container promptpay-admin-shell">
+                <div class="section-header promptpay-admin-header">
+                    <div>
+                        <p class="promptpay-admin-kicker">Payment Control</p>
+                        <h2>&#x0E08;&#x0E31;&#x0E14;&#x0E01;&#x0E32;&#x0E23;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C;</h2>
+                        <p style="color:#667; margin-top:8px;">&#x0E01;&#x0E33;&#x0E2B;&#x0E19;&#x0E14;&#x0E40;&#x0E25;&#x0E02;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C;&#x0E41;&#x0E25;&#x0E30;&#x0E02;&#x0E49;&#x0E2D;&#x0E21;&#x0E39;&#x0E25;&#x0E23;&#x0E49;&#x0E32;&#x0E19;&#x0E17;&#x0E35;&#x0E48;&#x0E43;&#x0E0A;&#x0E49;&#x0E2A;&#x0E23;&#x0E49;&#x0E32;&#x0E07; QR Payment &#x0E43;&#x0E19;&#x0E2B;&#x0E19;&#x0E49;&#x0E32; POS</p>
+                    </div>
+                    <button class="btn-action btn-view" type="button" onclick="loadPromptPaySettings()">&#x0E42;&#x0E2B;&#x0E25;&#x0E14;&#x0E02;&#x0E49;&#x0E2D;&#x0E21;&#x0E39;&#x0E25;&#x0E1B;&#x0E31;&#x0E08;&#x0E08;&#x0E38;&#x0E1A;&#x0E31;&#x0E19;</button>
+                </div>
+
+                <div class="promptpay-admin-grid">
+                    <form id="promptpaySettingsForm" class="promptpay-admin-card">
+                        <label class="promptpay-toggle">
+                            <span>
+                                <strong>&#x0E40;&#x0E1B;&#x0E34;&#x0E14;&#x0E43;&#x0E0A;&#x0E49; QR PromptPay</strong>
+                                <span>&#x0E16;&#x0E49;&#x0E32;&#x0E1B;&#x0E34;&#x0E14; POS &#x0E08;&#x0E30;&#x0E44;&#x0E21;&#x0E48;&#x0E2A;&#x0E23;&#x0E49;&#x0E32;&#x0E07; QR &#x0E2A;&#x0E33;&#x0E2B;&#x0E23;&#x0E31;&#x0E1A;&#x0E01;&#x0E32;&#x0E23;&#x0E0A;&#x0E33;&#x0E23;&#x0E30;</span>
+                            </span>
+                            <input type="checkbox" id="promptpay-enabled" checked>
+                        </label>
+
+                        <div class="promptpay-active-select">
+                            <label for="promptpay-active-account">&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C;&#x0E17;&#x0E35;&#x0E48;&#x0E43;&#x0E0A;&#x0E49;&#x0E07;&#x0E32;&#x0E19;&#x0E43;&#x0E19; POS</label>
+                            <select id="promptpay-active-account"></select>
+                            <p class="promptpay-help" style="margin:8px 0 0;">&#x0E40;&#x0E25;&#x0E37;&#x0E2D;&#x0E01;&#x0E1A;&#x0E31;&#x0E0D;&#x0E0A;&#x0E35;&#x0E17;&#x0E35;&#x0E48;&#x0E08;&#x0E30;&#x0E43;&#x0E0A;&#x0E49;&#x0E2A;&#x0E23;&#x0E49;&#x0E32;&#x0E07; QR Payment &#x0E43;&#x0E2B;&#x0E49;&#x0E25;&#x0E39;&#x0E01;&#x0E04;&#x0E49;&#x0E32;</p>
+                        </div>
+
+                        <div class="promptpay-account-toolbar">
+                            <h3>&#x0E1A;&#x0E31;&#x0E0D;&#x0E0A;&#x0E35;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C;&#x0E17;&#x0E31;&#x0E49;&#x0E07;&#x0E2B;&#x0E21;&#x0E14;</h3>
+                            <button type="button" class="promptpay-mini-btn" onclick="addPromptPayAccount()">+ &#x0E40;&#x0E1E;&#x0E34;&#x0E48;&#x0E21;&#x0E1A;&#x0E31;&#x0E0D;&#x0E0A;&#x0E35;</button>
+                        </div>
+                        <div id="promptpay-account-list" class="promptpay-account-list"></div>
+
+                        <div class="promptpay-account-editor">
+                            <h3 id="promptpay-editor-title">&#x0E41;&#x0E01;&#x0E49;&#x0E44;&#x0E02;&#x0E1A;&#x0E31;&#x0E0D;&#x0E0A;&#x0E35;</h3>
+                            <input type="hidden" id="promptpay-account-key">
+                            <div class="form-group">
+                                <label for="promptpay-account-label">&#x0E0A;&#x0E37;&#x0E48;&#x0E2D;&#x0E40;&#x0E23;&#x0E35;&#x0E22;&#x0E01;&#x0E1A;&#x0E31;&#x0E0D;&#x0E0A;&#x0E35;</label>
+                                <input type="text" id="promptpay-account-label" value="Eden Cafe Main" placeholder="Eden Cafe Main / Bar Counter / Roastery">
+                            </div>
+                            <div class="form-group">
+                                <label for="promptpay-id">&#x0E40;&#x0E25;&#x0E02;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C;</label>
+                                <input type="text" id="promptpay-id" inputmode="numeric" autocomplete="off" value="057556001655" placeholder="057556001655" required>
+                            </div>
+                            <p class="promptpay-help">&#x0E23;&#x0E2D;&#x0E07;&#x0E23;&#x0E31;&#x0E1A;&#x0E40;&#x0E1A;&#x0E2D;&#x0E23;&#x0E4C;&#x0E42;&#x0E17;&#x0E23; 10 &#x0E2B;&#x0E25;&#x0E31;&#x0E01;, &#x0E40;&#x0E25;&#x0E02;&#x0E1A;&#x0E31;&#x0E15;&#x0E23;&#x0E1B;&#x0E23;&#x0E30;&#x0E0A;&#x0E32;&#x0E0A;&#x0E19; 13 &#x0E2B;&#x0E25;&#x0E31;&#x0E01; &#x0E2B;&#x0E23;&#x0E37;&#x0E2D; e-Wallet ID 15 &#x0E2B;&#x0E25;&#x0E31;&#x0E01;</p>
+
+                            <div class="promptpay-form-row">
+                                <div class="form-group">
+                                    <label for="promptpay-merchant-name">&#x0E0A;&#x0E37;&#x0E48;&#x0E2D;&#x0E23;&#x0E49;&#x0E32;&#x0E19;&#x0E43;&#x0E19; QR</label>
+                                    <input type="text" id="promptpay-merchant-name" value="EDEN CAFE" maxlength="25" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="promptpay-city">&#x0E40;&#x0E21;&#x0E37;&#x0E2D;&#x0E07;</label>
+                                    <input type="text" id="promptpay-city" value="CHIANG RAI" maxlength="15" required>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="display:flex; gap:12px; justify-content:flex-end; flex-wrap:wrap; margin-top:10px;">
+                            <button type="button" class="btn-action" style="background:#789; padding: 10px 22px;" onclick="resetPromptPaySettingsForm()">&#x0E23;&#x0E35;&#x0E40;&#x0E0B;&#x0E47;&#x0E15;</button>
+                            <button type="button" class="btn-action btn-view" style="padding:10px 22px;" onclick="savePromptPayCurrentAccount()">&#x0E1A;&#x0E31;&#x0E19;&#x0E17;&#x0E36;&#x0E01;&#x0E1A;&#x0E31;&#x0E0D;&#x0E0A;&#x0E35;&#x0E43;&#x0E19;&#x0E23;&#x0E32;&#x0E22;&#x0E01;&#x0E32;&#x0E23;</button>
+                            <button type="submit" class="btn-submit" style="width:auto; padding:10px 28px; background:var(--accent-color);">&#x0E1A;&#x0E31;&#x0E19;&#x0E17;&#x0E36;&#x0E01;&#x0E17;&#x0E31;&#x0E49;&#x0E07;&#x0E2B;&#x0E21;&#x0E14;</button>
+                        </div>
+                        <p id="promptpay-settings-status" class="promptpay-settings-status"></p>
+                    </form>
+
+                    <aside class="promptpay-preview-card">
+                        <div class="promptpay-preview-top">
+                            <span>PromptPay</span>
+                            <strong id="promptpay-preview-id">057556001655</strong>
+                        </div>
+                        <div class="promptpay-preview-qr">
+                            <div class="promptpay-preview-mark">QR</div>
+                        </div>
+                        <div class="promptpay-preview-meta">
+                            <div><span>Merchant</span><strong id="promptpay-preview-merchant">EDEN CAFE</strong></div>
+                            <div><span>City</span><strong id="promptpay-preview-city">CHIANG RAI</strong></div>
+                            <div><span>Status</span><strong id="promptpay-preview-enabled">&#x0E40;&#x0E1B;&#x0E34;&#x0E14;&#x0E43;&#x0E0A;&#x0E49;&#x0E07;&#x0E32;&#x0E19;</strong></div>
+                        </div>
+                        <p class="promptpay-preview-note">&#x0E2B;&#x0E19;&#x0E49;&#x0E32; POS &#x0E08;&#x0E30;&#x0E14;&#x0E36;&#x0E07;&#x0E04;&#x0E48;&#x0E32;&#x0E19;&#x0E35;&#x0E49;&#x0E40;&#x0E1E;&#x0E37;&#x0E48;&#x0E2D;&#x0E2A;&#x0E23;&#x0E49;&#x0E32;&#x0E07; QR &#x0E15;&#x0E32;&#x0E21;&#x0E22;&#x0E2D;&#x0E14;&#x0E2A;&#x0E38;&#x0E17;&#x0E18;&#x0E34;&#x0E02;&#x0E2D;&#x0E07;&#x0E1A;&#x0E34;&#x0E25;&#x0E41;&#x0E15;&#x0E48;&#x0E25;&#x0E30;&#x0E23;&#x0E32;&#x0E22;&#x0E01;&#x0E32;&#x0E23;</p>
+                    </aside>
+                </div>
+            </div>
+        </div>
+
+        <!-- Marketing Settings Section -->
+        <div id="marketing-settings" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <div>
+                        <h2>Marketing Tools</h2>
+                        <p style="color:#667; margin-top:4px;">Connect Google Tag Manager, GA4, Google Ads, and Meta Pixel. Public pages will load these tools only after visitor consent.</p>
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button class="btn-action btn-view" type="button" onclick="loadMarketingSettings()">Load Current Settings</button>
+                    </div>
+                </div>
+
+                <div class="footer-preview-strip" id="marketing-live-preview">
+                    <p style="font-size: 0.78rem; opacity: 0.7; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.1em;">Marketing runtime preview</p>
+                    <div class="footer-preview-grid">
+                        <div>
+                            <h4>Consent-first loading</h4>
+                            <p>Scripts stay blocked until the visitor accepts analytics or marketing cookies.</p>
+                        </div>
+                        <div>
+                            <h4>Status</h4>
+                            <p id="marketing-preview-status">Disabled</p>
+                        </div>
+                        <div>
+                            <h4>Configured tools</h4>
+                            <p id="marketing-preview-ids">No marketing IDs configured</p>
+                        </div>
+                    </div>
+                </div>
+
+                <form id="marketingSettingsForm">
+                    <div class="footer-settings-grid">
+                        <div class="footer-settings-card">
+                            <h3>Runtime</h3>
+                            <div class="form-group">
+                                <label style="display:flex; gap:10px; align-items:center; font-weight:600;">
+                                    <input type="checkbox" id="marketing-enabled" oninput="updateMarketingPreview()" style="width:auto;">
+                                    Enable marketing integrations
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label style="display:flex; gap:10px; align-items:center; font-weight:600;">
+                                    <input type="checkbox" id="marketing-debug" style="width:auto;">
+                                    Debug events in browser console
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="footer-settings-card">
+                            <h3>Google</h3>
+                            <div class="form-group">
+                                <label for="marketing-gtm-id">Google Tag Manager ID</label>
+                                <input type="text" id="marketing-gtm-id" placeholder="GTM-XXXXXXX" oninput="updateMarketingPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="marketing-ga-id">GA4 Measurement ID</label>
+                                <input type="text" id="marketing-ga-id" placeholder="G-XXXXXXXXXX" oninput="updateMarketingPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="marketing-ads-id">Google Ads ID</label>
+                                <input type="text" id="marketing-ads-id" placeholder="AW-XXXXXXXXXX" oninput="updateMarketingPreview()">
+                            </div>
+                        </div>
+
+                        <div class="footer-settings-card footer-settings-full">
+                            <h3>Meta</h3>
+                            <div class="form-group">
+                                <label for="marketing-meta-pixel-id">Meta Pixel ID</label>
+                                <input type="text" id="marketing-meta-pixel-id" placeholder="123456789012345" oninput="updateMarketingPreview()">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 10px;">
+                        <button type="button" class="btn-action" style="background:#789; padding: 10px 24px;" onclick="loadMarketingSettings()">Cancel / Reload</button>
+                        <button type="submit" class="btn-submit" style="width: auto; padding: 10px 32px; background: var(--accent-color);">Save Marketing Settings</button>
+                    </div>
+                </form>
             </div>
         </div>
 
@@ -1500,7 +1735,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=40"></script>
+    <script type="module" src="js/admin.js?v=45"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {
