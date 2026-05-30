@@ -298,7 +298,13 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
     }
 
     function buildMembershipUser(user, orders, bookings) {
-        const paidLikeOrders = orders.filter(order => String(order.status || 'paid').toLowerCase() !== 'cancelled');
+        const paidLikeOrders = orders.filter(order => {
+            const status = String(order.status || '').toLowerCase();
+            const paymentStatus = String(order.paymentStatus || '').toLowerCase();
+            if (status === 'cancelled' || paymentStatus === 'refunded' || paymentStatus === 'failed') return false;
+            if (paymentStatus) return paymentStatus === 'paid';
+            return status === 'paid' || status === 'completed';
+        });
         const orderSpent = paidLikeOrders.reduce((sum, order) => sum + orderTotal(order), 0);
         const orderCount = paidLikeOrders.length;
         const bookingCount = bookings.length;
@@ -658,12 +664,23 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         el.style.color = isError ? '#b42318' : 'var(--primary-color)';
     }
 
+    function setProfileSavingState(form, isSaving, labels) {
+        const submitBtn = form?.querySelector('button[type="submit"]');
+        if (!submitBtn) return;
+        submitBtn.disabled = isSaving;
+        submitBtn.textContent = isSaving ? labels.saving : labels.save;
+    }
+
     async function saveMemberProfile(event) {
         event.preventDefault();
         const labels = getLabels();
         const user = readUser();
-        if (!db || !user?.uid || cloudProfileSaving) return false;
         const form = event.currentTarget;
+        if (cloudProfileSaving) return false;
+        if (!db || !user?.uid) {
+            showSaveMessage(labels.saveFailed, true);
+            return false;
+        }
         const formData = new FormData(form);
         const payload = {
             uid: user.uid,
@@ -680,6 +697,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         };
 
         cloudProfileSaving = true;
+        setProfileSavingState(form, true, labels);
         showSaveMessage(labels.saving);
         try {
             await setDoc(doc(db, 'users', user.uid), payload, { merge: true });
@@ -696,10 +714,13 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             showSaveMessage(labels.saved);
         } catch (error) {
             console.error('Profile save failed:', error);
-            showSaveMessage(labels.saveFailed, true);
+            const message = error?.code === 'permission-denied'
+                ? (isEnglishPage() ? 'Unable to save profile because profile permissions are not ready. Please try again after refresh.' : 'บันทึกไม่สำเร็จ: สิทธิ์โปรไฟล์ยังไม่พร้อม กรุณารีเฟรชแล้วลองใหม่อีกครั้ง')
+                : labels.saveFailed;
+            showSaveMessage(message, true);
         } finally {
             cloudProfileSaving = false;
-            renderProfile();
+            setProfileSavingState(form, false, labels);
         }
         return false;
     }
