@@ -12,6 +12,7 @@ const db = admin.firestore();
 const SPACESHIP_FTP_SERVER = defineSecret('SPACESHIP_FTP_SERVER');
 const SPACESHIP_FTP_USERNAME = defineSecret('SPACESHIP_FTP_USERNAME');
 const SPACESHIP_FTP_PASSWORD = defineSecret('SPACESHIP_FTP_PASSWORD');
+const GOOGLE_MAPS_SERVER_KEY = defineSecret('GOOGLE_MAPS_SERVER_KEY');
 
 const PLACE_ID = 'ChIJVTN6cGwB1zAR66OQ_OBKRkM';
 const PLACE_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
@@ -110,6 +111,11 @@ async function requireAdminAccess(req, permission = '') {
     throw error;
   }
 
+  if (!['owner', 'head_manager', 'manager'].includes(access.role)) {
+    const error = new Error('Admin permission required');
+    error.statusCode = 403;
+    throw error;
+  }
   if (access.role === 'owner' || access.role === 'head_manager') return decoded;
   if (permission && access.permissions && access.permissions[permission] === true) return decoded;
 
@@ -145,6 +151,8 @@ function normalizeAdminPermissions(role, raw = {}) {
     'dashboard',
     'members',
     'pos',
+    'discounts',
+    'loyalty',
     'orders',
     'bookings',
     'tables',
@@ -202,6 +210,15 @@ function authUserToMemberDoc(userRecord) {
     if (data[key] === null || data[key] === undefined || data[key] === '') delete data[key];
   });
   return data;
+}
+
+function memberTierFromMetrics(points = 0, totalSpent = 0, visitCount = 0) {
+  const p = Number(points) || 0;
+  const spent = Number(totalSpent) || 0;
+  const visits = Number(visitCount) || 0;
+  if (p >= 5000 || spent >= 50000 || visits >= 50) return 'Platinum';
+  if (p >= 1200 || spent >= 15000 || visits >= 15) return 'Gold';
+  return 'Silver';
 }
 
 function cleanString(value, maxLength) {
@@ -378,7 +395,7 @@ function normalizeReview(review) {
 }
 
 async function fetchGoogleReviews() {
-  const apiKey = process.env.GOOGLE_MAPS_SERVER_KEY;
+  const apiKey = GOOGLE_MAPS_SERVER_KEY.value() || process.env.GOOGLE_MAPS_SERVER_KEY;
   if (!apiKey) {
     throw new Error('GOOGLE_MAPS_SERVER_KEY is not configured');
   }
@@ -442,6 +459,7 @@ exports.refreshGoogleReviewsDaily = onSchedule(
     timeZone: 'Asia/Bangkok',
     region: 'asia-southeast1',
     retryCount: 3,
+    secrets: [GOOGLE_MAPS_SERVER_KEY],
   },
   async () => {
     try {
@@ -803,6 +821,129 @@ exports.syncAuthUsersToFirestore = onRequest(
       const status = error.statusCode || 500;
       logger.warn('Auth user sync failed', { message: error.message, status });
       res.status(status).json({ error: error.message || 'Auth user sync failed' });
+    }
+  }
+);
+
+exports.adjustMemberPoints = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const decoded = await requireAdminAccess(req, 'loyalty');
+      const body = req.body || {};
+      const userId = cleanString(body.userId, 160);
+      const requestedDelta = Math.trunc(Number(body.pointsDelta || body.delta || 0));
+      const reason = cleanString(body.reason, 240);
+
+      if (!userId) {
+        const error = new Error('Member UID is required');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (!requestedDelta) {
+        const error = new Error('Point adjustment must not be zero');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (Math.abs(requestedDelta) > 100000) {
+        const error = new Error('Point adjustment is too large');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (!reason) {
+        const error = new Error('Adjustment reason is required');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const userRef = db.collection('users').doc(userId);
+      const summaryRef = db.collection('member_summaries').doc(userId);
+      const ledgerRef = db.collection('point_ledger').doc();
+      let resultPayload = null;
+
+      await db.runTransaction(async transaction => {
+        const userSnap = await transaction.get(userRef);
+        if (!userSnap.exists) {
+          const error = new Error('Member profile was not found');
+          error.statusCode = 404;
+          throw error;
+        }
+
+        const member = userSnap.data() || {};
+        const before = Math.max(0, Math.floor(Number(member.points || 0)));
+        const after = Math.max(0, before + requestedDelta);
+        const actualDelta = after - before;
+        if (!actualDelta) {
+          const error = new Error('Point adjustment has no effect because the member balance is already zero');
+          error.statusCode = 400;
+          throw error;
+        }
+
+        const totalSpent = Number(member.totalSpent || 0);
+        const visitCount = Number(member.visitCount || 0);
+        const tier = memberTierFromMetrics(after, totalSpent, visitCount);
+        const now = admin.firestore.FieldValue.serverTimestamp();
+        const actorEmail = cleanString(decoded.email || '', 180);
+
+        transaction.set(ledgerRef, {
+          userId,
+          memberCode: cleanString(member.memberCode || '', 80),
+          memberName: cleanString(member.displayName || member.name || member.customerName || 'Eden Member', 160),
+          memberEmail: cleanString(member.email || '', 180),
+          type: 'manual_adjustment',
+          pointsDelta: actualDelta,
+          requestedDelta,
+          pointsBefore: before,
+          pointsAfter: after,
+          reason,
+          source: 'admin',
+          createdAt: now,
+          createdBy: decoded.uid || '',
+          createdByEmail: actorEmail,
+        });
+
+        transaction.set(userRef, {
+          points: after,
+          tier,
+          loyaltyUpdatedAt: now,
+          pointsAdjustedAt: now,
+          updatedAt: now,
+        }, { merge: true });
+
+        const summaryPayload = {
+          userId,
+          memberCode: cleanString(member.memberCode || '', 80),
+          memberName: cleanString(member.displayName || member.name || member.customerName || 'Eden Member', 160),
+          memberEmail: cleanString(member.email || '', 180),
+          pointsBalance: after,
+          tier,
+          lastLedgerId: ledgerRef.id,
+          updatedAt: now,
+        };
+        if (actualDelta > 0) {
+          summaryPayload.lifetimePoints = admin.firestore.FieldValue.increment(actualDelta);
+        } else {
+          summaryPayload.totalManualDeducted = admin.firestore.FieldValue.increment(Math.abs(actualDelta));
+        }
+        transaction.set(summaryRef, summaryPayload, { merge: true });
+
+        resultPayload = { ledgerId: ledgerRef.id, userId, pointsBefore: before, pointsAfter: after, pointsDelta: actualDelta, tier };
+      });
+
+      logger.info('Member points adjusted', resultPayload);
+      res.status(201).json({ ok: true, ...resultPayload });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('Member point adjustment failed', { message: error.message, status });
+      res.status(status).json({ error: error.message || 'Member point adjustment failed' });
     }
   }
 );
