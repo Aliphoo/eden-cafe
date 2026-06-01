@@ -125,7 +125,9 @@ const ADMIN_COLLECTION = 'admin_users';
 const ADMIN_PERMISSION_LABELS = {
     dashboard: 'ภาพรวมระบบ',
     members: 'จัดการสมาชิก',
-    pos: 'POS หน้าร้าน',
+    pos: 'Eden POS APK',
+    discounts: 'จัดการส่วนลด',
+    loyalty: 'จัดการแต้มสมาชิก',
     orders: 'ออเดอร์สินค้า',
     bookings: 'คิวจองโต๊ะ/ห้อง',
     tables: 'จัดการโต๊ะ/โซน',
@@ -153,6 +155,8 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
         dashboard: true,
         members: false,
         pos: true,
+        discounts: false,
+        loyalty: false,
         orders: true,
         bookings: true,
         tables: false,
@@ -169,7 +173,9 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
 const ADMIN_TAB_PERMISSIONS = {
     dashboard: 'dashboard',
     pos: 'pos',
+    discounts: 'discounts',
     members: 'members',
+    loyalty: 'loyalty',
     'admin-access': 'adminAccess',
     orders: 'orders',
     bookings: 'bookings',
@@ -214,6 +220,31 @@ let currentAdminAccess = null;
 let adminAccessData = {};
 let adminAccessUnsubscribe = null;
 let adminAccessFormBound = false;
+let discountsData = {};
+let discountsUnsubscribe = null;
+let discountFormBound = false;
+let loyaltyConfig = {};
+let loyaltyLedgerData = [];
+let loyaltyConfigUnsubscribe = null;
+let loyaltyLedgerUnsubscribe = null;
+let loyaltyFormsBound = false;
+let dashboardOrdersData = [];
+let activeSalesReport = 'summary';
+let salesReportNavBound = false;
+let salesReportMonthOffset = 0;
+let salesReportEmployeeFilter = 'all';
+let salesReportTimeFilter = 'all';
+const SALES_REPORT_LABELS = {
+    summary: 'สรุปยอดขาย',
+    product: 'ยอดขายตามสินค้า',
+    category: 'ยอดขาย แยกตาม หมวดหมู่',
+    staff: 'ยอดขาย แยกตาม พนักงาน',
+    payment: 'ยอดขาย แยกตาม ประเภทการชำระเงิน',
+    receipts: 'ใบเสร็จรับเงิน',
+    options: 'ยอดขาย แยกตาม ตัวเลือกเพิ่มเติม',
+    discounts: 'ส่วนลด',
+    taxes: 'ภาษี'
+};
 
 function buildBootstrapOwnerAccess(user) {
     return {
@@ -329,7 +360,7 @@ let shopProductsUnsubscribe = null;
 let blogsUnsubscribe = null;
 let faqsUnsubscribe = null;
 let memberFiltersBound = false;
-let viewsChart = null;
+let salesSummaryChart = null;
 
 const ADMIN_ACTIVE_TAB_STORAGE_KEY = 'edenAdminActiveTab';
 
@@ -855,6 +886,9 @@ const loginError = document.getElementById('login-error');
 
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
+    bindSalesReportNav();
+    renderDashboardSalesReport();
+
     getRedirectResult(auth).catch((error) => {
         console.error('Google redirect login failed:', error);
         if (loginError) {
@@ -954,7 +988,12 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function initializeAdminModules() {
-    if (canAdmin('dashboard')) fetchStats();
+    if (canAdmin('dashboard')) {
+        fetchStats();
+        bindSalesReportNav();
+        renderDashboardSalesReport();
+        if (!categoriesUnsubscribe) setupRealtimeCategories();
+    }
     if (canAdmin('orders') || canAdmin('pos')) setupRealtimeOrders();
     if (canAdmin('bookings')) setupRealtimeBookings();
     if (canAdmin('products')) {
@@ -968,7 +1007,9 @@ function initializeAdminModules() {
         setupRealtimeShopCategories();
         setupRealtimeShopProducts();
     }
-    if (canAdmin('members')) setupRealtimeMembers();
+    if (canAdmin('members') || canAdmin('loyalty')) setupRealtimeMembers();
+    if (canAdmin('discounts')) setupRealtimeDiscounts();
+    if (canAdmin('loyalty')) setupRealtimeLoyalty();
     if (canAdmin('promptpay') && typeof window.loadPromptPaySettings === 'function') window.loadPromptPaySettings();
     if (canAdmin('marketing') && typeof window.loadMarketingSettings === 'function') window.loadMarketingSettings();
     if (isOwnerAccess()) setupRealtimeAdminAccess();
@@ -1028,9 +1069,6 @@ function restoreAdminActiveTab() {
     if (firstAllowedMenu) {
         const tabId = adminTabIdFromMenuItem(firstAllowedMenu);
         if (tabId) window.switchTab(tabId, firstAllowedMenu);
-        else if (firstAllowedMenu.dataset.permission === 'pos' && canAdmin('pos')) {
-            window.location.href = 'pos.html';
-        }
     }
 }
 
@@ -1062,6 +1100,7 @@ window.refreshAdminSection = async (tabId, button = null) => {
         switch (tabId) {
             case 'dashboard':
                 await fetchStats();
+                renderDashboardSalesReport();
                 break;
             case 'members':
                 setupRealtimeMembers();
@@ -1069,12 +1108,13 @@ window.refreshAdminSection = async (tabId, button = null) => {
             case 'admin-access':
                 setupRealtimeAdminAccess();
                 break;
-            case 'pos':
-                if (!categoriesUnsubscribe) setupRealtimeCategories();
-                if (!productsUnsubscribe) setupRealtimeProducts();
-                await refreshCategoriesOnce();
-                await refreshProductsOnce();
-                renderPosScreen();
+            case 'discounts':
+                setupRealtimeDiscounts();
+                await refreshDiscountsOnce();
+                break;
+            case 'loyalty':
+                setupRealtimeLoyalty();
+                await refreshLoyaltyOnce();
                 break;
             case 'orders':
                 setupRealtimeOrders();
@@ -1134,6 +1174,511 @@ window.refreshAdminSection = async (tabId, button = null) => {
         }
     }
 };
+
+const DEFAULT_POS_DISCOUNTS = Object.freeze([
+    { id: 'discount-1', label: 'ส่วนลด 1%', type: 'percent', value: 1, active: true, order: 10 },
+    { id: 'discount-2', label: 'ส่วนลด 2%', type: 'percent', value: 2, active: true, order: 20 },
+    { id: 'discount-5', label: 'ส่วนลด 5%', type: 'percent', value: 5, active: true, order: 30 },
+    { id: 'discount-10', label: 'ส่วนลด 10%', type: 'percent', value: 10, active: true, order: 40 },
+    { id: 'discount-15', label: 'ส่วนลด 15%', type: 'percent', value: 15, active: true, order: 50 },
+    { id: 'discount-20', label: 'ส่วนลด 20%', type: 'percent', value: 20, active: true, order: 60 },
+    { id: 'discount-30', label: 'ส่วนลด 30%', type: 'percent', value: 30, active: true, order: 70 },
+    { id: 'fish-35', label: 'ส่วนลดปลา 35%', type: 'percent', value: 35, active: true, order: 80 },
+    { id: 'project-5', label: 'โครงการผาฮี้ 5%', type: 'percent', value: 5, active: true, order: 90 },
+    { id: 'staff-25', label: 'ส่วนลดพนักงาน 25%', type: 'percent', value: 25, active: true, order: 100 }
+]);
+
+function normalizeDiscountType(value) {
+    return String(value || '').toLowerCase() === 'amount' ? 'amount' : 'percent';
+}
+
+function normalizeDiscountOption(id, data = {}) {
+    const type = normalizeDiscountType(data.type);
+    const rawValue = Math.max(0, safeNumber(data.value));
+    return {
+        id: String(id || data.id || '').trim(),
+        label: String(data.label || '').trim(),
+        type,
+        value: type === 'percent' ? Math.min(rawValue, 100) : Math.min(rawValue, 100000),
+        active: data.active !== false,
+        order: safeNumber(data.order, 999),
+        createdAt: data.createdAt || null,
+        updatedAt: data.updatedAt || null
+    };
+}
+
+function sortDiscountOptions(options = []) {
+    return options.slice().sort((a, b) => {
+        const orderDiff = safeNumber(a.order, 999) - safeNumber(b.order, 999);
+        if (orderDiff) return orderDiff;
+        return String(a.label || a.id).localeCompare(String(b.label || b.id), 'th');
+    });
+}
+
+function discountValueText(discount = {}) {
+    const value = safeNumber(discount.value);
+    return discount.type === 'amount'
+        ? `฿${value.toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
+        : `${value.toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}%`;
+}
+
+function discountBadgeHTML(discount = {}) {
+    const isAmount = normalizeDiscountType(discount.type) === 'amount';
+    return `<span class="discount-badge ${isAmount ? 'amount' : ''}">${isAmount ? '฿' : '%'} ${escapeHTML(isAmount ? 'จำนวนเงิน' : 'เปอร์เซ็นต์')}</span>`;
+}
+
+async function refreshDiscountsOnce() {
+    const snapshot = await getDocs(query(collection(db, 'pos_discounts')));
+    discountsData = {};
+    snapshot.forEach(docSnap => {
+        discountsData[docSnap.id] = normalizeDiscountOption(docSnap.id, docSnap.data() || {});
+    });
+    renderDiscountsTable();
+}
+
+function setupRealtimeDiscounts() {
+    setupDiscountForm();
+    if (discountsUnsubscribe) discountsUnsubscribe();
+    discountsUnsubscribe = onSnapshot(query(collection(db, 'pos_discounts')), snapshot => {
+        discountsData = {};
+        snapshot.forEach(docSnap => {
+            discountsData[docSnap.id] = normalizeDiscountOption(docSnap.id, docSnap.data() || {});
+        });
+        renderDiscountsTable();
+    }, error => {
+        console.error('Error listening to POS discounts:', error);
+        const body = document.getElementById('discount-table-body');
+        if (body) body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#c62828;">โหลดส่วนลดไม่สำเร็จ: ${escapeHTML(error.message)}</td></tr>`;
+    });
+}
+
+function setupDiscountForm() {
+    if (discountFormBound) return;
+    const form = document.getElementById('discount-form');
+    if (!form) return;
+    form.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (!canAdmin('discounts')) {
+            alert('บัญชีนี้ไม่มีสิทธิ์จัดการส่วนลด');
+            return;
+        }
+        const idInput = document.getElementById('discount-id');
+        const labelInput = document.getElementById('discount-label');
+        const valueInput = document.getElementById('discount-value');
+        const orderInput = document.getElementById('discount-order');
+        const activeInput = document.getElementById('discount-active');
+        const typeInput = document.querySelector('input[name="discount-type"]:checked');
+        const id = String(idInput?.value || '').trim();
+        const type = normalizeDiscountType(typeInput?.value);
+        const label = String(labelInput?.value || '').trim();
+        const value = safeNumber(valueInput?.value);
+        if (!label) {
+            alert('กรุณาระบุชื่อส่วนลด');
+            labelInput?.focus();
+            return;
+        }
+        if (value <= 0) {
+            alert('กรุณาระบุมูลค่าส่วนลดมากกว่า 0');
+            valueInput?.focus();
+            return;
+        }
+        if (type === 'percent' && value > 100) {
+            alert('ส่วนลดแบบเปอร์เซ็นต์ต้องไม่เกิน 100%');
+            valueInput?.focus();
+            return;
+        }
+        const payload = {
+            label,
+            type,
+            value: type === 'percent' ? Math.min(value, 100) : Math.min(value, 100000),
+            active: activeInput?.checked !== false,
+            order: safeNumber(orderInput?.value, 999),
+            updatedAt: serverTimestamp(),
+            updatedBy: auth.currentUser?.uid || ''
+        };
+        try {
+            if (id) {
+                await updateDoc(doc(db, 'pos_discounts', id), payload);
+            } else {
+                const newId = label.toLowerCase().replace(/[^a-z0-9ก-๙]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 50) || `discount-${Date.now()}`;
+                await setDoc(doc(db, 'pos_discounts', newId), {
+                    ...payload,
+                    id: newId,
+                    createdAt: serverTimestamp(),
+                    createdBy: auth.currentUser?.uid || ''
+                }, { merge: false });
+            }
+            resetDiscountForm();
+        } catch (error) {
+            console.error('Unable to save POS discount:', error);
+            alert('บันทึกส่วนลดไม่สำเร็จ: ' + error.message);
+        }
+    });
+    discountFormBound = true;
+}
+
+function renderDiscountsTable() {
+    const body = document.getElementById('discount-table-body');
+    if (!body) return;
+    const rows = sortDiscountOptions(Object.values(discountsData));
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="6"><div class="discount-empty">ยังไม่มีส่วนลด กด “เติมชุดมาตรฐาน” หรือเพิ่มส่วนลดใหม่ได้เลย</div></td></tr>';
+        return;
+    }
+    body.innerHTML = rows.map(discount => `
+        <tr class="${discount.active ? '' : 'discount-row-muted'}">
+            <td><strong>${escapeHTML(discount.label)}</strong><br><small style="color:#789;">${escapeHTML(discount.id)}</small></td>
+            <td>${discountBadgeHTML(discount)}</td>
+            <td><strong>${escapeHTML(discountValueText(discount))}</strong></td>
+            <td>${safeNumber(discount.order, 999).toLocaleString('th-TH')}</td>
+            <td>${discount.active ? '<span class="status-badge status-completed">Active</span>' : '<span class="status-badge status-cancelled">Paused</span>'}</td>
+            <td><div class="discount-actions">
+                <button class="btn-action btn-edit" type="button" onclick="editDiscount('${escapeJSString(discount.id)}')">แก้ไข</button>
+                <button class="btn-action btn-delete" type="button" onclick="deleteDiscount('${escapeJSString(discount.id)}')">ลบ</button>
+            </div></td>
+        </tr>
+    `).join('');
+}
+
+window.resetDiscountForm = function resetDiscountForm() {
+    const form = document.getElementById('discount-form');
+    if (form) form.reset();
+    const idInput = document.getElementById('discount-id');
+    const activeInput = document.getElementById('discount-active');
+    const title = document.getElementById('discount-form-title');
+    if (idInput) idInput.value = '';
+    if (activeInput) activeInput.checked = true;
+    if (title) title.textContent = 'เพิ่มส่วนลดใหม่';
+};
+
+window.editDiscount = function editDiscount(id) {
+    const discount = discountsData[id];
+    if (!discount) return;
+    document.getElementById('discount-id').value = discount.id;
+    document.getElementById('discount-label').value = discount.label;
+    document.getElementById('discount-value').value = String(discount.value);
+    document.getElementById('discount-order').value = String(discount.order);
+    document.getElementById('discount-active').checked = discount.active;
+    const type = normalizeDiscountType(discount.type);
+    const radio = document.querySelector(`input[name="discount-type"][value="${type}"]`);
+    if (radio) radio.checked = true;
+    const title = document.getElementById('discount-form-title');
+    if (title) title.textContent = 'แก้ไขส่วนลด';
+    document.getElementById('discount-label')?.focus();
+};
+
+window.deleteDiscount = async function deleteDiscount(id) {
+    const discount = discountsData[id];
+    if (!discount) return;
+    if (!confirm(`ลบส่วนลด "${discount.label}" ใช่ไหม?`)) return;
+    try {
+        await deleteDoc(doc(db, 'pos_discounts', id));
+    } catch (error) {
+        console.error('Unable to delete POS discount:', error);
+        alert('ลบส่วนลดไม่สำเร็จ: ' + error.message);
+    }
+};
+
+window.seedDefaultDiscounts = async function seedDefaultDiscounts() {
+    if (!canAdmin('discounts')) {
+        alert('บัญชีนี้ไม่มีสิทธิ์จัดการส่วนลด');
+        return;
+    }
+    try {
+        const batch = writeBatch(db);
+        DEFAULT_POS_DISCOUNTS.forEach(discount => {
+            batch.set(doc(db, 'pos_discounts', discount.id), {
+                ...discount,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+                createdBy: auth.currentUser?.uid || '',
+                updatedBy: auth.currentUser?.uid || ''
+            }, { merge: true });
+        });
+        await batch.commit();
+        alert('เติมชุดส่วนลดมาตรฐานเรียบร้อย');
+    } catch (error) {
+        console.error('Unable to seed POS discounts:', error);
+        alert('เติมชุดส่วนลดไม่สำเร็จ: ' + error.message);
+    }
+};
+
+window.refreshDiscounts = () => window.refreshAdminSection('discounts');
+
+const DEFAULT_LOYALTY_CONFIG = Object.freeze({
+    enabled: true,
+    spendPerPoint: 25,
+    pointValue: 1,
+    expiryMonths: 24,
+    maxRedeemPercent: 30,
+    minRedeemPoints: 20,
+    earnAfterDiscount: true,
+    earnOnRedeemedAmount: false,
+    excludedCategories: ['เครื่องดื่มแอลกอฮอล์', 'ฝากเงิน', 'โปรแรง'],
+    tierMultipliers: {
+        Silver: 1,
+        Gold: 1.25,
+        Platinum: 1.5
+    }
+});
+
+function normalizeLoyaltyConfig(raw = {}) {
+    const tierMultipliers = raw.tierMultipliers || {};
+    const excludedCategories = Array.isArray(raw.excludedCategories)
+        ? raw.excludedCategories
+        : String(raw.excludedCategoryText || '').split(',');
+    return {
+        ...DEFAULT_LOYALTY_CONFIG,
+        ...raw,
+        enabled: raw.enabled !== false,
+        spendPerPoint: Math.max(1, Math.floor(safeNumber(raw.spendPerPoint, DEFAULT_LOYALTY_CONFIG.spendPerPoint))),
+        pointValue: Math.max(0, safeNumber(raw.pointValue, DEFAULT_LOYALTY_CONFIG.pointValue)),
+        expiryMonths: Math.max(0, Math.floor(safeNumber(raw.expiryMonths, DEFAULT_LOYALTY_CONFIG.expiryMonths))),
+        maxRedeemPercent: Math.min(100, Math.max(0, safeNumber(raw.maxRedeemPercent, DEFAULT_LOYALTY_CONFIG.maxRedeemPercent))),
+        minRedeemPoints: Math.max(0, Math.floor(safeNumber(raw.minRedeemPoints, DEFAULT_LOYALTY_CONFIG.minRedeemPoints))),
+        earnAfterDiscount: raw.earnAfterDiscount !== false,
+        earnOnRedeemedAmount: raw.earnOnRedeemedAmount === true,
+        excludedCategories: excludedCategories.map(item => String(item || '').trim()).filter(Boolean),
+        tierMultipliers: {
+            Silver: Math.max(1, safeNumber(tierMultipliers.Silver, 1)),
+            Gold: Math.max(1, safeNumber(tierMultipliers.Gold, DEFAULT_LOYALTY_CONFIG.tierMultipliers.Gold)),
+            Platinum: Math.max(1, safeNumber(tierMultipliers.Platinum, DEFAULT_LOYALTY_CONFIG.tierMultipliers.Platinum))
+        }
+    };
+}
+
+function loyaltyCurrency(value) {
+    return '฿' + safeNumber(value).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function setLoyaltyFormValues(config = loyaltyConfig) {
+    const normalized = normalizeLoyaltyConfig(config);
+    const setValue = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.value = String(value);
+    };
+    const setChecked = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.checked = !!value;
+    };
+    setChecked('loyalty-enabled', normalized.enabled);
+    setValue('loyalty-spend-per-point', normalized.spendPerPoint);
+    setValue('loyalty-point-value', normalized.pointValue);
+    setValue('loyalty-expiry-months', normalized.expiryMonths);
+    setValue('loyalty-max-redeem-percent', normalized.maxRedeemPercent);
+    setValue('loyalty-min-redeem-points', normalized.minRedeemPoints);
+    setValue('loyalty-gold-multiplier', normalized.tierMultipliers.Gold);
+    setValue('loyalty-platinum-multiplier', normalized.tierMultipliers.Platinum);
+    setChecked('loyalty-earn-after-discount', normalized.earnAfterDiscount);
+    setChecked('loyalty-earn-on-redeemed', normalized.earnOnRedeemedAmount);
+    setValue('loyalty-excluded-categories', normalized.excludedCategories.join(', '));
+}
+
+function readLoyaltyFormPayload() {
+    const categoriesText = String(document.getElementById('loyalty-excluded-categories')?.value || '');
+    return normalizeLoyaltyConfig({
+        enabled: document.getElementById('loyalty-enabled')?.checked !== false,
+        spendPerPoint: safeNumber(document.getElementById('loyalty-spend-per-point')?.value, 25),
+        pointValue: safeNumber(document.getElementById('loyalty-point-value')?.value, 1),
+        expiryMonths: safeNumber(document.getElementById('loyalty-expiry-months')?.value, 24),
+        maxRedeemPercent: safeNumber(document.getElementById('loyalty-max-redeem-percent')?.value, 30),
+        minRedeemPoints: safeNumber(document.getElementById('loyalty-min-redeem-points')?.value, 20),
+        earnAfterDiscount: document.getElementById('loyalty-earn-after-discount')?.checked !== false,
+        earnOnRedeemedAmount: document.getElementById('loyalty-earn-on-redeemed')?.checked === true,
+        excludedCategories: categoriesText.split(',').map(item => item.trim()).filter(Boolean),
+        excludedCategoryText: categoriesText,
+        tierMultipliers: {
+            Silver: 1,
+            Gold: safeNumber(document.getElementById('loyalty-gold-multiplier')?.value, 1.25),
+            Platinum: safeNumber(document.getElementById('loyalty-platinum-multiplier')?.value, 1.5)
+        },
+        updatedAt: serverTimestamp(),
+        updatedBy: auth.currentUser?.uid || ''
+    });
+}
+
+function setupRealtimeLoyalty() {
+    bindLoyaltyForms();
+    if (loyaltyConfigUnsubscribe) loyaltyConfigUnsubscribe();
+    if (loyaltyLedgerUnsubscribe) loyaltyLedgerUnsubscribe();
+
+    loyaltyConfigUnsubscribe = onSnapshot(doc(db, 'site_settings', 'loyalty'), snap => {
+        loyaltyConfig = normalizeLoyaltyConfig(snap.exists() ? snap.data() : DEFAULT_LOYALTY_CONFIG);
+        setLoyaltyFormValues(loyaltyConfig);
+        renderLoyaltySummary();
+    }, error => {
+        console.error('Error listening to loyalty config:', error);
+    });
+
+    loyaltyLedgerUnsubscribe = onSnapshot(query(collection(db, 'point_ledger'), orderBy('createdAt', 'desc')), snapshot => {
+        loyaltyLedgerData = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+        renderLoyaltyLedgerTable();
+        renderLoyaltySummary();
+    }, error => {
+        console.error('Error listening to point ledger:', error);
+        const body = document.getElementById('loyalty-ledger-body');
+        if (body) body.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#c62828;">โหลดประวัติแต้มไม่สำเร็จ: ${escapeHTML(error.message)}</td></tr>`;
+    });
+
+    renderLoyaltyMemberOptions();
+    renderLoyaltySummary();
+}
+
+async function refreshLoyaltyOnce() {
+    const configSnap = await getDoc(doc(db, 'site_settings', 'loyalty'));
+    loyaltyConfig = normalizeLoyaltyConfig(configSnap.exists() ? configSnap.data() : DEFAULT_LOYALTY_CONFIG);
+    const ledgerSnap = await getDocs(query(collection(db, 'point_ledger'), orderBy('createdAt', 'desc')));
+    loyaltyLedgerData = ledgerSnap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+    setLoyaltyFormValues(loyaltyConfig);
+    renderLoyaltyMemberOptions();
+    renderLoyaltyLedgerTable();
+    renderLoyaltySummary();
+}
+
+function bindLoyaltyForms() {
+    if (loyaltyFormsBound) return;
+    const configForm = document.getElementById('loyalty-config-form');
+    const adjustForm = document.getElementById('loyalty-adjust-form');
+
+    configForm?.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (!canAdmin('loyalty')) {
+            alert('บัญชีนี้ไม่มีสิทธิ์จัดการแต้มสมาชิก');
+            return;
+        }
+        try {
+            await setDoc(doc(db, 'site_settings', 'loyalty'), readLoyaltyFormPayload(), { merge: true });
+            alert('บันทึกกติกาแต้มเรียบร้อย');
+        } catch (error) {
+            console.error('Unable to save loyalty config:', error);
+            alert('บันทึกกติกาแต้มไม่สำเร็จ: ' + error.message);
+        }
+    });
+
+    adjustForm?.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (!canAdmin('loyalty')) {
+            alert('บัญชีนี้ไม่มีสิทธิ์ปรับแต้มสมาชิก');
+            return;
+        }
+        const userId = String(document.getElementById('loyalty-adjust-user')?.value || '').trim();
+        const pointsDelta = Math.trunc(safeNumber(document.getElementById('loyalty-adjust-points')?.value, 0));
+        const reason = String(document.getElementById('loyalty-adjust-reason')?.value || '').trim();
+        if (!userId) {
+            alert('กรุณาเลือกสมาชิก');
+            return;
+        }
+        if (!pointsDelta) {
+            alert('กรุณาระบุจำนวนแต้มที่ต้องการเพิ่มหรือลด');
+            return;
+        }
+        if (!reason) {
+            alert('กรุณาระบุเหตุผลในการปรับแต้ม');
+            return;
+        }
+        try {
+            await callAdminFunction('adjustMemberPoints', { userId, pointsDelta, reason });
+            adjustForm.reset();
+            alert('บันทึกการปรับแต้มเรียบร้อย');
+        } catch (error) {
+            console.error('Unable to adjust member points:', error);
+            alert('ปรับแต้มไม่สำเร็จ: ' + error.message);
+        }
+    });
+
+    loyaltyFormsBound = true;
+}
+
+function renderLoyaltyMemberOptions() {
+    const select = document.getElementById('loyalty-adjust-user');
+    if (!select) return;
+    const current = select.value;
+    const rows = Object.entries(membersData || {})
+        .map(([uid, member]) => ({ uid, member }))
+        .sort((a, b) => memberDisplayName(a.member).localeCompare(memberDisplayName(b.member), 'th'));
+    select.innerHTML = '<option value="">-- เลือกสมาชิก --</option>' + rows.map(({ uid, member }) => {
+        const points = safeNumber(member.points);
+        return `<option value="${escapeHTML(uid)}">${escapeHTML(memberDisplayName(member))} - ${escapeHTML(member.email || uid)} (${points.toLocaleString('th-TH')} แต้ม)</option>`;
+    }).join('');
+    if (current && rows.some(row => row.uid === current)) select.value = current;
+}
+
+function renderLoyaltySummary() {
+    const config = normalizeLoyaltyConfig(loyaltyConfig);
+    const members = Object.values(membersData || {});
+    const totalPoints = members.reduce((sum, member) => sum + Math.max(0, Math.floor(safeNumber(member.points))), 0);
+    const membersWithPoints = members.filter(member => safeNumber(member.points) > 0).length;
+    const setText = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    };
+    setText('loyalty-stat-points', totalPoints.toLocaleString('th-TH'));
+    setText('loyalty-stat-liability', loyaltyCurrency(totalPoints * config.pointValue));
+    setText('loyalty-stat-members', membersWithPoints.toLocaleString('th-TH'));
+    setText('loyalty-stat-ledger', loyaltyLedgerData.length.toLocaleString('th-TH'));
+}
+
+function renderLoyaltyLedgerTable() {
+    const body = document.getElementById('loyalty-ledger-body');
+    if (!body) return;
+    const rows = loyaltyLedgerData.slice(0, 80);
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="7"><div class="loyalty-empty">ยังไม่มีประวัติแต้ม ระบบจะเริ่มบันทึกเมื่อมีการปรับแต้ม หรือเมื่อ POS/Checkout เชื่อมเข้ามา</div></td></tr>';
+        return;
+    }
+    body.innerHTML = rows.map(row => {
+        const delta = Math.trunc(safeNumber(row.pointsDelta));
+        const member = row.userId && membersData[row.userId] ? membersData[row.userId] : null;
+        const memberName = row.memberName || (member ? memberDisplayName(member) : row.userId || '-');
+        const memberEmail = row.memberEmail || member?.email || '';
+        const deltaClass = delta >= 0 ? 'loyalty-points-positive' : 'loyalty-points-negative';
+        const deltaText = `${delta >= 0 ? '+' : ''}${delta.toLocaleString('th-TH')}`;
+        return `
+            <tr>
+                <td>${escapeHTML(formatDate(row.createdAt))}</td>
+                <td><strong>${escapeHTML(memberName)}</strong><small>${escapeHTML(memberEmail)}</small></td>
+                <td>${escapeHTML(row.type || '-')}</td>
+                <td class="${deltaClass}">${escapeHTML(deltaText)}</td>
+                <td>${safeNumber(row.pointsAfter).toLocaleString('th-TH')}</td>
+                <td>${escapeHTML(row.reason || row.orderId || '-')}<small>${escapeHTML(row.source || '')}</small></td>
+                <td>${escapeHTML(row.createdByEmail || row.createdBy || '-')}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+window.exportLoyaltyLiabilityCSV = function exportLoyaltyLiabilityCSV() {
+    const config = normalizeLoyaltyConfig(loyaltyConfig);
+    const header = ['uid', 'memberCode', 'name', 'email', 'tier', 'pointsBalance', 'pointValue', 'liabilityBaht', 'updatedAt'];
+    const rows = Object.entries(membersData || {})
+        .map(([uid, member]) => {
+            const points = Math.max(0, Math.floor(safeNumber(member.points)));
+            return [
+                uid,
+                member.memberCode || '',
+                memberDisplayName(member),
+                member.email || '',
+                memberTier(member),
+                points,
+                config.pointValue,
+                points * config.pointValue,
+                member.updatedAt ? formatDate(member.updatedAt) : ''
+            ];
+        })
+        .filter(row => safeNumber(row[5]) > 0);
+    const csv = [header, ...rows].map(row => row.map(csvEscape).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `eden-loyalty-liability-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+};
+
+window.refreshLoyalty = () => window.refreshAdminSection('loyalty');
 
 function hasLoyverseImportMode() {
     return new URLSearchParams(window.location.search).has('menu-import');
@@ -1293,46 +1838,745 @@ async function fetchStats() {
     try {
         const statsRef = doc(db, 'stats', 'pageViews');
         const snap = await getDoc(statsRef);
-        if (snap.exists()) {
+        const viewsEl = document.getElementById('stat-views-daily');
+        if (snap.exists() && viewsEl) {
             const data = snap.data();
-            document.getElementById('stat-views-daily').innerText = (data.dailyViews || 0).toLocaleString();
+            viewsEl.innerText = (data.dailyViews || 0).toLocaleString();
         }
-        
-        // Mock Chart Data for 7 days
-        const canvas = document.getElementById('viewsChart');
-        if (!canvas) return;
-        const chartData = [120, 150, 180, 142, 200, 250, snap.exists() ? snap.data().dailyViews : 142];
-        if (viewsChart) {
-            viewsChart.data.datasets[0].data = chartData;
-            viewsChart.update();
-            return;
-        }
-
-        const ctx = canvas.getContext('2d');
-        viewsChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-                datasets: [{
-                    label: 'ยอดผู้เข้าชม (Views)',
-                    data: chartData,
-                    borderColor: '#4caf50',
-                    backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                    borderWidth: 2,
-                    fill: true,
-                    tension: 0.4
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: { legend: { display: false } },
-                scales: { y: { beginAtZero: true } }
-            }
-        });
+        renderDashboardSalesReport();
     } catch (e) {
         console.error("Error fetching stats:", e);
     }
 }
+
+function adminMoney(value) {
+    const amount = safeNumber(value);
+    const hasSatang = Math.abs(amount % 1) > 0.001;
+    return '฿' + amount.toLocaleString('th-TH', {
+        minimumFractionDigits: hasSatang ? 2 : 0,
+        maximumFractionDigits: 2
+    });
+}
+
+function localDateKey(date = new Date()) {
+    const safeDate = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
+    const year = safeDate.getFullYear();
+    const month = String(safeDate.getMonth() + 1).padStart(2, '0');
+    const day = String(safeDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function parseLocalDateKey(key) {
+    const match = String(key || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return null;
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function salesReportRange() {
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth() + salesReportMonthOffset, 1);
+    const last = new Date(first.getFullYear(), first.getMonth() + 1, 0);
+    const todayKey = localDateKey(now);
+    const end = salesReportMonthOffset === 0 ? now : last;
+    return {
+        start: first,
+        end,
+        startKey: localDateKey(first),
+        endKey: localDateKey(end),
+        todayKey
+    };
+}
+
+function salesReportDateLabel(date = new Date()) {
+    return date.toLocaleDateString('th-TH', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+    });
+}
+
+function salesReportRangeLabel() {
+    const range = salesReportRange();
+    return `${range.start.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })} - ${range.end.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+}
+
+function dashboardReportDateLabel() {
+    return 'ช่วงวันที่ ' + salesReportRangeLabel();
+}
+
+function orderReportDateValue(order = {}) {
+    const raw = order.timestamp || order.createdAt || order.date;
+    if (raw?.toDate) return raw.toDate().getTime();
+    const parsed = new Date(raw).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function orderReportDateKey(order = {}) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(order.businessDate || ''))) return order.businessDate;
+    const time = orderReportDateValue(order);
+    return time ? localDateKey(new Date(time)) : '';
+}
+
+function isOrderInSalesReportRange(order = {}) {
+    const key = orderReportDateKey(order);
+    const range = salesReportRange();
+    return !!key && key >= range.startKey && key <= range.endKey;
+}
+
+function isOrderInSalesReportTime(order = {}) {
+    if (salesReportTimeFilter === 'all') return true;
+    const time = orderReportDateValue(order);
+    if (!time) return true;
+    const hour = new Date(time).getHours();
+    if (salesReportTimeFilter === 'morning') return hour >= 6 && hour < 12;
+    if (salesReportTimeFilter === 'afternoon') return hour >= 12 && hour < 18;
+    if (salesReportTimeFilter === 'evening') return hour >= 18 && hour < 24;
+    return true;
+}
+
+function isOrderForSalesReportEmployee(order = {}) {
+    if (salesReportEmployeeFilter === 'all') return true;
+    const key = salesReportEmployeeKey(order);
+    return key === salesReportEmployeeFilter;
+}
+
+function salesReportPaymentLabel(method, fallback = '') {
+    const labels = {
+        cash: 'เงินสด',
+        transfer: 'โอนเงิน',
+        qr: 'QR Payment',
+        card: 'บัตร',
+        other: 'อื่น ๆ'
+    };
+    return labels[String(method || '').toLowerCase()] || fallback || method || 'ไม่ระบุ';
+}
+
+function isSalesReportOrder(order = {}) {
+    const status = String(order.status || '').toLowerCase();
+    const paymentStatus = String(order.paymentStatus || (order.source === 'pos' ? 'paid' : '')).toLowerCase();
+    const billStatus = String(order.billStatus || '').toLowerCase();
+    if (order.isTestOrder || order.softLaunch || status === 'cancelled' || status === 'voided') return false;
+    if (billStatus === 'open' || paymentStatus === 'pending') return false;
+    return paymentStatus === 'paid' || status === 'completed';
+}
+
+function isRefundOrder(order = {}) {
+    const status = String(order.status || '').toLowerCase();
+    const paymentStatus = String(order.paymentStatus || '').toLowerCase();
+    return !order.isTestOrder && (status === 'refunded' || paymentStatus === 'refunded');
+}
+
+function dashboardRevenueOrders() {
+    return dashboardOrdersData
+        .filter(isSalesReportOrder)
+        .filter(isOrderInSalesReportRange)
+        .filter(isOrderInSalesReportTime)
+        .filter(isOrderForSalesReportEmployee);
+}
+
+function dashboardRefundOrders() {
+    return dashboardOrdersData
+        .filter(isRefundOrder)
+        .filter(isOrderInSalesReportRange)
+        .filter(isOrderInSalesReportTime)
+        .filter(isOrderForSalesReportEmployee);
+}
+
+function orderReportTotal(order = {}) {
+    return safeNumber(order.totalAmount ?? order.total ?? order.totals?.total);
+}
+
+function orderReportGross(order = {}) {
+    return safeNumber(order.subtotal ?? order.totals?.subtotal, orderReportTotal(order) + safeNumber(order.discount ?? order.totals?.discount));
+}
+
+function orderReportDiscount(order = {}) {
+    return safeNumber(order.discount ?? order.totals?.discount);
+}
+
+function orderReportTax(order = {}) {
+    return safeNumber(order.taxIncluded ?? order.totals?.taxIncluded);
+}
+
+function orderReportItems(order = {}) {
+    return Array.isArray(order.items) ? order.items.filter(Boolean) : [];
+}
+
+function itemReportAmount(item = {}) {
+    const quantity = Math.max(0, safeNumber(item.quantity, 1));
+    return safeNumber(item.lineTotal, safeNumber(item.price) * quantity);
+}
+
+function itemReportCost(item = {}) {
+    const quantity = Math.max(0, safeNumber(item.quantity, 1));
+    return safeNumber(item.cost) * quantity;
+}
+
+function orderReportCost(order = {}) {
+    return orderReportItems(order).reduce((sum, item) => sum + itemReportCost(item), 0);
+}
+
+function salesReportEmployeeKey(order = {}) {
+    return normalizeEmail(order.cashierEmail) || String(order.cashierUid || order.cashierName || 'unknown');
+}
+
+function salesReportEmployeeName(order = {}) {
+    return order.cashierName || order.cashierEmail || 'ไม่ระบุพนักงาน';
+}
+
+function pushSalesReportGroup(groups, key, label, amount, quantity = 0) {
+    const safeKey = String(key || label || 'unknown');
+    const current = groups.get(safeKey) || { label: label || 'ไม่ระบุ', amount: 0, quantity: 0 };
+    current.amount += safeNumber(amount);
+    current.quantity += safeNumber(quantity);
+    groups.set(safeKey, current);
+}
+
+function sortedSalesReportGroups(groups) {
+    return Array.from(groups.values())
+        .sort((a, b) => (b.amount - a.amount) || (b.quantity - a.quantity) || String(a.label).localeCompare(String(b.label), 'th'));
+}
+
+function reportSummaryTotals(orders = dashboardRevenueOrders()) {
+    const refunds = dashboardRefundOrders().reduce((sum, order) => sum + orderReportTotal(order), 0);
+    const gross = orders.reduce((sum, order) => sum + orderReportGross(order), 0);
+    const discounts = orders.reduce((sum, order) => sum + orderReportDiscount(order), 0);
+    const net = orders.reduce((sum, order) => sum + orderReportTotal(order), 0);
+    const cost = orders.reduce((sum, order) => sum + orderReportCost(order), 0);
+    const tax = orders.reduce((sum, order) => sum + orderReportTax(order), 0);
+    const profit = net - cost;
+    const margin = net > 0 ? (profit / net) * 100 : 0;
+    return { refunds, gross, discounts, net, cost, tax, profit, margin, count: orders.length };
+}
+
+function buildDailySalesRows() {
+    const range = salesReportRange();
+    const revenueOrders = dashboardRevenueOrders();
+    const refunds = dashboardRefundOrders();
+    const byDate = new Map();
+
+    for (let cursor = new Date(range.start); cursor <= range.end; cursor.setDate(cursor.getDate() + 1)) {
+        const key = localDateKey(cursor);
+        byDate.set(key, { key, date: new Date(cursor), gross: 0, refunds: 0, discounts: 0, net: 0, cost: 0, profit: 0, margin: 0, tax: 0 });
+    }
+
+    revenueOrders.forEach(order => {
+        const key = orderReportDateKey(order);
+        if (!byDate.has(key)) return;
+        const row = byDate.get(key);
+        row.gross += orderReportGross(order);
+        row.discounts += orderReportDiscount(order);
+        row.net += orderReportTotal(order);
+        row.cost += orderReportCost(order);
+        row.tax += orderReportTax(order);
+    });
+
+    refunds.forEach(order => {
+        const key = orderReportDateKey(order);
+        if (!byDate.has(key)) return;
+        byDate.get(key).refunds += orderReportTotal(order);
+    });
+
+    byDate.forEach(row => {
+        row.profit = row.net - row.cost;
+        row.margin = row.net > 0 ? (row.profit / row.net) * 100 : 0;
+    });
+
+    return Array.from(byDate.values()).sort((a, b) => b.key.localeCompare(a.key));
+}
+
+function buildDashboardSalesReportRows(type, orders = dashboardRevenueOrders()) {
+    const groups = new Map();
+
+    if (type === 'summary') return buildDailySalesRows();
+
+    if (type === 'receipts') {
+        return orders
+            .slice()
+            .sort((a, b) => orderReportDateValue(b) - orderReportDateValue(a))
+            .map(order => ({
+                label: order.receiptNo || order.orderNumber || order.id || order.firestoreId || 'ใบเสร็จ',
+                amount: orderReportTotal(order),
+                meta: [formatDate(order.timestamp || order.createdAt), order.cashierName || order.customerName || ''].filter(Boolean).join(' · ')
+            }));
+    }
+
+    if (type === 'discounts') {
+        orders.forEach(order => {
+            const discount = orderReportDiscount(order);
+            if (!discount) return;
+            const label = order.totals?.discountLabel || order.discountLabel || 'ส่วนลดหน้าร้าน';
+            pushSalesReportGroup(groups, label, label, discount, 1);
+        });
+        return sortedSalesReportGroups(groups);
+    }
+
+    if (type === 'taxes') {
+        orders.forEach(order => {
+            const tax = orderReportTax(order);
+            if (!tax) return;
+            const label = order.receiptNo || order.orderNumber || order.id || 'ภาษีรวมในราคา';
+            pushSalesReportGroup(groups, label, label, tax, 1);
+        });
+        return sortedSalesReportGroups(groups);
+    }
+
+    orders.forEach(order => {
+        if (type === 'staff') {
+            const label = salesReportEmployeeName(order);
+            pushSalesReportGroup(groups, salesReportEmployeeKey(order), label, orderReportTotal(order), 1);
+            return;
+        }
+        if (type === 'payment') {
+            const label = order.paymentLabel || salesReportPaymentLabel(order.paymentMethod);
+            pushSalesReportGroup(groups, label, label, orderReportTotal(order), 1);
+            return;
+        }
+
+        orderReportItems(order).forEach(item => {
+            const quantity = Math.max(0, safeNumber(item.quantity, 1));
+            const amount = itemReportAmount(item);
+            if (type === 'category') {
+                const categoryId = item.category || item.categoryId || '';
+                const label = item.categoryName || categoriesData[categoryId]?.name || categoryId || 'ไม่ระบุหมวดหมู่';
+                pushSalesReportGroup(groups, categoryId || label, label, amount, quantity);
+                return;
+            }
+            if (type === 'options') {
+                const label = item.variantName || item.optionName || 'ไม่มีตัวเลือกเพิ่มเติม';
+                pushSalesReportGroup(groups, label, label, amount, quantity);
+                return;
+            }
+            const label = [item.name || item.productName || 'ไม่ระบุสินค้า', item.variantName].filter(Boolean).join(' - ');
+            pushSalesReportGroup(groups, label, label, amount, quantity);
+        });
+    });
+
+    return sortedSalesReportGroups(groups);
+}
+
+function updateSalesReportEmployeeOptions() {
+    const select = document.getElementById('sales-report-employee-filter');
+    if (!select) return;
+    const employees = new Map();
+    dashboardOrdersData.forEach(order => {
+        const key = salesReportEmployeeKey(order);
+        if (!key || key === 'unknown') return;
+        employees.set(key, salesReportEmployeeName(order));
+    });
+    const current = salesReportEmployeeFilter;
+    select.innerHTML = '<option value="all">พนักงานทั้งหมด</option>'
+        + Array.from(employees.entries())
+            .sort((a, b) => a[1].localeCompare(b[1], 'th'))
+            .map(([key, label]) => `<option value="${escapeHTML(key)}">${escapeHTML(label)}</option>`)
+            .join('');
+    select.value = employees.has(current) ? current : 'all';
+    salesReportEmployeeFilter = select.value;
+}
+
+function updateSalesReportToolbar() {
+    const rangeLabel = document.getElementById('sales-report-range-label');
+    if (rangeLabel) rangeLabel.textContent = salesReportRangeLabel();
+    const timeSelect = document.getElementById('sales-report-time-filter');
+    if (timeSelect) timeSelect.value = salesReportTimeFilter;
+    updateSalesReportEmployeeOptions();
+}
+
+function renderSalesReportKpis() {
+    const totals = reportSummaryTotals();
+    const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    };
+    setText('sales-kpi-refunds', adminMoney(totals.refunds));
+    setText('sales-kpi-discounts', adminMoney(totals.discounts));
+    setText('sales-kpi-net', adminMoney(totals.net));
+    setText('sales-kpi-profit', adminMoney(totals.profit));
+    setText('sales-kpi-refunds-note', totals.refunds ? 'มีรายการคืนเงินในช่วงนี้' : 'ไม่มีรายการคืนเงิน');
+    setText('sales-kpi-discounts-note', `${totals.count.toLocaleString('th-TH')} ใบเสร็จในช่วงนี้`);
+    setText('sales-kpi-net-note', dashboardReportDateLabel());
+    setText('sales-kpi-profit-note', `ผลต่าง ${totals.margin.toLocaleString('th-TH', { maximumFractionDigits: 2 })}%`);
+
+    const revenueEl = document.getElementById('stat-revenue');
+    const ordersEl = document.getElementById('stat-orders');
+    if (revenueEl) revenueEl.innerText = adminMoney(totals.net);
+    if (ordersEl) ordersEl.innerText = totals.count.toLocaleString('th-TH');
+}
+
+function renderSalesSummaryChart() {
+    const canvas = document.getElementById('salesSummaryChart');
+    if (!canvas || typeof Chart === 'undefined') return;
+
+    const rows = buildDailySalesRows().slice().reverse();
+    const labels = rows.map(row => row.date.toLocaleDateString('th-TH', { day: '2-digit', month: 'short' }));
+    const values = rows.map(row => safeNumber(row.net));
+    const chartType = activeSalesReport === 'summary' ? 'line' : 'bar';
+    const datasetLabel = SALES_REPORT_LABELS[activeSalesReport] || SALES_REPORT_LABELS.summary;
+    const reportRows = activeSalesReport === 'summary' ? [] : buildDashboardSalesReportRows(activeSalesReport).slice(0, 10);
+    const finalLabels = activeSalesReport === 'summary' ? labels : (reportRows.length ? reportRows.map(row => row.label) : ['ยังไม่มีข้อมูล']);
+    const finalValues = activeSalesReport === 'summary' ? values : (reportRows.length ? reportRows.map(row => safeNumber(row.amount)) : [0]);
+    const needsRecreate = !salesSummaryChart || salesSummaryChart.config.type !== chartType;
+
+    if (needsRecreate && salesSummaryChart) {
+        salesSummaryChart.destroy();
+        salesSummaryChart = null;
+    }
+
+    const chartData = {
+        labels: finalLabels,
+        datasets: [{
+            label: datasetLabel,
+            data: finalValues,
+            borderColor: '#79bd3f',
+            backgroundColor: chartType === 'line' ? 'rgba(121, 189, 63, 0.12)' : 'rgba(67, 173, 79, 0.72)',
+            borderWidth: 2,
+            pointRadius: chartType === 'line' ? 3.5 : 0,
+            pointBackgroundColor: '#fff',
+            pointBorderColor: '#79bd3f',
+            pointBorderWidth: 2,
+            fill: chartType === 'line',
+            tension: 0.32,
+            borderRadius: chartType === 'bar' ? 8 : 0,
+            borderSkipped: false
+        }]
+    };
+
+    if (salesSummaryChart) {
+        salesSummaryChart.data = chartData;
+        salesSummaryChart.update();
+        return;
+    }
+
+    salesSummaryChart = new Chart(canvas.getContext('2d'), {
+        type: chartType,
+        data: chartData,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: context => adminMoney(chartType === 'line' ? context.parsed.y : context.parsed.y || 0)
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { color: 'rgba(0,0,0,0.08)' },
+                    ticks: { maxRotation: 45, minRotation: 45 }
+                },
+                y: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(0,0,0,0.08)' },
+                    ticks: { callback: value => adminMoney(value) }
+                }
+            }
+        }
+    });
+}
+
+function renderSalesSummaryTable() {
+    const head = document.getElementById('sales-summary-table-head');
+    const body = document.getElementById('sales-summary-table-body');
+    if (!body) return;
+
+    if (activeSalesReport !== 'summary') {
+        const rows = buildDashboardSalesReportRows(activeSalesReport);
+        const totalAmount = rows.reduce((sum, row) => sum + safeNumber(row.amount), 0);
+        const totalQuantity = rows.reduce((sum, row) => sum + safeNumber(row.quantity), 0);
+        if (head) {
+            head.innerHTML = `
+                <tr>
+                    <th>รายการ</th>
+                    <th>จำนวน</th>
+                    <th>ยอดขาย</th>
+                    <th>วันที่ / ช่วงเวลา</th>
+                </tr>
+            `;
+        }
+        const totalLabel = activeSalesReport === 'category' ? 'ยอดขายรวม' : 'รวมทั้งหมด';
+        const totalRow = `
+            <tr>
+                <td class="sales-date-cell">${escapeHTML(totalLabel)}</td>
+                <td>${totalQuantity ? totalQuantity.toLocaleString('th-TH') : rows.length.toLocaleString('th-TH')}</td>
+                <td>${adminMoney(totalAmount)}</td>
+                <td>${escapeHTML(dashboardReportDateLabel())}</td>
+            </tr>
+        `;
+        if (!rows.length) {
+            body.innerHTML = totalRow + `<tr><td colspan="4" class="sales-report-empty">ยังไม่มีข้อมูล ${escapeHTML(SALES_REPORT_LABELS[activeSalesReport] || 'รายงานนี้')}</td></tr>`;
+            return;
+        }
+        body.innerHTML = totalRow + rows.slice(0, 40).map(row => `
+            <tr>
+                <td class="sales-date-cell">${escapeHTML(row.label)}</td>
+                <td>${safeNumber(row.quantity).toLocaleString('th-TH')}</td>
+                <td>${adminMoney(row.amount)}</td>
+                <td>${escapeHTML(row.meta || dashboardReportDateLabel())}</td>
+            </tr>
+        `).join('');
+        const pageTotal = document.getElementById('sales-table-page-total');
+        if (pageTotal) pageTotal.textContent = `จาก ${Math.max(1, Math.ceil(rows.length / 10)).toLocaleString('th-TH')}`;
+        return;
+    }
+
+    if (head) {
+        head.innerHTML = `
+            <tr>
+                <th>วันที่</th>
+                <th>ยอดขาย</th>
+                <th>คืนเงิน</th>
+                <th>ส่วนลด</th>
+                <th>ยอดขายสุทธิ</th>
+                <th>ต้นทุนของสินค้า</th>
+                <th>กำไรรวม</th>
+                <th>ผลต่าง</th>
+                <th>ภาษี</th>
+            </tr>
+        `;
+    }
+    const rows = buildDailySalesRows();
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="9" class="sales-report-empty">ยังไม่มีข้อมูลยอดขาย</td></tr>';
+        return;
+    }
+    body.innerHTML = rows.map(row => `
+        <tr>
+            <td class="sales-date-cell">${escapeHTML(salesReportDateLabel(row.date))}</td>
+            <td>${adminMoney(row.gross)}</td>
+            <td>${adminMoney(row.refunds)}</td>
+            <td>${adminMoney(row.discounts)}</td>
+            <td>${adminMoney(row.net)}</td>
+            <td>${adminMoney(row.cost)}</td>
+            <td>${adminMoney(row.profit)}</td>
+            <td>${row.margin.toLocaleString('th-TH', { maximumFractionDigits: 2 })}%</td>
+            <td>${adminMoney(row.tax)}</td>
+        </tr>
+    `).join('');
+    const pageTotal = document.getElementById('sales-table-page-total');
+    if (pageTotal) pageTotal.textContent = `จาก ${Math.max(1, Math.ceil(rows.length / 10)).toLocaleString('th-TH')}`;
+}
+
+function renderDashboardSalesReport() {
+    updateSalesReportToolbar();
+    renderSalesReportKpis();
+    renderSalesSummaryChart();
+    renderSalesSummaryTable();
+}
+
+function bindSalesReportNav() {
+    if (salesReportNavBound) return;
+    const nav = document.querySelector('.sales-report-nav');
+    if (!nav) return;
+    nav.addEventListener('click', event => {
+        const button = event.target.closest('[data-sales-report]');
+        if (!button) return;
+        window.setSalesReportType(button.dataset.salesReport || 'summary', button);
+    });
+    salesReportNavBound = true;
+}
+
+window.setSalesReportType = (type = 'summary', button = null) => {
+    activeSalesReport = SALES_REPORT_LABELS[type] ? type : 'summary';
+    const nav = document.querySelector('.sales-report-nav');
+    if (nav) {
+        nav.querySelectorAll('[data-sales-report]').forEach(item => {
+            item.classList.toggle('active', item === button || item.dataset.salesReport === activeSalesReport);
+        });
+    }
+    renderDashboardSalesReport();
+};
+
+window.shiftSalesReportMonth = (delta = 0) => {
+    salesReportMonthOffset += safeNumber(delta);
+    renderDashboardSalesReport();
+};
+
+window.setSalesReportTimeFilter = (value = 'all') => {
+    salesReportTimeFilter = ['all', 'morning', 'afternoon', 'evening'].includes(value) ? value : 'all';
+    renderDashboardSalesReport();
+};
+
+window.setSalesReportEmployeeFilter = (value = 'all') => {
+    salesReportEmployeeFilter = value || 'all';
+    renderDashboardSalesReport();
+};
+
+function salesReportSheetName(name) {
+    return String(name || 'sales').replace(/[\\/?*[\]:]/g, '').slice(0, 31) || 'sales';
+}
+
+function salesReportExcelSheet(rows) {
+    const worksheet = worksheetFromData(rows.length ? rows : [{ note: 'ยังไม่มีข้อมูลยอดขายในช่วงที่เลือก' }]);
+    const keys = Object.keys(rows[0] || { note: '' });
+    worksheet['!cols'] = keys.map((key) => {
+        const maxLength = rows.reduce((max, row) => Math.max(max, String(row[key] ?? '').length), String(key).length);
+        return { wch: Math.min(Math.max(maxLength + 3, 12), 42) };
+    });
+    return worksheet;
+}
+
+function salesReportOrderDateText(order = {}) {
+    const value = order.timestamp || order.createdAt || order.date || order.businessDate;
+    if (!value) return '';
+    if (value?.toDate) return value.toDate().toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function salesReportReceiptNo(order = {}) {
+    return order.receiptNo || order.orderNumber || order.id || order.firestoreId || '';
+}
+
+function currentSalesReportExportRows(type = activeSalesReport) {
+    if (type === 'summary') {
+        return buildDailySalesRows().map(row => ({
+            'วันที่': salesReportDateLabel(row.date),
+            'ยอดขาย': row.gross,
+            'คืนเงิน': row.refunds,
+            'ส่วนลด': row.discounts,
+            'ยอดขายสุทธิ': row.net,
+            'ต้นทุนของสินค้า': row.cost,
+            'กำไรรวม': row.profit,
+            'ผลต่าง (%)': Number(row.margin.toFixed(2)),
+            'ภาษี': row.tax
+        }));
+    }
+    return buildDashboardSalesReportRows(type).map(row => ({
+        'รายงาน': SALES_REPORT_LABELS[type] || 'รายงานยอดขาย',
+        'รายการ': row.label || '',
+        'จำนวน': safeNumber(row.quantity),
+        'ยอดขาย': safeNumber(row.amount),
+        'วันที่ / ช่วงเวลา': row.meta || dashboardReportDateLabel()
+    }));
+}
+
+function salesReportReceiptRows() {
+    return dashboardRevenueOrders()
+        .slice()
+        .sort((a, b) => orderReportDateValue(b) - orderReportDateValue(a))
+        .map(order => {
+            const total = orderReportTotal(order);
+            const cost = orderReportCost(order);
+            return {
+                'เลขที่ใบเสร็จ': salesReportReceiptNo(order),
+                'วันที่': salesReportOrderDateText(order),
+                'ลูกค้า': order.customerName || 'Walk-in Customer',
+                'เบอร์โทร': order.phone || '',
+                'พนักงาน': salesReportEmployeeName(order),
+                'วิธีชำระเงิน': order.paymentLabel || salesReportPaymentLabel(order.paymentMethod),
+                'สถานะ': order.status || '',
+                'ยอดก่อนส่วนลด': orderReportGross(order),
+                'ส่วนลด': orderReportDiscount(order),
+                'ภาษี': orderReportTax(order),
+                'ยอดสุทธิ': total,
+                'ต้นทุน': cost,
+                'กำไร': total - cost,
+                'หมายเหตุ': order.note || '',
+                'Firestore ID': order.firestoreId || order.id || ''
+            };
+        });
+}
+
+function salesReportItemRows() {
+    const rows = [];
+    dashboardRevenueOrders()
+        .slice()
+        .sort((a, b) => orderReportDateValue(b) - orderReportDateValue(a))
+        .forEach(order => {
+            orderReportItems(order).forEach(item => {
+                const quantity = Math.max(0, safeNumber(item.quantity, 1));
+                const lineTotal = itemReportAmount(item);
+                const cost = itemReportCost(item);
+                rows.push({
+                    'เลขที่ใบเสร็จ': salesReportReceiptNo(order),
+                    'วันที่': salesReportOrderDateText(order),
+                    'สินค้า': item.name || item.productName || 'ไม่ระบุสินค้า',
+                    'ตัวเลือก': item.variantName || item.optionName || '',
+                    'SKU': item.sku || item.variantSku || '',
+                    'หมวดหมู่': item.categoryName || categoriesData[item.category || item.categoryId || '']?.name || item.category || item.categoryId || '',
+                    'จำนวน': quantity,
+                    'ราคาต่อหน่วย': safeNumber(item.unitPrice ?? item.price ?? item.basePrice),
+                    'ส่วนลดรายการ': safeNumber(item.lineDiscount ?? item.discount),
+                    'ยอดรวม': lineTotal,
+                    'ต้นทุนรวม': cost,
+                    'กำไรรวม': lineTotal - cost,
+                    'ลูกค้า': order.customerName || 'Walk-in Customer',
+                    'พนักงาน': salesReportEmployeeName(order)
+                });
+            });
+        });
+    return rows;
+}
+
+function exportSalesWorkbook(type = activeSalesReport) {
+    const XLSX = window.XLSX;
+    if (!XLSX) throw new Error('ไม่พบไลบรารี Excel กรุณารีเฟรชหน้าแล้วลองอีกครั้ง');
+    if (!canAdmin('orders')) throw new Error('บัญชีนี้ไม่มีสิทธิ์ดาวน์โหลดข้อมูลยอดขาย');
+
+    const workbook = XLSX.utils.book_new();
+    const activeLabel = SALES_REPORT_LABELS[type] || 'รายงานยอดขาย';
+    const totals = reportSummaryTotals();
+    const overviewRows = [{
+        'รายงาน': activeLabel,
+        'ช่วงวันที่': salesReportRangeLabel(),
+        'ช่วงเวลา': salesReportTimeFilter === 'all' ? 'ตลอดทั้งวัน' : salesReportTimeFilter,
+        'พนักงาน': salesReportEmployeeFilter === 'all' ? 'พนักงานทั้งหมด' : salesReportEmployeeFilter,
+        'จำนวนใบเสร็จ': totals.count,
+        'ยอดขาย': totals.gross,
+        'คืนเงิน': totals.refunds,
+        'ส่วนลด': totals.discounts,
+        'ยอดขายสุทธิ': totals.net,
+        'ต้นทุนของสินค้า': totals.cost,
+        'กำไรรวม': totals.profit,
+        'ผลต่าง (%)': Number(totals.margin.toFixed(2)),
+        'ภาษี': totals.tax,
+        'ส่งออกเมื่อ': new Date().toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })
+    }];
+
+    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(overviewRows), 'overview');
+    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(currentSalesReportExportRows(type)), salesReportSheetName(activeLabel));
+    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(buildDashboardSalesReportRows('category').map(row => ({
+        'หมวดหมู่': row.label,
+        'จำนวน': safeNumber(row.quantity),
+        'ยอดขาย': safeNumber(row.amount),
+        'ช่วงวันที่': dashboardReportDateLabel()
+    }))), 'categories');
+    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(buildDashboardSalesReportRows('product').map(row => ({
+        'สินค้า': row.label,
+        'จำนวน': safeNumber(row.quantity),
+        'ยอดขาย': safeNumber(row.amount),
+        'ช่วงวันที่': dashboardReportDateLabel()
+    }))), 'products');
+    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(salesReportReceiptRows()), 'receipts');
+    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(salesReportItemRows()), 'items');
+
+    XLSX.writeFile(workbook, `eden-sales-${type}-${salesReportRange().startKey}-to-${salesReportRange().endKey}.xlsx`);
+}
+
+window.exportSalesReportXLSX = () => {
+    const button = document.getElementById('sales-export-xlsx-btn');
+    const originalText = button?.textContent || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'กำลังสร้างไฟล์...';
+        }
+        exportSalesWorkbook(activeSalesReport);
+    } catch (error) {
+        console.error('Export sales XLSX failed:', error);
+        alert('ดาวน์โหลดข้อมูลยอดขายไม่สำเร็จ: ' + (error.message || error));
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText || '⬇ ดาวน์โหลด Excel';
+        }
+    }
+};
+
+window.exportSalesSummaryCSV = window.exportSalesReportXLSX;
 
 // Format Date Helper
 function formatDate(timestamp) {
@@ -1355,16 +2599,22 @@ function setupRealtimeOrders() {
         
         let todayOrders = 0;
         let todayRevenue = 0;
+        const reportOrders = [];
         const todayStr = new Date().toLocaleDateString('th-TH');
 
         if (snapshot.empty) {
             tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">ไม่มีข้อมูลออเดอร์</td></tr>';
+            dashboardOrdersData = [];
+            renderDashboardSalesReport();
+            document.getElementById('stat-orders').innerText = todayOrders;
+            document.getElementById('stat-revenue').innerText = '฿' + todayRevenue.toLocaleString();
             return;
         }
 
         snapshot.forEach((docSnap) => {
             const order = docSnap.data();
             const id = docSnap.id;
+            reportOrders.push({ ...order, firestoreId: id });
             const status = order.status || 'pending';
             const paymentStatus = order.paymentStatus || (order.source === 'pos' ? 'paid' : 'pending');
             const paymentLabel = order.paymentLabel || order.paymentMethod || '-';
@@ -1402,6 +2652,8 @@ function setupRealtimeOrders() {
         });
 
         // Update Dashboard Stats
+        dashboardOrdersData = reportOrders;
+        renderDashboardSalesReport();
         document.getElementById('stat-orders').innerText = todayOrders;
         document.getElementById('stat-revenue').innerText = '฿' + todayRevenue.toLocaleString();
     }, (error) => {
@@ -1571,6 +2823,7 @@ function renderCategoriesSnapshot(snapshot) {
         updateProductCategoryFilterOptions();
         renderProductsTable();
         renderPosScreen();
+        renderDashboardSalesReport();
         return;
     }
 
@@ -1623,6 +2876,7 @@ function renderCategoriesSnapshot(snapshot) {
     updateProductCategoryFilterOptions();
     renderProductsTable();
     renderPosScreen();
+    renderDashboardSalesReport();
 }
 
 async function refreshCategoriesOnce() {
@@ -4934,6 +6188,8 @@ function setupRealtimeMembers() {
         });
         renderMembersTable();
         renderAdminUserOptions();
+        renderLoyaltyMemberOptions();
+        renderLoyaltySummary();
     }, (error) => {
         console.error('Error listening to members:', error);
         const tbody = document.getElementById('members-table-body');

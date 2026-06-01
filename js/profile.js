@@ -1,6 +1,6 @@
 import { auth, db } from './firebase-config.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { doc, getDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, doc, getDoc, getDocs, query, setDoc, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getTierRules } from './membership.js';
 
 (() => {
@@ -15,8 +15,26 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
     let cloudProfileUid = '';
     let cloudProfileLoading = false;
     let cloudProfileSaving = false;
+    let loyaltyConfig = null;
+    let loyaltyLedger = [];
+    let loyaltySummary = null;
+    let loyaltyUid = '';
+    let loyaltyLoading = false;
     let currentAuthUser = null;
     let selectedPreviewTier = '';
+
+    const DEFAULT_LOYALTY_CONFIG = {
+        enabled: true,
+        spendPerPoint: 25,
+        pointValue: 1,
+        expiryMonths: 24,
+        maxRedeemPercent: 30,
+        minRedeemPoints: 20,
+        earnAfterDiscount: true,
+        earnOnRedeemedAmount: false,
+        excludedCategories: ['เครื่องดื่มแอลกอฮอล์', 'ฝากเงิน', 'โปรแรง'],
+        tierMultipliers: { Silver: 1, Gold: 1.25, Platinum: 1.5 }
+    };
 
     function isEnglishPage() {
         return location.pathname.includes('-en');
@@ -48,6 +66,43 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         return '฿' + (Number(value) || 0).toLocaleString('en-US');
     }
 
+    function numberValue(value, fallback = 0) {
+        const number = Number(value);
+        return Number.isFinite(number) ? number : fallback;
+    }
+
+    function normalizeLoyaltyConfig(raw = {}) {
+        const tierMultipliers = raw.tierMultipliers || {};
+        const excludedCategories = Array.isArray(raw.excludedCategories)
+            ? raw.excludedCategories
+            : String(raw.excludedCategories || '')
+                .split(',')
+                .map(item => item.trim())
+                .filter(Boolean);
+        return {
+            ...DEFAULT_LOYALTY_CONFIG,
+            ...raw,
+            enabled: raw.enabled !== false,
+            spendPerPoint: Math.max(1, numberValue(raw.spendPerPoint, DEFAULT_LOYALTY_CONFIG.spendPerPoint)),
+            pointValue: Math.max(0, numberValue(raw.pointValue, DEFAULT_LOYALTY_CONFIG.pointValue)),
+            expiryMonths: Math.max(0, Math.round(numberValue(raw.expiryMonths, DEFAULT_LOYALTY_CONFIG.expiryMonths))),
+            maxRedeemPercent: Math.min(100, Math.max(0, numberValue(raw.maxRedeemPercent, DEFAULT_LOYALTY_CONFIG.maxRedeemPercent))),
+            minRedeemPoints: Math.max(0, Math.round(numberValue(raw.minRedeemPoints, DEFAULT_LOYALTY_CONFIG.minRedeemPoints))),
+            earnAfterDiscount: raw.earnAfterDiscount !== false,
+            earnOnRedeemedAmount: raw.earnOnRedeemedAmount === true,
+            excludedCategories,
+            tierMultipliers: {
+                Silver: numberValue(tierMultipliers.Silver, DEFAULT_LOYALTY_CONFIG.tierMultipliers.Silver),
+                Gold: numberValue(tierMultipliers.Gold, DEFAULT_LOYALTY_CONFIG.tierMultipliers.Gold),
+                Platinum: numberValue(tierMultipliers.Platinum, DEFAULT_LOYALTY_CONFIG.tierMultipliers.Platinum)
+            }
+        };
+    }
+
+    function getLoyaltyConfig() {
+        return normalizeLoyaltyConfig(loyaltyConfig || DEFAULT_LOYALTY_CONFIG);
+    }
+
     function formatDate(value) {
         if (!value) return '-';
         const date = value?.toDate ? value.toDate() : new Date(value);
@@ -73,6 +128,17 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             totalSpent: 'Total Spent',
             visits: 'Visits',
             cartItems: 'Cart Items',
+            pointValue: 'Point Value',
+            loyaltyWallet: 'Eden Points Wallet',
+            loyaltyRule: 'Earning & redemption rules',
+            loyaltyHistory: 'Recent point history',
+            loyaltyLoading: 'Loading loyalty information...',
+            noLoyaltyHistory: 'No point movement yet.',
+            pointsAsCash: '{points} points = THB {value} credit',
+            earnRule: 'Earn 1 point for every THB {spend}. Gold x{gold}, Platinum x{platinum}.',
+            redeemRule: 'Redeem from {min} points, up to {percent}% of each bill.',
+            expiryRule: 'Points expire in {months} months.',
+            noExpiryRule: 'Points do not expire.',
             membership: 'Membership Level',
             benefits: 'Your Benefits',
             tierPreview: 'Preview membership tiers',
@@ -146,6 +212,17 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             totalSpent: 'ยอดใช้จ่ายสะสม',
             visits: 'จำนวนครั้งที่ใช้บริการ',
             cartItems: 'สินค้าในตะกร้า',
+            pointValue: 'มูลค่าแต้ม',
+            loyaltyWallet: 'กระเป๋าแต้ม Eden',
+            loyaltyRule: 'กติกาสะสมและใช้แต้ม',
+            loyaltyHistory: 'ประวัติแต้มล่าสุด',
+            loyaltyLoading: 'กำลังโหลดข้อมูลแต้ม...',
+            noLoyaltyHistory: 'ยังไม่มีรายการแต้ม',
+            pointsAsCash: '{points} คะแนน = เครดิต {value} บาท',
+            earnRule: 'ซื้อครบ {spend} บาท ได้ 1 คะแนน Gold x{gold}, Platinum x{platinum}',
+            redeemRule: 'ใช้แต้มขั้นต่ำ {min} คะแนน และใช้ได้ไม่เกิน {percent}% ต่อบิล',
+            expiryRule: 'แต้มหมดอายุใน {months} เดือน',
+            noExpiryRule: 'แต้มไม่มีวันหมดอายุ',
             membership: 'ระดับสมาชิก',
             benefits: 'สิทธิประโยชน์ของคุณ',
             tierPreview: 'พรีวิวระดับสมาชิก',
@@ -269,6 +346,34 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         }
     }
 
+    async function refreshLoyaltyData(user) {
+        if (!db || !user?.uid || loyaltyLoading || loyaltyUid === user.uid) return;
+        loyaltyLoading = true;
+        try {
+            const [configSnap, summarySnap, ledgerSnap] = await Promise.all([
+                getDoc(doc(db, 'site_settings', 'loyalty')),
+                getDoc(doc(db, 'member_summaries', user.uid)),
+                getDocs(query(collection(db, 'point_ledger'), where('userId', '==', user.uid)))
+            ]);
+            loyaltyConfig = configSnap.exists() ? normalizeLoyaltyConfig(configSnap.data()) : normalizeLoyaltyConfig();
+            loyaltySummary = summarySnap.exists() ? summarySnap.data() : null;
+            loyaltyLedger = ledgerSnap.docs
+                .map(item => ({ id: item.id, ...item.data() }))
+                .sort((a, b) => {
+                    const left = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
+                    const right = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
+                    return right - left;
+                })
+                .slice(0, 8);
+            loyaltyUid = user.uid;
+            renderProfile();
+        } catch (error) {
+            console.warn('Unable to load loyalty information:', error);
+        } finally {
+            loyaltyLoading = false;
+        }
+    }
+
     function cartCount() {
         const cart = readJSON(CART_KEY, []);
         return Array.isArray(cart) ? cart.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) : 0;
@@ -309,7 +414,15 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         const orderCount = paidLikeOrders.length;
         const bookingCount = bookings.length;
         const computedVisitCount = orderCount + bookingCount;
-        const computedPoints = Math.floor(orderSpent / 10);
+        const config = getLoyaltyConfig();
+        const computedPoints = config.enabled ? Math.floor(orderSpent / config.spendPerPoint) : 0;
+        const summaryPoints = loyaltySummary?.pointsBalance;
+        const savedPoints = profileValue('points', null);
+        const points = summaryPoints != null
+            ? Math.max(0, Number(summaryPoints) || 0)
+            : savedPoints != null
+                ? Math.max(0, Number(savedPoints) || 0)
+                : computedPoints;
 
         return {
             id: user.uid,
@@ -317,7 +430,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             email: profileValue('email', user.email || ''),
             avatarUrl: profileValue('photoURL', user.avatar || ''),
             memberCode: profileValue('memberCode', memberId(user)),
-            points: Math.max(Number(profileValue('points', 0)) || 0, computedPoints),
+            points,
             totalSpent: Math.max(Number(profileValue('totalSpent', 0)) || 0, orderSpent),
             visitCount: Math.max(Number(profileValue('visitCount', 0)) || 0, computedVisitCount),
             orderCount: Math.max(Number(profileValue('orderCount', 0)) || 0, orderCount),
@@ -387,6 +500,57 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                     <div class="member-progress-text"><span>${escapeHTML(progressLabel)}</span><span>${percent}%</span></div>
                     <div class="member-progress-bar"><div class="member-progress-fill" style="width:${percent}%"></div></div>
                     <p class="member-progress-goal">${escapeHTML(progressMessage(progress, labels))}</p>
+                </div>
+            </div>
+        `;
+    }
+
+    function renderLoyaltyWallet(membershipUser, labels) {
+        const config = getLoyaltyConfig();
+        const pointCashValue = Math.floor((Number(membershipUser.points) || 0) * config.pointValue);
+        const earnRule = labels.earnRule
+            .replace('{spend}', formatBaht(config.spendPerPoint))
+            .replace('{gold}', config.tierMultipliers.Gold)
+            .replace('{platinum}', config.tierMultipliers.Platinum);
+        const redeemRule = labels.redeemRule
+            .replace('{min}', formatNumber(config.minRedeemPoints))
+            .replace('{percent}', formatNumber(config.maxRedeemPercent));
+        const expiryRule = config.expiryMonths
+            ? labels.expiryRule.replace('{months}', formatNumber(config.expiryMonths))
+            : labels.noExpiryRule;
+        const walletValue = labels.pointsAsCash
+            .replace('{points}', formatNumber(membershipUser.points))
+            .replace('{value}', formatBaht(pointCashValue));
+        const historyRows = loyaltyLedger.map(row => {
+            const delta = Number(row.pointsDelta) || 0;
+            const prefix = delta > 0 ? '+' : '';
+            const reason = row.reason || row.type || '-';
+            return `
+                <div class="membership-rule-row">
+                    <span>${escapeHTML(formatDate(row.createdAt))}</span>
+                    <strong style="color:${delta < 0 ? '#b42318' : 'var(--primary-color)'};">${escapeHTML(prefix + formatNumber(delta))}</strong>
+                    <em>${escapeHTML(reason)}</em>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="membership-panel" id="profile-loyalty-wallet">
+                <h2>${escapeHTML(labels.loyaltyWallet)}</h2>
+                <div class="stats-grid">
+                    <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.points)}</div><div class="stat-label">${escapeHTML(labels.points)}</div></div>
+                    <div class="stat-box"><div class="stat-value">฿${formatBaht(pointCashValue)}</div><div class="stat-label">${escapeHTML(labels.pointValue)}</div></div>
+                </div>
+                <p class="membership-rule-lead">${escapeHTML(walletValue)}</p>
+                <div class="benefit-grid">
+                    <div class="benefit-pill">${escapeHTML(earnRule)}</div>
+                    <div class="benefit-pill">${escapeHTML(redeemRule)}</div>
+                    <div class="benefit-pill">${escapeHTML(expiryRule)}</div>
+                </div>
+                <h3 style="margin:24px 0 10px;">${escapeHTML(labels.loyaltyHistory)}</h3>
+                ${loyaltyLoading ? `<p class="membership-rule-lead">${escapeHTML(labels.loyaltyLoading)}</p>` : ''}
+                <div class="membership-rule-list">
+                    ${historyRows || `<p class="membership-rule-lead">${escapeHTML(labels.noLoyaltyHistory)}</p>`}
                 </div>
             </div>
         `;
@@ -619,6 +783,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                     </div>
 
                     ${renderMemberCard(user, labels, membershipUser)}
+                    ${renderLoyaltyWallet(membershipUser, labels)}
                     ${renderTierPreview(tier, labels)}
 
                     <div class="stats-grid">
@@ -653,6 +818,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                 </section>
             </div>
         `;
+        refreshLoyaltyData(user);
         refreshCloudProfile(user);
         refreshCloudHistory(user);
     }
@@ -762,6 +928,10 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                 cloudHistoryUid = '';
                 cloudProfile = null;
                 cloudProfileUid = '';
+                loyaltyConfig = null;
+                loyaltyLedger = [];
+                loyaltySummary = null;
+                loyaltyUid = '';
                 renderProfile();
             });
         }
@@ -774,6 +944,10 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         cloudHistoryUid = '';
         cloudProfile = null;
         cloudProfileUid = '';
+        loyaltyConfig = null;
+        loyaltyLedger = [];
+        loyaltySummary = null;
+        loyaltyUid = '';
         renderProfile();
     });
 })();

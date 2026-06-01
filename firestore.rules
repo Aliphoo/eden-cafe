@@ -57,7 +57,7 @@ service cloud.firestore {
     }
     function isValidAdminOrderCreate() {
       return request.resource.data.keys().hasOnly([
-          'id', 'date', 'items', 'total', 'totalAmount', 'uid', 'timestamp',
+          'id', 'date', 'businessDate', 'businessDateLabel', 'items', 'total', 'totalAmount', 'uid', 'timestamp',
            'customerName', 'phone', 'address', 'status',
            'source', 'orderType', 'receiptNo', 'paymentStatus', 'paymentMethod',
           'paymentLabel', 'customerUid', 'customerEmail', 'customerLineId',
@@ -73,6 +73,8 @@ service cloud.firestore {
         && request.resource.data.uid == request.auth.uid
         && isShortString(request.resource.data.id, 60)
         && isShortString(request.resource.data.date, 60)
+        && (!request.resource.data.keys().hasAny(['businessDate']) || (request.resource.data.businessDate is string && request.resource.data.businessDate.matches('^\\d{4}-\\d{2}-\\d{2}$')))
+        && (!request.resource.data.keys().hasAny(['businessDateLabel']) || (request.resource.data.businessDateLabel is string && request.resource.data.businessDateLabel.size() <= 60))
         && request.resource.data.items is list
         && request.resource.data.items.size() > 0
         && request.resource.data.items.size() <= 100
@@ -124,7 +126,7 @@ service cloud.firestore {
     function isValidPosOrderCreate() {
       return (hasAdminPermission('pos') || hasAdminPermission('orders'))
         && request.resource.data.keys().hasOnly([
-          'id', 'date', 'items', 'total', 'totalAmount', 'uid', 'timestamp',
+          'id', 'date', 'businessDate', 'businessDateLabel', 'items', 'total', 'totalAmount', 'uid', 'timestamp',
           'customerName', 'phone', 'address', 'status',
           'source', 'orderType', 'receiptNo', 'paymentStatus', 'paymentMethod',
           'paymentLabel', 'customerUid', 'customerEmail', 'customerLineId',
@@ -145,6 +147,8 @@ service cloud.firestore {
         && request.resource.data.orderType == 'pos'
         && isShortString(request.resource.data.id, 80)
         && isShortString(request.resource.data.date, 80)
+        && (!request.resource.data.keys().hasAny(['businessDate']) || (request.resource.data.businessDate is string && request.resource.data.businessDate.matches('^\\d{4}-\\d{2}-\\d{2}$')))
+        && (!request.resource.data.keys().hasAny(['businessDateLabel']) || (request.resource.data.businessDateLabel is string && request.resource.data.businessDateLabel.size() <= 60))
         && request.resource.data.items is list
         && request.resource.data.items.size() > 0
         && request.resource.data.items.size() <= 200
@@ -264,7 +268,7 @@ service cloud.firestore {
         && request.resource.data.orderType == 'pos'
         && request.resource.data.uid is string
         && affected.hasOnly([
-          'id', 'date', 'items', 'total', 'totalAmount', 'uid',
+          'id', 'date', 'businessDate', 'businessDateLabel', 'items', 'total', 'totalAmount', 'uid',
           'source', 'orderType',
           'customerName', 'phone', 'address', 'status',
           'receiptNo', 'paymentStatus', 'paymentMethod', 'paymentLabel',
@@ -295,6 +299,8 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'qr', 'card', 'other'])
         && (!request.resource.data.keys().hasAny(['paymentLabel']) || (request.resource.data.paymentLabel is string && request.resource.data.paymentLabel.size() <= 60))
         && (!request.resource.data.keys().hasAny(['receiptNo']) || (request.resource.data.receiptNo is string && request.resource.data.receiptNo.size() > 0 && request.resource.data.receiptNo.size() <= 80))
+        && (!request.resource.data.keys().hasAny(['businessDate']) || (request.resource.data.businessDate is string && request.resource.data.businessDate.matches('^\\d{4}-\\d{2}-\\d{2}$')))
+        && (!request.resource.data.keys().hasAny(['businessDateLabel']) || (request.resource.data.businessDateLabel is string && request.resource.data.businessDateLabel.size() <= 60))
         && (!request.resource.data.keys().hasAny(['customerName']) || (request.resource.data.customerName is string && request.resource.data.customerName.size() <= 120))
         && (!request.resource.data.keys().hasAny(['phone']) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40))
         && (!request.resource.data.keys().hasAny(['address']) || (request.resource.data.address is string && request.resource.data.address.size() <= 250))
@@ -356,7 +362,8 @@ service cloud.firestore {
       allow read: if true;
       allow write: if (docId == 'footer' && hasAdminPermission('footer'))
         || (docId == 'promptpay' && hasAdminPermission('promptpay'))
-        || (docId == 'marketing' && hasAdminPermission('marketing'));
+        || (docId == 'marketing' && hasAdminPermission('marketing'))
+        || (docId == 'loyalty' && hasAdminPermission('loyalty'));
     }
     match /categories/{docId} {
       allow read: if true;
@@ -366,6 +373,42 @@ service cloud.firestore {
       allow read: if true;
       allow create, delete: if hasAdminPermission('products');
       allow update: if hasAdminPermission('products') || isValidPosProductStockUpdate();
+    }
+    match /pos_discounts/{docId} {
+      allow read: if true;
+      allow create, update: if hasAdminPermission('discounts')
+        && request.resource.data.keys().hasOnly([
+          'id', 'label', 'type', 'value', 'active', 'order',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ])
+        && (!request.resource.data.keys().hasAny(['id']) || request.resource.data.id is string)
+        && request.resource.data.label is string
+        && request.resource.data.label.size() > 0
+        && request.resource.data.label.size() <= 80
+        && request.resource.data.type in ['percent', 'amount']
+        && request.resource.data.value is number
+        && request.resource.data.value > 0
+        && request.resource.data.value <= 100000
+        && request.resource.data.active is bool
+        && request.resource.data.order is number
+        && (!request.resource.data.keys().hasAny(['createdAt']) || request.resource.data.createdAt is timestamp)
+        && (!request.resource.data.keys().hasAny(['updatedAt']) || request.resource.data.updatedAt is timestamp)
+        && (!request.resource.data.keys().hasAny(['createdBy']) || request.resource.data.createdBy == request.auth.uid)
+        && (!request.resource.data.keys().hasAny(['updatedBy']) || request.resource.data.updatedBy == request.auth.uid);
+      allow delete: if hasAdminPermission('discounts');
+    }
+    match /point_ledger/{docId} {
+      allow read: if hasAdminPermission('loyalty')
+        || hasAdminPermission('members')
+        || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create, update, delete: if hasAdminPermission('loyalty');
+    }
+    match /member_summaries/{userId} {
+      allow read: if hasAdminPermission('loyalty')
+        || hasAdminPermission('members')
+        || hasAdminPermission('pos')
+        || (isSignedIn() && request.auth.uid == userId);
+      allow write: if hasAdminPermission('loyalty');
     }
     match /google_reviews/{docId} {
       allow read: if true;
@@ -393,7 +436,7 @@ service cloud.firestore {
       allow delete: if isOwner() && request.auth.uid != userId;
     }
     match /users/{userId} {
-      allow read: if hasAdminPermission('members') || hasAdminPermission('pos') || (isSignedIn() && request.auth.uid == userId);
+      allow read: if hasAdminPermission('members') || hasAdminPermission('loyalty') || hasAdminPermission('pos') || (isSignedIn() && request.auth.uid == userId);
       allow write: if hasAdminPermission('members');
       allow create: if isSignedIn()
         && request.auth.uid == userId
