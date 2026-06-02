@@ -1,14 +1,14 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="th">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Eden Shop | ร้านค้าออนไลน์</title>
     <link rel="icon" type="image/webp" href="Images/Logo.webp">
-    
+
     <meta name="description" content="เลือกซื้อเมล็ดกาแฟพิเศษ ชา เบเกอรี่ และของที่ระลึกจาก Eden Cafe จัดส่งทั่วประเทศ">
     <link rel="stylesheet" href="style.css?v=3">
-    
+
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -41,7 +41,7 @@
                     <li><a href="/shop" class="active">ร้านค้า</a></li>
                     <li><a href="/booking">ระบบจอง</a></li>
                     <li><a href="/blog">บทความ (Blog)</a></li>
-                    <li><a href="/#faq">คำถามที่พบบ่อย</a></li>
+                    <li><a href="/faq">คำถามที่พบบ่อย</a></li>
                 </ul>
             </nav>
             <div class="nav-actions">
@@ -71,6 +71,16 @@
             <!-- Online Products -->
             <div id="online-shop" class="shop-section active"></div>
         </div>
+            <section id="faq" class="faq faq-page-preview">
+                <div class="container">
+                    <div style="text-align:center; margin-bottom: 28px;">
+                        <p style="color: var(--accent-color); font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 10px;">FAQ</p>
+                        <h2>คำถามยอดฮิตเกี่ยวกับร้านค้าออนไลน์</h2>
+                        <p style="color:#667; max-width: 680px; margin: 10px auto 0;">รวมคำตอบเรื่องสินค้าออนไลน์ การจัดส่ง การชำระเงิน และการดูแลออเดอร์</p>
+                    </div>
+                    <div class="faq-grid" data-faq-page="shop"></div>
+                </div>
+            </section>
     </main>
 
     <!-- Shopping Cart Slide-out -->
@@ -203,6 +213,7 @@
             });
         }
     </script>
+    <script type="module" src="js/faq.js?v=1"></script>
     <script type="module" src="js/auth.js?v=10"></script>
     <!-- Cookie Consent Banner -->
     <div id="cookie-consent"

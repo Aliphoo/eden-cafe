@@ -427,6 +427,41 @@
         
 
         /* Content Sections */
+
+        .faq-manager-shell { display: flex; flex-direction: column; gap: 22px; }
+        .faq-admin-grid { display: grid; grid-template-columns: minmax(320px, 0.9fr) minmax(420px, 1.4fr); gap: 24px; align-items: start; }
+        .faq-admin-card { background: #fbfff8; border: 1px solid #dcebdd; border-radius: 16px; padding: 22px; box-shadow: 0 10px 24px rgba(24, 94, 47, 0.06); }
+        .faq-admin-card h3 { margin: 0 0 14px; color: #123528; }
+        .faq-admin-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+        .faq-admin-form-grid .full { grid-column: 1 / -1; }
+        .faq-admin-form input[type="text"], .faq-admin-form input[type="number"], .faq-admin-form select, .faq-admin-form textarea,
+        .faq-filter-row input, .faq-filter-row select { width: 100%; border: 1px solid #d7e5d7; border-radius: 10px; padding: 11px 12px; font: inherit; background: #fff; color: #1d2d22; }
+        .faq-admin-form textarea { resize: vertical; min-height: 120px; }
+        .faq-fieldset { border: 1px solid #dcebdd; border-radius: 14px; padding: 14px; background: #fff; }
+        .faq-fieldset legend { padding: 0 8px; font-weight: 700; color: #184b34; }
+        .faq-check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .faq-check-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #e2eee3; border-radius: 12px; background: #f8fff7; font-weight: 700; color: #21362a; }
+        .faq-page-order-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+        .faq-page-order-grid label { display: grid; gap: 6px; font-weight: 700; color: #334; }
+        .faq-form-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+        .faq-form-actions button { border: 0; border-radius: 10px; padding: 12px 16px; font-weight: 800; cursor: pointer; }
+        .faq-save-btn { background: #11843a; color: #fff; }
+        .faq-reset-btn { background: #eef5ef; color: #19472f; }
+        .faq-page-summary-grid { display: grid; grid-template-columns: repeat(5, minmax(110px, 1fr)); gap: 12px; }
+        .faq-page-summary-card { border: 1px solid #e2eee3; border-radius: 14px; padding: 14px; background: #fff; }
+        .faq-page-summary-card strong { display: block; color: #0b4b2c; font-size: 1.05rem; }
+        .faq-page-summary-card span { display: block; color: #667; margin-top: 4px; }
+        .faq-filter-row { display: grid; grid-template-columns: 1.4fr 0.8fr 0.8fr 0.8fr; gap: 12px; margin: 16px 0; }
+        .faq-badge-row { display: flex; gap: 6px; flex-wrap: wrap; }
+        .faq-badge { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 5px 9px; font-size: 0.78rem; font-weight: 800; background: #eef8ef; color: #116437; border: 1px solid #d6ead8; }
+        .faq-badge.pinned { background: #fff7d9; color: #8b6400; border-color: #f0dc8a; }
+        .faq-badge.draft { background: #f3f4f6; color: #5f6670; border-color: #e5e7eb; }
+        .faq-question-cell strong { color: #132b20; }
+        .faq-question-cell small { display: block; color: #778; margin-top: 4px; }
+        .faq-answer-preview { max-height: 64px; overflow: hidden; color: #4d5d52; line-height: 1.5; }
+        @media (max-width: 1180px) { .faq-admin-grid { grid-template-columns: 1fr; } .faq-filter-row { grid-template-columns: 1fr 1fr; } .faq-page-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 720px) { .faq-admin-form-grid, .faq-check-grid, .faq-page-order-grid, .faq-filter-row { grid-template-columns: 1fr; } .faq-page-summary-grid { grid-template-columns: 1fr; } }
+
         .content-section { display: none; }
         .content-section.active { display: block; }
 
@@ -1482,27 +1517,104 @@
 
         <!-- FAQs Section -->
         <div id="faqs" class="content-section">
-            <div class="section-container">
+            <div class="section-container faq-manager-shell">
                 <div class="section-header">
-                    <h2>จัดการคำถามที่พบบ่อย (FAQ)</h2>
-                    <button class="btn-action" onclick="openFaqModal()">+ เพิ่มคำถามใหม่</button>
+                    <div>
+                        <h2>จัดการคำถามที่พบบ่อย (FAQ)</h2>
+                        <p style="color:#667; margin-top:8px;">คุมคำถามทั้งหมดจากหลังบ้าน เลือกได้ว่าจะให้ไปแสดงหน้า Home, เมนู, ร้านค้า, ระบบจอง หรือหน้า FAQ รวม</p>
+                    </div>
+                    <button class="btn-action" type="button" onclick="resetFaqForm()">+ เพิ่มคำถามใหม่</button>
                 </div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>ลำดับ</th>
-                            <th style="width: 30%">คำถาม</th>
-                            <th style="width: 40%">คำตอบ</th>
-                            <th>จัดการ</th>
-                        </tr>
-                    </thead>
-                    <tbody id="faqs-table-body">
-                        <!-- Data injected via JS -->
-                    </tbody>
-                </table>
+
+                <div class="faq-page-summary-grid" id="faq-page-summary">
+                    <!-- FAQ page summary injected via JS -->
+                </div>
+
+                <div class="faq-admin-grid">
+                    <form id="faqForm" class="faq-admin-card faq-admin-form">
+                        <input type="hidden" id="faqId">
+                        <h3>เพิ่ม / แก้ไขคำถาม</h3>
+                        <div class="faq-admin-form-grid">
+                            <div class="full">
+                                <label for="faqQuestion">คำถาม</label>
+                                <input type="text" id="faqQuestion" placeholder="เช่น จองโต๊ะต้องมัดจำไหม?" required>
+                            </div>
+                            <div class="full">
+                                <label for="faqAnswer">คำตอบ</label>
+                                <textarea id="faqAnswer" rows="5" placeholder="คำตอบที่ต้องการให้ลูกค้าเห็น" required></textarea>
+                            </div>
+                            <div>
+                                <label for="faqCategory">หมวดหมู่</label>
+                                <select id="faqCategory"></select>
+                            </div>
+                            <div>
+                                <label for="faqStatus">สถานะ</label>
+                                <select id="faqStatus">
+                                    <option value="published">เผยแพร่</option>
+                                    <option value="draft">ฉบับร่าง</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="faqOrder">ลำดับรวม</label>
+                                <input type="number" id="faqOrder" value="0" min="0" step="1">
+                            </div>
+                            <div>
+                                <label for="faqPopularOrder">ลำดับในหน้า FAQ รวม</label>
+                                <input type="number" id="faqPopularOrder" value="0" min="0" step="1">
+                            </div>
+                            <label class="faq-check-card full">
+                                <input type="checkbox" id="faqIsPopular">
+                                <span>คำถามยอดฮิต / แสดงในพรีวิว 12 คำถามบนหน้า FAQ รวม</span>
+                            </label>
+                        </div>
+
+                        <fieldset class="faq-fieldset" style="margin-top:16px;">
+                            <legend>เลือกหน้าเพจที่จะให้แสดง</legend>
+                            <div class="faq-check-grid" id="faqTargetPages"></div>
+                        </fieldset>
+
+                        <fieldset class="faq-fieldset" style="margin-top:16px;">
+                            <legend>ตรึงคำถามที่หน้าเพจ</legend>
+                            <p style="margin:0 0 10px; color:#667;">คำถามที่ตรึงจะถูกดึงขึ้นก่อน และแต่ละหน้าเว็บจะแสดงแค่ 3 คำถาม</p>
+                            <div class="faq-check-grid" id="faqPinnedPages"></div>
+                            <div class="faq-page-order-grid" id="faqPageOrders"></div>
+                        </fieldset>
+
+                        <div class="faq-form-actions">
+                            <button type="submit" class="faq-save-btn">บันทึก FAQ</button>
+                            <button type="button" class="faq-reset-btn" onclick="resetFaqForm()">ล้างฟอร์ม</button>
+                        </div>
+                    </form>
+
+                    <div class="faq-admin-card">
+                        <h3>รายการคำถามทั้งหมด</h3>
+                        <div class="faq-filter-row">
+                            <input type="search" id="faqSearch" placeholder="ค้นหาคำถาม / คำตอบ / หมวดหมู่">
+                            <select id="faqPageFilter"></select>
+                            <select id="faqCategoryFilter"></select>
+                            <select id="faqStatusFilter">
+                                <option value="all">ทุกสถานะ</option>
+                                <option value="published">เผยแพร่</option>
+                                <option value="draft">ฉบับร่าง</option>
+                            </select>
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>คำถาม</th>
+                                    <th>หน้าเพจ</th>
+                                    <th>สถานะ</th>
+                                    <th>จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="faqs-table-body">
+                                <!-- Data injected via JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
-
         <!-- PromptPay Settings Section -->
         <div id="promptpay" class="content-section">
             <div class="section-container promptpay-admin-shell">
@@ -2165,29 +2277,7 @@
         </div>
     </div>
 
-    <!-- FAQ Modal -->
-    <div id="faqModal" class="modal">
-        <div class="modal-content" style="max-width: 600px;">
-            <span class="close-modal" onclick="closeFaqModal()">&times;</span>
-            <h2 id="faqModalTitle">เพิ่มคำถามที่พบบ่อย</h2>
-            <form id="faqForm">
-                <input type="hidden" id="faqId">
-                <div class="form-group">
-                    <label for="faqQuestion">คำถาม (Question)</label>
-                    <input type="text" id="faqQuestion" required>
-                </div>
-                <div class="form-group">
-                    <label for="faqAnswer">คำตอบ (Answer)</label>
-                    <textarea id="faqAnswer" rows="4" required></textarea>
-                </div>
-                <div class="form-group">
-                    <label for="faqOrder">ลำดับการแสดงผล (ตัวเลข)</label>
-                    <input type="number" id="faqOrder" value="0" required>
-                </div>
-                <button type="submit" class="btn-submit">บันทึกข้อมูล</button>
-            </form>
-        </div>
-    </div>
+    <!-- Legacy FAQ modal removed: FAQ is now managed inline in the FAQ section. -->
 
     <!-- Member Detail Modal -->
     <div id="memberModal" class="modal">

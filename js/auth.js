@@ -174,6 +174,7 @@ async function loadProducts() {
 async function loadFaqs() {
     const container = document.getElementById('faq-container');
     if (!container || !db) return;
+    if (container.dataset.faqPage || container.dataset.faqManaged === 'true' || window.EdenFAQ) return;
 
     try {
         const q = query(collection(db, 'faqs'), orderBy('order', 'asc'));

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="th">
 
 <head>
@@ -135,7 +135,7 @@
                     <li><a href="/shop">ร้านค้า</a></li>
                     <li><a href="/booking">ระบบจอง</a></li>
                     <li><a href="/blog">บทความ (Blog)</a></li>
-                    <li><a href="#faq">คำถามที่พบบ่อย</a></li>
+                    <li><a href="/faq">คำถามที่พบบ่อย</a></li>
                 </ul>
             </nav>
             <div class="nav-actions">
@@ -308,7 +308,7 @@
         <section id="faq" class="faq">
             <div class="container">
                 <h2>คำถามที่พบบ่อย (FAQ)</h2>
-                <div class="faq-grid" id="faq-container">
+                <div class="faq-grid" id="faq-container" data-faq-page="home">
                     <p style="text-align:center; width:100%;">กำลังโหลดคำถามที่พบบ่อย...</p>
                 </div>
             </div>
@@ -427,6 +427,7 @@
             });
         }
     </script>
+    <script type="module" src="js/faq.js?v=1"></script>
     <script type="module" src="js/auth.js?v=10"></script>
     <script type="module" src="js/home-featured-products.js?v=2"></script>
     <!-- Cookie Consent Banner -->

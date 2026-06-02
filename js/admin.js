@@ -6645,111 +6645,337 @@ window.deleteMemberStaffAccess = async (uid) => {
 // FAQ Management Logic
 // ==========================================
 let faqsData = {};
+const FAQ_PAGE_OPTIONS = Object.freeze([
+    { key: 'home', label: 'Home / Index' },
+    { key: 'menu', label: 'เมนู' },
+    { key: 'shop', label: 'ร้านค้า' },
+    { key: 'booking', label: 'ระบบจอง' },
+    { key: 'faq', label: 'FAQ รวม' }
+]);
+const FAQ_CATEGORY_OPTIONS = Object.freeze([
+    { key: 'general', label: 'ทั่วไป' },
+    { key: 'home', label: 'หน้า Home' },
+    { key: 'menu', label: 'เมนู' },
+    { key: 'shop', label: 'ร้านค้า' },
+    { key: 'booking', label: 'ระบบจอง' },
+    { key: 'payment', label: 'การชำระเงิน' },
+    { key: 'membership', label: 'สมาชิก' },
+    { key: 'delivery', label: 'จัดส่ง / รับหน้าร้าน' },
+    { key: 'parking', label: 'ที่จอดรถ / การเดินทาง' },
+    { key: 'wellness', label: 'Wellness' }
+]);
+const FAQ_STATUS_LABELS = Object.freeze({
+    published: 'เผยแพร่',
+    draft: 'ฉบับร่าง'
+});
+let faqFilters = {
+    search: '',
+    page: 'all',
+    category: 'all',
+    status: 'all'
+};
 
-const faqModal = document.getElementById('faqModal');
-const faqForm = document.getElementById('faqForm');
+function getFaqPageLabel(pageKey) {
+    return FAQ_PAGE_OPTIONS.find(page => page.key === pageKey)?.label || pageKey || '-';
+}
+
+function getFaqCategoryLabel(categoryKey) {
+    return FAQ_CATEGORY_OPTIONS.find(category => category.key === categoryKey)?.label || categoryKey || 'ทั่วไป';
+}
+
+function normalizeFaqRecord(raw = {}, id = '') {
+    const legacyPublished = raw.published !== false;
+    const targetPages = Array.isArray(raw.targetPages) && raw.targetPages.length
+        ? raw.targetPages.filter(page => FAQ_PAGE_OPTIONS.some(option => option.key === page))
+        : ['home', 'faq'];
+    const pinnedPages = raw.pinnedPages && typeof raw.pinnedPages === 'object' ? raw.pinnedPages : {};
+    const pageOrder = raw.pageOrder && typeof raw.pageOrder === 'object' ? raw.pageOrder : {};
+    const hasPopularField = Object.prototype.hasOwnProperty.call(raw, 'isPopular');
+
+    return {
+        id,
+        question: String(raw.question || '').trim(),
+        answer: String(raw.answer || '').trim(),
+        category: String(raw.category || 'general').trim() || 'general',
+        status: String(raw.status || (legacyPublished ? 'published' : 'draft')).trim() === 'draft' ? 'draft' : 'published',
+        order: safeNumber(raw.order, 0),
+        targetPages,
+        pinnedPages,
+        pageOrder,
+        isPopular: hasPopularField ? Boolean(raw.isPopular) : targetPages.includes('faq'),
+        popularOrder: safeNumber(raw.popularOrder, safeNumber(raw.order, 0)),
+        createdAt: raw.createdAt || '',
+        updatedAt: raw.updatedAt || ''
+    };
+}
+
+function renderFaqControls() {
+    const categorySelect = document.getElementById('faqCategory');
+    const categoryFilter = document.getElementById('faqCategoryFilter');
+    if (categorySelect && !categorySelect.dataset.ready) {
+        categorySelect.innerHTML = FAQ_CATEGORY_OPTIONS.map(category => `<option value="${category.key}">${escapeHTML(category.label)}</option>`).join('');
+        categorySelect.dataset.ready = 'true';
+    }
+    if (categoryFilter && !categoryFilter.dataset.ready) {
+        categoryFilter.innerHTML = '<option value="all">ทุกหมวดหมู่</option>' + FAQ_CATEGORY_OPTIONS.map(category => `<option value="${category.key}">${escapeHTML(category.label)}</option>`).join('');
+        categoryFilter.dataset.ready = 'true';
+    }
+
+    const pageFilter = document.getElementById('faqPageFilter');
+    if (pageFilter && !pageFilter.dataset.ready) {
+        pageFilter.innerHTML = '<option value="all">ทุกหน้าเพจ</option>' + FAQ_PAGE_OPTIONS.map(page => `<option value="${page.key}">${escapeHTML(page.label)}</option>`).join('');
+        pageFilter.dataset.ready = 'true';
+    }
+
+    const targetContainer = document.getElementById('faqTargetPages');
+    if (targetContainer && !targetContainer.dataset.ready) {
+        targetContainer.innerHTML = FAQ_PAGE_OPTIONS.map(page => `
+            <label class="faq-check-card">
+                <input type="checkbox" data-faq-page-target="${page.key}">
+                <span>${escapeHTML(page.label)}</span>
+            </label>
+        `).join('');
+        targetContainer.dataset.ready = 'true';
+    }
+
+    const pinnedContainer = document.getElementById('faqPinnedPages');
+    if (pinnedContainer && !pinnedContainer.dataset.ready) {
+        pinnedContainer.innerHTML = FAQ_PAGE_OPTIONS.map(page => `
+            <label class="faq-check-card">
+                <input type="checkbox" data-faq-pinned-page="${page.key}">
+                <span>ตรึงที่ ${escapeHTML(page.label)}</span>
+            </label>
+        `).join('');
+        pinnedContainer.dataset.ready = 'true';
+    }
+
+    const orderContainer = document.getElementById('faqPageOrders');
+    if (orderContainer && !orderContainer.dataset.ready) {
+        orderContainer.innerHTML = FAQ_PAGE_OPTIONS.map(page => `
+            <label>
+                ลำดับใน ${escapeHTML(page.label)}
+                <input type="number" min="0" step="1" value="0" data-faq-page-order="${page.key}">
+            </label>
+        `).join('');
+        orderContainer.dataset.ready = 'true';
+    }
+}
+
+function getFaqFormData() {
+    const targetPages = Array.from(document.querySelectorAll('[data-faq-page-target]:checked')).map(input => input.dataset.faqPageTarget);
+    const pinnedPages = {};
+    Array.from(document.querySelectorAll('[data-faq-pinned-page]')).forEach(input => {
+        pinnedPages[input.dataset.faqPinnedPage] = input.checked;
+    });
+    const pageOrder = {};
+    Array.from(document.querySelectorAll('[data-faq-page-order]')).forEach(input => {
+        pageOrder[input.dataset.faqPageOrder] = safeNumber(input.value, 0);
+    });
+
+    return {
+        question: document.getElementById('faqQuestion')?.value.trim() || '',
+        answer: document.getElementById('faqAnswer')?.value.trim() || '',
+        category: document.getElementById('faqCategory')?.value || 'general',
+        status: document.getElementById('faqStatus')?.value || 'published',
+        order: safeNumber(document.getElementById('faqOrder')?.value, 0),
+        targetPages: targetPages.length ? targetPages : ['faq'],
+        pinnedPages,
+        pageOrder,
+        isPopular: Boolean(document.getElementById('faqIsPopular')?.checked),
+        popularOrder: safeNumber(document.getElementById('faqPopularOrder')?.value, 0),
+        updatedAt: new Date().toISOString()
+    };
+}
+
+function setFaqFormData(faq = null) {
+    renderFaqControls();
+    const normalized = faq ? normalizeFaqRecord(faq, faq.id || '') : null;
+    document.getElementById('faqId').value = normalized?.id || '';
+    document.getElementById('faqQuestion').value = normalized?.question || '';
+    document.getElementById('faqAnswer').value = normalized?.answer || '';
+    document.getElementById('faqCategory').value = normalized?.category || 'general';
+    document.getElementById('faqStatus').value = normalized?.status || 'published';
+    document.getElementById('faqOrder').value = normalized?.order ?? Object.keys(faqsData).length + 1;
+    document.getElementById('faqPopularOrder').value = normalized?.popularOrder ?? Object.keys(faqsData).length + 1;
+    document.getElementById('faqIsPopular').checked = normalized ? normalized.isPopular : true;
+
+    Array.from(document.querySelectorAll('[data-faq-page-target]')).forEach(input => {
+        input.checked = normalized ? normalized.targetPages.includes(input.dataset.faqPageTarget) : input.dataset.faqPageTarget === 'faq';
+    });
+    Array.from(document.querySelectorAll('[data-faq-pinned-page]')).forEach(input => {
+        input.checked = normalized ? Boolean(normalized.pinnedPages?.[input.dataset.faqPinnedPage]) : false;
+    });
+    Array.from(document.querySelectorAll('[data-faq-page-order]')).forEach(input => {
+        input.value = normalized ? safeNumber(normalized.pageOrder?.[input.dataset.faqPageOrder], 0) : 0;
+    });
+}
+
+function renderFaqPageSummary() {
+    const container = document.getElementById('faq-page-summary');
+    if (!container) return;
+    const faqs = Object.values(faqsData).map(faq => normalizeFaqRecord(faq, faq.id));
+    container.innerHTML = FAQ_PAGE_OPTIONS.map(page => {
+        const published = faqs.filter(faq => faq.status === 'published' && faq.targetPages.includes(page.key));
+        const pinned = published.filter(faq => faq.pinnedPages?.[page.key]);
+        return `
+            <div class="faq-page-summary-card">
+                <strong>${escapeHTML(page.label)}</strong>
+                <span>${published.length} คำถามเผยแพร่</span>
+                <span>${pinned.length} คำถามตรึง</span>
+            </div>
+        `;
+    }).join('');
+}
+
+function getFilteredFaqs() {
+    const search = faqFilters.search.toLowerCase().trim();
+    return Object.values(faqsData)
+        .map(faq => normalizeFaqRecord(faq, faq.id))
+        .filter(faq => {
+            if (faqFilters.status !== 'all' && faq.status !== faqFilters.status) return false;
+            if (faqFilters.category !== 'all' && faq.category !== faqFilters.category) return false;
+            if (faqFilters.page !== 'all' && !faq.targetPages.includes(faqFilters.page)) return false;
+            if (search) {
+                const haystack = [faq.question, faq.answer, faq.category, getFaqCategoryLabel(faq.category), faq.targetPages.map(getFaqPageLabel).join(' ')].join(' ').toLowerCase();
+                if (!haystack.includes(search)) return false;
+            }
+            return true;
+        })
+        .sort((a, b) => (a.order - b.order) || a.question.localeCompare(b.question, 'th'));
+}
+
+function renderFaqAdmin() {
+    renderFaqControls();
+    renderFaqPageSummary();
+    const tbody = document.getElementById('faqs-table-body');
+    if (!tbody) return;
+
+    const faqs = getFilteredFaqs();
+    if (!faqs.length) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#667; padding:24px;">ยังไม่มีคำถามตามเงื่อนไขที่เลือก</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = faqs.map(faq => {
+        const pageBadges = faq.targetPages.map(page => `<span class="faq-badge">${escapeHTML(getFaqPageLabel(page))}</span>`).join('');
+        const pinnedBadges = FAQ_PAGE_OPTIONS
+            .filter(page => faq.pinnedPages?.[page.key])
+            .map(page => `<span class="faq-badge pinned">ตรึง ${escapeHTML(page.label)}</span>`)
+            .join('');
+        const popularBadge = faq.isPopular ? '<span class="faq-badge pinned">ยอดฮิต</span>' : '';
+        const statusBadge = faq.status === 'published'
+            ? '<span class="faq-badge">เผยแพร่</span>'
+            : '<span class="faq-badge draft">ฉบับร่าง</span>';
+        return `
+            <tr>
+                <td class="faq-question-cell">
+                    <strong>${escapeHTML(faq.question)}</strong>
+                    <small>${escapeHTML(getFaqCategoryLabel(faq.category))} · ลำดับรวม ${escapeHTML(faq.order)}</small>
+                    <div class="faq-answer-preview">${escapeHTML(faq.answer)}</div>
+                </td>
+                <td><div class="faq-badge-row">${pageBadges}${pinnedBadges}${popularBadge}</div></td>
+                <td>${statusBadge}</td>
+                <td>
+                    <button class="btn-action btn-edit" type="button" onclick="editFaq('${escapeJSString(faq.id)}')">แก้ไข</button>
+                    <button class="btn-action btn-delete" type="button" onclick="deleteFaq('${escapeJSString(faq.id)}')">ลบ</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
 
 window.fetchFaqsFromCloud = function() {
+    renderFaqControls();
     if (faqsUnsubscribe) {
         faqsUnsubscribe();
         faqsUnsubscribe = null;
     }
-    const q = query(collection(db, "faqs"), orderBy("order", "asc"));
+    const q = query(collection(db, 'faqs'), orderBy('order', 'asc'));
     faqsUnsubscribe = onSnapshot(q, (snapshot) => {
-        const tbody = document.getElementById('faqs-table-body');
-        if (!tbody) return;
-        
-        tbody.innerHTML = '';
         faqsData = {};
-        
-        let index = 1;
         snapshot.forEach((docSnap) => {
-            const faq = docSnap.data();
-            const id = docSnap.id;
-            faqsData[id] = faq;
-            
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td>${escapeHTML(faq.order || index)}</td>
-                <td><strong>${escapeHTML(faq.question)}</strong></td>
-                <td><div style="max-height: 80px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;">${escapeHTML(faq.answer)}</div></td>
-                <td>
-                    <button class="btn-action btn-edit" onclick="editFaq('${escapeJSString(id)}')">แก้ไข</button>
-                    <button class="btn-action btn-delete" onclick="deleteFaq('${escapeJSString(id)}')">ลบ</button>
-                </td>
-            `;
-            tbody.appendChild(tr);
-            index++;
+            const faq = normalizeFaqRecord(docSnap.data(), docSnap.id);
+            faqsData[docSnap.id] = faq;
         });
+        renderFaqAdmin();
     }, (error) => {
-        console.error("Error fetching FAQs:", error);
+        console.error('Error fetching FAQs:', error);
+        const tbody = document.getElementById('faqs-table-body');
+        if (tbody) tbody.innerHTML = `<tr><td colspan="4" style="color:#b42318; text-align:center; padding:24px;">โหลด FAQ ไม่สำเร็จ: ${escapeHTML(error.message)}</td></tr>`;
     });
-}
-
-window.openFaqModal = () => {
-    faqForm.reset();
-    document.getElementById('faqId').value = '';
-    document.getElementById('faqOrder').value = Object.keys(faqsData).length + 1;
-    document.getElementById('faqModalTitle').innerText = 'เพิ่มคำถามใหม่';
-    faqModal.style.display = 'block';
 };
 
-window.closeFaqModal = () => {
-    faqModal.style.display = 'none';
+window.openFaqModal = () => window.resetFaqForm();
+window.closeFaqModal = () => window.resetFaqForm();
+
+window.resetFaqForm = () => {
+    const form = document.getElementById('faqForm');
+    form?.reset();
+    setFaqFormData(null);
+    form?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
 window.editFaq = (id) => {
     const faq = faqsData[id];
     if (!faq) return;
-    
-    document.getElementById('faqId').value = id;
-    document.getElementById('faqQuestion').value = faq.question || '';
-    document.getElementById('faqAnswer').value = faq.answer || '';
-    document.getElementById('faqOrder').value = faq.order || 0;
-    
-    document.getElementById('faqModalTitle').innerText = 'แก้ไขคำถาม';
-    faqModal.style.display = 'block';
+    setFaqFormData({ ...faq, id });
+    document.getElementById('faqForm')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
 window.deleteFaq = async (id) => {
-    if (confirm("คุณแน่ใจหรือไม่ว่าต้องการลบคำถามนี้?")) {
-        try {
-            await deleteDoc(doc(db, "faqs", id));
-        } catch (e) {
-            alert("ลบไม่สำเร็จ: " + e.message);
-        }
+    const faq = faqsData[id];
+    if (!faq) return;
+    if (!confirm(`ต้องการลบคำถาม "${faq.question}" ใช่ไหม?`)) return;
+    try {
+        await deleteDoc(doc(db, 'faqs', id));
+    } catch (error) {
+        alert('ลบ FAQ ไม่สำเร็จ: ' + error.message);
     }
 };
 
+const faqForm = document.getElementById('faqForm');
 faqForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    
-    const id = document.getElementById('faqId').value;
-    const faqData = {
-        question: document.getElementById('faqQuestion').value,
-        answer: document.getElementById('faqAnswer').value,
-        order: Number(document.getElementById('faqOrder').value),
-        updatedAt: new Date().toISOString()
-    };
-    
+    const id = document.getElementById('faqId')?.value || '';
+    const faqData = getFaqFormData();
+    if (!faqData.question || !faqData.answer) {
+        alert('กรุณากรอกคำถามและคำตอบ');
+        return;
+    }
+
     try {
         if (id) {
-            await updateDoc(doc(db, "faqs", id), faqData);
+            await updateDoc(doc(db, 'faqs', id), faqData);
         } else {
             faqData.createdAt = new Date().toISOString();
-            await addDoc(collection(db, "faqs"), faqData);
+            await addDoc(collection(db, 'faqs'), faqData);
         }
-        closeFaqModal();
+        window.resetFaqForm();
+        alert('บันทึก FAQ สำเร็จ');
     } catch (error) {
-        alert("บันทึกไม่สำเร็จ: " + error.message);
+        alert('บันทึก FAQ ไม่สำเร็จ: ' + error.message);
     }
 });
+
+function bindFaqFilters() {
+    renderFaqControls();
+    const search = document.getElementById('faqSearch');
+    const page = document.getElementById('faqPageFilter');
+    const category = document.getElementById('faqCategoryFilter');
+    const status = document.getElementById('faqStatusFilter');
+    search?.addEventListener('input', () => { faqFilters.search = search.value; renderFaqAdmin(); });
+    page?.addEventListener('change', () => { faqFilters.page = page.value; renderFaqAdmin(); });
+    category?.addEventListener('change', () => { faqFilters.category = category.value; renderFaqAdmin(); });
+    status?.addEventListener('change', () => { faqFilters.status = status.value; renderFaqAdmin(); });
+}
+bindFaqFilters();
+setFaqFormData(null);
 
 // Start fetching FAQs when logged in
 onAuthStateChanged(auth, (user) => {
     if (user) {
-        if(typeof fetchFaqsFromCloud === 'function') fetchFaqsFromCloud();
-        if(typeof loadFooterSettings === 'function') loadFooterSettings();
+        if (typeof fetchFaqsFromCloud === 'function') fetchFaqsFromCloud();
+        if (typeof loadFooterSettings === 'function') loadFooterSettings();
     }
 });
 

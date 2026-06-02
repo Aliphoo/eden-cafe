@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="th">
 <head>
     <meta charset="UTF-8">
@@ -44,7 +44,7 @@
                     <li><a href="/shop">ร้านค้า</a></li>
                     <li><a href="/booking" style="color: var(--primary-color); font-weight: bold;">ระบบจอง</a></li>
                     <li><a href="/blog">บทความ (Blog)</a></li>
-                    <li><a href="/#faq">คำถามที่พบบ่อย</a></li>
+                    <li><a href="/faq">คำถามที่พบบ่อย</a></li>
                 </ul>
             </nav>
                         <div class="nav-actions">
@@ -311,6 +311,16 @@
                 </div>
             </div>
         </section>
+        <section id="faq" class="faq faq-page-preview">
+            <div class="container">
+                <div style="text-align:center; margin-bottom: 28px;">
+                    <p style="color: var(--accent-color); font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 10px;">FAQ</p>
+                    <h2>คำถามยอดฮิตเกี่ยวกับระบบจอง</h2>
+                    <p style="color:#667; max-width: 680px; margin: 10px auto 0;">รวมคำตอบเรื่องจองโต๊ะ ห้องรับรอง เวลาเข้าใช้บริการ และเงื่อนไขพิเศษ</p>
+                </div>
+                <div class="faq-grid" data-faq-page="booking"></div>
+            </div>
+        </section>
     </main>
 
     <!-- Footer -->
@@ -423,6 +433,7 @@
             });
         }
     </script>
+    <script type="module" src="js/faq.js?v=1"></script>
     <script type="module" src="js/auth.js?v=10"></script>
     <!-- Cookie Consent Banner -->
     <div id="cookie-consent"
