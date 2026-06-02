@@ -80,6 +80,11 @@ function isEnglishPage() {
     return window.location.pathname.includes('-en') || window.location.pathname.endsWith('/en') || window.location.pathname.endsWith('/en');
 }
 
+function authMemberCode(uid) {
+    const source = String(uid || '000000').replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase().padStart(6, '0');
+    return 'ED-' + source;
+}
+
 async function syncAuthUserProfile(user) {
     if (!user || !db) return;
     try {
@@ -88,6 +93,7 @@ async function syncAuthUserProfile(user) {
             displayName: user.displayName || 'Eden Member',
             email: user.email || '',
             photoURL: user.photoURL || '',
+            memberCode: authMemberCode(user.uid),
             updatedAt: serverTimestamp()
         }, { merge: true });
     } catch (error) {

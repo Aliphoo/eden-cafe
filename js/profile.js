@@ -380,10 +380,8 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
     }
 
     function memberId(user) {
-        const source = String(user.uid || user.email || 'eden');
-        let hash = 0;
-        for (let i = 0; i < source.length; i += 1) hash = ((hash << 5) - hash) + source.charCodeAt(i);
-        return 'ED-' + Math.abs(hash).toString().slice(0, 6).padStart(6, '0');
+        const source = String(user?.uid || '000000').replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase().padStart(6, '0');
+        return 'ED-' + source;
     }
 
     function profileValue(key, fallback = '') {
@@ -415,6 +413,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         const bookingCount = bookings.length;
         const computedVisitCount = orderCount + bookingCount;
         const config = getLoyaltyConfig();
+        const canonicalMemberCode = memberId(user);
         const computedPoints = config.enabled ? Math.floor(orderSpent / config.spendPerPoint) : 0;
         const summaryPoints = loyaltySummary?.pointsBalance;
         const summaryTotalSpent = loyaltySummary?.totalSpent;
@@ -433,7 +432,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             name: profileValue('displayName', user.name || ''),
             email: profileValue('email', user.email || ''),
             avatarUrl: profileValue('photoURL', user.avatar || ''),
-            memberCode: profileValue('memberCode', memberId(user)),
+            memberCode: canonicalMemberCode,
             points,
             totalSpent: Math.max(Number(profileValue('totalSpent', 0)) || 0, Number(summaryTotalSpent) || 0, orderSpent),
             visitCount: Math.max(Number(profileValue('visitCount', 0)) || 0, Number(summaryVisitCount) || 0, computedVisitCount),
@@ -857,6 +856,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             displayName: cleanString(user.name || currentAuthUser?.displayName || labels.member, 120),
             email: cleanString(user.email || currentAuthUser?.email || '', 180),
             photoURL: cleanString(user.avatar || currentAuthUser?.photoURL || '', 500),
+            memberCode: memberId(user),
             phone: cleanString(formData.get('phone'), 40),
             shippingAddress: cleanString(formData.get('shippingAddress'), 500),
             birthDate: cleanString(formData.get('birthDate'), 20),

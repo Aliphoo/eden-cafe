@@ -5957,10 +5957,14 @@ function memberDisplayName(member) {
     return memberText(member.displayName || member.name || member.customerName || (member.email || '').split('@')[0], 'Eden Member');
 }
 
-function memberCode(uid, member = {}) {
-    if (member.memberCode) return member.memberCode;
-    const source = String(uid || member.uid || '000000').replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase().padStart(6, '0');
+function canonicalMemberCode(uid) {
+    const source = String(uid || '000000').replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase().padStart(6, '0');
     return 'ED-' + source;
+}
+
+function memberCode(uid, member = {}) {
+    if (uid || member.uid) return canonicalMemberCode(uid || member.uid);
+    return member.memberCode || canonicalMemberCode('');
 }
 
 function memberAvatar(member) {
