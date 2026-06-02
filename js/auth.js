@@ -402,10 +402,27 @@ function sortByTimestampDesc(items) {
     });
 }
 
+function isCustomerOrderForUser(order, uid) {
+    if (!order || order.isTestOrder === true) return false;
+    const orderUid = String(order.uid || '').trim();
+    const customerUid = String(order.customerUid || '').trim();
+    const source = String(order.source || '').toLowerCase();
+    if (customerUid) return customerUid === uid;
+    return orderUid === uid && source !== 'pos';
+}
+
 async function fetchUserOrdersFromCloud(uid) {
     if (!db || !uid) return [];
-    const snap = await getDocs(query(collection(db, 'orders'), where('uid', '==', uid)));
-    return sortByTimestampDesc(snap.docs.map(docSnap => ({ id: docSnap.data().id || docSnap.id, ...docSnap.data() }))).slice(0, 10);
+    const [customerSnap, legacySnap] = await Promise.all([
+        getDocs(query(collection(db, 'orders'), where('customerUid', '==', uid))).catch(() => ({ docs: [] })),
+        getDocs(query(collection(db, 'orders'), where('uid', '==', uid))).catch(() => ({ docs: [] }))
+    ]);
+    const byId = new Map();
+    [...customerSnap.docs, ...legacySnap.docs].forEach(docSnap => {
+        const order = { id: docSnap.data().id || docSnap.id, ...docSnap.data() };
+        if (isCustomerOrderForUser(order, uid)) byId.set(docSnap.id, order);
+    });
+    return sortByTimestampDesc(Array.from(byId.values())).slice(0, 10);
 }
 
 async function fetchUserBookingsFromCloud(uid) {

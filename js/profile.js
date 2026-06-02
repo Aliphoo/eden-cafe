@@ -404,6 +404,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         const paidLikeOrders = orders.filter(order => {
             const status = String(order.status || '').toLowerCase();
             const paymentStatus = String(order.paymentStatus || '').toLowerCase();
+            if (order.isTestOrder === true) return false;
             if (status === 'cancelled' || paymentStatus === 'refunded' || paymentStatus === 'failed') return false;
             if (paymentStatus) return paymentStatus === 'paid';
             return status === 'paid' || status === 'completed';
@@ -763,8 +764,9 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
     }
 
     function renderSignedIn(container, user, labels) {
-        const orders = cloudOrders || readOrders();
-        const bookings = cloudBookings || readBookings();
+        const hasFirebaseUser = !!currentAuthUser?.uid;
+        const orders = hasFirebaseUser ? (Array.isArray(cloudOrders) ? cloudOrders : []) : (cloudOrders || readOrders());
+        const bookings = hasFirebaseUser ? (Array.isArray(cloudBookings) ? cloudBookings : []) : (cloudBookings || readBookings());
         const membershipUser = buildMembershipUser(user, orders, bookings);
         const tier = getMemberTier(membershipUser);
         const avatar = profileValue('photoURL', user.avatar || user.photoURL || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user.name || labels.member) + '&background=4caf50&color=fff');

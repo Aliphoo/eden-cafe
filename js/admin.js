@@ -6367,13 +6367,24 @@ window.exportMembersCSV = () => {
 };
 
 async function loadMemberActivity(uid) {
-    const [ordersSnap, bookingsSnap] = await Promise.all([
-        getDocs(query(collection(db, 'orders'), where('uid', '==', uid))),
+    const [customerOrdersSnap, legacyOrdersSnap, bookingsSnap] = await Promise.all([
+        getDocs(query(collection(db, 'orders'), where('customerUid', '==', uid))).catch(() => ({ docs: [], forEach: () => {} })),
+        getDocs(query(collection(db, 'orders'), where('uid', '==', uid))).catch(() => ({ docs: [], forEach: () => {} })),
         getDocs(query(collection(db, 'bookings'), where('uid', '==', uid)))
     ]);
 
-    const orders = [];
-    ordersSnap.forEach(docSnap => orders.push({ id: docSnap.id, ...docSnap.data() }));
+    const ordersById = new Map();
+    [...customerOrdersSnap.docs, ...legacyOrdersSnap.docs].forEach(docSnap => {
+        const order = { id: docSnap.id, ...docSnap.data() };
+        const customerUid = String(order.customerUid || '').trim();
+        const orderUid = String(order.uid || '').trim();
+        const source = String(order.source || '').toLowerCase();
+        if (order.isTestOrder === true) return;
+        if (customerUid ? customerUid === uid : (orderUid === uid && source !== 'pos')) {
+            ordersById.set(docSnap.id, order);
+        }
+    });
+    const orders = Array.from(ordersById.values());
     const bookings = [];
     bookingsSnap.forEach(docSnap => bookings.push({ id: docSnap.id, ...docSnap.data() }));
 
