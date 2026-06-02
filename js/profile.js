@@ -426,6 +426,10 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             : savedPoints != null
                 ? Math.max(0, Number(savedPoints) || 0)
                 : computedPoints;
+        const savedTotalSpent = Number(profileValue('totalSpent', 0)) || 0;
+        const savedVisitCount = Number(profileValue('visitCount', 0)) || 0;
+        const savedOrderCount = Number(profileValue('orderCount', 0)) || 0;
+        const savedBookingCount = Number(profileValue('bookingCount', 0)) || 0;
 
         return {
             id: user.uid,
@@ -434,10 +438,10 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             avatarUrl: profileValue('photoURL', user.avatar || ''),
             memberCode: canonicalMemberCode,
             points,
-            totalSpent: Math.max(Number(profileValue('totalSpent', 0)) || 0, Number(summaryTotalSpent) || 0, orderSpent),
-            visitCount: Math.max(Number(profileValue('visitCount', 0)) || 0, Number(summaryVisitCount) || 0, computedVisitCount),
-            orderCount: Math.max(Number(profileValue('orderCount', 0)) || 0, Number(summaryOrderCount) || 0, orderCount),
-            bookingCount: Math.max(Number(profileValue('bookingCount', 0)) || 0, Number(summaryBookingCount) || 0, bookingCount),
+            totalSpent: summaryTotalSpent != null ? Math.max(0, Number(summaryTotalSpent) || 0) : Math.max(savedTotalSpent, orderSpent),
+            visitCount: summaryVisitCount != null ? Math.max(0, Number(summaryVisitCount) || 0) : Math.max(savedVisitCount, computedVisitCount),
+            orderCount: summaryOrderCount != null ? Math.max(0, Number(summaryOrderCount) || 0) : Math.max(savedOrderCount, orderCount),
+            bookingCount: summaryBookingCount != null ? Math.max(0, Number(summaryBookingCount) || 0) : Math.max(savedBookingCount, bookingCount),
             cartItemCount: cartCount(),
             createdAt: profileValue('createdAt', ''),
             updatedAt: profileValue('updatedAt', '')

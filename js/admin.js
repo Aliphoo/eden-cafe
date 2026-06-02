@@ -6182,20 +6182,19 @@ function memberMetricMax(...values) {
 
 function enrichMemberMetrics(uid, member = {}) {
     const summary = memberSummariesData[uid] || {};
-    const orderMetrics = memberOrdersMetrics[uid] || {};
-    const bookingMetrics = memberBookingsMetrics[uid] || {};
-    const computedVisitCount = safeNumber(orderMetrics.orderCount) + safeNumber(bookingMetrics.bookingCount);
     const summaryPoints = summary.pointsBalance ?? summary.points;
+    const summaryTotalSpent = summary.totalSpent;
+    const summaryVisitCount = summary.visitCount;
+    const summaryOrderCount = summary.orderCount;
+    const summaryBookingCount = summary.bookingCount;
     return {
         ...member,
         points: summaryPoints != null ? Math.max(0, safeNumber(summaryPoints)) : Math.max(0, safeNumber(member.points)),
-        totalSpent: memberMetricMax(member.totalSpent, summary.totalSpent, orderMetrics.totalSpent),
-        visitCount: memberMetricMax(member.visitCount, summary.visitCount, computedVisitCount),
-        orderCount: memberMetricMax(member.orderCount, summary.orderCount, orderMetrics.orderCount),
-        bookingCount: memberMetricMax(member.bookingCount, summary.bookingCount, bookingMetrics.bookingCount),
-        _memberSummary: summary,
-        _memberOrderMetrics: orderMetrics,
-        _memberBookingMetrics: bookingMetrics
+        totalSpent: summaryTotalSpent != null ? Math.max(0, safeNumber(summaryTotalSpent)) : Math.max(0, safeNumber(member.totalSpent)),
+        visitCount: summaryVisitCount != null ? Math.max(0, safeNumber(summaryVisitCount)) : Math.max(0, safeNumber(member.visitCount)),
+        orderCount: summaryOrderCount != null ? Math.max(0, safeNumber(summaryOrderCount)) : Math.max(0, safeNumber(member.orderCount)),
+        bookingCount: summaryBookingCount != null ? Math.max(0, safeNumber(summaryBookingCount)) : Math.max(0, safeNumber(member.bookingCount)),
+        _memberSummary: summary
     };
 }
 
@@ -6300,6 +6299,8 @@ function setupRealtimeMembers() {
     memberSummariesData = {};
     memberOrdersMetrics = {};
     memberBookingsMetrics = {};
+    memberOrdersMetricsUnsubscribe = null;
+    memberBookingsMetricsUnsubscribe = null;
 
     const q = query(collection(db, 'users'));
     membersUnsubscribe = onSnapshot(q, (snapshot) => {
@@ -6326,27 +6327,6 @@ function setupRealtimeMembers() {
         rebuildMembersData();
     });
 
-    if (canAdmin('orders') || canAdmin('pos')) {
-        memberOrdersMetricsUnsubscribe = onSnapshot(collection(db, 'orders'), (snapshot) => {
-            memberOrdersMetrics = buildMemberOrderMetrics(snapshot);
-            rebuildMembersData();
-        }, (error) => {
-            console.warn('Unable to load order metrics for members:', error);
-            memberOrdersMetrics = {};
-            rebuildMembersData();
-        });
-    }
-
-    if (canAdmin('bookings')) {
-        memberBookingsMetricsUnsubscribe = onSnapshot(collection(db, 'bookings'), (snapshot) => {
-            memberBookingsMetrics = buildMemberBookingMetrics(snapshot);
-            rebuildMembersData();
-        }, (error) => {
-            console.warn('Unable to load booking metrics for members:', error);
-            memberBookingsMetrics = {};
-            rebuildMembersData();
-        });
-    }
 }
 
 window.refreshMembers = () => window.refreshAdminSection('members');
