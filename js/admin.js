@@ -140,6 +140,9 @@ const ADMIN_PERMISSION_LABELS = {
     marketing: 'Marketing Tools',
     footer: 'Footer'
 };
+const ADMIN_PERMISSION_HELP = {
+    pos: 'อนุญาตให้ล็อกอิน Eden POS APK และซิงค์บิล/ใบเสร็จหน้าร้าน'
+};
 const ADMIN_ROLE_LABELS = {
     owner: 'Owner',
     head_manager: 'Head Manager',
@@ -154,7 +157,7 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
     manager: {
         dashboard: true,
         members: false,
-        pos: true,
+        pos: false,
         discounts: false,
         loyalty: false,
         orders: true,
@@ -348,7 +351,14 @@ let shopCategoriesData = {};
 let roomsData = {};
 let tablesData = {};
 let membersData = {};
+let memberUsersData = {};
+let memberSummariesData = {};
+let memberOrdersMetrics = {};
+let memberBookingsMetrics = {};
 let membersUnsubscribe = null;
+let memberSummariesUnsubscribe = null;
+let memberOrdersMetricsUnsubscribe = null;
+let memberBookingsMetricsUnsubscribe = null;
 let ordersUnsubscribe = null;
 let bookingsUnsubscribe = null;
 let categoriesUnsubscribe = null;
@@ -5665,12 +5675,18 @@ function normalizePermissions(role, permissions = {}) {
 function renderAdminPermissionInputs(selected = adminRoleDefaults('manager'), disabled = false) {
     const container = document.getElementById('access-permissions');
     if (!container) return;
-    container.innerHTML = Object.entries(ADMIN_PERMISSION_LABELS).map(([key, label]) => `
+    container.innerHTML = Object.entries(ADMIN_PERMISSION_LABELS).map(([key, label]) => {
+        const help = ADMIN_PERMISSION_HELP[key] || '';
+        return `
         <label>
             <input type="checkbox" data-access-permission="${escapeHTML(key)}" ${selected[key] ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
-            <span>${escapeHTML(label)}</span>
+            <span class="access-permission-copy">
+                <strong>${escapeHTML(label)}</strong>
+                ${help ? `<small>${escapeHTML(help)}</small>` : ''}
+            </span>
         </label>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function getSelectedAdminPermissions() {
@@ -5996,12 +6012,18 @@ function getSelectedMemberStaffPermissions() {
 }
 
 function memberStaffPermissionInputsHTML(selected = adminRoleDefaults('manager'), disabled = false) {
-    return Object.entries(ADMIN_PERMISSION_LABELS).map(([key, label]) => `
+    return Object.entries(ADMIN_PERMISSION_LABELS).map(([key, label]) => {
+        const help = ADMIN_PERMISSION_HELP[key] || '';
+        return `
         <label>
             <input type="checkbox" data-member-staff-permission="${escapeHTML(key)}" ${selected[key] ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
-            <span>${escapeHTML(label)}</span>
+            <span class="access-permission-copy">
+                <strong>${escapeHTML(label)}</strong>
+                ${help ? `<small>${escapeHTML(help)}</small>` : ''}
+            </span>
         </label>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function canManageMemberStaffAccess(uid, access = memberStaffAccess(uid)) {
@@ -6097,6 +6119,92 @@ function bindMemberFilters() {
     memberFiltersBound = true;
 }
 
+function memberOrderUid(order = {}) {
+    return String(order.uid || order.customerUid || order.userId || order.memberUid || '').trim();
+}
+
+function memberBookingUid(booking = {}) {
+    return String(booking.uid || booking.customerUid || booking.userId || booking.memberUid || '').trim();
+}
+
+function memberOrderTotal(order = {}) {
+    return safeNumber(order.totalAmount ?? order.total ?? order.amount);
+}
+
+function isPaidLikeMemberOrder(order = {}) {
+    const status = String(order.status || '').toLowerCase();
+    const paymentStatus = String(order.paymentStatus || '').toLowerCase();
+    if (status === 'cancelled' || paymentStatus === 'refunded' || paymentStatus === 'failed') return false;
+    if (paymentStatus) return paymentStatus === 'paid';
+    return status === 'paid' || status === 'completed';
+}
+
+function latestMemberMetricDate(current, candidate) {
+    return memberTimestampToMillis(candidate) > memberTimestampToMillis(current) ? candidate : current;
+}
+
+function buildMemberOrderMetrics(snapshot) {
+    const metrics = {};
+    snapshot.forEach(docSnap => {
+        const order = docSnap.data() || {};
+        const uid = memberOrderUid(order);
+        if (!uid || !isPaidLikeMemberOrder(order)) return;
+        const current = metrics[uid] || { totalSpent: 0, orderCount: 0, updatedAt: null };
+        current.totalSpent += memberOrderTotal(order);
+        current.orderCount += 1;
+        current.updatedAt = latestMemberMetricDate(current.updatedAt, order.timestamp || order.createdAt || order.updatedAt);
+        metrics[uid] = current;
+    });
+    return metrics;
+}
+
+function buildMemberBookingMetrics(snapshot) {
+    const metrics = {};
+    snapshot.forEach(docSnap => {
+        const booking = docSnap.data() || {};
+        const uid = memberBookingUid(booking);
+        if (!uid) return;
+        const current = metrics[uid] || { bookingCount: 0, updatedAt: null };
+        current.bookingCount += 1;
+        current.updatedAt = latestMemberMetricDate(current.updatedAt, booking.timestamp || booking.createdAt || booking.updatedAt);
+        metrics[uid] = current;
+    });
+    return metrics;
+}
+
+function memberMetricMax(...values) {
+    return Math.max(...values.map(value => safeNumber(value)));
+}
+
+function enrichMemberMetrics(uid, member = {}) {
+    const summary = memberSummariesData[uid] || {};
+    const orderMetrics = memberOrdersMetrics[uid] || {};
+    const bookingMetrics = memberBookingsMetrics[uid] || {};
+    const computedVisitCount = safeNumber(orderMetrics.orderCount) + safeNumber(bookingMetrics.bookingCount);
+    const summaryPoints = summary.pointsBalance ?? summary.points;
+    return {
+        ...member,
+        points: summaryPoints != null ? Math.max(0, safeNumber(summaryPoints)) : Math.max(0, safeNumber(member.points)),
+        totalSpent: memberMetricMax(member.totalSpent, summary.totalSpent, orderMetrics.totalSpent),
+        visitCount: memberMetricMax(member.visitCount, summary.visitCount, computedVisitCount),
+        orderCount: memberMetricMax(member.orderCount, summary.orderCount, orderMetrics.orderCount),
+        bookingCount: memberMetricMax(member.bookingCount, summary.bookingCount, bookingMetrics.bookingCount),
+        _memberSummary: summary,
+        _memberOrderMetrics: orderMetrics,
+        _memberBookingMetrics: bookingMetrics
+    };
+}
+
+function rebuildMembersData() {
+    membersData = Object.fromEntries(
+        Object.entries(memberUsersData || {}).map(([uid, member]) => [uid, enrichMemberMetrics(uid, member)])
+    );
+    renderMembersTable();
+    renderAdminUserOptions();
+    renderLoyaltyMemberOptions();
+    renderLoyaltySummary();
+}
+
 function getMemberRows() {
     return Object.entries(membersData).map(([uid, member]) => ({ uid, member, tier: memberTier(member), status: memberStatus(member) }));
 }
@@ -6180,21 +6288,61 @@ function renderMembersTable() {
 function setupRealtimeMembers() {
     bindMemberFilters();
     if (membersUnsubscribe) membersUnsubscribe();
+    if (memberSummariesUnsubscribe) memberSummariesUnsubscribe();
+    if (memberOrdersMetricsUnsubscribe) memberOrdersMetricsUnsubscribe();
+    if (memberBookingsMetricsUnsubscribe) memberBookingsMetricsUnsubscribe();
+
+    memberUsersData = {};
+    memberSummariesData = {};
+    memberOrdersMetrics = {};
+    memberBookingsMetrics = {};
+
     const q = query(collection(db, 'users'));
     membersUnsubscribe = onSnapshot(q, (snapshot) => {
-        membersData = {};
+        memberUsersData = {};
         snapshot.forEach(docSnap => {
-            membersData[docSnap.id] = { uid: docSnap.id, ...docSnap.data() };
+            memberUsersData[docSnap.id] = { uid: docSnap.id, ...docSnap.data() };
         });
-        renderMembersTable();
-        renderAdminUserOptions();
-        renderLoyaltyMemberOptions();
-        renderLoyaltySummary();
+        rebuildMembersData();
     }, (error) => {
         console.error('Error listening to members:', error);
         const tbody = document.getElementById('members-table-body');
         if (tbody) tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#c62828;">Unable to load members: ${escapeHTML(error.message)}</td></tr>`;
     });
+
+    memberSummariesUnsubscribe = onSnapshot(collection(db, 'member_summaries'), (snapshot) => {
+        memberSummariesData = {};
+        snapshot.forEach(docSnap => {
+            memberSummariesData[docSnap.id] = { uid: docSnap.id, ...docSnap.data() };
+        });
+        rebuildMembersData();
+    }, (error) => {
+        console.warn('Unable to load member summaries for member metrics:', error);
+        memberSummariesData = {};
+        rebuildMembersData();
+    });
+
+    if (canAdmin('orders') || canAdmin('pos')) {
+        memberOrdersMetricsUnsubscribe = onSnapshot(collection(db, 'orders'), (snapshot) => {
+            memberOrdersMetrics = buildMemberOrderMetrics(snapshot);
+            rebuildMembersData();
+        }, (error) => {
+            console.warn('Unable to load order metrics for members:', error);
+            memberOrdersMetrics = {};
+            rebuildMembersData();
+        });
+    }
+
+    if (canAdmin('bookings')) {
+        memberBookingsMetricsUnsubscribe = onSnapshot(collection(db, 'bookings'), (snapshot) => {
+            memberBookingsMetrics = buildMemberBookingMetrics(snapshot);
+            rebuildMembersData();
+        }, (error) => {
+            console.warn('Unable to load booking metrics for members:', error);
+            memberBookingsMetrics = {};
+            rebuildMembersData();
+        });
+    }
 }
 
 window.refreshMembers = () => window.refreshAdminSection('members');
@@ -6381,8 +6529,8 @@ window.saveMemberAdminFields = async (event, uid) => {
             statusEl.textContent = 'Saved';
             statusEl.style.color = '#2e7d32';
         }
-        membersData[uid] = { ...membersData[uid], ...payload, updatedAt: new Date().toISOString() };
-        renderMembersTable();
+        memberUsersData[uid] = { ...(memberUsersData[uid] || membersData[uid] || {}), ...payload, updatedAt: new Date().toISOString() };
+        rebuildMembersData();
     } catch (error) {
         console.error('Unable to save member admin fields:', error);
         if (statusEl) {
@@ -7200,8 +7348,3 @@ footerSettingsForm?.addEventListener('submit', async (e) => {
         }
     }
 });
-
-
-
-
-

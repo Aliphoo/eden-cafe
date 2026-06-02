@@ -417,6 +417,10 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         const config = getLoyaltyConfig();
         const computedPoints = config.enabled ? Math.floor(orderSpent / config.spendPerPoint) : 0;
         const summaryPoints = loyaltySummary?.pointsBalance;
+        const summaryTotalSpent = loyaltySummary?.totalSpent;
+        const summaryVisitCount = loyaltySummary?.visitCount;
+        const summaryOrderCount = loyaltySummary?.orderCount;
+        const summaryBookingCount = loyaltySummary?.bookingCount;
         const savedPoints = profileValue('points', null);
         const points = summaryPoints != null
             ? Math.max(0, Number(summaryPoints) || 0)
@@ -431,10 +435,10 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             avatarUrl: profileValue('photoURL', user.avatar || ''),
             memberCode: profileValue('memberCode', memberId(user)),
             points,
-            totalSpent: Math.max(Number(profileValue('totalSpent', 0)) || 0, orderSpent),
-            visitCount: Math.max(Number(profileValue('visitCount', 0)) || 0, computedVisitCount),
-            orderCount: Math.max(Number(profileValue('orderCount', 0)) || 0, orderCount),
-            bookingCount: Math.max(Number(profileValue('bookingCount', 0)) || 0, bookingCount),
+            totalSpent: Math.max(Number(profileValue('totalSpent', 0)) || 0, Number(summaryTotalSpent) || 0, orderSpent),
+            visitCount: Math.max(Number(profileValue('visitCount', 0)) || 0, Number(summaryVisitCount) || 0, computedVisitCount),
+            orderCount: Math.max(Number(profileValue('orderCount', 0)) || 0, Number(summaryOrderCount) || 0, orderCount),
+            bookingCount: Math.max(Number(profileValue('bookingCount', 0)) || 0, Number(summaryBookingCount) || 0, bookingCount),
             cartItemCount: cartCount(),
             createdAt: profileValue('createdAt', ''),
             updatedAt: profileValue('updatedAt', '')
