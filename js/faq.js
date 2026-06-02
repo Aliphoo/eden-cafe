@@ -193,18 +193,72 @@ function renderHubList(container, faqs, expanded = false, categoryFilter = 'all'
 
     const resultTarget = container.querySelector('[data-faq-hub-results]');
     const loadMore = container.querySelector('[data-faq-load-more]');
+    const resultCount = container.querySelector('[data-faq-result-count]');
+    const activeFilter = container.querySelector('[data-faq-active-filter]');
     if (resultTarget) {
-        resultTarget.innerHTML = body || '<p class="faq-empty">ไม่พบคำถามตามเงื่อนไขที่ค้นหา</p>';
+        resultTarget.innerHTML = body || `
+            <div class="faq-empty-state">
+                <strong>ไม่พบคำถามที่ค้นหา</strong>
+                <span>ลองเปลี่ยนคำค้นหา หรือเลือกหมวดหมู่เป็น “ทุกหมวดหมู่” อีกครั้ง</span>
+            </div>
+        `;
     }
     if (loadMore) {
         loadMore.hidden = expanded || filtered.length <= HUB_PREVIEW_LIMIT;
     }
+    if (resultCount) {
+        resultCount.textContent = `${filtered.length} คำถาม`;
+    }
+    if (activeFilter) {
+        const categoryLabel = categoryFilter === 'all' ? 'ทุกหมวดหมู่' : (CATEGORY_LABELS[categoryFilter] || categoryFilter);
+        activeFilter.textContent = search ? `ค้นหา: ${searchTerm.trim()} • ${categoryLabel}` : categoryLabel;
+    }
     renderPageSchema('hub', visible.slice(0, HUB_PREVIEW_LIMIT));
+}
+
+function renderFaqHubShell(container) {
+    const categories = ['all', ...Object.keys(CATEGORY_LABELS)];
+    container.innerHTML = `
+        <div class="faq-hub-search-card">
+            <div class="faq-hub-search-copy">
+                <span class="faq-hub-search-label">FAQ Concierge</span>
+                <h2>ค้นหาคำตอบ</h2>
+                <p>พิมพ์คำถามหรือเลือกหมวดหมู่ ระบบจะดึงคำตอบจากหลังบ้านของ Eden Cafe ให้โดยตรง</p>
+            </div>
+            <div class="faq-hub-toolbar" role="search">
+                <label class="faq-search-field">
+                    <span class="faq-field-icon" aria-hidden="true">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                            <path d="M10.8 18.1a7.3 7.3 0 1 1 0-14.6 7.3 7.3 0 0 1 0 14.6Z" stroke="currentColor" stroke-width="2"/>
+                            <path d="m16.2 16.2 4.3 4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </span>
+                    <input type="search" data-faq-hub-search aria-label="ค้นหาคำถาม" placeholder="ค้นหาคำถาม เช่น จองโต๊ะ, ชำระเงิน, สมาชิก">
+                </label>
+                <label class="faq-filter-field">
+                    <span>หมวดหมู่</span>
+                    <select data-faq-hub-category aria-label="เลือกหมวดหมู่คำถาม">
+                        ${categories.map(category => `<option value="${escapeHTML(category)}">${escapeHTML(category === 'all' ? 'ทุกหมวดหมู่' : (CATEGORY_LABELS[category] || category))}</option>`).join('')}
+                    </select>
+                </label>
+            </div>
+            <div class="faq-hub-meta">
+                <span data-faq-result-count>กำลังโหลดคำถาม</span>
+                <span data-faq-active-filter>ทุกหมวดหมู่</span>
+            </div>
+        </div>
+        <div class="faq-hub-results" data-faq-hub-results>
+            <p class="faq-loading faq-loading-card">กำลังโหลดศูนย์รวมคำถาม...</p>
+        </div>
+        <div class="faq-more-link">
+            <button type="button" class="btn faq-more-btn" data-faq-load-more hidden>ดูคำถามเพิ่มเติม</button>
+        </div>
+    `;
 }
 
 async function renderFaqHub(container) {
     container.dataset.faqManaged = 'true';
-    container.innerHTML = '<p class="faq-loading">กำลังโหลดศูนย์รวมคำถาม...</p>';
+    renderFaqHubShell(container);
 
     try {
         const faqs = (await fetchFaqs())
@@ -212,13 +266,35 @@ async function renderFaqHub(container) {
             .sort((a, b) => safeNumber(a.popularOrder, a.order) - safeNumber(b.popularOrder, b.order));
         const categories = ['all', ...Array.from(new Set(faqs.map(faq => faq.category || 'general')))];
         container.innerHTML = `
-            <div class="faq-hub-toolbar">
-                <input type="search" data-faq-hub-search placeholder="ค้นหาคำถาม เช่น จองโต๊ะ, ชำระเงิน, สมาชิก">
-                <select data-faq-hub-category>
-                    ${categories.map(category => `<option value="${escapeHTML(category)}">${escapeHTML(category === 'all' ? 'ทุกหมวดหมู่' : (CATEGORY_LABELS[category] || category))}</option>`).join('')}
-                </select>
+            <div class="faq-hub-search-card">
+                <div class="faq-hub-search-copy">
+                    <span class="faq-hub-search-label">FAQ Concierge</span>
+                    <h2>ค้นหาคำตอบ</h2>
+                    <p>พิมพ์คำถามหรือเลือกหมวดหมู่ ระบบจะดึงคำตอบจากหลังบ้านของ Eden Cafe ให้โดยตรง</p>
+                </div>
+                <div class="faq-hub-toolbar" role="search">
+                    <label class="faq-search-field">
+                        <span class="faq-field-icon" aria-hidden="true">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                                <path d="M10.8 18.1a7.3 7.3 0 1 1 0-14.6 7.3 7.3 0 0 1 0 14.6Z" stroke="currentColor" stroke-width="2"/>
+                                <path d="m16.2 16.2 4.3 4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                            </svg>
+                        </span>
+                        <input type="search" data-faq-hub-search aria-label="ค้นหาคำถาม" placeholder="ค้นหาคำถาม เช่น จองโต๊ะ, ชำระเงิน, สมาชิก">
+                    </label>
+                    <label class="faq-filter-field">
+                        <span>หมวดหมู่</span>
+                        <select data-faq-hub-category aria-label="เลือกหมวดหมู่คำถาม">
+                            ${categories.map(category => `<option value="${escapeHTML(category)}">${escapeHTML(category === 'all' ? 'ทุกหมวดหมู่' : (CATEGORY_LABELS[category] || category))}</option>`).join('')}
+                        </select>
+                    </label>
+                </div>
+                <div class="faq-hub-meta">
+                    <span data-faq-result-count>0 คำถาม</span>
+                    <span data-faq-active-filter>ทุกหมวดหมู่</span>
+                </div>
             </div>
-            <div data-faq-hub-results></div>
+            <div class="faq-hub-results" data-faq-hub-results></div>
             <div class="faq-more-link">
                 <button type="button" class="btn faq-more-btn" data-faq-load-more>ดูคำถามเพิ่มเติม</button>
             </div>
