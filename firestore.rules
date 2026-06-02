@@ -55,6 +55,19 @@ service cloud.firestore {
       return !request.resource.data.keys().hasAny(['uid'])
         || (isSignedIn() && request.resource.data.uid == request.auth.uid);
     }
+    function isValidOptionalLoyaltyOrderFields() {
+      return (!request.resource.data.keys().hasAny(['normalDiscount']) || (request.resource.data.normalDiscount is number && request.resource.data.normalDiscount >= 0 && request.resource.data.normalDiscount <= 1000000))
+        && (!request.resource.data.keys().hasAny(['loyaltyDiscount']) || (request.resource.data.loyaltyDiscount is number && request.resource.data.loyaltyDiscount >= 0 && request.resource.data.loyaltyDiscount <= 1000000))
+        && (!request.resource.data.keys().hasAny(['totalBeforeLoyalty']) || (request.resource.data.totalBeforeLoyalty is number && request.resource.data.totalBeforeLoyalty >= 0 && request.resource.data.totalBeforeLoyalty <= 1000000))
+        && (!request.resource.data.keys().hasAny(['earnedPoints']) || (request.resource.data.earnedPoints is number && request.resource.data.earnedPoints >= 0 && request.resource.data.earnedPoints <= 1000000))
+        && (!request.resource.data.keys().hasAny(['redeemedPoints']) || (request.resource.data.redeemedPoints is number && request.resource.data.redeemedPoints >= 0 && request.resource.data.redeemedPoints <= 1000000))
+        && (!request.resource.data.keys().hasAny(['loyaltyRedemption']) || request.resource.data.loyaltyRedemption is map)
+        && (!request.resource.data.keys().hasAny(['loyalty']) || request.resource.data.loyalty is map)
+        && (!request.resource.data.keys().hasAny(['loyaltySyncStatus']) || request.resource.data.loyaltySyncStatus in ['skipped', 'pending', 'syncing', 'synced', 'failed', 'local'])
+        && (!request.resource.data.keys().hasAny(['loyaltyError']) || (request.resource.data.loyaltyError is string && request.resource.data.loyaltyError.size() <= 500))
+        && (!request.resource.data.keys().hasAny(['loyaltyIdempotencyKey']) || (request.resource.data.loyaltyIdempotencyKey is string && request.resource.data.loyaltyIdempotencyKey.size() <= 120))
+        && (!request.resource.data.keys().hasAny(['loyaltySyncedAt']) || request.resource.data.loyaltySyncedAt is string || request.resource.data.loyaltySyncedAt is timestamp);
+    }
     function isValidAdminOrderCreate() {
       return request.resource.data.keys().hasOnly([
           'id', 'date', 'businessDate', 'businessDateLabel', 'items', 'total', 'totalAmount', 'uid', 'timestamp',
@@ -62,7 +75,11 @@ service cloud.firestore {
            'source', 'orderType', 'receiptNo', 'paymentStatus', 'paymentMethod',
           'paymentLabel', 'customerUid', 'customerEmail', 'customerLineId',
           'customerTier', 'customerMemberCode', 'customerProfileSynced',
-          'subtotal', 'discount', 'taxIncluded', 'paidAmount', 'changeAmount',
+          'subtotal', 'discount', 'normalDiscount', 'loyaltyDiscount',
+          'totalBeforeLoyalty', 'taxIncluded', 'paidAmount', 'changeAmount',
+          'earnedPoints', 'redeemedPoints', 'loyaltyRedemption', 'loyalty',
+          'loyaltySyncStatus', 'loyaltyError', 'loyaltyIdempotencyKey',
+          'loyaltySyncedAt',
           'note', 'cashierUid', 'cashierName', 'cashierEmail',
           'isTestOrder', 'softLaunch', 'stockAdjusted', 'stockAdjustments',
           'stockMode', 'billStatus', 'isOpenBill', 'orderMode',
@@ -85,7 +102,7 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['source']) || request.resource.data.source in ['pos', 'online'])
         && (!request.resource.data.keys().hasAny(['orderType']) || request.resource.data.orderType in ['pos', 'online', 'shop'])
         && (!request.resource.data.keys().hasAny(['paymentStatus']) || request.resource.data.paymentStatus in ['pending', 'paid', 'failed', 'refunded'])
-        && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'qr', 'card', 'other'])
+        && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'thai_chuay_thai_plus', 'qr', 'card', 'other'])
         && (!request.resource.data.keys().hasAny(['paymentLabel']) || (request.resource.data.paymentLabel is string && request.resource.data.paymentLabel.size() <= 40))
         && (!request.resource.data.keys().hasAny(['receiptNo']) || isShortString(request.resource.data.receiptNo, 60))
         && (!request.resource.data.keys().hasAny(['customerName']) || (request.resource.data.customerName is string && request.resource.data.customerName.size() <= 120))
@@ -100,6 +117,7 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['note']) || (request.resource.data.note is string && request.resource.data.note.size() <= 500))
         && (!request.resource.data.keys().hasAny(['subtotal']) || (request.resource.data.subtotal is number && request.resource.data.subtotal >= 0 && request.resource.data.subtotal <= 1000000))
         && (!request.resource.data.keys().hasAny(['discount']) || (request.resource.data.discount is number && request.resource.data.discount >= 0 && request.resource.data.discount <= 1000000))
+        && isValidOptionalLoyaltyOrderFields()
         && (!request.resource.data.keys().hasAny(['taxIncluded']) || (request.resource.data.taxIncluded is number && request.resource.data.taxIncluded >= 0 && request.resource.data.taxIncluded <= 1000000))
         && (!request.resource.data.keys().hasAny(['paidAmount']) || (request.resource.data.paidAmount is number && request.resource.data.paidAmount >= 0 && request.resource.data.paidAmount <= 1000000))
         && (!request.resource.data.keys().hasAny(['changeAmount']) || (request.resource.data.changeAmount is number && request.resource.data.changeAmount >= 0 && request.resource.data.changeAmount <= 1000000))
@@ -131,7 +149,11 @@ service cloud.firestore {
           'source', 'orderType', 'receiptNo', 'paymentStatus', 'paymentMethod',
           'paymentLabel', 'customerUid', 'customerEmail', 'customerLineId',
           'customerTier', 'customerMemberCode', 'customerProfileSynced',
-          'subtotal', 'discount', 'taxIncluded', 'paidAmount', 'changeAmount',
+          'subtotal', 'discount', 'normalDiscount', 'loyaltyDiscount',
+          'totalBeforeLoyalty', 'taxIncluded', 'paidAmount', 'changeAmount',
+          'earnedPoints', 'redeemedPoints', 'loyaltyRedemption', 'loyalty',
+          'loyaltySyncStatus', 'loyaltyError', 'loyaltyIdempotencyKey',
+          'loyaltySyncedAt',
           'note', 'cashierUid', 'cashierName', 'cashierEmail',
           'isTestOrder', 'softLaunch', 'stockAdjusted', 'stockAdjustments',
           'stockMode', 'billStatus', 'isOpenBill', 'orderMode',
@@ -157,7 +179,7 @@ service cloud.firestore {
         && request.resource.data.totalAmount <= 1000000
         && request.resource.data.status in ['pending', 'processing', 'completed', 'cancelled']
         && (!request.resource.data.keys().hasAny(['paymentStatus']) || request.resource.data.paymentStatus in ['pending', 'paid', 'failed', 'refunded'])
-        && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'qr', 'card', 'other'])
+        && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'thai_chuay_thai_plus', 'qr', 'card', 'other'])
         && (!request.resource.data.keys().hasAny(['paymentLabel']) || (request.resource.data.paymentLabel is string && request.resource.data.paymentLabel.size() <= 80))
         && (!request.resource.data.keys().hasAny(['receiptNo']) || (request.resource.data.receiptNo is string && request.resource.data.receiptNo.size() > 0 && request.resource.data.receiptNo.size() <= 80))
         && (!request.resource.data.keys().hasAny(['customerName']) || (request.resource.data.customerName is string && request.resource.data.customerName.size() <= 120))
@@ -172,6 +194,7 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['customerProfileSynced']) || request.resource.data.customerProfileSynced is bool)
         && (!request.resource.data.keys().hasAny(['subtotal']) || (request.resource.data.subtotal is number && request.resource.data.subtotal >= 0 && request.resource.data.subtotal <= 1000000))
         && (!request.resource.data.keys().hasAny(['discount']) || (request.resource.data.discount is number && request.resource.data.discount >= 0 && request.resource.data.discount <= 1000000))
+        && isValidOptionalLoyaltyOrderFields()
         && (!request.resource.data.keys().hasAny(['taxIncluded']) || (request.resource.data.taxIncluded is number && request.resource.data.taxIncluded >= 0 && request.resource.data.taxIncluded <= 1000000))
         && (!request.resource.data.keys().hasAny(['paidAmount']) || (request.resource.data.paidAmount is number && request.resource.data.paidAmount >= 0 && request.resource.data.paidAmount <= 1000000))
         && (!request.resource.data.keys().hasAny(['changeAmount']) || (request.resource.data.changeAmount is number && request.resource.data.changeAmount >= 0 && request.resource.data.changeAmount <= 1000000))
@@ -210,7 +233,7 @@ service cloud.firestore {
         && request.resource.data.status in ['pending', 'processing', 'completed', 'cancelled']
         && (!request.resource.data.keys().hasAny(['uid']) || request.resource.data.uid is string)
         && (!request.resource.data.keys().hasAny(['paymentStatus']) || request.resource.data.paymentStatus in ['pending', 'paid', 'failed', 'refunded'])
-        && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'qr', 'card', 'other'])
+        && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'thai_chuay_thai_plus', 'qr', 'card', 'other'])
         && (!request.resource.data.keys().hasAny(['billStatus']) || request.resource.data.billStatus in ['open', 'paid', 'cancelled'])
         && (!request.resource.data.keys().hasAny(['isOpenBill']) || request.resource.data.isOpenBill is bool)
         && (!request.resource.data.keys().hasAny(['subtotal']) || (request.resource.data.subtotal is number && request.resource.data.subtotal >= 0 && request.resource.data.subtotal <= 1000000))
@@ -275,6 +298,10 @@ service cloud.firestore {
           'customerUid', 'customerEmail', 'customerLineId',
           'customerTier', 'customerMemberCode', 'customerProfileSynced',
           'subtotal', 'discount', 'taxIncluded', 'paidAmount', 'changeAmount',
+          'normalDiscount', 'loyaltyDiscount', 'totalBeforeLoyalty',
+          'earnedPoints', 'redeemedPoints', 'loyaltyRedemption', 'loyalty',
+          'loyaltySyncStatus', 'loyaltyError', 'loyaltyIdempotencyKey',
+          'loyaltySyncedAt',
           'note', 'cashierUid', 'cashierName', 'cashierEmail',
           'isTestOrder', 'softLaunch', 'stockAdjusted', 'stockAdjustments',
           'stockMode', 'billStatus', 'isOpenBill', 'orderMode',
@@ -293,10 +320,11 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['total']) || (request.resource.data.total is number && request.resource.data.total >= 0 && request.resource.data.total <= 1000000))
         && (!request.resource.data.keys().hasAny(['subtotal']) || (request.resource.data.subtotal is number && request.resource.data.subtotal >= 0 && request.resource.data.subtotal <= 1000000))
         && (!request.resource.data.keys().hasAny(['discount']) || (request.resource.data.discount is number && request.resource.data.discount >= 0 && request.resource.data.discount <= 1000000))
+        && isValidOptionalLoyaltyOrderFields()
         && (!request.resource.data.keys().hasAny(['taxIncluded']) || (request.resource.data.taxIncluded is number && request.resource.data.taxIncluded >= 0 && request.resource.data.taxIncluded <= 1000000))
         && (!request.resource.data.keys().hasAny(['paidAmount']) || (request.resource.data.paidAmount is number && request.resource.data.paidAmount >= 0 && request.resource.data.paidAmount <= 1000000))
         && (!request.resource.data.keys().hasAny(['changeAmount']) || (request.resource.data.changeAmount is number && request.resource.data.changeAmount >= 0 && request.resource.data.changeAmount <= 1000000))
-        && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'qr', 'card', 'other'])
+        && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'thai_chuay_thai_plus', 'qr', 'card', 'other'])
         && (!request.resource.data.keys().hasAny(['paymentLabel']) || (request.resource.data.paymentLabel is string && request.resource.data.paymentLabel.size() <= 60))
         && (!request.resource.data.keys().hasAny(['receiptNo']) || (request.resource.data.receiptNo is string && request.resource.data.receiptNo.size() > 0 && request.resource.data.receiptNo.size() <= 80))
         && (!request.resource.data.keys().hasAny(['businessDate']) || (request.resource.data.businessDate is string && request.resource.data.businessDate.matches('^\\d{4}-\\d{2}-\\d{2}$')))
@@ -511,7 +539,7 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['source']) || request.resource.data.source == 'online')
         && (!request.resource.data.keys().hasAny(['orderType']) || request.resource.data.orderType in ['online', 'shop'])
         && (!request.resource.data.keys().hasAny(['paymentStatus']) || request.resource.data.paymentStatus in ['pending', 'paid', 'failed', 'refunded'])
-        && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'qr', 'card', 'other'])
+        && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'thai_chuay_thai_plus', 'qr', 'card', 'other'])
         && (!request.resource.data.keys().hasAny(['paymentLabel']) || (request.resource.data.paymentLabel is string && request.resource.data.paymentLabel.size() <= 80))
         && (!request.resource.data.keys().hasAny(['fulfillmentMethod']) || request.resource.data.fulfillmentMethod in ['delivery', 'pickup'])
         && (!request.resource.data.keys().hasAny(['shippingFee']) || (request.resource.data.shippingFee is number && request.resource.data.shippingFee >= 0 && request.resource.data.shippingFee <= 100000))

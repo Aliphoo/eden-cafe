@@ -1,6 +1,6 @@
 # Eden Print Bridge
 
-Local bridge for Eden POS thermal receipt printing. It lets `pos.html` send ESC/POS bytes to a WiFi/LAN receipt printer over raw TCP, usually port `9100`.
+Local bridge for Eden POS thermal receipt printing. It lets the Eden POS APK send ESC/POS bytes to a WiFi/LAN receipt printer over raw TCP, usually port `9100`.
 
 ## Start
 
@@ -15,9 +15,9 @@ Default URL:
 http://127.0.0.1:8787
 ```
 
-## POS setup
+## POS APK setup
 
-1. Open `pos.html`.
+1. Open Eden POS APK.
 2. In `Printer Control`, choose `WiFi/LAN via Eden Print Bridge`.
 3. Set `Bridge URL` to `http://127.0.0.1:8787`.
 4. Set the receipt printer IP, for example `192.168.1.50`.
@@ -27,13 +27,13 @@ http://127.0.0.1:8787
 ## Supported paths
 
 - WiFi/LAN ESC/POS printers: supported through this bridge.
-- USB / serial cable printers: use the POS page `Web Serial` or `WebUSB` profiles.
-- Bluetooth printers: use `Bluetooth BLE` when the printer exposes BLE GATT write service, or `Web Serial` if Windows exposes it as a Bluetooth serial port.
+- USB / serial cable printers: use the APK printer profile supported by the target device.
+- Bluetooth printers: use `Bluetooth BLE` when the printer exposes BLE GATT write service, or the device printer profile if Android exposes it.
 - Browser print: use the `Browser Print` profile as a fallback for Windows/macOS printer drivers.
 
 ## Security
 
-The bridge listens on `127.0.0.1` by default and accepts requests from local pages, `file://` pages, and local origins. To allow a hosted Eden POS origin, set:
+The bridge listens on `127.0.0.1` by default and accepts requests from local pages, `file://` pages, and local origins. To allow an Eden POS origin during testing, set:
 
 ```powershell
 $env:EDEN_PRINT_ALLOWED_ORIGINS="https://your-eden-domain.example"

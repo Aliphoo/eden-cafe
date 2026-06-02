@@ -35,12 +35,26 @@ const ALLOWED_ORIGINS = new Set([
   'https://edencafe-d9095.firebaseapp.com',
   'https://edencafe.co',
   'https://www.edencafe.co',
+  'capacitor://localhost',
+  'ionic://localhost',
+  'http://localhost',
+  'http://127.0.0.1',
   'http://localhost:5000',
   'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5175',
+  'http://localhost:5176',
+  'http://localhost:4175',
+  'http://localhost:4183',
   'http://localhost:8080',
   'http://localhost:8787',
   'http://127.0.0.1:5000',
   'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
+  'http://127.0.0.1:5175',
+  'http://127.0.0.1:5176',
+  'http://127.0.0.1:4175',
+  'http://127.0.0.1:4183',
   'http://127.0.0.1:8080',
   'http://127.0.0.1:8787',
 ]);
@@ -944,6 +958,398 @@ exports.adjustMemberPoints = onRequest(
       const status = error.statusCode || 500;
       logger.warn('Member point adjustment failed', { message: error.message, status });
       res.status(status).json({ error: error.message || 'Member point adjustment failed' });
+    }
+  }
+);
+
+function normalizeLoyaltySettings(raw = {}) {
+  const numberOr = (value, fallback) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const defaultTierMultipliers = { Silver: 1, Gold: 1.25, Platinum: 1.5 };
+  const tierMultipliers = raw.tierMultipliers && typeof raw.tierMultipliers === 'object'
+    ? {
+      ...defaultTierMultipliers,
+      ...Object.fromEntries(Object.entries(raw.tierMultipliers)
+        .map(([tier, value]) => [tier, Math.max(0, numberOr(value, 1))])
+        .filter(([, value]) => value > 0)),
+    }
+    : defaultTierMultipliers;
+
+  return {
+    enabled: raw.enabled !== false,
+    spendPerPoint: Math.max(0, numberOr(raw.spendPerPoint, 25)),
+    pointValue: Math.max(0, numberOr(raw.pointValue, 1)),
+    expiryMonths: Math.max(0, Math.trunc(numberOr(raw.expiryMonths, 24))),
+    maxRedeemPercent: Math.min(100, Math.max(0, numberOr(raw.maxRedeemPercent, 30))),
+    minRedeemPoints: Math.max(0, Math.trunc(numberOr(raw.minRedeemPoints, 20))),
+    earnAfterDiscount: raw.earnAfterDiscount !== false,
+    earnOnRedeemedAmount: raw.earnOnRedeemedAmount === true,
+    excludedCategories: Array.isArray(raw.excludedCategories)
+      ? raw.excludedCategories.map(value => cleanString(value, 120).toLowerCase()).filter(Boolean)
+      : ['เครื่องดื่มแอลกอฮอล์', 'ฝากเงิน', 'โปรแรง'],
+    tierMultipliers,
+  };
+}
+
+function safeLedgerKey(value) {
+  return cleanString(value || Date.now(), 140)
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '') || String(Date.now());
+}
+
+function normalizePosSaleItems(items) {
+  return Array.isArray(items)
+    ? items.map(item => ({
+      productId: cleanString(item.productId || '', 120),
+      variantId: cleanString(item.variantId || 'base', 80),
+      sku: cleanString(item.sku || '', 80),
+      name: cleanString(item.name || 'POS item', 180),
+      variantName: cleanString(item.variantName || '', 120),
+      category: cleanString(item.category || '', 160),
+      quantity: Math.max(0, Number(item.quantity || 0)),
+      unitPrice: Math.max(0, Number(item.unitPrice || 0)),
+      lineDiscount: Math.max(0, Number(item.lineDiscount || 0)),
+      taxEnabled: item.taxEnabled !== false,
+    })).filter(item => item.quantity > 0)
+    : [];
+}
+
+function eligibleSubtotalForPosSale(items, excludedCategories) {
+  const excluded = new Set(excludedCategories);
+  return items.reduce((sum, item) => {
+    const category = cleanString(item.category, 160).toLowerCase();
+    if (category && excluded.has(category)) return sum;
+    return sum + Math.max(0, item.unitPrice * item.quantity - item.lineDiscount);
+  }, 0);
+}
+
+function expiryTimestamp(months) {
+  if (!months) return null;
+  const date = new Date();
+  date.setMonth(date.getMonth() + months);
+  return admin.firestore.Timestamp.fromDate(date);
+}
+
+exports.applyPosLoyaltySale = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const decoded = await requireAdminAccess(req, 'pos');
+      const body = req.body || {};
+      const orderId = cleanString(body.orderId || body.firestoreId || '', 180);
+      const receiptNo = cleanString(body.receiptNo || orderId, 120);
+      const customerUid = cleanString(body.customerUid || '', 180);
+      const idempotencyKey = safeLedgerKey(body.idempotencyKey || receiptNo || orderId);
+      const netAmount = Math.max(0, Number(body.netAmount || 0));
+      const normalDiscount = Math.max(0, Number(body.normalDiscount || 0));
+      const subtotal = Math.max(0, Number(body.subtotal || 0));
+      const requestedRedeemedPoints = Math.max(0, Math.trunc(Number(body.redeemedPoints || 0)));
+      const items = normalizePosSaleItems(body.items || []);
+
+      if (!orderId) {
+        const error = new Error('Order ID is required');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (!receiptNo) {
+        const error = new Error('Receipt number is required');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (!customerUid) {
+        const error = new Error('Customer UID is required');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (netAmount <= 0) {
+        const error = new Error('Net amount must be greater than zero');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const orderRef = db.collection('orders').doc(orderId);
+      const userRef = db.collection('users').doc(customerUid);
+      const summaryRef = db.collection('member_summaries').doc(customerUid);
+      const loyaltyRef = db.collection('site_settings').doc('loyalty');
+      const earnLedgerRef = db.collection('point_ledger').doc(`pos-earn-${idempotencyKey}`);
+      const redeemLedgerRef = db.collection('point_ledger').doc(`pos-redeem-${idempotencyKey}`);
+      let resultPayload = null;
+
+      await db.runTransaction(async transaction => {
+        const [
+          orderSnap,
+          userSnap,
+          summarySnap,
+          loyaltySnap,
+          earnLedgerSnap,
+          redeemLedgerSnap,
+        ] = await Promise.all([
+          transaction.get(orderRef),
+          transaction.get(userRef),
+          transaction.get(summaryRef),
+          transaction.get(loyaltyRef),
+          transaction.get(earnLedgerRef),
+          transaction.get(redeemLedgerRef),
+        ]);
+
+        if (!orderSnap.exists) {
+          const error = new Error('Synced order was not found');
+          error.statusCode = 404;
+          throw error;
+        }
+        if (!userSnap.exists) {
+          const error = new Error('Member profile was not found');
+          error.statusCode = 404;
+          throw error;
+        }
+
+        const order = orderSnap.data() || {};
+        if (
+          order.loyaltySyncStatus === 'synced' &&
+          order.loyaltyIdempotencyKey === idempotencyKey &&
+          order.loyalty
+        ) {
+          resultPayload = order.loyalty;
+          return;
+        }
+        if (earnLedgerSnap.exists || redeemLedgerSnap.exists) {
+          resultPayload = order.loyalty || {
+            customerUid,
+            earnedPoints: Number(earnLedgerSnap.data()?.pointsDelta || 0),
+            redeemedPoints: Math.abs(Number(redeemLedgerSnap.data()?.pointsDelta || 0)),
+            loyaltyDiscount: Number(order.loyaltyDiscount || 0),
+            idempotencyKey,
+            ledgerIds: {
+              earn: earnLedgerSnap.exists ? earnLedgerRef.id : '',
+              redeem: redeemLedgerSnap.exists ? redeemLedgerRef.id : '',
+            },
+            syncedAt: new Date().toISOString(),
+          };
+          transaction.set(orderRef, {
+            loyalty: resultPayload,
+            loyaltySyncStatus: 'synced',
+            loyaltyError: '',
+            loyaltyIdempotencyKey: idempotencyKey,
+            loyaltySyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+          return;
+        }
+
+        const config = normalizeLoyaltySettings(
+          loyaltySnap.exists ? loyaltySnap.data() || {} : {}
+        );
+        if (!config.enabled) {
+          const error = new Error('Loyalty is disabled');
+          error.statusCode = 400;
+          throw error;
+        }
+
+        const member = userSnap.data() || {};
+        const summary = summarySnap.exists ? summarySnap.data() || {} : {};
+        const memberTotalSpent = Math.max(0, Number(member.totalSpent || 0));
+        const memberVisitCount = Math.max(0, Math.floor(Number(member.visitCount || 0)));
+        const summaryTotalSpent = Math.max(0, Number(summary.totalSpent ?? memberTotalSpent));
+        const summaryVisitCount = Math.max(0, Math.floor(Number(summary.visitCount ?? memberVisitCount)));
+        const summaryLifetimePoints = Math.max(0, Number(summary.lifetimePoints || 0));
+        const summaryTotalRedeemed = Math.max(0, Number(summary.totalRedeemed || 0));
+        const memberPoints = Math.max(0, Math.floor(Number(member.points || 0)));
+        const estimatedLegacyPoints = config.spendPerPoint > 0
+          ? Math.floor(memberTotalSpent / config.spendPerPoint)
+          : 0;
+        const pointsBefore = summarySnap.exists && summary.pointsBalance !== undefined
+          ? Math.max(0, Math.floor(Number(summary.pointsBalance || 0)))
+          : Math.max(memberPoints, estimatedLegacyPoints);
+        const summaryLifetimeBase = Math.max(summaryLifetimePoints, pointsBefore);
+
+        if (requestedRedeemedPoints > pointsBefore) {
+          const error = new Error('Redeemed points exceed member balance');
+          error.statusCode = 400;
+          throw error;
+        }
+        if (
+          requestedRedeemedPoints > 0 &&
+          config.minRedeemPoints > 0 &&
+          requestedRedeemedPoints < config.minRedeemPoints
+        ) {
+          const error = new Error(`Minimum redeem points is ${config.minRedeemPoints}`);
+          error.statusCode = 400;
+          throw error;
+        }
+
+        const requestedDiscount = requestedRedeemedPoints * config.pointValue;
+        const maxRedeemDiscount = (netAmount * config.maxRedeemPercent) / 100;
+        if (requestedDiscount > maxRedeemDiscount + 0.0001) {
+          const error = new Error('Redeemed points exceed max redeem percent');
+          error.statusCode = 400;
+          throw error;
+        }
+        if (requestedDiscount > netAmount + 0.0001) {
+          const error = new Error('Redeemed points exceed sale amount');
+          error.statusCode = 400;
+          throw error;
+        }
+
+        const loyaltyDiscount = Math.min(netAmount, requestedDiscount);
+        const payableAmount = Math.max(0, netAmount - loyaltyDiscount);
+        const eligibleSubtotal = eligibleSubtotalForPosSale(items, config.excludedCategories);
+        const subtotalBase = subtotal > 0
+          ? subtotal
+          : items.reduce((sum, item) => sum + Math.max(0, item.unitPrice * item.quantity), 0);
+        const eligibleRatio = subtotalBase > 0 ? Math.min(1, eligibleSubtotal / subtotalBase) : 0;
+        const normalDiscountShare = config.earnAfterDiscount
+          ? normalDiscount * eligibleRatio
+          : 0;
+        const redeemedDiscountShare = config.earnOnRedeemedAmount
+          ? 0
+          : loyaltyDiscount * eligibleRatio;
+        const earnBase = Math.max(0, eligibleSubtotal - normalDiscountShare - redeemedDiscountShare);
+        const currentTier = cleanString(member.tier || summary.tier || 'Silver', 40);
+        const multiplier = Number(config.tierMultipliers[currentTier] || 1);
+        const earnedPoints = config.spendPerPoint > 0
+          ? Math.floor((earnBase / config.spendPerPoint) * multiplier)
+          : 0;
+        const pointsAfter = Math.max(0, pointsBefore - requestedRedeemedPoints + earnedPoints);
+        const totalSpentAfter = memberTotalSpent + payableAmount;
+        const visitCountAfter = memberVisitCount + 1;
+        const tier = memberTierFromMetrics(pointsAfter, totalSpentAfter, visitCountAfter);
+        const now = admin.firestore.FieldValue.serverTimestamp();
+        const syncedAt = new Date().toISOString();
+        const memberCode = cleanString(member.memberCode || '', 80);
+        const memberName = cleanString(member.displayName || member.name || member.customerName || 'Eden Member', 160);
+        const memberEmail = cleanString(member.email || '', 180);
+
+        resultPayload = {
+          customerUid,
+          earnedPoints,
+          redeemedPoints: requestedRedeemedPoints,
+          loyaltyDiscount,
+          pointsBefore,
+          pointsAfter,
+          tier,
+          eligibleAmount: eligibleSubtotal,
+          earnBase,
+          idempotencyKey,
+          ledgerIds: {
+            earn: earnedPoints > 0 ? earnLedgerRef.id : '',
+            redeem: requestedRedeemedPoints > 0 ? redeemLedgerRef.id : '',
+          },
+          syncedAt,
+        };
+
+        if (requestedRedeemedPoints > 0) {
+          transaction.set(redeemLedgerRef, {
+            userId: customerUid,
+            memberCode,
+            memberName,
+            memberEmail,
+            type: 'pos_redeem',
+            pointsDelta: -requestedRedeemedPoints,
+            pointsBefore,
+            pointsAfter: pointsBefore - requestedRedeemedPoints,
+            amount: loyaltyDiscount,
+            receiptNo,
+            orderId,
+            idempotencyKey,
+            source: 'pos',
+            createdAt: now,
+            createdBy: decoded.uid || '',
+            createdByEmail: cleanString(decoded.email || '', 180),
+          });
+        }
+        if (earnedPoints > 0) {
+          const earnPayload = {
+            userId: customerUid,
+            memberCode,
+            memberName,
+            memberEmail,
+            type: 'pos_earn',
+            pointsDelta: earnedPoints,
+            pointsBefore: pointsBefore - requestedRedeemedPoints,
+            pointsAfter,
+            amount: earnBase,
+            receiptNo,
+            orderId,
+            idempotencyKey,
+            source: 'pos',
+            createdAt: now,
+            createdBy: decoded.uid || '',
+            createdByEmail: cleanString(decoded.email || '', 180),
+          };
+          const expiresAt = expiryTimestamp(config.expiryMonths);
+          if (expiresAt) earnPayload.expiresAt = expiresAt;
+          transaction.set(earnLedgerRef, earnPayload);
+        }
+
+        transaction.set(userRef, {
+          points: pointsAfter,
+          totalSpent: totalSpentAfter,
+          visitCount: visitCountAfter,
+          tier,
+          loyaltyUpdatedAt: now,
+          updatedAt: now,
+        }, { merge: true });
+
+        transaction.set(summaryRef, {
+          userId: customerUid,
+          memberCode,
+          memberName,
+          memberEmail,
+          pointsBalance: pointsAfter,
+          tier,
+          lifetimePoints: summaryLifetimeBase + earnedPoints,
+          totalRedeemed: summaryTotalRedeemed + requestedRedeemedPoints,
+          totalSpent: summaryTotalSpent + payableAmount,
+          visitCount: summaryVisitCount + 1,
+          lastLedgerId:
+            earnedPoints > 0
+              ? earnLedgerRef.id
+              : requestedRedeemedPoints > 0
+                ? redeemLedgerRef.id
+                : cleanString(summary.lastLedgerId || '', 180),
+          updatedAt: now,
+        }, { merge: true });
+
+        transaction.set(orderRef, {
+          loyalty: resultPayload,
+          earnedPoints,
+          redeemedPoints: requestedRedeemedPoints,
+          loyaltyDiscount,
+          totalBeforeLoyalty: netAmount,
+          totalAmount: payableAmount,
+          total: payableAmount,
+          loyaltySyncStatus: 'synced',
+          loyaltyError: '',
+          loyaltyIdempotencyKey: idempotencyKey,
+          loyaltySyncedAt: now,
+          updatedAt: now,
+        }, { merge: true });
+      });
+
+      logger.info('POS loyalty sale applied', {
+        orderId,
+        receiptNo,
+        customerUid,
+        idempotencyKey,
+        earnedPoints: resultPayload?.earnedPoints,
+        redeemedPoints: resultPayload?.redeemedPoints,
+      });
+      res.status(201).json({ ok: true, loyalty: resultPayload });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('POS loyalty sale failed', { message: error.message, status });
+      res.status(status).json({ error: error.message || 'POS loyalty sale failed' });
     }
   }
 );

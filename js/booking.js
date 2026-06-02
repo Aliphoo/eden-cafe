@@ -52,6 +52,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (el) el.required = required;
     }
 
+    function waitForWindowFunction(name, timeoutMs = 5000) {
+        if (typeof window[name] === 'function') return Promise.resolve(window[name]);
+        return new Promise(resolve => {
+            const startedAt = Date.now();
+            const timer = window.setInterval(() => {
+                if (typeof window[name] === 'function') {
+                    window.clearInterval(timer);
+                    resolve(window[name]);
+                } else if (Date.now() - startedAt >= timeoutMs) {
+                    window.clearInterval(timer);
+                    resolve(null);
+                }
+            }, 100);
+        });
+    }
+
     function handleBookingTypeChange() {
         const bookingType = getSelectedBookingType();
         const isRoom = bookingType === 'room';
@@ -73,10 +89,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     async function loadRooms() {
-        if (!roomSelect || typeof window.fetchRoomsFromCloud !== 'function') return;
+        if (!roomSelect) return;
+        const fetchRoomsFromCloud = await waitForWindowFunction('fetchRoomsFromCloud');
+        if (typeof fetchRoomsFromCloud !== 'function') return;
 
         try {
-            const rooms = await window.fetchRoomsFromCloud();
+            const rooms = await fetchRoomsFromCloud();
             roomSelect.innerHTML = '<option value="" disabled selected>Select Room / เลือกห้อง</option>';
             rooms.forEach(room => {
                 roomsMap[room.id] = room;
