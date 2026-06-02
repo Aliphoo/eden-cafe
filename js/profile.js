@@ -129,6 +129,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             visits: 'Visits',
             cartItems: 'Cart Items',
             pointValue: 'Point Value',
+            pointsTab: 'Points',
             loyaltyWallet: 'Eden Points Wallet',
             loyaltyRule: 'Earning & redemption rules',
             loyaltyHistory: 'Recent point history',
@@ -213,6 +214,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             visits: 'จำนวนครั้งที่ใช้บริการ',
             cartItems: 'สินค้าในตะกร้า',
             pointValue: 'มูลค่าแต้ม',
+            pointsTab: 'แต้ม',
             loyaltyWallet: 'กระเป๋าแต้ม Eden',
             loyaltyRule: 'กติกาสะสมและใช้แต้ม',
             loyaltyHistory: 'ประวัติแต้มล่าสุด',
@@ -483,33 +485,54 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         return template.replace('{value}', value).replace('{tier}', progress.nextTier);
     }
 
-    function renderMemberCard(user, labels, membershipUser) {
+    function renderMemberCard(user, labels, membershipUser, avatar, displayName, email) {
         const tier = getMemberTier(membershipUser);
         const theme = getTierTheme(tier);
         const progress = getNextTierProgress(membershipUser);
         const progressLabel = progress.completed ? labels.highestTier : `${labels.progressTo} ${progress.nextTier}`;
         const percent = progress.completed ? 100 : progress.percent;
+        const config = getLoyaltyConfig();
+        const pointCashValue = Math.floor((Number(membershipUser.points) || 0) * config.pointValue);
+        const memberCode = membershipUser.memberCode || memberId(user);
 
         return `
-            <div class="member-card ${theme.className}" id="profile-overview">
-                <div class="member-card-header">
-                    <div>
-                        <div class="member-tier-badge ${theme.badgeClass}">${escapeHTML(tier)}</div>
-                        <p class="member-name">${escapeHTML(membershipUser.name || labels.member)}</p>
+            <section class="member-card profile-hero ${theme.className}" id="profile-overview">
+                <div class="profile-hero-identity">
+                    <img src="${escapeHTML(avatar)}" alt="Profile" class="profile-hero-avatar">
+                    <div class="profile-hero-copy">
+                        <span class="profile-kicker">${escapeHTML(labels.profileInfo)}</span>
+                        <h1>${escapeHTML(displayName || membershipUser.name || labels.member)}</h1>
+                        <p>${escapeHTML(email || labels.notProvided)}</p>
+                        <div class="profile-identity-meta">
+                            <span class="member-tier-badge ${theme.badgeClass}">${escapeHTML(tier)}</span>
+                            <span class="member-id">${escapeHTML(labels.memberId)}: ${escapeHTML(memberCode)}</span>
+                        </div>
                     </div>
-                    <div class="member-id">${escapeHTML(labels.memberId)}: ${escapeHTML(membershipUser.memberCode || memberId(user))}</div>
                 </div>
-                <div class="member-metrics-row">
-                    <span>${escapeHTML(labels.points)} <strong>${formatNumber(membershipUser.points)}</strong></span>
-                    <span>${escapeHTML(labels.totalSpent)} <strong>฿${formatBaht(membershipUser.totalSpent)}</strong></span>
-                    <span>${escapeHTML(labels.visits)} <strong>${formatNumber(membershipUser.visitCount)}</strong></span>
+                <div class="profile-summary-grid">
+                    <div class="profile-summary-tile">
+                        <span>${escapeHTML(labels.points)}</span>
+                        <strong>${formatNumber(membershipUser.points)}</strong>
+                    </div>
+                    <div class="profile-summary-tile">
+                        <span>${escapeHTML(labels.pointValue)}</span>
+                        <strong>฿${formatBaht(pointCashValue)}</strong>
+                    </div>
+                    <div class="profile-summary-tile">
+                        <span>${escapeHTML(labels.totalSpent)}</span>
+                        <strong>฿${formatBaht(membershipUser.totalSpent)}</strong>
+                    </div>
+                    <div class="profile-summary-tile">
+                        <span>${escapeHTML(labels.visits)}</span>
+                        <strong>${formatNumber(membershipUser.visitCount)}</strong>
+                    </div>
                 </div>
                 <div class="member-progress-container">
                     <div class="member-progress-text"><span>${escapeHTML(progressLabel)}</span><span>${percent}%</span></div>
                     <div class="member-progress-bar"><div class="member-progress-fill" style="width:${percent}%"></div></div>
                     <p class="member-progress-goal">${escapeHTML(progressMessage(progress, labels))}</p>
                 </div>
-            </div>
+            </section>
         `;
     }
 
@@ -536,43 +559,44 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             return `
                 <div class="membership-rule-row">
                     <span>${escapeHTML(formatDate(row.createdAt))}</span>
-                    <strong style="color:${delta < 0 ? '#b42318' : 'var(--primary-color)'};">${escapeHTML(prefix + formatNumber(delta))}</strong>
+                    <strong class="${delta < 0 ? 'is-negative' : 'is-positive'}">${escapeHTML(prefix + formatNumber(delta))}</strong>
                     <em>${escapeHTML(reason)}</em>
                 </div>
             `;
         }).join('');
 
         return `
-            <div class="membership-panel" id="profile-loyalty-wallet">
-                <h2>${escapeHTML(labels.loyaltyWallet)}</h2>
-                <div class="stats-grid">
-                    <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.points)}</div><div class="stat-label">${escapeHTML(labels.points)}</div></div>
-                    <div class="stat-box"><div class="stat-value">฿${formatBaht(pointCashValue)}</div><div class="stat-label">${escapeHTML(labels.pointValue)}</div></div>
+            <section class="membership-panel profile-section" id="profile-loyalty-wallet">
+                <div class="profile-section-head">
+                    <div>
+                        <span class="profile-section-kicker">${escapeHTML(labels.pointsTab)}</span>
+                        <h2>${escapeHTML(labels.loyaltyWallet)}</h2>
+                    </div>
+                    <strong class="profile-wallet-value">${escapeHTML(walletValue)}</strong>
                 </div>
-                <p class="membership-rule-lead">${escapeHTML(walletValue)}</p>
-                <div class="benefit-grid">
+                <div class="benefit-grid profile-rule-grid">
                     <div class="benefit-pill">${escapeHTML(earnRule)}</div>
                     <div class="benefit-pill">${escapeHTML(redeemRule)}</div>
                     <div class="benefit-pill">${escapeHTML(expiryRule)}</div>
                 </div>
-                <h3 style="margin:24px 0 10px;">${escapeHTML(labels.loyaltyHistory)}</h3>
+                <h3 class="profile-subsection-title">${escapeHTML(labels.loyaltyHistory)}</h3>
                 ${loyaltyLoading ? `<p class="membership-rule-lead">${escapeHTML(labels.loyaltyLoading)}</p>` : ''}
                 <div class="membership-rule-list">
                     ${historyRows || `<p class="membership-rule-lead">${escapeHTML(labels.noLoyaltyHistory)}</p>`}
                 </div>
-            </div>
+            </section>
         `;
     }
 
     function renderBenefits(tier, labels) {
         const benefits = getTierBenefits(tier, isEnglishPage() ? 'en' : 'th');
         return `
-            <div class="membership-panel">
+            <section class="membership-panel profile-section">
                 <h2>${escapeHTML(labels.benefits)}</h2>
                 <div class="benefit-grid">
                     ${benefits.map(item => `<div class="benefit-pill">${escapeHTML(item)}</div>`).join('')}
                 </div>
-            </div>
+            </section>
         `;
     }
 
@@ -584,7 +608,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         const isPreviewLocked = tierRank(previewTier) > tierRank(actualTier);
 
         return `
-            <div class="membership-panel tier-preview-panel">
+            <section class="membership-panel profile-section tier-preview-panel">
                 <div class="tier-preview-heading">
                     <div>
                         <h2>${escapeHTML(labels.tierPreview)}</h2>
@@ -619,7 +643,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                     </div>
                     ${isPreviewLocked ? tierUnlockRules(previewTier, labels) : ''}
                 </div>
-            </div>
+            </section>
         `;
     }
 
@@ -628,10 +652,10 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         const rules = getTierRules();
         if (progress.completed || !progress.nextTier) {
             return `
-                <div class="membership-panel">
+                <section class="membership-panel profile-section">
                     <h2>${escapeHTML(labels.nextLevel)}</h2>
                     <p class="membership-max-note">${escapeHTML(labels.highestTier)}</p>
-                </div>
+                </section>
             `;
         }
 
@@ -643,7 +667,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         ];
 
         return `
-            <div class="membership-panel">
+            <section class="membership-panel profile-section">
                 <h2>${escapeHTML(labels.nextLevel)}</h2>
                 <p class="membership-rule-lead">${escapeHTML(labels.nextRulesPrefix)}</p>
                 <div class="membership-rule-list">
@@ -655,23 +679,23 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                         </div>
                     `).join('')}
                 </div>
-            </div>
+            </section>
         `;
     }
 
     function renderSignedOut(container, labels) {
         container.innerHTML = `
-            <div class="profile-container" style="text-align:center;">
-                <img src="Images/Logo.webp" alt="Eden Cafe" style="width:84px;height:84px;border-radius:50%;object-fit:cover;margin-bottom:18px;">
-                <h1 style="margin-bottom:10px;">${escapeHTML(labels.profile)}</h1>
-                <p style="color:#666;">${escapeHTML(labels.signInPrompt)}</p>
-                <button class="btn btn-outline" onclick="openLoginModal()" style="margin-top:15px;">${escapeHTML(labels.signIn)}</button>
+            <div class="profile-container profile-signed-out">
+                <img src="Images/Logo.webp" alt="Eden Cafe" class="profile-signed-out-logo">
+                <h1>${escapeHTML(labels.profile)}</h1>
+                <p>${escapeHTML(labels.signInPrompt)}</p>
+                <button class="btn btn-outline" onclick="openLoginModal()">${escapeHTML(labels.signIn)}</button>
             </div>
         `;
     }
 
     function renderOrderList(orders, labels) {
-        if (!orders.length) return `<p style="color:#777;">${escapeHTML(labels.noOrders)}</p>`;
+        if (!orders.length) return `<p class="profile-empty-state">${escapeHTML(labels.noOrders)}</p>`;
         return orders.map(order => {
             const items = Array.isArray(order.items) ? order.items : [];
             const status = order.status === 'paid' ? labels.paid : labels.pending;
@@ -679,25 +703,25 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                 <div class="order-card">
                     <div class="order-card-header">
                         <strong>${escapeHTML(labels.orderId)} ${escapeHTML(order.id || '-')}</strong>
-                        <span style="color:var(--primary-color);font-weight:600;">${escapeHTML(status)}</span>
+                        <span class="profile-status-pill">${escapeHTML(status)}</span>
                     </div>
-                    <p style="margin:0 0 8px;color:#666;">${formatDate(order.date || order.timestamp)}</p>
-                    <p style="margin:0 0 8px;">${escapeHTML(labels.items)}: ${items.map(item => escapeHTML(item.name || '')).join(', ') || '-'}</p>
-                    <strong>${escapeHTML(labels.total)}: ${money(order.totalAmount || order.total || 0)}</strong>
+                    <p class="profile-list-meta">${formatDate(order.date || order.timestamp)}</p>
+                    <p class="profile-list-items">${escapeHTML(labels.items)}: ${items.map(item => escapeHTML(item.name || '')).join(', ') || '-'}</p>
+                    <strong class="profile-list-total">${escapeHTML(labels.total)}: ${money(order.totalAmount || order.total || 0)}</strong>
                 </div>
             `;
         }).join('');
     }
 
     function renderBookingList(bookings, labels) {
-        if (!bookings.length) return `<p style="color:#777;">${escapeHTML(labels.noBookings)}</p>`;
+        if (!bookings.length) return `<p class="profile-empty-state">${escapeHTML(labels.noBookings)}</p>`;
         return bookings.map(booking => `
             <div class="order-card">
                 <div class="order-card-header">
                     <strong>${escapeHTML(booking.id || booking.date || '-')}</strong>
-                    <span style="color:var(--primary-color);font-weight:600;">${escapeHTML(booking.status || 'confirmed')}</span>
+                    <span class="profile-status-pill">${escapeHTML(booking.status || 'confirmed')}</span>
                 </div>
-                <p style="margin:0;color:#666;">${escapeHTML([booking.date, booking.time || booking.arrivalTime || booking.startTime, booking.tableIds || booking.table || booking.zone || booking.tableZone].filter(Boolean).join(' | '))}</p>
+                <p class="profile-list-meta">${escapeHTML([booking.date, booking.time || booking.arrivalTime || booking.startTime, booking.tableIds || booking.table || booking.zone || booking.tableZone].filter(Boolean).join(' | '))}</p>
             </div>
         `).join('');
     }
@@ -763,6 +787,28 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         `;
     }
 
+    function setupProfileNavigation(container) {
+        const navItems = Array.from(container.querySelectorAll('.profile-nav-item[href^="#profile"]'));
+        const activate = hash => {
+            navItems.forEach(item => item.classList.toggle('active', item.getAttribute('href') === hash));
+        };
+        navItems.forEach(item => {
+            item.addEventListener('click', () => activate(item.getAttribute('href')));
+        });
+        if (!('IntersectionObserver' in window)) return;
+        const sections = navItems
+            .map(item => document.querySelector(item.getAttribute('href')))
+            .filter(Boolean);
+        if (!sections.length) return;
+        const observer = new IntersectionObserver(entries => {
+            const activeEntry = entries
+                .filter(entry => entry.isIntersecting)
+                .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+            if (activeEntry?.target?.id) activate(`#${activeEntry.target.id}`);
+        }, { rootMargin: '-30% 0px -58% 0px', threshold: [0.1, 0.35, 0.6] });
+        sections.forEach(section => observer.observe(section));
+    }
+
     function renderSignedIn(container, user, labels) {
         const hasFirebaseUser = !!currentAuthUser?.uid;
         const orders = hasFirebaseUser ? (Array.isArray(cloudOrders) ? cloudOrders : []) : (cloudOrders || readOrders());
@@ -775,58 +821,43 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
 
         container.innerHTML = `
             <div class="profile-layout">
-                <aside class="profile-sidebar">
+                <nav class="profile-sidebar" aria-label="Profile sections">
                     <a class="profile-nav-item active" href="#profile-overview">${escapeHTML(labels.overview)}</a>
+                    <a class="profile-nav-item" href="#profile-loyalty-wallet">${escapeHTML(labels.pointsTab)}</a>
                     <a class="profile-nav-item" href="#profile-orders">${escapeHTML(labels.orders)}</a>
-                    <a class="profile-nav-item" href="#profile-bookings">${escapeHTML(labels.bookings)}</a>
                     <a class="profile-nav-item" href="#profile-account">${escapeHTML(labels.account)}</a>
-                    <a class="profile-nav-item" href="#" onclick="logout(); return false;">${escapeHTML(labels.logout)}</a>
-                </aside>
+                    <button type="button" class="profile-nav-item profile-nav-item--logout" onclick="logout()">${escapeHTML(labels.logout)}</button>
+                </nav>
                 <section class="profile-main">
-                    <div class="profile-header">
-                        <img src="${escapeHTML(avatar)}" alt="Profile">
-                        <div>
-                            <h1 style="margin:0;">${escapeHTML(displayName || labels.member)}</h1>
-                            <p style="margin:5px 0 0;color:#666;">${escapeHTML(email || '')}</p>
-                        </div>
+                    ${renderMemberCard(user, labels, membershipUser, avatar, displayName, email)}
+                    <div class="profile-action-row">
+                        <a class="btn" href="${isEnglishPage() ? '/shop-en' : '/shop'}">${escapeHTML(labels.shopNow)}</a>
+                        <a class="btn btn-outline" href="${isEnglishPage() ? '/booking-en' : '/booking'}">${escapeHTML(labels.bookTable)}</a>
+                        <button type="button" class="btn btn-quiet" onclick="logout()">${escapeHTML(labels.logout)}</button>
                     </div>
-
-                    ${renderMemberCard(user, labels, membershipUser)}
                     ${renderLoyaltyWallet(membershipUser, labels)}
                     ${renderTierPreview(tier, labels)}
-
-                    <div class="stats-grid">
-                        <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.points)}</div><div class="stat-label">${escapeHTML(labels.points)}</div></div>
-                        <div class="stat-box"><div class="stat-value">฿${formatBaht(membershipUser.totalSpent)}</div><div class="stat-label">${escapeHTML(labels.totalSpent)}</div></div>
-                        <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.visitCount)}</div><div class="stat-label">${escapeHTML(labels.visits)}</div></div>
-                        <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.cartItemCount)}</div><div class="stat-label">${escapeHTML(labels.cartItems)}</div></div>
-                    </div>
-
                     ${renderBenefits(tier, labels)}
                     ${renderNextTierRequirements(membershipUser, labels)}
 
-                    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:30px;">
-                        <a class="btn" href="${isEnglishPage() ? '/shop-en' : '/shop'}">${escapeHTML(labels.shopNow)}</a>
-                        <a class="btn btn-outline" href="${isEnglishPage() ? '/booking-en' : '/booking'}">${escapeHTML(labels.bookTable)}</a>
-                    </div>
-
-                    <div class="order-history" id="profile-account">
-                        <h2>${escapeHTML(labels.editableInfo)}</h2>
-                        ${renderProfileForm(user, labels)}
-                    </div>
-
-                    <div class="order-history" id="profile-orders">
+                    <section class="order-history profile-section" id="profile-orders">
                         <h2>${escapeHTML(labels.recentOrders)}</h2>
                         ${renderOrderList(orders, labels)}
-                    </div>
+                    </section>
 
-                    <div class="order-history" id="profile-bookings">
+                    <section class="order-history profile-section" id="profile-bookings">
                         <h2>${escapeHTML(labels.bookings)}</h2>
                         ${renderBookingList(bookings, labels)}
-                    </div>
+                    </section>
+
+                    <section class="order-history profile-section" id="profile-account">
+                        <h2>${escapeHTML(labels.editableInfo)}</h2>
+                        ${renderProfileForm(user, labels)}
+                    </section>
                 </section>
             </div>
         `;
+        setupProfileNavigation(container);
         refreshLoyaltyData(user);
         refreshCloudProfile(user);
         refreshCloudHistory(user);
