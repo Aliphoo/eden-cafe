@@ -631,19 +631,32 @@ service cloud.firestore {
       allow read: if true;
       allow write: if hasAdminPermission('tables');
     }
-    match /stats/pageViews {
-      allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['totalViews', 'dailyViews', 'lastUpdateDate'])
+    function isValidVisitorStatsDoc() {
+      return request.resource.data.keys().hasOnly(['totalViews', 'dailyViews', 'lastUpdateDate'])
         && request.resource.data.totalViews is number
         && request.resource.data.dailyViews is number
         && request.resource.data.totalViews >= 0
-        && request.resource.data.dailyViews >= 0;
-      allow update: if request.resource.data.keys().hasOnly(['totalViews', 'dailyViews', 'lastUpdateDate'])
-        && request.resource.data.totalViews is number
-        && request.resource.data.dailyViews is number
-        && request.resource.data.totalViews >= resource.data.totalViews
-        && request.resource.data.totalViews <= resource.data.totalViews + 1
-        && request.resource.data.dailyViews >= 0;
+        && request.resource.data.dailyViews >= 0
+        && request.resource.data.lastUpdateDate is string
+        && request.resource.data.lastUpdateDate.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+    function isSameDayVisitorIncrement() {
+      return request.resource.data.lastUpdateDate == resource.data.lastUpdateDate
+        && request.resource.data.totalViews == resource.data.totalViews + 1
+        && request.resource.data.dailyViews == resource.data.dailyViews + 1;
+    }
+    function isNewDayVisitorIncrement() {
+      return request.resource.data.lastUpdateDate != resource.data.lastUpdateDate
+        && request.resource.data.totalViews == resource.data.totalViews + 1
+        && request.resource.data.dailyViews == 1;
+    }
+    match /stats/pageViews {
+      allow read: if true;
+      allow create: if isValidVisitorStatsDoc()
+        && request.resource.data.totalViews == 1
+        && request.resource.data.dailyViews == 1;
+      allow update: if isValidVisitorStatsDoc()
+        && (isSameDayVisitorIncrement() || isNewDayVisitorIncrement());
     }
 
     // Deny all by default
