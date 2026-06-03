@@ -88,14 +88,21 @@ function authMemberCode(uid) {
 async function syncAuthUserProfile(user) {
     if (!user || !db) return;
     try {
-        await setDoc(doc(db, 'users', user.uid), {
+        const displayName = user.displayName || (user.phoneNumber ? 'Eden Member ' + String(user.phoneNumber).slice(-4) : 'Eden Member');
+        const payload = {
             uid: user.uid,
-            displayName: user.displayName || 'Eden Member',
+            displayName,
             email: user.email || '',
-            photoURL: user.photoURL || '',
+            photoURL: user.photoURL || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(displayName) + '&background=1A9345&color=fff',
             memberCode: authMemberCode(user.uid),
+            authProviderIds: (user.providerData || []).map(profile => profile.providerId).filter(Boolean),
             updatedAt: serverTimestamp()
-        }, { merge: true });
+        };
+        if (user.phoneNumber) {
+            payload.phone = user.phoneNumber;
+            payload.phoneE164 = user.phoneNumber;
+        }
+        await setDoc(doc(db, 'users', user.uid), payload, { merge: true });
     } catch (error) {
         console.warn('Unable to sync member profile:', error);
     }
@@ -223,6 +230,7 @@ function ensureLoginModal() {
                     </svg>
                     Sign in with Google
                 </button>
+                <a class="phone-register-link" href="/register">${isEnglishPage() ? 'Register with phone number' : 'สมัคร / ล็อกอินด้วยเบอร์โทร'}</a>
             </div>
         </div>
     `;
@@ -466,11 +474,22 @@ document.addEventListener('DOMContentLoaded', () => {
         onAuthStateChanged(auth, user => {
             if (user) {
                 syncAuthUserProfile(user);
+                const storedUser = getStoredUser() || {};
+                const authName = user.displayName || storedUser.name || (user.phoneNumber ? 'Eden Member ' + String(user.phoneNumber).slice(-4) : 'Eden Member');
+                const authAvatar = user.photoURL || storedUser.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(authName) + '&background=4caf50&color=fff';
+                const baseStoredUser = {
+                    ...storedUser,
+                    uid: user.uid,
+                    name: authName,
+                    email: user.email || storedUser.email || '',
+                    avatar: authAvatar,
+                    phone: user.phoneNumber || storedUser.phone || '',
+                    phoneNumber: user.phoneNumber || storedUser.phoneNumber || ''
+                };
                 getUserAdminAccess(user).then(access => {
-                    const storedUser = getStoredUser() || {};
                     const isBackOffice = isBackOfficeAccess(access);
                     localStorage.setItem('eden_user', JSON.stringify({
-                        ...storedUser,
+                        ...baseStoredUser,
                         isAdmin: isBackOffice,
                         adminRole: access?.role || '',
                         canUsePos: canUsePosAccess(access),
@@ -482,10 +501,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ? { role: 'owner', status: 'active', permissions: { pos: true } }
                     : null;
                 localStorage.setItem('eden_user', JSON.stringify({
-                    uid: user.uid,
-                    name: user.displayName || 'Eden Member',
-                    email: user.email,
-                    avatar: user.photoURL || 'https://ui-avatars.com/api/?name=Eden+Member&background=4caf50&color=fff',
+                    ...baseStoredUser,
                     isAdmin: !!bootstrapAccess,
                     adminRole: bootstrapAccess?.role || '',
                     canUsePos: canUsePosAccess(bootstrapAccess)

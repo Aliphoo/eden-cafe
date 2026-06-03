@@ -441,49 +441,71 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.auth.uid == userId
         && request.resource.data.keys().hasOnly([
-          'uid', 'displayName', 'email', 'photoURL', 'phone',
+          'uid', 'displayName', 'email', 'photoURL', 'phone', 'phoneE164',
           'shippingAddress', 'birthDate', 'allergies', 'healthNote',
-          'lineId', 'updatedAt'
+          'lineId', 'memberCode', 'authProviderIds', 'registrationSource',
+          'marketingConsent', 'privacyConsent', 'phoneVerifiedAt',
+          'updatedAt'
         ])
         && request.resource.data.keys().hasAll(['uid', 'displayName', 'email', 'updatedAt'])
         && request.resource.data.uid == request.auth.uid
         && isShortString(request.resource.data.displayName, 120)
-        && isShortString(request.resource.data.email, 180)
+        && request.resource.data.email is string
+        && request.resource.data.email.size() <= 180
         && (!request.resource.data.keys().hasAny(['photoURL']) || (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 500))
         && (!request.resource.data.keys().hasAny(['phone']) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['phoneE164']) || (request.resource.data.phoneE164 is string && request.resource.data.phoneE164.size() <= 40))
         && (!request.resource.data.keys().hasAny(['shippingAddress']) || (request.resource.data.shippingAddress is string && request.resource.data.shippingAddress.size() <= 500))
         && (!request.resource.data.keys().hasAny(['birthDate']) || (request.resource.data.birthDate is string && request.resource.data.birthDate.size() <= 20))
         && (!request.resource.data.keys().hasAny(['allergies']) || (request.resource.data.allergies is string && request.resource.data.allergies.size() <= 200))
         && (!request.resource.data.keys().hasAny(['healthNote']) || (request.resource.data.healthNote is string && request.resource.data.healthNote.size() <= 500))
         && (!request.resource.data.keys().hasAny(['lineId']) || (request.resource.data.lineId is string && request.resource.data.lineId.size() <= 80))
+        && (!request.resource.data.keys().hasAny(['memberCode']) || (request.resource.data.memberCode is string && request.resource.data.memberCode.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['authProviderIds']) || request.resource.data.authProviderIds is list)
+        && (!request.resource.data.keys().hasAny(['registrationSource']) || (request.resource.data.registrationSource is string && request.resource.data.registrationSource.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['marketingConsent']) || request.resource.data.marketingConsent is bool)
+        && (!request.resource.data.keys().hasAny(['privacyConsent']) || request.resource.data.privacyConsent is bool)
+        && (!request.resource.data.keys().hasAny(['phoneVerifiedAt']) || request.resource.data.phoneVerifiedAt == request.time)
         && request.resource.data.updatedAt == request.time;
       allow update: if isSignedIn()
         && request.auth.uid == userId
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'displayName', 'email', 'photoURL', 'phone',
+          'displayName', 'email', 'photoURL', 'phone', 'phoneE164',
           'shippingAddress', 'birthDate', 'allergies', 'healthNote',
-          'lineId', 'updatedAt'
+          'lineId', 'memberCode', 'authProviderIds', 'registrationSource',
+          'marketingConsent', 'privacyConsent', 'phoneVerifiedAt',
+          'updatedAt'
         ])
         && request.resource.data.keys().hasOnly([
-          'uid', 'displayName', 'email', 'photoURL', 'phone',
+          'uid', 'displayName', 'email', 'photoURL', 'phone', 'phoneE164',
           'shippingAddress', 'birthDate', 'allergies', 'healthNote',
-          'lineId', 'memberCode', 'tier', 'points', 'totalSpent',
+          'lineId', 'memberCode', 'authProviderIds', 'registrationSource',
+          'marketingConsent', 'privacyConsent', 'phoneVerifiedAt',
+          'tier', 'points', 'totalSpent',
           'visitCount', 'orderCount', 'bookingCount', 'cartItemCount',
           'status', 'adminNote', 'adminTags',
-          'authProviderIds', 'authDisabled', 'emailVerified',
+          'authDisabled', 'emailVerified',
           'authCreatedAt', 'lastLoginAt',
           'createdAt', 'updatedAt'
         ])
         && request.resource.data.uid == request.auth.uid
         && isShortString(request.resource.data.displayName, 120)
-        && isShortString(request.resource.data.email, 180)
+        && request.resource.data.email is string
+        && request.resource.data.email.size() <= 180
         && (!request.resource.data.keys().hasAny(['photoURL']) || (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 500))
         && (!request.resource.data.keys().hasAny(['phone']) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['phoneE164']) || (request.resource.data.phoneE164 is string && request.resource.data.phoneE164.size() <= 40))
         && (!request.resource.data.keys().hasAny(['shippingAddress']) || (request.resource.data.shippingAddress is string && request.resource.data.shippingAddress.size() <= 500))
         && (!request.resource.data.keys().hasAny(['birthDate']) || (request.resource.data.birthDate is string && request.resource.data.birthDate.size() <= 20))
         && (!request.resource.data.keys().hasAny(['allergies']) || (request.resource.data.allergies is string && request.resource.data.allergies.size() <= 200))
         && (!request.resource.data.keys().hasAny(['healthNote']) || (request.resource.data.healthNote is string && request.resource.data.healthNote.size() <= 500))
         && (!request.resource.data.keys().hasAny(['lineId']) || (request.resource.data.lineId is string && request.resource.data.lineId.size() <= 80))
+        && (!request.resource.data.keys().hasAny(['memberCode']) || (request.resource.data.memberCode is string && request.resource.data.memberCode.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['authProviderIds']) || request.resource.data.authProviderIds is list)
+        && (!request.resource.data.keys().hasAny(['registrationSource']) || (request.resource.data.registrationSource is string && request.resource.data.registrationSource.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['marketingConsent']) || request.resource.data.marketingConsent is bool)
+        && (!request.resource.data.keys().hasAny(['privacyConsent']) || request.resource.data.privacyConsent is bool)
+        && (!request.resource.data.keys().hasAny(['phoneVerifiedAt']) || request.resource.data.phoneVerifiedAt is timestamp)
         && request.resource.data.updatedAt == request.time;
       allow delete: if isAdmin();
     }
