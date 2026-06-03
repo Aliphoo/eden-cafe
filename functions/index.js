@@ -125,7 +125,7 @@ const VISITOR_COUNTER_DOC = db.collection('stats').doc('pageViews');
 const VISITOR_COUNTER_SESSION_COLLECTION = 'visitor_counter_sessions';
 const VISITOR_COUNTER_IP_BUCKET_COLLECTION = 'visitor_counter_ip_buckets';
 const VISITOR_COUNTER_IP_DAILY_LIMIT = 80;
-const VISITOR_COUNTER_LOADING_MESSAGE = 'กำลังอัปเดตสถิติ';
+const VISITOR_COUNTER_LOADING_MESSAGE = '\u0e01\u0e33\u0e25\u0e31\u0e07\u0e2d\u0e31\u0e1b\u0e40\u0e14\u0e15\u0e2a\u0e16\u0e34\u0e15\u0e34';
 
 function bangkokDateKey(date = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {

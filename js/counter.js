@@ -1,7 +1,7 @@
 const COUNTER_API_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net/trackVisitorCounter';
 const COUNTER_CLIENT_KEY = 'eden_counter_client_id';
-const COUNTER_LOADING_LABEL = 'กำลังอัปเดตสถิติ';
-const COUNTER_ERROR_LABEL = 'กำลังอัปเดตสถิติ';
+const COUNTER_LOADING_LABEL = '\u0e01\u0e33\u0e25\u0e31\u0e07\u0e2d\u0e31\u0e1b\u0e40\u0e14\u0e15\u0e2a\u0e16\u0e34\u0e15\u0e34';
+const COUNTER_ERROR_LABEL = '\u0e01\u0e33\u0e25\u0e31\u0e07\u0e2d\u0e31\u0e1b\u0e40\u0e14\u0e15\u0e2a\u0e16\u0e34\u0e15\u0e34';
 
 function isDevMode() {
     const host = window.location.hostname;
