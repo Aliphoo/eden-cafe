@@ -1,8 +1,21 @@
-import { db } from './firebase-config.js';
-import { doc, getDoc, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+const COUNTER_API_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net/trackVisitorCounter';
+const COUNTER_CLIENT_KEY = 'eden_counter_client_id';
+const COUNTER_LOADING_LABEL = 'กำลังอัปเดตสถิติ';
+const COUNTER_ERROR_LABEL = 'กำลังอัปเดตสถิติ';
 
-const COUNTER_DOC = doc(db, 'stats', 'pageViews');
-const EMPTY_COUNTER_LABEL = '...';
+function isDevMode() {
+    const host = window.location.hostname;
+    return host === 'localhost'
+        || host === '127.0.0.1'
+        || host === ''
+        || window.location.search.includes('debugCounter=1');
+}
+
+function logCounterError(error) {
+    if (isDevMode()) {
+        console.error('[Eden visitor counter]', error);
+    }
+}
 
 function getBangkokDateKey() {
     return new Intl.DateTimeFormat('en-CA', {
@@ -13,35 +26,81 @@ function getBangkokDateKey() {
     }).format(new Date());
 }
 
-function normalizeStats(data = {}, today) {
-    const totalViews = Math.max(0, Math.floor(Number(data.totalViews) || 0));
-    const dailyViews = Math.max(0, Math.floor(Number(data.dailyViews) || 0));
-    const lastUpdateDate = typeof data.lastUpdateDate === 'string' ? data.lastUpdateDate : today;
-    return { totalViews, dailyViews, lastUpdateDate };
+function storageGet(storage, key) {
+    try {
+        return storage.getItem(key);
+    } catch (_) {
+        return '';
+    }
+}
+
+function storageSet(storage, key, value) {
+    try {
+        storage.setItem(key, value);
+    } catch (_) {
+        // Storage can be blocked in private mode; server-side throttling still protects the counter.
+    }
+}
+
+function getOrCreateClientId() {
+    const existing = storageGet(localStorage, COUNTER_CLIENT_KEY);
+    if (existing) return existing;
+
+    const generated = window.crypto && typeof window.crypto.randomUUID === 'function'
+        ? window.crypto.randomUUID()
+        : `eden-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    storageSet(localStorage, COUNTER_CLIENT_KEY, generated);
+    return generated;
 }
 
 function formatCounterValue(value) {
     const number = Number(value);
-    if (!Number.isFinite(number) || number < 0) return EMPTY_COUNTER_LABEL;
+    if (!Number.isFinite(number) || number < 0) return COUNTER_ERROR_LABEL;
     return Math.floor(number).toLocaleString('en-US');
 }
 
-function updateCounterUI(dailyEl, totalEl, stats) {
-    if (!stats) {
-        if (dailyEl) dailyEl.innerText = EMPTY_COUNTER_LABEL;
-        if (totalEl) totalEl.innerText = EMPTY_COUNTER_LABEL;
-        return;
-    }
-    if (dailyEl) dailyEl.innerText = formatCounterValue(stats.dailyViews);
-    if (totalEl) totalEl.innerText = formatCounterValue(stats.totalViews);
+function setCounterText(dailyEl, totalEl, dailyText, totalText = dailyText) {
+    if (dailyEl) dailyEl.innerText = dailyText;
+    if (totalEl) totalEl.innerText = totalText;
 }
 
-async function readCounter(today) {
-    const snapshot = await getDoc(COUNTER_DOC);
-    if (!snapshot.exists()) return null;
-    const stats = normalizeStats(snapshot.data(), today);
-    if (stats.lastUpdateDate !== today) stats.dailyViews = 0;
-    return stats;
+function updateCounterUI(dailyEl, totalEl, stats) {
+    if (!stats || stats.ok !== true) {
+        setCounterText(dailyEl, totalEl, COUNTER_ERROR_LABEL);
+        return;
+    }
+    setCounterText(
+        dailyEl,
+        totalEl,
+        formatCounterValue(stats.dailyViews),
+        formatCounterValue(stats.totalViews)
+    );
+}
+
+async function fetchCounterStats(shouldCountVisit) {
+    const response = await fetch(COUNTER_API_URL, {
+        method: shouldCountVisit ? 'POST' : 'GET',
+        headers: shouldCountVisit ? { 'Content-Type': 'application/json' } : {},
+        body: shouldCountVisit
+            ? JSON.stringify({ count: true, visitorId: getOrCreateClientId() })
+            : undefined,
+        cache: 'no-store',
+        credentials: 'omit'
+    });
+
+    let payload = null;
+    try {
+        payload = await response.json();
+    } catch (_) {
+        payload = null;
+    }
+
+    if (!response.ok || !payload || payload.ok !== true) {
+        const message = payload && payload.error ? payload.error : `Counter API failed (${response.status})`;
+        throw new Error(message);
+    }
+
+    return payload;
 }
 
 async function trackVisit() {
@@ -50,43 +109,24 @@ async function trackVisit() {
     if (!dailyEl && !totalEl) return;
 
     const today = getBangkokDateKey();
-    const visitKey = `eden_counter_visited_${today}`;
-    const shouldCountVisit = sessionStorage.getItem(visitKey) !== 'true';
+    const localVisitKey = `eden_counter_counted_${today}`;
+    const sessionVisitKey = `eden_counter_session_counted_${today}`;
+    const hasLocalCount = storageGet(localStorage, localVisitKey) === 'true';
+    const hasSessionCount = storageGet(sessionStorage, sessionVisitKey) === 'true';
+    const shouldCountVisit = !hasLocalCount && !hasSessionCount;
 
-    updateCounterUI(dailyEl, totalEl, null);
+    setCounterText(dailyEl, totalEl, COUNTER_LOADING_LABEL);
 
     try {
-        if (!shouldCountVisit) {
-            updateCounterUI(dailyEl, totalEl, await readCounter(today));
-            return;
+        const stats = await fetchCounterStats(shouldCountVisit);
+        if (shouldCountVisit) {
+            storageSet(localStorage, localVisitKey, 'true');
+            storageSet(sessionStorage, sessionVisitKey, 'true');
         }
-
-        const nextStats = await runTransaction(db, async transaction => {
-            const snapshot = await transaction.get(COUNTER_DOC);
-            if (!snapshot.exists()) {
-                const firstStats = { totalViews: 1, dailyViews: 1, lastUpdateDate: today };
-                transaction.set(COUNTER_DOC, firstStats);
-                return firstStats;
-            }
-
-            const current = normalizeStats(snapshot.data(), today);
-            const next = {
-                totalViews: current.totalViews + 1,
-                dailyViews: current.lastUpdateDate === today ? current.dailyViews + 1 : 1,
-                lastUpdateDate: today
-            };
-            transaction.set(COUNTER_DOC, next);
-            return next;
-        });
-
-        sessionStorage.setItem(visitKey, 'true');
-        updateCounterUI(dailyEl, totalEl, nextStats);
-    } catch (e) {
-        try {
-            updateCounterUI(dailyEl, totalEl, await readCounter(today));
-        } catch (_) {
-            updateCounterUI(dailyEl, totalEl, null);
-        }
+        updateCounterUI(dailyEl, totalEl, stats);
+    } catch (error) {
+        logCounterError(error);
+        setCounterText(dailyEl, totalEl, COUNTER_ERROR_LABEL);
     }
 }
 

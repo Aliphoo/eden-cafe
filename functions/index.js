@@ -17,11 +17,6 @@ const SPACESHIP_FTP_SERVER = defineSecret('SPACESHIP_FTP_SERVER');
 const SPACESHIP_FTP_USERNAME = defineSecret('SPACESHIP_FTP_USERNAME');
 const SPACESHIP_FTP_PASSWORD = defineSecret('SPACESHIP_FTP_PASSWORD');
 const GOOGLE_MAPS_SERVER_KEY = defineSecret('GOOGLE_MAPS_SERVER_KEY');
-const SMTP_HOST = defineSecret('SMTP_HOST');
-const SMTP_PORT = defineSecret('SMTP_PORT');
-const SMTP_USER = defineSecret('SMTP_USER');
-const SMTP_PASS = defineSecret('SMTP_PASS');
-const SMTP_FROM = defineSecret('SMTP_FROM');
 
 const PLACE_ID = 'ChIJVTN6cGwB1zAR66OQ_OBKRkM';
 const PLACE_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
@@ -71,7 +66,7 @@ const ALLOWED_ORIGINS = new Set([
 
 function setCors(req, res) {
   const origin = req.get('origin') || '';
-  if (ALLOWED_ORIGINS.has(origin)) {
+  if (ALLOWED_ORIGINS.has(origin) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
     res.set('Access-Control-Allow-Origin', origin);
     res.set('Vary', 'Origin');
   }
@@ -125,6 +120,137 @@ function publicApiError(error, fallback = 'Unable to process request') {
   if (status >= 500) return { status, message: fallback };
   return { status, message: fallback };
 }
+
+const VISITOR_COUNTER_DOC = db.collection('stats').doc('pageViews');
+const VISITOR_COUNTER_SESSION_COLLECTION = 'visitor_counter_sessions';
+const VISITOR_COUNTER_IP_BUCKET_COLLECTION = 'visitor_counter_ip_buckets';
+const VISITOR_COUNTER_IP_DAILY_LIMIT = 80;
+const VISITOR_COUNTER_LOADING_MESSAGE = 'กำลังอัปเดตสถิติ';
+
+function bangkokDateKey(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(String(value || '')).digest('hex');
+}
+
+function normalizeCounterStats(data = {}, today = bangkokDateKey()) {
+  const totalViews = Math.max(0, Math.floor(Number(data.totalViews) || 0));
+  const lastUpdateDate = typeof data.lastUpdateDate === 'string' ? data.lastUpdateDate : today;
+  const dailyViews = lastUpdateDate === today
+    ? Math.max(0, Math.floor(Number(data.dailyViews) || 0))
+    : 0;
+  return { totalViews, dailyViews, lastUpdateDate: lastUpdateDate === today ? today : lastUpdateDate };
+}
+
+function counterPayload(stats, counted = false) {
+  return {
+    ok: true,
+    counted,
+    dailyViews: stats.dailyViews,
+    totalViews: stats.totalViews,
+    lastUpdateDate: stats.lastUpdateDate,
+    timezone: 'Asia/Bangkok',
+    fallbackText: VISITOR_COUNTER_LOADING_MESSAGE,
+  };
+}
+
+exports.trackVisitorCounter = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    res.set('Cache-Control', 'no-store, max-age=0');
+    res.set('X-Content-Type-Options', 'nosniff');
+
+    if (!['GET', 'POST'].includes(req.method)) {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'visitor-counter', 120, 15 * 60 * 1000);
+
+      const today = bangkokDateKey();
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const wantsCount = req.method === 'POST' && body.count !== false;
+      let result = null;
+
+      await db.runTransaction(async transaction => {
+        const statsSnap = await transaction.get(VISITOR_COUNTER_DOC);
+        const currentStats = statsSnap.exists
+          ? normalizeCounterStats(statsSnap.data(), today)
+          : { totalViews: 0, dailyViews: 0, lastUpdateDate: today };
+
+        if (!wantsCount) {
+          result = counterPayload(currentStats, false);
+          return;
+        }
+
+        const ip = clientIp(req);
+        const userAgent = cleanString(req.get('user-agent') || 'unknown', 300);
+        const visitorId = cleanString(body.visitorId || '', 160);
+        const ipHash = sha256(ip).slice(0, 32);
+        const visitorHash = sha256(`${today}:${visitorId || 'anonymous'}:${ipHash}:${userAgent}`).slice(0, 48);
+        const sessionRef = db.collection(VISITOR_COUNTER_SESSION_COLLECTION).doc(`${today}_${visitorHash}`);
+        const ipBucketRef = db.collection(VISITOR_COUNTER_IP_BUCKET_COLLECTION).doc(`${today}_${ipHash}`);
+        const [sessionSnap, ipBucketSnap] = await Promise.all([
+          transaction.get(sessionRef),
+          transaction.get(ipBucketRef),
+        ]);
+
+        if (sessionSnap.exists) {
+          result = counterPayload(currentStats, false);
+          return;
+        }
+
+        const ipBucketCount = ipBucketSnap.exists ? Math.max(0, Number(ipBucketSnap.data().count) || 0) : 0;
+        if (ipBucketCount >= VISITOR_COUNTER_IP_DAILY_LIMIT) {
+          logger.warn('Visitor counter IP bucket limit reached', { ipHash, today });
+          result = counterPayload(currentStats, false);
+          return;
+        }
+
+        const nextStats = {
+          totalViews: currentStats.totalViews + 1,
+          dailyViews: currentStats.lastUpdateDate === today ? currentStats.dailyViews + 1 : 1,
+          lastUpdateDate: today,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+
+        transaction.set(VISITOR_COUNTER_DOC, nextStats, { merge: true });
+        transaction.set(sessionRef, {
+          date: today,
+          visitorHash,
+          ipHash,
+          userAgentHash: sha256(userAgent).slice(0, 32),
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        transaction.set(ipBucketRef, {
+          date: today,
+          ipHash,
+          count: admin.firestore.FieldValue.increment(1),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+        result = counterPayload(nextStats, true);
+      });
+
+      res.status(200).json(result || counterPayload({ totalViews: 0, dailyViews: 0, lastUpdateDate: today }, false));
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('Visitor counter failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, VISITOR_COUNTER_LOADING_MESSAGE);
+      res.status(status).json({ error: publicError.message, fallbackText: VISITOR_COUNTER_LOADING_MESSAGE });
+    }
+  }
+);
 
 exports.downloadPosApk = onRequest(
   { region: 'asia-southeast1', timeoutSeconds: 120, memory: '512MiB' },
@@ -947,10 +1073,10 @@ function emailVerificationHash(uid, email, code) {
 }
 
 function createMailTransporter() {
-  const host = SMTP_HOST.value();
-  const port = Number(SMTP_PORT.value() || 587);
-  const user = SMTP_USER.value();
-  const pass = SMTP_PASS.value();
+  const host = process.env.SMTP_HOST || '';
+  const port = Number(process.env.SMTP_PORT || 587);
+  const user = process.env.SMTP_USER || '';
+  const pass = process.env.SMTP_PASS || '';
   if (!host || !user || !pass) {
     const error = new Error('Email sender is not configured');
     error.statusCode = 503;
@@ -965,10 +1091,7 @@ function createMailTransporter() {
 }
 
 exports.sendEmailVerificationCode = onRequest(
-  {
-    region: 'asia-southeast1',
-    secrets: [SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM],
-  },
+  { region: 'asia-southeast1' },
   async (req, res) => {
     if (handleOptions(req, res)) return;
     setCors(req, res);
@@ -1001,7 +1124,7 @@ exports.sendEmailVerificationCode = onRequest(
         expiresAt,
       });
 
-      const from = SMTP_FROM.value() || SMTP_USER.value();
+      const from = process.env.SMTP_FROM || process.env.SMTP_USER;
       await createMailTransporter().sendMail({
         from,
         to: email,
