@@ -46,6 +46,12 @@
         return Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : fallback;
     }
 
+    function normalizeRotation(value, fallback = 0) {
+        const number = Number(value);
+        if (!Number.isFinite(number)) return fallback;
+        return ((Math.round(number) % 360) + 360) % 360;
+    }
+
     function getInputValue(id, fallback = '') {
         const el = document.getElementById(id);
         return el ? el.value : fallback;
@@ -94,6 +100,7 @@
                 shape: ['round', 'rect', 'wide'].includes(row.shape) ? row.shape : 'rect',
                 x: clampPercent(row.x, 10),
                 y: clampPercent(row.y, 10),
+                rotation: normalizeRotation(row.rotation, 0),
                 status: ['available', 'booked', 'unavailable'].includes(row.status) ? row.status : 'available'
             });
         });
@@ -281,7 +288,7 @@
                             disabled: table.status !== 'available' || overLimit,
                             onClick: () => handleTableClick(table),
                             className: 'eden-map-table shape-' + table.shape + ' is-' + status,
-                            style: { left: table.x + '%', top: table.y + '%' },
+                            style: { left: table.x + '%', top: table.y + '%', '--table-rotation': normalizeRotation(table.rotation, 0) + 'deg' },
                             'aria-label': table.code + ' ' + table.zone + ' ' + statusText[status]
                         },
                             h('span', { className: 'eden-map-table-code' }, table.code),

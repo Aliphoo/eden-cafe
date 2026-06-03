@@ -4780,6 +4780,8 @@ footer p {
 }
 
 .eden-map-table {
+    --table-lift: 0px;
+    --table-rotation: 0deg;
     align-items: center;
     border: 2px solid transparent;
     cursor: pointer;
@@ -4789,7 +4791,8 @@ footer p {
     font-weight: 800;
     justify-content: center;
     position: absolute;
-    transform: translateZ(0);
+    transform: translateY(var(--table-lift)) rotate(var(--table-rotation)) translateZ(0);
+    transform-origin: center center;
     transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
 }
 
@@ -4818,8 +4821,8 @@ footer p {
 }
 
 .eden-map-table.is-available:hover {
+    --table-lift: -3px;
     box-shadow: 0 10px 24px rgba(9, 89, 55, 0.18);
-    transform: translateY(-3px);
 }
 
 .eden-map-table.is-selected {

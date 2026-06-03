@@ -303,13 +303,29 @@
         .map-admin-grid { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 20px; align-items: start; }
         .map-admin-help { background: #f2fbf3; border: 1px solid #d9efdc; border-radius: 12px; padding: 14px 16px; color: #345; font-size: 0.92rem; line-height: 1.6; margin-bottom: 16px; }
         .map-admin-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+        .map-admin-panel { min-width: 0; }
+        .map-admin-toolbar { display: grid; grid-template-columns: minmax(220px, 1fr) 140px 150px 150px 150px auto; gap: 10px; margin-bottom: 12px; }
+        .map-admin-toolbar input, .map-admin-toolbar select { width: 100%; min-height: 42px; border: 1px solid #dfe8df; border-radius: 8px; padding: 9px 12px; font: inherit; background: #fff; }
+        .map-admin-reset { min-height: 42px; border: 1px solid #dfe8df; border-radius: 8px; padding: 0 14px; background: #f8fbf8; color: #345; font-weight: 700; cursor: pointer; white-space: nowrap; }
+        .map-admin-table-scroll { max-height: 680px; overflow: auto; border: 1px solid #edf1ed; border-radius: 12px; background: #fff; }
+        .map-admin-table { min-width: 920px; }
+        .map-admin-table thead th { position: sticky; top: 0; z-index: 2; background: #f8faf8; }
+        .map-admin-row { cursor: pointer; }
+        .map-admin-row:hover, .map-admin-row.is-selected { background: #f4fbf4; }
+        .map-admin-row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .map-admin-pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; color: #667; flex-wrap: wrap; }
+        .map-admin-page-controls { display: flex; align-items: center; gap: 8px; }
+        .map-admin-page-btn { width: 42px; height: 38px; border: 1px solid #dfe8df; border-radius: 8px; background: #fff; color: #345; font-size: 1.2rem; cursor: pointer; }
+        .map-admin-page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .map-admin-page-input { width: 58px; height: 38px; border: 1px solid #dfe8df; border-radius: 8px; text-align: center; }
         .map-admin-preview-card { background: #fbfff8; border: 1px solid #e0eadc; border-radius: 14px; padding: 14px; position: sticky; top: 20px; }
         .admin-map-stage { position: relative; width: 100%; aspect-ratio: 1.35 / 1; min-height: 310px; overflow: hidden; border-radius: 18px; background: linear-gradient(135deg, #063b29, #0b5b3a 58%, #103c2d); border: 1px solid rgba(0,0,0,0.08); touch-action: none; user-select: none; }
         .admin-map-zone { position: absolute; border: 1px solid rgba(255,255,255,0.18); border-radius: 18px; background: rgba(255,255,255,0.12); color: white; padding: 10px; font-size: 0.76rem; overflow: hidden; cursor: grab; touch-action: none; }
         .admin-map-zone strong { display: block; letter-spacing: 0.14em; text-transform: uppercase; }
         .admin-map-zone small { color: rgba(255,255,255,0.72); }
-        .admin-map-table { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2px solid #0b5b3a; background: #fffdf6; color: #123f2b; font-size: 0.68rem; font-weight: 700; box-shadow: 0 6px 14px rgba(0,0,0,0.12); cursor: grab; touch-action: none; }
+        .admin-map-table { --table-rotation: 0deg; position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2px solid #0b5b3a; background: #fffdf6; color: #123f2b; font-size: 0.68rem; font-weight: 700; box-shadow: 0 6px 14px rgba(0,0,0,0.12); cursor: grab; touch-action: none; transform: rotate(var(--table-rotation)); transform-origin: center center; }
         .admin-map-zone.is-dragging, .admin-map-table.is-dragging { cursor: grabbing; outline: 2px solid rgba(255,255,255,0.85); outline-offset: 3px; z-index: 20; }
+        .admin-map-zone.is-selected, .admin-map-table.is-selected { outline: 3px solid rgba(255, 204, 102, 0.95); outline-offset: 4px; z-index: 12; }
         .admin-map-table.shape-round { width: 44px; height: 44px; border-radius: 999px; }
         .admin-map-table.shape-rect { width: 66px; height: 42px; border-radius: 14px; }
         .admin-map-table.shape-wide { width: 88px; height: 42px; border-radius: 14px; }
@@ -318,10 +334,14 @@
         .map-admin-mini { color: #789; font-size: 0.82rem; margin-top: 10px; }
         .map-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         .map-form-grid .full { grid-column: 1 / -1; }
+        .map-rotation-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .map-rotation-chip { min-height: 34px; border: 1px solid #dfe8df; border-radius: 999px; background: #fff; color: #345; padding: 0 12px; font-weight: 700; cursor: pointer; }
         .modal-content.map-modal { max-width: 760px; margin: 4% auto; }
         .map-admin-pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 9px; font-size: 0.78rem; font-weight: 500; background: #eef6f0; color: #2e7d32; }
         .map-admin-pill.zone { background: #e3f2fd; color: #1565c0; }
+        @media (max-width: 1300px) { .map-admin-toolbar { grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(130px, 1fr)); } }
         @media (max-width: 1100px) { .map-admin-grid { grid-template-columns: 1fr; } .map-admin-preview-card { position: static; } }
+        @media (max-width: 720px) { .map-admin-toolbar { grid-template-columns: 1fr; } }
         @media (max-width: 640px) { .map-form-grid { grid-template-columns: 1fr; } }
 
 
@@ -1288,8 +1308,33 @@
                 </div>
 
                 <div class="map-admin-grid">
-                    <div style="overflow-x:auto;">
-                        <table>
+                    <div class="map-admin-panel">
+                        <div class="map-admin-toolbar">
+                            <input type="search" id="table-map-search" placeholder="ค้นหารหัสโต๊ะ ชื่อ โซน หรือสถานะ">
+                            <select id="table-kind-filter" aria-label="กรองประเภท">
+                                <option value="all">ทั้งหมด</option>
+                                <option value="table">เฉพาะโต๊ะ</option>
+                                <option value="zone">เฉพาะโซน</option>
+                            </select>
+                            <select id="table-zone-filter" aria-label="กรองโซน">
+                                <option value="all">ทุกโซน</option>
+                            </select>
+                            <select id="table-status-filter" aria-label="กรองสถานะ">
+                                <option value="all">ทุกสถานะ</option>
+                                <option value="available">ว่าง</option>
+                                <option value="booked">จองแล้ว</option>
+                                <option value="unavailable">ปิดใช้งาน</option>
+                            </select>
+                            <select id="table-page-size" aria-label="จำนวนรายการต่อหน้า">
+                                <option value="25">แสดง 25</option>
+                                <option value="50">แสดง 50</option>
+                                <option value="100">แสดง 100</option>
+                                <option value="all">แสดงทั้งหมด</option>
+                            </select>
+                            <button class="map-admin-reset" id="table-filter-reset" type="button">ล้างตัวกรอง</button>
+                        </div>
+                        <div class="map-admin-table-scroll">
+                        <table class="map-admin-table">
                             <thead>
                                 <tr>
                                     <th>ประเภท</th>
@@ -1297,20 +1342,31 @@
                                     <th>โซน/สถานะ</th>
                                     <th>ตำแหน่ง</th>
                                     <th>ขนาด/ที่นั่ง</th>
+                                    <th>มุมหมุน</th>
                                     <th>จัดการ</th>
                                 </tr>
                             </thead>
                             <tbody id="tables-table-body">
-                                <tr><td colspan="6" style="text-align:center;">กำลังโหลดข้อมูล...</td></tr>
+                                <tr><td colspan="7" style="text-align:center;">กำลังโหลดข้อมูล...</td></tr>
                             </tbody>
                         </table>
+                        </div>
+                        <div class="map-admin-pager">
+                            <span id="table-list-summary">กำลังโหลดข้อมูล...</span>
+                            <div class="map-admin-page-controls">
+                                <button class="map-admin-page-btn" id="table-page-prev" type="button" aria-label="ก่อนหน้า">‹</button>
+                                <input class="map-admin-page-input" id="table-page-input" type="number" min="1" value="1" aria-label="หน้า">
+                                <span id="table-page-total">จาก 1</span>
+                                <button class="map-admin-page-btn" id="table-page-next" type="button" aria-label="ถัดไป">›</button>
+                            </div>
+                        </div>
                     </div>
 
                     <aside class="map-admin-preview-card">
                         <h3 style="margin-bottom:10px; color:var(--primary-color);">Preview แผนผัง</h3>
                         <div id="admin-table-map-preview" class="admin-map-stage"></div>
                         <p id="admin-table-map-summary" class="map-admin-mini">ยังไม่มีข้อมูลแผนผัง</p>
-                        <p class="map-admin-mini" style="color:#2e7d32;">ลากโซนหรือโต๊ะใน Preview เพื่อย้ายตำแหน่ง แล้วปล่อยเมาส์เพื่อบันทึกอัตโนมัติ</p>
+                        <p class="map-admin-mini" style="color:#2e7d32;">คลิกโต๊ะ/โซนใน Preview เพื่อแก้ไข หรือลากเพื่อย้ายตำแหน่งแล้วปล่อยเมาส์เพื่อบันทึกอัตโนมัติ</p>
                     </aside>
                 </div>
             </div>
@@ -2098,6 +2154,17 @@
                             <option value="unavailable">ปิดใช้งาน</option>
                         </select>
                     </div>
+                    <div class="form-group table-only-field">
+                        <label>มุมหมุนโต๊ะ (องศา)</label>
+                        <input type="number" id="tableRotation" min="0" max="359" step="1" value="0">
+                        <div class="map-rotation-actions" aria-label="มุมหมุนลัด">
+                            <button class="map-rotation-chip" type="button" data-rotation-value="0">0°</button>
+                            <button class="map-rotation-chip" type="button" data-rotation-value="45">45°</button>
+                            <button class="map-rotation-chip" type="button" data-rotation-value="90">90°</button>
+                            <button class="map-rotation-chip" type="button" data-rotation-value="180">180°</button>
+                            <button class="map-rotation-chip" type="button" data-rotation-value="270">270°</button>
+                        </div>
+                    </div>
                     <div class="form-group zone-only-field">
                         <label>คำอธิบายโซน</label>
                         <input type="text" id="zoneHint" placeholder="Quiet AC seating">
@@ -2291,7 +2358,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=50"></script>
+    <script type="module" src="js/admin.js?v=51"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {

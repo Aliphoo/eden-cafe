@@ -350,6 +350,10 @@ let shopProductsData = {};
 let shopCategoriesData = {};
 let roomsData = {};
 let tablesData = {};
+let tableMapCurrentPage = 1;
+let tableMapPageSize = 25;
+let tableMapControlsBound = false;
+let tableMapSelectedId = '';
 let membersData = {};
 let memberUsersData = {};
 let memberSummariesData = {};
@@ -2993,6 +2997,11 @@ function clampPercent(value, fallback = 0) {
     return Math.max(0, Math.min(100, safeNumber(value, fallback)));
 }
 
+function normalizeRotation(value, fallback = 0) {
+    const number = safeNumber(value, fallback);
+    return ((Math.round(number) % 360) + 360) % 360;
+}
+
 function normalizeMapItem(id, data = {}) {
     const kind = data.kind === 'zone' ? 'zone' : 'table';
     if (kind === 'zone') {
@@ -3020,6 +3029,7 @@ function normalizeMapItem(id, data = {}) {
         status: ['available', 'booked', 'unavailable'].includes(data.status) ? data.status : 'available',
         x: clampPercent(data.x, 10),
         y: clampPercent(data.y, 10),
+        rotation: normalizeRotation(data.rotation, 0),
         mapEnabled: data.mapEnabled !== false && data.kind === 'table'
     };
 }
@@ -3035,6 +3045,111 @@ function updateZoneDatalist(items = getMapItems()) {
     if (!datalist) return;
     const zones = [...new Set(items.filter(item => item.kind === 'zone').map(item => item.name))];
     datalist.innerHTML = zones.map(zone => '<option value="' + escapeHTML(zone) + '"></option>').join('');
+}
+
+function getSortedMapItems(items = getMapItems()) {
+    return items.slice().sort((a, b) => {
+        if (a.kind !== b.kind) return a.kind === 'zone' ? -1 : 1;
+        return (a.name || a.code || a.id).localeCompare(b.name || b.code || b.id, 'th');
+    });
+}
+
+function updateTableZoneFilter(items = getMapItems()) {
+    const filter = document.getElementById('table-zone-filter');
+    if (!filter) return;
+    const current = filter.value || 'all';
+    const zones = [...new Set(items.map(item => item.kind === 'zone' ? item.name : item.zone).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, 'th'));
+    filter.innerHTML = '<option value="all">ทุกโซน</option>' + zones.map(zone => '<option value="' + escapeHTML(zone) + '">' + escapeHTML(zone) + '</option>').join('');
+    filter.value = current === 'all' || zones.includes(current) ? current : 'all';
+}
+
+function getFilteredMapItems(items = getSortedMapItems()) {
+    const search = (document.getElementById('table-map-search')?.value || '').trim().toLowerCase();
+    const kindFilter = document.getElementById('table-kind-filter')?.value || 'all';
+    const zoneFilter = document.getElementById('table-zone-filter')?.value || 'all';
+    const statusFilter = document.getElementById('table-status-filter')?.value || 'all';
+
+    return items.filter(item => {
+        if (kindFilter !== 'all' && item.kind !== kindFilter) return false;
+        if (zoneFilter !== 'all') {
+            const itemZone = item.kind === 'zone' ? item.name : item.zone;
+            if (itemZone !== zoneFilter) return false;
+        }
+        if (statusFilter !== 'all' && (item.kind !== 'table' || item.status !== statusFilter)) return false;
+        if (!search) return true;
+        const haystack = [
+            item.id, item.kind, item.name, item.code, item.zone, item.status, item.hint, item.shape,
+            item.seats, item.x, item.y, item.w, item.h, item.rotation
+        ].filter(value => value !== undefined && value !== null).join(' ').toLowerCase();
+        return haystack.includes(search);
+    });
+}
+
+function bindTableMapControls() {
+    if (tableMapControlsBound) return;
+    tableMapControlsBound = true;
+
+    const rerenderFromFirstPage = () => {
+        tableMapCurrentPage = 1;
+        renderTablesManagerView();
+    };
+
+    ['table-map-search', 'table-kind-filter', 'table-zone-filter', 'table-status-filter'].forEach(id => {
+        const control = document.getElementById(id);
+        if (!control) return;
+        control.addEventListener(id === 'table-map-search' ? 'input' : 'change', rerenderFromFirstPage);
+    });
+
+    const pageSize = document.getElementById('table-page-size');
+    pageSize?.addEventListener('change', () => {
+        tableMapPageSize = pageSize.value;
+        rerenderFromFirstPage();
+    });
+
+    document.getElementById('table-page-prev')?.addEventListener('click', () => {
+        tableMapCurrentPage = Math.max(1, tableMapCurrentPage - 1);
+        renderTablesManagerView();
+    });
+
+    document.getElementById('table-page-next')?.addEventListener('click', () => {
+        tableMapCurrentPage += 1;
+        renderTablesManagerView();
+    });
+
+    document.getElementById('table-page-input')?.addEventListener('change', (event) => {
+        tableMapCurrentPage = Math.max(1, safeNumber(event.target.value, 1));
+        renderTablesManagerView();
+    });
+
+    document.getElementById('table-filter-reset')?.addEventListener('click', () => {
+        const search = document.getElementById('table-map-search');
+        const kind = document.getElementById('table-kind-filter');
+        const zone = document.getElementById('table-zone-filter');
+        const status = document.getElementById('table-status-filter');
+        const size = document.getElementById('table-page-size');
+        if (search) search.value = '';
+        if (kind) kind.value = 'all';
+        if (zone) zone.value = 'all';
+        if (status) status.value = 'all';
+        if (size) size.value = '25';
+        tableMapPageSize = 25;
+        tableMapSelectedId = '';
+        rerenderFromFirstPage();
+    });
+
+    document.querySelectorAll('[data-rotation-value]').forEach(button => {
+        button.addEventListener('click', () => {
+            const input = document.getElementById('tableRotation');
+            if (input) input.value = normalizeRotation(button.dataset.rotationValue, 0);
+        });
+    });
+}
+
+function selectTableMapItem(id, options = {}) {
+    tableMapSelectedId = id || '';
+    renderTablesManagerView();
+    if (options.openEditor && id) window.editTable(id);
 }
 
 function setMapDesignerSummary(message) {
@@ -3099,7 +3214,7 @@ function attachMapDrag(element, item, stage) {
             window.removeEventListener('pointercancel', cancel);
 
             if (!moved) {
-                renderAdminTableMap(getMapItems());
+                selectTableMapItem(item.id, { openEditor: true });
                 return;
             }
 
@@ -3114,7 +3229,7 @@ function attachMapDrag(element, item, stage) {
             } catch (error) {
                 console.error('Error updating map position:', error);
                 alert('บันทึกตำแหน่งไม่สำเร็จ: ' + error.message);
-                renderAdminTableMap(getMapItems());
+                renderTablesManagerView();
             }
         };
 
@@ -3124,7 +3239,7 @@ function attachMapDrag(element, item, stage) {
             window.removeEventListener('pointermove', move);
             window.removeEventListener('pointerup', end);
             window.removeEventListener('pointercancel', cancel);
-            renderAdminTableMap(getMapItems());
+            renderTablesManagerView();
         };
 
         window.addEventListener('pointermove', move);
@@ -3142,7 +3257,7 @@ function renderAdminTableMap(items = getMapItems()) {
     const tableItems = items.filter(item => item.kind === 'table');
     zones.forEach(zone => {
         const el = document.createElement('div');
-        el.className = 'admin-map-zone';
+        el.className = 'admin-map-zone' + (zone.id === tableMapSelectedId ? ' is-selected' : '');
         el.style.left = zone.x + '%';
         el.style.top = zone.y + '%';
         el.style.width = zone.w + '%';
@@ -3153,49 +3268,111 @@ function renderAdminTableMap(items = getMapItems()) {
     });
     tableItems.forEach(table => {
         const el = document.createElement('div');
-        el.className = 'admin-map-table shape-' + table.shape + ' is-' + table.status;
+        el.className = 'admin-map-table shape-' + table.shape + ' is-' + table.status + (table.id === tableMapSelectedId ? ' is-selected' : '');
         el.style.left = table.x + '%';
         el.style.top = table.y + '%';
+        el.style.setProperty('--table-rotation', table.rotation + 'deg');
         el.innerHTML = '<span>' + escapeHTML(table.code) + '</span><small>' + escapeHTML(table.seats) + ' seats</small>';
         attachMapDrag(el, table, preview);
         preview.appendChild(el);
     });
-    if (summary) summary.textContent = 'โซน ' + zones.length + ' รายการ · โต๊ะ ' + tableItems.length + ' ตัว · คลิกแก้ไขจากตารางด้านซ้าย';
+    if (summary) summary.textContent = 'โซน ' + zones.length + ' รายการ · โต๊ะ ' + tableItems.length + ' ตัว · คลิก Preview เพื่อแก้ไขได้ทันที';
 }
 
-function renderTablesManager(snapshot) {
+function renderTablesManagerView() {
     const tbody = document.getElementById('tables-table-body');
     if (!tbody) return;
     tbody.innerHTML = '';
-    tablesData = {};
-    snapshot.forEach((docSnap) => { tablesData[docSnap.id] = docSnap.data(); });
-    const items = getMapItems().sort((a, b) => {
-        if (a.kind !== b.kind) return a.kind === 'zone' ? -1 : 1;
-        return (a.name || a.code || a.id).localeCompare(b.name || b.code || b.id);
-    });
-    if (items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">ยังไม่มีแผนผังโต๊ะ กด “ใช้แผนผังเริ่มต้น” เพื่อเริ่มได้เลย</td></tr>';
-        renderAdminTableMap([]);
-        updateZoneDatalist([]);
+
+    const allItems = getSortedMapItems();
+    if (tableMapSelectedId && !allItems.some(item => item.id === tableMapSelectedId)) {
+        tableMapSelectedId = '';
+    }
+    updateTableZoneFilter(allItems);
+    updateZoneDatalist(allItems);
+    renderAdminTableMap(allItems);
+
+    if (allItems.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">ยังไม่มีแผนผังโต๊ะ กด “ใช้แผนผังเริ่มต้น” เพื่อเริ่มได้เลย</td></tr>';
+        const summary = document.getElementById('table-list-summary');
+        if (summary) summary.textContent = 'ยังไม่มีรายการ';
+        const pageInput = document.getElementById('table-page-input');
+        const pageTotal = document.getElementById('table-page-total');
+        const prev = document.getElementById('table-page-prev');
+        const next = document.getElementById('table-page-next');
+        if (pageInput) pageInput.value = 1;
+        if (pageTotal) pageTotal.textContent = 'จาก 1';
+        if (prev) prev.disabled = true;
+        if (next) next.disabled = true;
         return;
     }
-    items.forEach(item => {
+
+    const filteredItems = getFilteredMapItems(allItems);
+    const pageSizeControl = document.getElementById('table-page-size');
+    const rawPageSize = pageSizeControl?.value || String(tableMapPageSize || 25);
+    const showAll = rawPageSize === 'all';
+    const pageSize = showAll ? Math.max(1, filteredItems.length) : Math.max(1, safeNumber(rawPageSize, 25));
+    const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+    tableMapCurrentPage = Math.max(1, Math.min(totalPages, tableMapCurrentPage));
+    const start = showAll ? 0 : (tableMapCurrentPage - 1) * pageSize;
+    const pageItems = filteredItems.slice(start, start + pageSize);
+
+    if (filteredItems.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">ไม่พบรายการที่ตรงกับตัวกรอง</td></tr>';
+    }
+
+    pageItems.forEach(item => {
         const tr = document.createElement('tr');
         const isZone = item.kind === 'zone';
+        tr.className = 'map-admin-row' + (item.id === tableMapSelectedId ? ' is-selected' : '');
+        tr.dataset.mapItemId = item.id;
         tr.innerHTML = '<td><span class="map-admin-pill ' + (isZone ? 'zone' : '') + '">' + (isZone ? 'โซน' : 'โต๊ะ') + '</span></td>'
             + '<td><strong>' + escapeHTML(isZone ? item.name : item.code) + '</strong><br><small class="text-muted">' + escapeHTML(item.id) + '</small></td>'
             + '<td>' + (isZone ? escapeHTML(item.hint || '-') : escapeHTML(item.zone) + '<br><small>' + escapeHTML(item.status) + '</small>') + '</td>'
             + '<td>X ' + escapeHTML(item.x) + '% · Y ' + escapeHTML(item.y) + '%</td>'
             + '<td>' + (isZone ? 'W ' + escapeHTML(item.w) + '% · H ' + escapeHTML(item.h) + '%' : escapeHTML(item.seats) + ' seats · ' + escapeHTML(item.shape)) + '</td>'
-            + '<td><button class="btn-action btn-edit" onclick="editTable(\'' + escapeJSString(item.id) + '\')">แก้ไข</button> '
-            + '<button class="btn-action btn-delete" onclick="deleteTable(\'' + escapeJSString(item.id) + '\')">ลบ</button></td>';
+            + '<td>' + (isZone ? '-' : escapeHTML(item.rotation) + '°') + '</td>'
+            + '<td><div class="map-admin-row-actions"><button class="btn-action btn-edit" onclick="editTable(\'' + escapeJSString(item.id) + '\')">แก้ไข</button>'
+            + '<button class="btn-action btn-delete" onclick="deleteTable(\'' + escapeJSString(item.id) + '\')">ลบ</button></div></td>';
+        tr.addEventListener('click', (event) => {
+            if (event.target.closest('button')) return;
+            selectTableMapItem(item.id);
+        });
         tbody.appendChild(tr);
     });
-    renderAdminTableMap(items);
-    updateZoneDatalist(items);
+
+    const summary = document.getElementById('table-list-summary');
+    if (summary) {
+        if (filteredItems.length === 0) {
+            summary.textContent = 'ไม่พบรายการจากทั้งหมด ' + allItems.length.toLocaleString('th-TH') + ' รายการ';
+        } else {
+            const end = Math.min(start + pageItems.length, filteredItems.length);
+            summary.textContent = 'แสดง ' + (start + 1).toLocaleString('th-TH') + '-' + end.toLocaleString('th-TH') + ' จาก ' + filteredItems.length.toLocaleString('th-TH') + ' รายการ (ทั้งหมด ' + allItems.length.toLocaleString('th-TH') + ')';
+        }
+    }
+
+    const pageInput = document.getElementById('table-page-input');
+    const pageTotal = document.getElementById('table-page-total');
+    const prev = document.getElementById('table-page-prev');
+    const next = document.getElementById('table-page-next');
+    if (pageInput) {
+        pageInput.value = tableMapCurrentPage;
+        pageInput.max = totalPages;
+        pageInput.disabled = showAll;
+    }
+    if (pageTotal) pageTotal.textContent = 'จาก ' + totalPages.toLocaleString('th-TH');
+    if (prev) prev.disabled = showAll || tableMapCurrentPage <= 1;
+    if (next) next.disabled = showAll || tableMapCurrentPage >= totalPages;
+}
+
+function renderTablesManager(snapshot) {
+    tablesData = {};
+    snapshot.forEach((docSnap) => { tablesData[docSnap.id] = docSnap.data(); });
+    renderTablesManagerView();
 }
 
 function setupRealtimeTables() {
+    bindTableMapControls();
     if (tablesUnsubscribe) {
         tablesUnsubscribe();
         tablesUnsubscribe = null;
@@ -3204,7 +3381,7 @@ function setupRealtimeTables() {
     tablesUnsubscribe = onSnapshot(q, renderTablesManager, (error) => {
         console.error('Error listening to table map:', error);
         const tbody = document.getElementById('tables-table-body');
-        if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:red;">โหลดข้อมูลแผนผังไม่สำเร็จ</td></tr>';
+        if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:red;">โหลดข้อมูลแผนผังไม่สำเร็จ</td></tr>';
     });
 }
 
@@ -3226,6 +3403,7 @@ function resetTableModal(kind = 'table') {
     document.getElementById('tableSeats').value = 4;
     document.getElementById('tableShape').value = 'rect';
     document.getElementById('tableStatus').value = 'available';
+    document.getElementById('tableRotation').value = 0;
     document.getElementById('tableX').value = 10;
     document.getElementById('tableY').value = 10;
     document.getElementById('zoneW').value = 35;
@@ -3251,6 +3429,10 @@ window.editTable = (id) => {
     const raw = tablesData[id];
     if (!raw) return;
     const item = normalizeMapItem(id, raw);
+    if (tableMapSelectedId !== id) {
+        tableMapSelectedId = id;
+        renderTablesManagerView();
+    }
     resetTableModal(item.kind);
     document.getElementById('tableId').value = id;
     document.getElementById('tableCode').value = id;
@@ -3267,6 +3449,7 @@ window.editTable = (id) => {
         document.getElementById('tableSeats').value = item.seats || 4;
         document.getElementById('tableShape').value = item.shape || 'rect';
         document.getElementById('tableStatus').value = item.status || 'available';
+        document.getElementById('tableRotation').value = item.rotation || 0;
     }
     document.getElementById('tableSubmitBtn').innerText = item.kind === 'zone' ? 'บันทึกโซน' : 'บันทึกโต๊ะ';
     tableModal.style.display = 'block';
@@ -3326,6 +3509,7 @@ tableForm.addEventListener('submit', async (e) => {
                 seats: Math.max(1, safeNumber(document.getElementById('tableSeats').value, 4)),
                 shape: document.getElementById('tableShape').value,
                 status: document.getElementById('tableStatus').value,
+                rotation: normalizeRotation(document.getElementById('tableRotation').value, 0),
                 x: clampPercent(document.getElementById('tableX').value, 10),
                 y: clampPercent(document.getElementById('tableY').value, 10),
                 mapEnabled: true, updatedAt: new Date().toISOString()
