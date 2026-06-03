@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="th">
 <head>
     <meta charset="UTF-8">
@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=faq-ui-2">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <header class="navbar" style="background-color: #fff;">
@@ -53,14 +53,112 @@
     <main>
         <section class="faq-hub-hero">
             <div class="container">
-                <p class="faq-hub-kicker">Eden Cafe FAQ</p>
+                <p style="color: var(--accent-color); font-weight: 800; letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 12px;">Eden Cafe FAQ</p>
                 <h1>คำถามที่พบบ่อย</h1>
                 <p>รวมคำตอบยอดฮิตจากทุกหน้าเพจ ทั้งเมนู ร้านค้า ระบบจอง สมาชิก และบริการของ Eden Cafe โดยข้อมูลทั้งหมดเชื่อมจากหลังบ้านโดยตรง</p>
             </div>
         </section>
         <section class="faq-hub">
             <div class="container">
-                <div class="faq-hub-panel" data-faq-hub></div>
+                <div class="faq-hub-panel" data-faq-hub>
+                    <div data-faq-hub-results>
+                        <section class="faq-hub-category">
+                            <h2>หน้า Home</h2>
+                            <div class="faq-hub-grid">
+                                <article class="faq-card faq-static-fallback">
+                                    <details open>
+                                        <summary><span>Eden Cafe คืออะไร อยู่ที่ไหน</span><small>หน้า Home</small></summary>
+                                        <p>Eden Cafe คือคาเฟ่และพื้นที่พักผ่อนในเชียงราย ตั้งอยู่ที่ 306 หมู่ 7 ตำบลนางแล อำเภอเมืองเชียงราย จังหวัดเชียงราย 57100</p>
+                                    </details>
+                                </article>
+                                <article class="faq-card faq-static-fallback">
+                                    <details>
+                                        <summary><span>ติดต่อ Eden Cafe ได้ทางไหน?</span><small>หน้า Home</small></summary>
+                                        <p>ติดต่อร้านได้ทางอีเมล edencafe.2565@gmail.com หรือโทร 098-008-0383</p>
+                                    </details>
+                                </article>
+                                <article class="faq-card faq-static-fallback">
+                                    <details>
+                                        <summary><span>ร้านเหมาะกับนั่งทำงานหรือพักผ่อนไหม?</span><small>หน้า Home</small></summary>
+                                        <p>Eden Cafe ออกแบบให้เป็นพื้นที่ผ่อนคลาย มีทั้งมุมคาเฟ่ เมนูเครื่องดื่ม และบรรยากาศสำหรับนั่งพักหรือนัดพบ</p>
+                                    </details>
+                                </article>
+                            </div>
+                        </section>
+                        <section class="faq-hub-category">
+                            <h2>เมนูและร้านค้า</h2>
+                            <div class="faq-hub-grid">
+                                <article class="faq-card faq-static-fallback">
+                                    <details>
+                                        <summary><span>เมนูมีตัวเลือกเย็น ร้อน หรือปั่นไหม?</span><small>เมนู</small></summary>
+                                        <p>บางเมนูมีตัวเลือกหลายแบบ เช่น เย็น ร้อน ปั่น หรือขนาดต่างๆ โดยราคาจะแสดงตามตัวเลือกที่เลือก</p>
+                                    </details>
+                                </article>
+                                <article class="faq-card faq-static-fallback">
+                                    <details>
+                                        <summary><span>แจ้งแพ้อาหารหรือข้อจำกัดอาหารได้ไหม?</span><small>เมนู</small></summary>
+                                        <p>แจ้งทีมงานก่อนสั่งได้ทุกครั้ง โดยเฉพาะนม ถั่ว กลูเตน หรือวัตถุดิบที่ต้องหลีกเลี่ยง</p>
+                                    </details>
+                                </article>
+                                <article class="faq-card faq-static-fallback">
+                                    <details>
+                                        <summary><span>ร้านค้าออนไลน์จัดส่งอย่างไร?</span><small>ร้านค้า</small></summary>
+                                        <p>สินค้าที่สั่งผ่าน Eden Shop สามารถจัดส่งตามที่อยู่ที่ระบุในขั้นตอนชำระเงิน หรือเลือกติดต่อร้านเพื่อรับหน้าร้านได้ตามความเหมาะสม</p>
+                                    </details>
+                                </article>
+                            </div>
+                        </section>
+                        <section class="faq-hub-category">
+                            <h2>ระบบจองและสมาชิก</h2>
+                            <div class="faq-hub-grid">
+                                <article class="faq-card faq-static-fallback">
+                                    <details>
+                                        <summary><span>จองโต๊ะต้องเลือกอะไรบ้าง?</span><small>ระบบจอง</small></summary>
+                                        <p>เลือกวันที่ เวลา จำนวนคน และโต๊ะหรือโซนที่ต้องการ ระบบจะแสดงสรุปก่อนยืนยันการจอง</p>
+                                    </details>
+                                </article>
+                                <article class="faq-card faq-static-fallback">
+                                    <details>
+                                        <summary><span>จำนวนคนเยอะเลือกได้กี่โต๊ะ?</span><small>ระบบจอง</small></summary>
+                                        <p>1-4 คนเลือกได้ 1 โต๊ะ, 5-8 คนเลือกได้สูงสุด 2 โต๊ะ, 9-12 คนเลือกได้สูงสุด 3 โต๊ะ และมากกว่า 12 คนกรุณาติดต่อร้านโดยตรง</p>
+                                    </details>
+                                </article>
+                                <article class="faq-card faq-static-fallback">
+                                    <details>
+                                        <summary><span>สมาชิกสะสมคะแนนได้อย่างไร?</span><small>สมาชิก</small></summary>
+                                        <p>ระบบสมาชิกผูกกับบัญชีผู้ใช้และประวัติคำสั่งซื้อ เมื่อระบบคะแนนเปิดใช้งาน คะแนนจะแสดงในหน้าโปรไฟล์ของสมาชิก</p>
+                                    </details>
+                                </article>
+                            </div>
+                        </section>
+                        <section class="faq-hub-category">
+                            <h2>การชำระเงินและข้อมูล</h2>
+                            <div class="faq-hub-grid">
+                                <article class="faq-card faq-static-fallback">
+                                    <details>
+                                        <summary><span>ชำระเงินได้ช่องทางไหน?</span><small>ร้านค้า</small></summary>
+                                        <p>ระบบจะแสดงช่องทางชำระเงินตามที่ร้านเปิดให้ใช้งานในขั้นตอน Checkout</p>
+                                    </details>
+                                </article>
+                                <article class="faq-card faq-static-fallback">
+                                    <details>
+                                        <summary><span>ข้อมูล FAQ อัปเดตจากที่ไหน?</span><small>คำถามที่พบบ่อย</small></summary>
+                                        <p>ข้อมูล FAQ หลักเชื่อมจากหลังบ้าน และหน้านี้มีคำตอบสำรองเพื่อให้ผู้ใช้ยังเห็นข้อมูลสำคัญหากระบบเชื่อมต่อชั่วคราวไม่ได้</p>
+                                    </details>
+                                </article>
+                                <article class="faq-card faq-static-fallback">
+                                    <details>
+                                        <summary><span>ถ้าข้อมูลบนเว็บไม่ตรงควรทำอย่างไร?</span><small>คำถามที่พบบ่อย</small></summary>
+                                        <p>ติดต่อร้านโดยตรงเพื่อยืนยันข้อมูลล่าสุด โดยเฉพาะราคา การจอง และเงื่อนไขโปรโมชัน</p>
+                                    </details>
+                                </article>
+                            </div>
+                        </section>
+                    </div>
+                    <div class="faq-more-link">
+                        <a class="btn faq-more-btn" href="/#contact">ติดต่อร้านเพิ่มเติม</a>
+                    </div>
+                </div>
             </div>
         </section>
     </main>
@@ -96,7 +194,7 @@
                                 <div style="color: #FFD700; font-size: 0.75rem; margin-top: 3px;">Updating...</div>
                             </div>
                         </div>
-                        <p style="font-size: 0.9rem; margin: 0; font-style: italic; opacity: 0.9;">"Real Google Maps reviews will appear after the cache refreshes."</p>
+                        <p style="font-size: 0.9rem; margin: 0; font-style: italic; opacity: 0.9;">"รีวิวจากลูกค้าจริงบน Google Maps ของ Eden Cafe"</p>
                     </div>
                 </div>
             </div>
@@ -107,9 +205,9 @@
                 </div>
                 <div>
                     <h4>ติดต่อและสถานที่ตั้ง</h4>
-                    <p>123 ถนนสุขุมวิท กรุงเทพมหานคร 10110</p>
-                    <p>อีเมล: hello@edencafe.co</p>
-                    <p>โทร: +66-2-000-0000</p>
+                    <p>306 หมู่ 7 ตำบลนางแล อำเภอเมืองเชียงราย จังหวัดเชียงราย 57100</p>
+                    <p>อีเมล: edencafe.2565@gmail.com</p>
+                    <p>โทร: 098-008-0383</p>
                 </div>
                 <div>
                     <h4>ติดตามเรา</h4>
@@ -175,7 +273,7 @@
             });
         }
     </script>
-    <script type="module" src="js/faq.js?v=2"></script>
-    <script type="module" src="js/auth.js?v=11"></script>
+    <script type="module" src="js/faq.js?v=1"></script>
+    <script type="module" src="js/auth.js?v=12"></script>
 </body>
 </html>

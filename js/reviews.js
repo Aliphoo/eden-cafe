@@ -17,12 +17,12 @@ function safeImageURL(value) {
 async function fetchReviewCache() {
     const response = await fetch(REVIEW_CACHE_URL, { cache: 'no-store' });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `Review cache unavailable: ${response.status}`);
+    if (!response.ok) throw new Error(`Google review data unavailable: ${response.status}`);
 
     const documents = Array.isArray(data.documents) ? data.documents : [];
     const cacheDoc = documents.find(doc => String(doc.name || '').endsWith('/cache')) || documents[0];
     const cache = cacheDoc ? fromFirestoreFields(cacheDoc.fields || {}) : null;
-    if (!cache) throw new Error('Review cache is empty');
+    if (!cache) throw new Error('Google review data unavailable');
     return cache;
 }
 
@@ -54,12 +54,12 @@ async function loadCachedGoogleReviews() {
     try {
         const cache = await fetchReviewCache();
         updateReviewsUI(cache);
-    } catch (error) {
-        showReviewCachePending(error.message);
+    } catch (_) {
+        showReviewCachePending();
     }
 }
 
-function showReviewCachePending(reason) {
+function showReviewCachePending() {
     const countEl = document.getElementById('google-rating-count');
     const containerEl = document.getElementById('google-reviews-container');
     if (!containerEl) return;
@@ -67,56 +67,54 @@ function showReviewCachePending(reason) {
     const path = window.location.pathname;
     const isEnglish = path.includes('-en') || path.endsWith('/en');
     const mapsReviewURL = 'https://maps.app.goo.gl/BYJNa4mXjVNaLDPy5';
+    const openLabel = isEnglish ? 'Open Google Maps' : 'เปิด Google Maps';
 
     if (countEl) {
-        countEl.textContent = isEnglish
-            ? '(waiting for real Google Maps review cache)'
-            : '(กำลังรอข้อมูลรีวิวจริงจาก Google Maps)';
+        countEl.textContent = isEnglish ? '(Google Maps reviews)' : '(รีวิวบน Google Maps)';
     }
 
-    containerEl.innerHTML = `
-        <div class="hero-review-card">
-            <div style="display: flex; gap: 10px; margin-bottom: 8px; align-items: center;">
-                <div style="width: 32px; height: 32px; background: rgba(255,255,255,0.3); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.9rem;">G</div>
-                <div>
-                    <div style="font-size: 0.85rem; font-weight: bold; line-height: 1; color: white;">Google Maps Reviews</div>
-                    <div style="color: #FFD700; font-size: 0.75rem; margin-top: 3px;">${isEnglish ? 'Waiting for real data' : 'รอข้อมูลจริง'}</div>
-                </div>
-            </div>
-            <p style="font-size: 0.8rem; line-height: 1.4; opacity: 0.9; margin: 0; font-style: italic; color: white;">
-                "${isEnglish ? 'The review cache is not ready yet. No fake reviews are shown here.' : 'ระบบยังไม่มี cache รีวิวจริง จึงไม่แสดงรีวิวปลอมในหน้านี้'}"
-            </p>
-        </div>
-        <div class="hero-review-card">
-            <div style="display: flex; gap: 10px; margin-bottom: 8px; align-items: center;">
-                <div style="width: 32px; height: 32px; background: rgba(255,215,0,0.25); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.85rem; color: white;">5★</div>
-                <div>
-                    <div style="font-size: 0.85rem; font-weight: bold; line-height: 1; color: white;">${isEnglish ? '5-star review feed' : 'ฟีดรีวิว 5 ดาว'}</div>
-                    <div style="color: #FFD700; font-size: 0.75rem; margin-top: 3px;">★★★★★</div>
-                </div>
-            </div>
-            <p style="font-size: 0.8rem; line-height: 1.4; opacity: 0.9; margin: 0; font-style: italic; color: white;">
-                "${isEnglish ? 'Once the server API key is configured, this area will show the newest five 5-star Google reviews.' : 'เมื่อตั้งค่า Server API key แล้ว ตรงนี้จะแสดงรีวิว Google 5 ดาวล่าสุด จำนวน 5 รีวิว'}"
-            </p>
-        </div>
-        <div class="hero-review-card">
-            <div style="display: flex; gap: 10px; margin-bottom: 8px; align-items: center;">
-                <div style="width: 32px; height: 32px; background: rgba(255,255,255,0.3); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.9rem;">↗</div>
-                <div>
-                    <div style="font-size: 0.85rem; font-weight: bold; line-height: 1; color: white;">${isEnglish ? 'Latest reviews' : 'รีวิวล่าสุด'}</div>
-                    <div style="color: #FFD700; font-size: 0.75rem; margin-top: 3px;">Google Maps</div>
-                </div>
-            </div>
-            <p style="font-size: 0.8rem; line-height: 1.4; opacity: 0.9; margin: 0 0 10px; font-style: italic; color: white;">
-                "${isEnglish ? 'Open the live Google Maps profile to view the latest public reviews now.' : 'เปิดโปรไฟล์ Google Maps เพื่อดูรีวิวจริงล่าสุดได้ทันที'}"
-            </p>
-            <a href="${mapsReviewURL}" target="_blank" rel="noopener noreferrer" style="display:inline-flex; padding: 7px 12px; border-radius: 999px; background: rgba(255,255,255,0.22); color: white; text-decoration: none; font-size: 0.78rem; font-weight: 700;">
-                ${isEnglish ? 'Open Google Maps' : 'เปิด Google Maps'}
-            </a>
-        </div>`;
-    console.warn('Review cache pending:', reason);
-}
+    const cards = [
+        {
+            icon: 'G',
+            title: 'Google Maps Reviews',
+            badge: 'Eden Cafe',
+            text: isEnglish
+                ? 'Read the latest public reviews from Eden Cafe on Google Maps.'
+                : 'อ่านรีวิวจริงล่าสุดของ Eden Cafe ได้บน Google Maps'
+        },
+        {
+            icon: '5★',
+            title: isEnglish ? '5-star reviews' : 'รีวิว 5 ดาว',
+            badge: '★★★★★',
+            text: isEnglish
+                ? 'See verified customer feedback directly on the public Google Maps profile.'
+                : 'ดูเสียงตอบรับจากลูกค้าจริงได้จากโปรไฟล์ Google Maps ของร้าน'
+        },
+        {
+            icon: '↗',
+            title: isEnglish ? 'Latest reviews' : 'รีวิวล่าสุด',
+            badge: 'Google Maps',
+            text: isEnglish
+                ? 'Open the live Google Maps profile to view the newest public reviews.'
+                : 'เปิดโปรไฟล์ Google Maps เพื่อดูรีวิวจริงล่าสุดได้ทันที',
+            action: true
+        }
+    ];
 
+    containerEl.innerHTML = cards.map(card => `
+        <div class="hero-review-card">
+            <div style="display:flex; gap:10px; margin-bottom:8px; align-items:center;">
+                <div style="width:32px; height:32px; background:rgba(255,255,255,0.3); border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:0.9rem; color:white;">${escapeHTML(card.icon)}</div>
+                <div>
+                    <div style="font-size:0.85rem; font-weight:bold; line-height:1; color:white;">${escapeHTML(card.title)}</div>
+                    <div style="color:#FFD700; font-size:0.75rem; margin-top:3px;">${escapeHTML(card.badge)}</div>
+                </div>
+            </div>
+            <p style="font-size:0.8rem; line-height:1.4; opacity:0.9; margin:0 0 ${card.action ? '10px' : '0'}; font-style:italic; color:white;">"${escapeHTML(card.text)}"</p>
+            ${card.action ? `<a href="${mapsReviewURL}" target="_blank" rel="noopener noreferrer" style="display:inline-flex; padding:7px 12px; border-radius:999px; background:rgba(255,255,255,0.22); color:white; text-decoration:none; font-size:0.78rem; font-weight:700;">${escapeHTML(openLabel)}</a>` : ''}
+        </div>
+    `).join('');
+}
 function updateReviewsUI(cache) {
     const scoreEl = document.getElementById('google-rating-score');
     const countEl = document.getElementById('google-rating-count');
@@ -139,7 +137,7 @@ function updateReviewsUI(cache) {
 
     const visibleReviews = reviews.filter(review => Number(review.rating) === 5).slice(0, 5);
     if (visibleReviews.length === 0) {
-        showReviewCachePending('Review cache has no 5-star reviews');
+        showReviewCachePending();
         return;
     }
 

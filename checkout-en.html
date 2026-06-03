@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -6,7 +6,7 @@
     <title>Checkout | Eden Cafe</title>
     <link rel="icon" type="image/webp" href="Images/Logo.webp">
     
-    <link rel="stylesheet" href="style.css?v=checkout4">
+    <link rel="stylesheet" href="style.css?v=auth-phone-1">
     
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -53,7 +53,7 @@
                             </div>
                             <div class="form-group">
                                 <label for="address">Delivery Address (House No, Soi, Street)</label>
-                                <textarea id="address" rows="2" required placeholder="123 Sukhumvit Road..."></textarea>
+                                <textarea id="address" rows="2" required placeholder="House number, street, district, province, postal code"></textarea>
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
@@ -119,16 +119,16 @@
                         
                         <div class="summary-line">
                             <span>Subtotal</span>
-                            <span id="subtotal">฿0</span>
+                            <span id="subtotal">?0</span>
                         </div>
                         <div class="summary-line">
                             <span>Delivery Fee (Flat Rate)</span>
-                            <span>฿50</span>
+                            <span>?50</span>
                         </div>
                         
                         <div class="summary-line total-line">
                             <span>Grand Total</span>
-                            <span id="grand-total" style="color: var(--primary-color); font-size: 1.5rem;">฿0</span>
+                            <span id="grand-total" style="color: var(--primary-color); font-size: 1.5rem;">?0</span>
                         </div>
                         
                         <button type="button" class="btn btn-large" style="width: 100%; margin-top: 20px; background-color: #2c3e50; color: white;" onclick="confirmOrder()">Pay securely via Feelfreepay</button>
@@ -156,7 +156,7 @@
 
             <div class="footer-reviews"
                 style="text-align: center; margin-bottom: 50px; overflow: hidden; padding-bottom: 10px;">
-                <h3 style="color: white; margin-bottom: 20px;">รีวิวจากลูกค้าจริงบน Google Maps</h3>
+                <h3 style="color: white; margin-bottom: 20px;">???????????????????? Google Maps</h3>
                 <a href="https://maps.app.goo.gl/BYJNa4mXjVNaLDPy5" target="_blank" rel="noopener noreferrer" class="review-stat"
                     style="display: inline-flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.2); padding: 12px 25px; border-radius: 50px; color: white; text-decoration: none; backdrop-filter: blur(5px); transition: background 0.3s; border: 1px solid rgba(255,255,255,0.3);">
                     <svg viewBox="0 0 48 48" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
@@ -169,8 +169,8 @@
                         <path fill="#34A853"
                             d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
                     </svg>
-                    <strong id="google-rating-score" style="font-size: 1.2rem; color: #FFD700;">★ 4.8</strong>
-                    <span id="google-rating-count" style="font-size: 0.95rem;">(978 รีวิวบน Google Maps)</span>
+                    <strong id="google-rating-score" style="font-size: 1.2rem; color: #FFD700;">? 4.8</strong>
+                    <span id="google-rating-count" style="font-size: 0.95rem;">(978 ??????? Google Maps)</span>
                 </a>
                 <div class="hero-reviews" id="google-reviews-container">
                     <div class="hero-review-card">
@@ -181,23 +181,23 @@
                                 <div style="color: #FFD700; font-size: 0.75rem; margin-top: 3px;">Updating...</div>
                             </div>
                         </div>
-                        <p style="font-size: 0.9rem; margin: 0; font-style: italic; opacity: 0.9;">"Real Google Maps reviews will appear after the cache refreshes."</p>
+                        <p style="font-size: 0.9rem; margin: 0; font-style: italic; opacity: 0.9;">"???????????????????? Google Maps ??? Eden Cafe"</p>
                     </div>
                 </div>
             </div>
             <div class="footer-grid">
                 <div>
                     <h4>Eden Cafe.</h4>
-                    <p>กาแฟพิเศษระดับพรีเมียม สวนพักผ่อนส่วนตัวของคุณในเมืองใหญ่</p>
+                    <p>?????????????????????? ??????????????????????????????????</p>
                 </div>
                 <div>
-                    <h4>ติดต่อและสถานที่ตั้ง</h4>
-                    <p>123 ถนนสุขุมวิท กรุงเทพมหานคร 10110</p>
-                    <p>อีเมล: hello@edencafe.co</p>
-                    <p>โทร: +66-2-000-0000</p>
+                    <h4>????????????????????</h4>
+                    <p>306 ???? 7 ????????? ?????????????????? ??????????????? 57100</p>
+                    <p>?????: edencafe.2565@gmail.com</p>
+                    <p>???: 098-008-0383</p>
                 </div>
                 <div>
-                    <h4>ติดตามเรา</h4>
+                    <h4>?????????</h4>
                     <div class="social-icons-premium">
                         <a href="https://instagram.com" target="_blank" aria-label="Instagram">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -226,12 +226,12 @@
             </div>
             <div class="footer-bottom"
                 style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 20px;">
-                <p class="copyright">© 2026 Eden Cafe Thailand. สงวนลิขสิทธิ์ | Optimized for AEO & GEO</p>
+                <p class="copyright">� 2026 Eden Cafe Thailand. ????????????? | Optimized for AEO & GEO</p>
                 <div class="visitor-stats-mini"
                     style="display: flex; gap: 20px; font-size: 0.85rem; color: rgba(255,255,255,0.9); background: rgba(255, 255, 255, 0.1); padding: 10px 20px; border-radius: 50px; border: 1px solid rgba(255, 255, 255, 0.2); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1); backdrop-filter: blur(5px);">
-                    <span>👁️ เข้าชมวันนี้: <strong id="daily-views" style="color: #fff;">0</strong></span>
+                    <span>??? ????????????: <strong id="daily-views" style="color: #fff;">0</strong></span>
                     <span>|</span>
-                    <span>📈 เข้าชมสะสม: <strong id="total-views" style="color: #fff;">0</strong></span>
+                    <span>?? ??????????: <strong id="total-views" style="color: #fff;">0</strong></span>
                 </div>
             </div>
         </div>
@@ -260,23 +260,23 @@
             });
         }
     </script>
-    <script type="module" src="js/auth.js?v=10"></script>
+    <script type="module" src="js/auth.js?v=12"></script>
     <!-- Cookie Consent Banner -->
     <div id="cookie-consent"
         style="display: none; position: fixed; bottom: 20px; left: 20px; right: 20px; max-width: 600px; margin: 0 auto; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); padding: 20px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); z-index: 9999; border: 1px solid rgba(0,0,0,0.05); text-align: left;">
         <div style="display: flex; flex-direction: column; gap: 15px;">
             <div>
-                <strong style="display: block; margin-bottom: 5px; font-size: 1.05rem; color: #2c3e50;">🍪
-                    การตั้งค่าคุกกี้ (Cookie Policy)</strong>
+                <strong style="display: block; margin-bottom: 5px; font-size: 1.05rem; color: #2c3e50;">??
+                    ???????????????? (Cookie Policy)</strong>
                 <p style="margin: 0; font-size: 0.85rem; color: #555; line-height: 1.5;">
-                    เว็บไซต์นี้ใช้คุกกี้เพื่อมอบประสบการณ์ที่ดีที่สุดในการใช้งาน
-                    และช่วยให้เราเข้าใจการเข้าถึงเว็บไซต์ของคุณ (ตาม พ.ร.บ. คุ้มครองข้อมูลส่วนบุคคล - PDPA)
-                    หากคุณใช้งานเว็บไซต์ต่อ ถือว่าคุณยอมรับการใช้งานคุกกี้ของเรา</p>
+                    ????????????????????????????????????????????????????????????
+                    ??????????????????????????????????????????? (??? ?.?.?. ??????????????????????? - PDPA)
+                    ??????????????????????? ????????????????????????????????????</p>
             </div>
             <div style="display: flex; gap: 10px; justify-content: flex-end;">
                 <button id="accept-cookies"
                     style="background: var(--primary-color); color: white; border: none; padding: 8px 20px; border-radius: 5px; cursor: pointer; font-family: 'Prompt', sans-serif; font-weight: 500; transition: opacity 0.3s;"
-                    onmouseover="this.style.opacity=0.8" onmouseout="this.style.opacity=1">ยอมรับทั้งหมด
+                    onmouseover="this.style.opacity=0.8" onmouseout="this.style.opacity=1">?????????????
                     (Accept)</button>
             </div>
         </div>

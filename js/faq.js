@@ -25,6 +25,133 @@ const CATEGORY_LABELS = {
     wellness: 'Wellness'
 };
 
+const FALLBACK_FAQS = [
+    {
+        id: 'fallback-home-location',
+        question: 'Eden Cafe อยู่ที่ไหน?',
+        answer: 'Eden Cafe ตั้งอยู่ที่ 306 หมู่ 7 ตำบลนางแล อำเภอเมืองเชียงราย จังหวัดเชียงราย 57100',
+        category: 'home',
+        targetPages: ['home', 'faq'],
+        pinnedPages: { home: true },
+        isPopular: true,
+        order: 1,
+        popularOrder: 1
+    },
+    {
+        id: 'fallback-home-contact',
+        question: 'ติดต่อ Eden Cafe ได้ทางไหน?',
+        answer: 'ติดต่อร้านได้ทางอีเมล edencafe.2565@gmail.com หรือโทร 098-008-0383',
+        category: 'home',
+        targetPages: ['home', 'faq'],
+        isPopular: true,
+        order: 2,
+        popularOrder: 2
+    },
+    {
+        id: 'fallback-booking-table',
+        question: 'จองโต๊ะต้องทำอย่างไร?',
+        answer: 'ไปที่หน้าระบบจอง เลือกวัน เวลา จำนวนคน และเลือกโต๊ะหรือโซนที่ต้องการ จากนั้นกรอกข้อมูลติดต่อเพื่อยืนยันการจอง',
+        category: 'booking',
+        targetPages: ['booking', 'faq'],
+        pinnedPages: { booking: true },
+        isPopular: true,
+        order: 3,
+        popularOrder: 3
+    },
+    {
+        id: 'fallback-booking-change',
+        question: 'ถ้าต้องการแก้ไขหรือยกเลิกการจองต้องทำอย่างไร?',
+        answer: 'กรุณาติดต่อร้านโดยตรงพร้อมชื่อ เบอร์โทร วันที่ และเวลาที่จอง เพื่อให้ทีมงานตรวจสอบและช่วยแก้ไขให้',
+        category: 'booking',
+        targetPages: ['booking', 'faq'],
+        isPopular: true,
+        order: 4,
+        popularOrder: 4
+    },
+    {
+        id: 'fallback-menu-options',
+        question: 'เมนูมีตัวเลือก เช่น หวาน ร้อน เย็น หรือเปลี่ยนนมไหม?',
+        answer: 'บางเมนูมีตัวเลือกเพิ่มเติมตามที่ร้านเปิดไว้ เช่น ระดับความหวาน อุณหภูมิ ชนิดนม หรือ modifier อื่นๆ',
+        category: 'menu',
+        targetPages: ['menu', 'faq'],
+        pinnedPages: { menu: true },
+        isPopular: true,
+        order: 5,
+        popularOrder: 5
+    },
+    {
+        id: 'fallback-menu-allergy',
+        question: 'ถ้ามีแพ้อาหารควรแจ้งอย่างไร?',
+        answer: 'กรุณาระบุข้อมูลแพ้อาหารหรือหมายเหตุสุขภาพตอนจองหรือสั่งซื้อ เพื่อให้ทีมงานใช้ประกอบการให้บริการอย่างปลอดภัย',
+        category: 'menu',
+        targetPages: ['menu', 'booking', 'faq'],
+        isPopular: true,
+        order: 6,
+        popularOrder: 6
+    },
+    {
+        id: 'fallback-shop-order',
+        question: 'สั่งสินค้าออนไลน์ได้อย่างไร?',
+        answer: 'ไปที่หน้าร้านค้า เลือกสินค้าที่ต้องการ เพิ่มลงตะกร้า และดำเนินการชำระเงินในหน้า Checkout',
+        category: 'shop',
+        targetPages: ['shop', 'faq'],
+        pinnedPages: { shop: true },
+        isPopular: true,
+        order: 7,
+        popularOrder: 7
+    },
+    {
+        id: 'fallback-shop-delivery',
+        question: 'รับสินค้าหน้าร้านหรือจัดส่งได้ไหม?',
+        answer: 'ตัวเลือกการรับสินค้าขึ้นอยู่กับรายการสินค้าและเงื่อนไขร้าน โปรดตรวจสอบในหน้า Checkout ก่อนยืนยันคำสั่งซื้อ',
+        category: 'delivery',
+        targetPages: ['shop', 'faq'],
+        isPopular: true,
+        order: 8,
+        popularOrder: 8
+    },
+    {
+        id: 'fallback-payment',
+        question: 'รองรับช่องทางชำระเงินอะไรบ้าง?',
+        answer: 'ระบบรองรับช่องทางที่ร้านเปิดใช้งานในช่วงนั้น เช่น โอนเงิน QR Payment หรือช่องทางอื่นตามที่แสดงในหน้า Checkout',
+        category: 'payment',
+        targetPages: ['shop', 'booking', 'faq'],
+        isPopular: true,
+        order: 9,
+        popularOrder: 9
+    },
+    {
+        id: 'fallback-member',
+        question: 'สมาชิก Eden Cafe ใช้ทำอะไรได้บ้าง?',
+        answer: 'สมาชิกสามารถดูข้อมูลโปรไฟล์ ประวัติคำสั่งซื้อ ประวัติการจอง คะแนนสะสม และระดับสมาชิกตามเงื่อนไขที่ร้านกำหนด',
+        category: 'membership',
+        targetPages: ['home', 'faq'],
+        isPopular: true,
+        order: 10,
+        popularOrder: 10
+    },
+    {
+        id: 'fallback-points',
+        question: 'คะแนนสะสมคำนวณอย่างไร?',
+        answer: 'คะแนนสะสมและสิทธิประโยชน์จะคำนวณตามกติกาสมาชิกที่ร้านเปิดใช้งาน และอาจเปลี่ยนได้ตามเงื่อนไขของ Eden Cafe',
+        category: 'membership',
+        targetPages: ['faq'],
+        isPopular: true,
+        order: 11,
+        popularOrder: 11
+    },
+    {
+        id: 'fallback-faq-updates',
+        question: 'ข้อมูล FAQ อัปเดตจากที่ไหน?',
+        answer: 'คำถามที่พบบ่อยถูกจัดการจากหลังบ้าน Eden Admin และหน้านี้มีข้อมูลสำรองพื้นฐานในกรณีระบบออนไลน์โหลดไม่ได้',
+        category: 'general',
+        targetPages: ['faq'],
+        isPopular: true,
+        order: 12,
+        popularOrder: 12
+    }
+];
+
 let faqCache = null;
 
 function escapeHTML(value) {
@@ -67,13 +194,27 @@ function normalizeFaq(raw = {}, id = '') {
 
 async function fetchFaqs() {
     if (faqCache) return faqCache;
-    if (!db) return [];
+    if (!db) {
+        faqCache = fallbackFaqs();
+        return faqCache;
+    }
 
-    const snap = await getDocs(query(collection(db, 'faqs'), orderBy('order', 'asc')));
-    faqCache = snap.docs
-        .map(docSnap => normalizeFaq(docSnap.data(), docSnap.id))
-        .filter(faq => faq.status === 'published' && faq.question && faq.answer);
+    try {
+        const snap = await getDocs(query(collection(db, 'faqs'), orderBy('order', 'asc')));
+        faqCache = snap.docs
+            .map(docSnap => normalizeFaq(docSnap.data(), docSnap.id))
+            .filter(faq => faq.status === 'published' && faq.question && faq.answer);
+        if (!faqCache.length) faqCache = fallbackFaqs();
+    } catch (_) {
+        faqCache = fallbackFaqs();
+    }
     return faqCache;
+}
+
+function fallbackFaqs() {
+    return FALLBACK_FAQS
+        .map((faq, index) => normalizeFaq({ ...faq, status: 'published', order: faq.order || index + 1 }, faq.id))
+        .filter(faq => faq.question && faq.answer);
 }
 
 function getPageFaqs(faqs, pageKey, limit = PAGE_LIMIT) {
@@ -141,7 +282,9 @@ function renderPageSchema(pageKey, faqs) {
 async function renderPageFaqs(container) {
     const pageKey = container.dataset.faqPage || 'home';
     container.dataset.faqManaged = 'true';
-    container.innerHTML = '<p class="faq-loading">กำลังโหลดคำถามที่พบบ่อย...</p>';
+    if (!container.children.length) {
+        container.innerHTML = '<p class="faq-loading">กำลังโหลดคำถามที่พบบ่อย...</p>';
+    }
 
     try {
         const faqs = getPageFaqs(await fetchFaqs(), pageKey);
@@ -152,9 +295,15 @@ async function renderPageFaqs(container) {
         container.innerHTML = faqs.map((faq, index) => renderFaqCard(faq, { open: index === 0 })).join('');
         addMoreLink(container, pageKey);
         renderPageSchema(pageKey, faqs);
-    } catch (error) {
-        console.error('Failed to render page FAQs:', error);
-        container.innerHTML = '<p class="faq-empty error">โหลดคำถามไม่สำเร็จ กรุณาลองใหม่อีกครั้ง</p>';
+    } catch (_) {
+        const faqs = getPageFaqs(fallbackFaqs(), pageKey);
+        if (faqs.length) {
+            container.innerHTML = faqs.map((faq, index) => renderFaqCard(faq, { open: index === 0 })).join('');
+            addMoreLink(container, pageKey);
+            renderPageSchema(pageKey, faqs);
+            return;
+        }
+        container.innerHTML = '<p class="faq-empty error">ยังไม่สามารถโหลดคำถามได้ในขณะนี้</p>';
     }
 }
 
@@ -193,72 +342,20 @@ function renderHubList(container, faqs, expanded = false, categoryFilter = 'all'
 
     const resultTarget = container.querySelector('[data-faq-hub-results]');
     const loadMore = container.querySelector('[data-faq-load-more]');
-    const resultCount = container.querySelector('[data-faq-result-count]');
-    const activeFilter = container.querySelector('[data-faq-active-filter]');
     if (resultTarget) {
-        resultTarget.innerHTML = body || `
-            <div class="faq-empty-state">
-                <strong>ไม่พบคำถามที่ค้นหา</strong>
-                <span>ลองเปลี่ยนคำค้นหา หรือเลือกหมวดหมู่เป็น “ทุกหมวดหมู่” อีกครั้ง</span>
-            </div>
-        `;
+        resultTarget.innerHTML = body || '<p class="faq-empty">ไม่พบคำถามตามเงื่อนไขที่ค้นหา</p>';
     }
     if (loadMore) {
         loadMore.hidden = expanded || filtered.length <= HUB_PREVIEW_LIMIT;
     }
-    if (resultCount) {
-        resultCount.textContent = `${filtered.length} คำถาม`;
-    }
-    if (activeFilter) {
-        const categoryLabel = categoryFilter === 'all' ? 'ทุกหมวดหมู่' : (CATEGORY_LABELS[categoryFilter] || categoryFilter);
-        activeFilter.textContent = search ? `ค้นหา: ${searchTerm.trim()} • ${categoryLabel}` : categoryLabel;
-    }
     renderPageSchema('hub', visible.slice(0, HUB_PREVIEW_LIMIT));
-}
-
-function renderFaqHubShell(container) {
-    const categories = ['all', ...Object.keys(CATEGORY_LABELS)];
-    container.innerHTML = `
-        <div class="faq-hub-search-card">
-            <div class="faq-hub-search-copy">
-                <span class="faq-hub-search-label">FAQ Concierge</span>
-                <h2>ค้นหาคำตอบ</h2>
-                <p>พิมพ์คำถามหรือเลือกหมวดหมู่ ระบบจะดึงคำตอบจากหลังบ้านของ Eden Cafe ให้โดยตรง</p>
-            </div>
-            <div class="faq-hub-toolbar" role="search">
-                <label class="faq-search-field">
-                    <span class="faq-field-icon" aria-hidden="true">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                            <path d="M10.8 18.1a7.3 7.3 0 1 1 0-14.6 7.3 7.3 0 0 1 0 14.6Z" stroke="currentColor" stroke-width="2"/>
-                            <path d="m16.2 16.2 4.3 4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                        </svg>
-                    </span>
-                    <input type="search" data-faq-hub-search aria-label="ค้นหาคำถาม" placeholder="ค้นหาคำถาม เช่น จองโต๊ะ, ชำระเงิน, สมาชิก">
-                </label>
-                <label class="faq-filter-field">
-                    <span>หมวดหมู่</span>
-                    <select data-faq-hub-category aria-label="เลือกหมวดหมู่คำถาม">
-                        ${categories.map(category => `<option value="${escapeHTML(category)}">${escapeHTML(category === 'all' ? 'ทุกหมวดหมู่' : (CATEGORY_LABELS[category] || category))}</option>`).join('')}
-                    </select>
-                </label>
-            </div>
-            <div class="faq-hub-meta">
-                <span data-faq-result-count>กำลังโหลดคำถาม</span>
-                <span data-faq-active-filter>ทุกหมวดหมู่</span>
-            </div>
-        </div>
-        <div class="faq-hub-results" data-faq-hub-results>
-            <p class="faq-loading faq-loading-card">กำลังโหลดศูนย์รวมคำถาม...</p>
-        </div>
-        <div class="faq-more-link">
-            <button type="button" class="btn faq-more-btn" data-faq-load-more hidden>ดูคำถามเพิ่มเติม</button>
-        </div>
-    `;
 }
 
 async function renderFaqHub(container) {
     container.dataset.faqManaged = 'true';
-    renderFaqHubShell(container);
+    if (!container.children.length) {
+        container.innerHTML = '<p class="faq-loading">กำลังโหลดศูนย์รวมคำถาม...</p>';
+    }
 
     try {
         const faqs = (await fetchFaqs())
@@ -266,35 +363,13 @@ async function renderFaqHub(container) {
             .sort((a, b) => safeNumber(a.popularOrder, a.order) - safeNumber(b.popularOrder, b.order));
         const categories = ['all', ...Array.from(new Set(faqs.map(faq => faq.category || 'general')))];
         container.innerHTML = `
-            <div class="faq-hub-search-card">
-                <div class="faq-hub-search-copy">
-                    <span class="faq-hub-search-label">FAQ Concierge</span>
-                    <h2>ค้นหาคำตอบ</h2>
-                    <p>พิมพ์คำถามหรือเลือกหมวดหมู่ ระบบจะดึงคำตอบจากหลังบ้านของ Eden Cafe ให้โดยตรง</p>
-                </div>
-                <div class="faq-hub-toolbar" role="search">
-                    <label class="faq-search-field">
-                        <span class="faq-field-icon" aria-hidden="true">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                                <path d="M10.8 18.1a7.3 7.3 0 1 1 0-14.6 7.3 7.3 0 0 1 0 14.6Z" stroke="currentColor" stroke-width="2"/>
-                                <path d="m16.2 16.2 4.3 4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                            </svg>
-                        </span>
-                        <input type="search" data-faq-hub-search aria-label="ค้นหาคำถาม" placeholder="ค้นหาคำถาม เช่น จองโต๊ะ, ชำระเงิน, สมาชิก">
-                    </label>
-                    <label class="faq-filter-field">
-                        <span>หมวดหมู่</span>
-                        <select data-faq-hub-category aria-label="เลือกหมวดหมู่คำถาม">
-                            ${categories.map(category => `<option value="${escapeHTML(category)}">${escapeHTML(category === 'all' ? 'ทุกหมวดหมู่' : (CATEGORY_LABELS[category] || category))}</option>`).join('')}
-                        </select>
-                    </label>
-                </div>
-                <div class="faq-hub-meta">
-                    <span data-faq-result-count>0 คำถาม</span>
-                    <span data-faq-active-filter>ทุกหมวดหมู่</span>
-                </div>
+            <div class="faq-hub-toolbar">
+                <input type="search" data-faq-hub-search placeholder="ค้นหาคำถาม เช่น จองโต๊ะ, ชำระเงิน, สมาชิก">
+                <select data-faq-hub-category>
+                    ${categories.map(category => `<option value="${escapeHTML(category)}">${escapeHTML(category === 'all' ? 'ทุกหมวดหมู่' : (CATEGORY_LABELS[category] || category))}</option>`).join('')}
+                </select>
             </div>
-            <div class="faq-hub-results" data-faq-hub-results></div>
+            <div data-faq-hub-results></div>
             <div class="faq-more-link">
                 <button type="button" class="btn faq-more-btn" data-faq-load-more>ดูคำถามเพิ่มเติม</button>
             </div>
@@ -313,9 +388,12 @@ async function renderFaqHub(container) {
             refresh();
         });
         refresh();
-    } catch (error) {
-        console.error('Failed to render FAQ hub:', error);
-        container.innerHTML = '<p class="faq-empty error">โหลดคำถามไม่สำเร็จ กรุณาลองใหม่อีกครั้ง</p>';
+    } catch (_) {
+        const faqs = fallbackFaqs()
+            .filter(faq => faq.targetPages.includes('faq') || faq.isPopular)
+            .sort((a, b) => safeNumber(a.popularOrder, a.order) - safeNumber(b.popularOrder, b.order));
+        container.innerHTML = '<div data-faq-hub-results></div>';
+        renderHubList(container, faqs, false, 'all', '');
     }
 }
 
