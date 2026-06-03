@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>สมัครสมาชิกด้วยเบอร์โทร | Eden Cafe</title>
+    <meta name="description" content="สมัครสมาชิก Eden Cafe ด้วยเบอร์โทรศัพท์ รับ OTP และบันทึกข้อมูลสมาชิกเพื่อสะสมแต้ม จองโต๊ะ และใช้งานบริการของร้าน">
+    <link rel="icon" type="image/webp" href="Images/Logo.webp">
+    <link rel="stylesheet" href="style.css?v=phone-register-2">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header class="navbar" style="background-color: #fff;">
+        <div class="container">
+            <a href="/" class="logo">
+                <img src="Images/Logo.webp" alt="Eden Cafe Logo" class="logo-img">
+            </a>
+            <div class="menu-toggle" id="mobile-menu">
+                <span class="bar"></span>
+                <span class="bar"></span>
+                <span class="bar"></span>
+            </div>
+            <nav>
+                <ul class="nav-links">
+                    <li><a href="/">หน้าแรก</a></li>
+                    <li><a href="/menu">เมนู</a></li>
+                    <li><a href="/shop">ร้านค้า</a></li>
+                    <li><a href="/booking">ระบบจอง</a></li>
+                    <li><a href="/faq">คำถามที่พบบ่อย</a></li>
+                </ul>
+            </nav>
+            <div class="nav-actions">
+                <a href="/checkout" class="global-cart-icon" aria-label="Cart">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="9" cy="21" r="1"></circle>
+                        <circle cx="20" cy="21" r="1"></circle>
+                        <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+                    </svg>
+                    <span class="global-cart-badge" id="global-cart-badge" style="display: none;">0</span>
+                </a>
+                <div class="lang-switcher">
+                    <a href="/register" class="active">TH</a>
+                </div>
+                <div class="auth-container"></div>
+            </div>
+        </div>
+    </header>
+
+    <main class="register-page">
+        <section class="register-hero">
+            <div class="container register-shell">
+                <div class="register-copy">
+                    <p class="register-eyebrow">Eden Cafe Membership</p>
+                    <h1>สมัครสมาชิกด้วยเบอร์โทร</h1>
+                    <p>
+                        ใช้เบอร์โทรรับ OTP เพื่อสร้างบัญชีสมาชิก Eden Cafe สำหรับสะสมแต้ม
+                        ดูประวัติการจอง และรับสิทธิพิเศษในอนาคต
+                    </p>
+                    <div class="register-benefits">
+                        <span>สะสมแต้มอัตโนมัติ</span>
+                        <span>จองโต๊ะง่ายขึ้น</span>
+                        <span>รองรับ POS หน้าร้าน</span>
+                    </div>
+                </div>
+
+                <section class="register-card" aria-label="Phone registration form">
+                    <div class="register-steps" aria-hidden="true">
+                        <span class="register-step active" data-step-dot="phone">1</span>
+                        <span class="register-step" data-step-dot="otp">2</span>
+                        <span class="register-step" data-step-dot="profile">3</span>
+                    </div>
+
+                    <div class="register-status" id="register-status" role="status" aria-live="polite"></div>
+
+                    <form class="register-form active" id="phone-register-form">
+                        <p class="register-form-kicker">ขั้นตอนที่ 1</p>
+                        <h2>ยืนยันเบอร์โทรศัพท์</h2>
+                        <p class="register-muted">กรอกเบอร์ไทย เช่น 08X-XXX-XXXX ระบบจะแปลงเป็นรูปแบบ +66 อัตโนมัติ</p>
+                        <label>
+                            <span>เบอร์โทรศัพท์</span>
+                            <input id="register-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel"
+                                placeholder="08X-XXX-XXXX" required>
+                        </label>
+                        <label class="register-check">
+                            <input id="register-privacy" type="checkbox" required>
+                            <span>ยอมรับการใช้ข้อมูลเพื่อสมัครสมาชิกและให้ Eden Cafe ติดต่อเกี่ยวกับบริการที่เกี่ยวข้อง</span>
+                        </label>
+                        <label class="register-check">
+                            <input id="register-marketing" type="checkbox">
+                            <span>รับข่าวสาร โปรโมชัน และสิทธิพิเศษจาก Eden Cafe</span>
+                        </label>
+                        <div id="register-recaptcha" class="register-recaptcha"></div>
+                        <button class="btn register-submit" type="submit">ส่งรหัส OTP</button>
+                    </form>
+
+                    <form class="register-form" id="otp-register-form">
+                        <p class="register-form-kicker">ขั้นตอนที่ 2</p>
+                        <h2>กรอกรหัส OTP</h2>
+                        <p class="register-muted">เราส่งรหัสไปที่ <strong id="register-phone-preview">เบอร์ของคุณ</strong></p>
+                        <label>
+                            <span>รหัส OTP 6 หลัก</span>
+                            <input id="register-otp" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code"
+                                maxlength="6" placeholder="123456" required>
+                        </label>
+                        <div class="register-actions">
+                            <button class="btn register-submit" type="submit">ยืนยัน OTP</button>
+                            <button class="btn btn-outline" type="button" id="register-resend">ส่ง OTP ใหม่</button>
+                        </div>
+                    </form>
+
+                    <form class="register-form" id="profile-register-form">
+                        <p class="register-form-kicker">ขั้นตอนที่ 3</p>
+                        <h2>ข้อมูลสมาชิก</h2>
+                        <p class="register-muted">กรอกเท่าที่จำเป็นก่อนก็ได้ ข้อมูลส่วนตัวแก้ไขต่อได้ในหน้าโปรไฟล์</p>
+                        <div class="register-grid">
+                            <label>
+                                <span>ชื่อ-นามสกุล</span>
+                                <input id="register-name" name="displayName" type="text" autocomplete="name"
+                                    placeholder="ชื่อของคุณ" required>
+                            </label>
+                            <label>
+                                <span>LINE ID</span>
+                                <input id="register-line" name="lineId" type="text" autocomplete="off"
+                                    placeholder="LINE ID ของคุณ">
+                            </label>
+                            <label>
+                                <span>วันเกิด</span>
+                                <input id="register-birthdate" name="birthDate" type="date">
+                            </label>
+                            <label>
+                                <span>แพ้อาหาร</span>
+                                <input id="register-allergies" name="allergies" type="text"
+                                    placeholder="เช่น ถั่ว นม กุ้ง กลูเตน">
+                            </label>
+                        </div>
+                        <label>
+                            <span>ที่อยู่จัดส่ง</span>
+                            <textarea id="register-address" name="shippingAddress" rows="3"
+                                placeholder="บ้านเลขที่ ถนน เขต/อำเภอ จังหวัด รหัสไปรษณีย์"></textarea>
+                        </label>
+                        <label>
+                            <span>หมายเหตุสุขภาพ</span>
+                            <textarea id="register-health" name="healthNote" rows="3"
+                                placeholder="ข้อมูลที่ต้องการแจ้งร้าน"></textarea>
+                        </label>
+                        <button class="btn register-submit" type="submit">บันทึกข้อมูลสมาชิก</button>
+                    </form>
+
+                    <div class="register-complete" id="register-complete" hidden>
+                        <div class="register-complete-icon">✓</div>
+                        <h2>สมัครสมาชิกเรียบร้อย</h2>
+                        <p>บัญชี Eden Cafe ของคุณพร้อมใช้งานแล้ว</p>
+                        <div class="register-actions">
+                            <a class="btn" href="/profile">ไปหน้าโปรไฟล์</a>
+                            <a class="btn btn-outline" href="/menu">ดูเมนู</a>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const menu = document.querySelector('#mobile-menu');
+        const navLinks = document.querySelector('.nav-links');
+        const navActions = document.querySelector('.nav-actions');
+        if (menu) {
+            menu.addEventListener('click', function () {
+                menu.classList.toggle('is-active');
+                navLinks.classList.toggle('active');
+                navActions.classList.toggle('active');
+            });
+            document.querySelectorAll('.nav-links a').forEach(item => {
+                item.addEventListener('click', () => {
+                    menu.classList.remove('is-active');
+                    navLinks.classList.remove('active');
+                    navActions.classList.remove('active');
+                });
+            });
+        }
+    </script>
+    <script type="module" src="js/register.js?v=phone-register-2"></script>
+    <script type="module" src="js/auth.js?v=phone-register-2"></script>
+</body>
+</html>
