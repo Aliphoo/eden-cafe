@@ -1,8 +1,11 @@
 import { auth, db } from './firebase-config.js';
 import {
+    EmailAuthProvider,
     RecaptchaVerifier,
+    linkWithCredential,
     signInWithPhoneNumber,
     onAuthStateChanged,
+    updatePassword,
     updateProfile
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
@@ -13,6 +16,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const USER_KEY = 'eden_user';
+const PHONE_AUTH_EMAIL_DOMAIN = 'phone.edencafe.co';
+const CAN_LOG_CLIENT_ERRORS = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
 
 const state = {
     confirmationResult: null,
@@ -37,13 +42,21 @@ const els = {
     phonePreview: document.getElementById('register-phone-preview'),
     otp: document.getElementById('register-otp'),
     resend: document.getElementById('register-resend'),
-    name: document.getElementById('register-name'),
+    username: document.getElementById('register-username'),
+    firstName: document.getElementById('register-first-name'),
+    lastName: document.getElementById('register-last-name'),
+    password: document.getElementById('register-password'),
+    passwordConfirm: document.getElementById('register-password-confirm'),
     lineId: document.getElementById('register-line'),
     birthDate: document.getElementById('register-birthdate'),
     allergies: document.getElementById('register-allergies'),
     address: document.getElementById('register-address'),
     healthNote: document.getElementById('register-health')
 };
+
+function logClientError(label, error) {
+    if (CAN_LOG_CLIENT_ERRORS) console.warn(label, error);
+}
 
 function setStatus(message, type = 'info') {
     if (!els.status) return;
@@ -93,9 +106,50 @@ function displayThaiPhone(phoneE164) {
     return phoneE164;
 }
 
-function buildMemberCode(uid) {
-    const source = String(uid || '000000').replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase().padStart(6, '0');
-    return 'ED-' + source;
+function phoneAuthEmail(phoneE164) {
+    const digits = String(phoneE164 || '').replace(/\D/g, '');
+    if (!digits) return '';
+    return 'p' + digits + '@' + PHONE_AUTH_EMAIL_DOMAIN;
+}
+
+function isInternalPhoneEmail(email) {
+    return String(email || '').toLowerCase().endsWith('@' + PHONE_AUTH_EMAIL_DOMAIN);
+}
+
+function publicEmail(user, fallback = '') {
+    return isInternalPhoneEmail(user?.email) ? fallback : (user?.email || fallback || '');
+}
+
+function passwordProviderLinked(user) {
+    return getProviderIds(user).includes('password');
+}
+
+async function ensurePhonePassword(user, password) {
+    const cleanPassword = String(password || '');
+    if (!user?.uid) throw new Error('ไม่พบบัญชีผู้ใช้สำหรับตั้งรหัสผ่าน');
+    if (cleanPassword.length < 8 || cleanPassword.length > 128) {
+        throw new Error('รหัสผ่านต้องมีความยาว 8-128 ตัวอักษร');
+    }
+
+    const aliasEmail = phoneAuthEmail(user.phoneNumber || state.phoneE164);
+    if (!aliasEmail) throw new Error('ไม่พบเบอร์โทรสำหรับสร้าง USERNAME');
+
+    if (passwordProviderLinked(user)) {
+        await updatePassword(user, cleanPassword);
+        return { user, aliasEmail, passwordLinked: true };
+    }
+
+    try {
+        const credential = EmailAuthProvider.credential(aliasEmail, cleanPassword);
+        const result = await linkWithCredential(user, credential);
+        return { user: result.user, aliasEmail, passwordLinked: true };
+    } catch (error) {
+        if (error?.code === 'auth/provider-already-linked') {
+            await updatePassword(user, cleanPassword);
+            return { user, aliasEmail, passwordLinked: true };
+        }
+        throw error;
+    }
 }
 
 function avatarForName(name) {
@@ -171,8 +225,11 @@ async function hydrateProfileForm(user) {
     if (!user || !db) return;
     const snap = await getDoc(doc(db, 'users', user.uid));
     const data = snap.exists() ? snap.data() : {};
-    const displayName = data.displayName || user.displayName || ('Eden Member ' + String(user.phoneNumber || '').slice(-4));
-    if (els.name) els.name.value = displayName;
+    const displayName = data.displayName || user.displayName || '';
+    const parts = String(displayName || '').trim().split(/\s+/);
+    if (els.username) els.username.value = data.loginUsername || data.phone || displayThaiPhone(user.phoneNumber || '') || '';
+    if (els.firstName) els.firstName.value = data.firstName || parts[0] || '';
+    if (els.lastName) els.lastName.value = data.lastName || parts.slice(1).join(' ') || '';
     if (els.lineId) els.lineId.value = data.lineId || '';
     if (els.birthDate) els.birthDate.value = data.birthDate || '';
     if (els.allergies) els.allergies.value = data.allergies || '';
@@ -184,14 +241,16 @@ async function upsertUserProfile(user, extras = {}) {
     if (!db || !user?.uid) throw new Error('ไม่พบฐานข้อมูลหรือบัญชีผู้ใช้');
 
     const displayName = cleanString(extras.displayName || user.displayName || 'Eden Member', 120);
+    const phoneE164 = cleanString(extras.phoneE164 || user.phoneNumber || '', 40);
+    const userRef = doc(db, 'users', user.uid);
+    const existingSnap = await getDoc(userRef);
+    const visibleEmail = cleanString(extras.email || publicEmail(user), 180);
     const payload = {
         uid: user.uid,
         displayName,
-        email: cleanString(user.email || extras.email || '', 180),
         photoURL: cleanString(user.photoURL || avatarForName(displayName), 500),
-        memberCode: buildMemberCode(user.uid),
         phone: cleanString(extras.phone || displayThaiPhone(user.phoneNumber || '') || '', 40),
-        phoneE164: cleanString(extras.phoneE164 || user.phoneNumber || '', 40),
+        phoneE164,
         authProviderIds: getProviderIds(user),
         registrationSource: cleanString(extras.source || 'phone_register', 40),
         marketingConsent: !!extras.marketingConsent,
@@ -199,13 +258,23 @@ async function upsertUserProfile(user, extras = {}) {
         phoneVerifiedAt: serverTimestamp(),
         updatedAt: serverTimestamp()
     };
+    if (visibleEmail || !existingSnap.exists()) payload.email = visibleEmail;
 
-    await setDoc(doc(db, 'users', user.uid), payload, { merge: true });
+    if ('firstName' in extras) payload.firstName = cleanString(extras.firstName, 80);
+    if ('lastName' in extras) payload.lastName = cleanString(extras.lastName, 80);
+    if ('loginUsername' in extras || phoneE164) payload.loginUsername = cleanString(extras.loginUsername || extras.phone || displayThaiPhone(phoneE164), 40);
+    if ('phoneAuthEmail' in extras || phoneE164) payload.phoneAuthEmail = cleanString(extras.phoneAuthEmail || phoneAuthEmail(phoneE164), 180);
+    if ('passwordLoginEnabled' in extras) payload.passwordLoginEnabled = extras.passwordLoginEnabled === true;
+    if ('profileCompleted' in extras) payload.profileCompleted = extras.profileCompleted === true;
 
+    await setDoc(userRef, payload, { merge: true });
+
+    const existingEmail = existingSnap.exists() ? publicEmail({ email: cleanString(existingSnap.data().email, 180) }) : '';
+    const storedEmail = payload.email || existingEmail;
     const storedUser = {
         uid: user.uid,
         name: payload.displayName,
-        email: payload.email,
+        email: storedEmail,
         avatar: payload.photoURL,
         phone: payload.phone,
         phoneNumber: payload.phoneE164,
@@ -221,18 +290,33 @@ async function saveProfile(event) {
     const user = auth.currentUser || state.authUser;
     if (!user) throw new Error('กรุณายืนยัน OTP ก่อนบันทึกข้อมูลสมาชิก');
 
-    const displayName = cleanString(els.name?.value, 120);
-    if (!displayName) throw new Error('กรุณากรอกชื่อสมาชิก');
+    const firstName = cleanString(els.firstName?.value, 80);
+    const lastName = cleanString(els.lastName?.value, 80);
+    const password = String(els.password?.value || '');
+    const passwordConfirm = String(els.passwordConfirm?.value || '');
+    if (!firstName || !lastName) throw new Error('กรุณากรอกชื่อจริงและนามสกุล');
+    if (password !== passwordConfirm) throw new Error('รหัสผ่านและยืนยันรหัสผ่านไม่ตรงกัน');
+    if (password.length < 8 || password.length > 128) throw new Error('รหัสผ่านต้องมีความยาว 8-128 ตัวอักษร');
 
-    await updateProfile(user, {
+    const displayName = `${firstName} ${lastName}`.trim();
+    const passwordResult = await ensurePhonePassword(user, password);
+    state.authUser = passwordResult.user || user;
+
+    await updateProfile(state.authUser, {
         displayName,
-        photoURL: user.photoURL || avatarForName(displayName)
+        photoURL: state.authUser.photoURL || avatarForName(displayName)
     });
 
-    await upsertUserProfile(user, {
+    await upsertUserProfile(state.authUser, {
         displayName,
-        phone: state.phoneDisplay || displayThaiPhone(user.phoneNumber || ''),
-        phoneE164: user.phoneNumber || state.phoneE164,
+        firstName,
+        lastName,
+        phone: state.phoneDisplay || displayThaiPhone(state.authUser.phoneNumber || ''),
+        phoneE164: state.authUser.phoneNumber || state.phoneE164,
+        loginUsername: state.phoneDisplay || displayThaiPhone(state.authUser.phoneNumber || ''),
+        phoneAuthEmail: passwordResult.aliasEmail,
+        passwordLoginEnabled: true,
+        profileCompleted: true,
         lineId: cleanString(els.lineId?.value, 80),
         birthDate: cleanString(els.birthDate?.value, 20),
         allergies: cleanString(els.allergies?.value, 200),
@@ -243,7 +327,14 @@ async function saveProfile(event) {
         source: 'phone_register'
     });
 
-    await setDoc(doc(db, 'users', user.uid), {
+    await setDoc(doc(db, 'users', state.authUser.uid), {
+        firstName,
+        lastName,
+        loginUsername: state.phoneDisplay || displayThaiPhone(state.authUser.phoneNumber || ''),
+        phoneAuthEmail: passwordResult.aliasEmail,
+        passwordLoginEnabled: true,
+        profileCompleted: true,
+        onboardingCompletedAt: serverTimestamp(),
         lineId: cleanString(els.lineId?.value, 80),
         birthDate: cleanString(els.birthDate?.value, 20),
         allergies: cleanString(els.allergies?.value, 200),
@@ -255,6 +346,10 @@ async function saveProfile(event) {
     els.profileForm?.classList.remove('active');
     if (els.complete) els.complete.hidden = false;
     setStatus('บันทึกข้อมูลสมาชิกสำเร็จ', 'success');
+    window.setTimeout(() => {
+        const next = new URLSearchParams(location.search).get('next') || '/profile';
+        window.location.href = next.startsWith('/') ? next : '/profile';
+    }, 900);
 }
 
 function describeFirebaseAuthError(error) {
@@ -265,8 +360,11 @@ function describeFirebaseAuthError(error) {
     if (code === 'auth/quota-exceeded') return 'โควตา SMS ของ Firebase เต็ม กรุณาตรวจสอบใน Firebase Console';
     if (code === 'auth/operation-not-allowed') return 'ยังไม่ได้เปิด Phone provider ใน Firebase Authentication';
     if (code === 'auth/unauthorized-domain') return 'โดเมนนี้ยังไม่ได้อยู่ใน Authorized domains ของ Firebase';
+    if (code === 'auth/email-already-in-use' || code === 'auth/credential-already-in-use') return 'เบอร์โทรนี้มี USERNAME อยู่แล้ว กรุณาเข้าสู่ระบบด้วย OTP หรือแจ้งร้านเพื่อตรวจสอบ';
+    if (code === 'auth/requires-recent-login') return 'กรุณายืนยัน OTP ใหม่อีกครั้งก่อนตั้งรหัสผ่าน';
+    if (code === 'auth/weak-password') return 'รหัสผ่านง่ายเกินไป กรุณาตั้งรหัสผ่านใหม่อย่างน้อย 8 ตัวอักษร';
     if (code === 'permission-denied') return 'สิทธิ์ Firestore ยังไม่อนุญาตให้บันทึกโปรไฟล์สมาชิก';
-    return error?.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง';
+    return 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง';
 }
 
 function bindEvents() {
@@ -279,7 +377,7 @@ function bindEvents() {
             activateStep('otp');
             setStatus('ส่ง OTP สำเร็จ กรุณาตรวจ SMS แล้วกรอกรหัส 6 หลัก', 'success');
         } catch (error) {
-            console.warn('Phone OTP failed:', error);
+            logClientError('Phone OTP failed:', error);
             setStatus(describeFirebaseAuthError(error), 'error');
             try {
                 state.recaptchaVerifier?.clear();
@@ -299,10 +397,18 @@ function bindEvents() {
         setStatus('กำลังยืนยัน OTP...', 'info');
         try {
             await verifyOtp();
+            const profileSnap = db && state.authUser?.uid ? await getDoc(doc(db, 'users', state.authUser.uid)) : null;
+            const profile = profileSnap?.exists() ? profileSnap.data() : {};
+            if (profile.profileCompleted === true) {
+                setStatus('ยืนยันเบอร์สำเร็จ กำลังพาไปหน้าถัดไป...', 'success');
+                const next = new URLSearchParams(location.search).get('next') || '/profile';
+                window.setTimeout(() => { window.location.href = next.startsWith('/') ? next : '/profile'; }, 500);
+                return;
+            }
             activateStep('profile');
-            setStatus('ยืนยันเบอร์สำเร็จ กรอกข้อมูลสมาชิกต่อได้เลย', 'success');
+            setStatus('ยืนยันเบอร์สำเร็จ กรุณากรอกชื่อจริง นามสกุล และตั้งรหัสผ่าน', 'success');
         } catch (error) {
-            console.warn('OTP confirm failed:', error);
+            logClientError('OTP confirm failed:', error);
             setStatus(describeFirebaseAuthError(error), 'error');
         } finally {
             setBusy(els.otpForm, false);
@@ -316,7 +422,7 @@ function bindEvents() {
             await saveProfile(event);
         } catch (error) {
             event.preventDefault();
-            console.warn('Profile registration save failed:', error);
+            logClientError('Profile registration save failed:', error);
             setStatus(describeFirebaseAuthError(error), 'error');
         } finally {
             setBusy(els.profileForm, false);
@@ -332,7 +438,7 @@ function bindEvents() {
             activateStep('otp');
             setStatus('ส่ง OTP ใหม่สำเร็จ', 'success');
         } catch (error) {
-            console.warn('OTP resend failed:', error);
+            logClientError('OTP resend failed:', error);
             setStatus(describeFirebaseAuthError(error), 'error');
         } finally {
             setBusy(els.otpForm, false);
@@ -347,10 +453,11 @@ onAuthStateChanged(auth, user => {
         state.phoneE164 = user.phoneNumber;
         state.phoneDisplay = displayThaiPhone(user.phoneNumber);
         hydrateProfileForm(user).then(() => {
+            if (els.username) els.username.value = state.phoneDisplay;
             activateStep('profile');
-            setStatus('พบเบอร์ที่ยืนยันแล้ว สามารถตรวจสอบและบันทึกโปรไฟล์ได้เลย', 'success');
+            setStatus('พบเบอร์ที่ยืนยันแล้ว กรุณาตั้งค่าบัญชีให้ครบเพื่อเริ่มใช้งาน', 'success');
         }).catch(error => {
-            console.warn('Unable to hydrate phone profile:', error);
+            logClientError('Unable to hydrate phone profile:', error);
         });
     }
 });

@@ -4,6 +4,10 @@ const { defineSecret } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 const ftp = require('basic-ftp');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
+const fs = require('fs');
+const path = require('path');
 const { Readable } = require('stream');
 
 admin.initializeApp();
@@ -13,9 +17,15 @@ const SPACESHIP_FTP_SERVER = defineSecret('SPACESHIP_FTP_SERVER');
 const SPACESHIP_FTP_USERNAME = defineSecret('SPACESHIP_FTP_USERNAME');
 const SPACESHIP_FTP_PASSWORD = defineSecret('SPACESHIP_FTP_PASSWORD');
 const GOOGLE_MAPS_SERVER_KEY = defineSecret('GOOGLE_MAPS_SERVER_KEY');
+const SMTP_HOST = defineSecret('SMTP_HOST');
+const SMTP_PORT = defineSecret('SMTP_PORT');
+const SMTP_USER = defineSecret('SMTP_USER');
+const SMTP_PASS = defineSecret('SMTP_PASS');
+const SMTP_FROM = defineSecret('SMTP_FROM');
 
 const PLACE_ID = 'ChIJVTN6cGwB1zAR66OQ_OBKRkM';
 const PLACE_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
+const PHONE_AUTH_EMAIL_DOMAIN = 'phone.edencafe.co';
 const REVIEW_LIMIT = 5;
 const ADMIN_EMAILS = new Set([
   'admin@edencafe.com',
@@ -35,12 +45,26 @@ const ALLOWED_ORIGINS = new Set([
   'https://edencafe-d9095.firebaseapp.com',
   'https://edencafe.co',
   'https://www.edencafe.co',
+  'capacitor://localhost',
+  'ionic://localhost',
+  'http://localhost',
+  'http://127.0.0.1',
   'http://localhost:5000',
   'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5175',
+  'http://localhost:5176',
+  'http://localhost:4175',
+  'http://localhost:4183',
   'http://localhost:8080',
   'http://localhost:8787',
   'http://127.0.0.1:5000',
   'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
+  'http://127.0.0.1:5175',
+  'http://127.0.0.1:5176',
+  'http://127.0.0.1:4175',
+  'http://127.0.0.1:4183',
   'http://127.0.0.1:8080',
   'http://127.0.0.1:8787',
 ]);
@@ -64,6 +88,97 @@ function handleOptions(req, res) {
   }
   return false;
 }
+
+const RATE_LIMIT_BUCKETS = new Map();
+
+function clientIp(req) {
+  const forwarded = String(req.get('x-forwarded-for') || '').split(',')[0].trim();
+  return forwarded || String(req.ip || req.get('x-real-ip') || 'unknown');
+}
+
+function checkRateLimit(req, bucketName, maxRequests, windowMs) {
+  const now = Date.now();
+  const key = `${bucketName}:${clientIp(req)}`;
+  checkRateLimitKey(key, maxRequests, windowMs, now);
+}
+
+function checkRateLimitKey(key, maxRequests, windowMs, now = Date.now()) {
+  const bucket = RATE_LIMIT_BUCKETS.get(key);
+  if (!bucket || bucket.expiresAt <= now) {
+    RATE_LIMIT_BUCKETS.set(key, { count: 1, expiresAt: now + windowMs });
+    return;
+  }
+  if (bucket.count >= maxRequests) {
+    const error = new Error('Too many requests');
+    error.statusCode = 429;
+    throw error;
+  }
+  bucket.count += 1;
+}
+
+function publicApiError(error, fallback = 'Unable to process request') {
+  const status = error.statusCode || 500;
+  if (status === 401) return { status, message: 'Please sign in and try again.' };
+  if (status === 403) return { status, message: 'You do not have permission to perform this action.' };
+  if (status === 409) return { status, message: 'The selected resource is no longer available.' };
+  if (status === 429) return { status, message: 'Too many requests. Please try again later.' };
+  if (status >= 500) return { status, message: fallback };
+  return { status, message: fallback };
+}
+
+exports.downloadPosApk = onRequest(
+  { region: 'asia-southeast1', timeoutSeconds: 120, memory: '512MiB' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'GET') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const decoded = await requireAdminAccess(req, 'pos');
+      const fileName = 'EdenCafePOS-release.apk';
+      const filePath = path.join(__dirname, 'assets', fileName);
+
+      if (!fs.existsSync(filePath)) {
+        res.status(404).json({ error: 'POS APK file is not available' });
+        return;
+      }
+
+      const stat = fs.statSync(filePath);
+      res.set('Cache-Control', 'no-store, max-age=0');
+      res.set('Content-Type', 'application/vnd.android.package-archive');
+      res.set('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.set('Content-Length', String(stat.size));
+      res.set('X-Content-Type-Options', 'nosniff');
+
+      logger.info('Protected POS APK download started', {
+        uid: decoded.uid || '',
+        email: decoded.email || '',
+        bytes: stat.size,
+      });
+
+      fs.createReadStream(filePath)
+        .on('error', error => {
+          logger.error('Protected POS APK stream failed', { message: error.message });
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Unable to stream POS APK' });
+            return;
+          }
+          res.end();
+        })
+        .pipe(res);
+    } catch (error) {
+      const isTokenError = /Firebase ID token|verify ID token|Decoding Firebase|jwt/i.test(error.message || '');
+      const status = error.statusCode || (isTokenError ? 401 : 500);
+      logger.warn('Protected POS APK download denied', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to download POS APK');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
 
 async function requireAdminUid(req) {
   const header = req.get('authorization') || '';
@@ -138,6 +253,17 @@ async function requireOwnerAccess(req) {
   throw error;
 }
 
+async function requireSignedInUser(req) {
+  const header = req.get('authorization') || '';
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match) {
+    const error = new Error('Missing Authorization token');
+    error.statusCode = 401;
+    throw error;
+  }
+  return admin.auth().verifyIdToken(match[1]);
+}
+
 function normalizeAdminRole(role) {
   return ['owner', 'head_manager', 'manager'].includes(role) ? role : 'manager';
 }
@@ -185,22 +311,40 @@ function timestampFromAuthDate(value) {
   return date && !Number.isNaN(date.getTime()) ? admin.firestore.Timestamp.fromDate(date) : null;
 }
 
+function isInternalPhoneEmail(email) {
+  return String(email || '').toLowerCase().endsWith('@' + PHONE_AUTH_EMAIL_DOMAIN);
+}
+
+function displayThaiPhone(phoneE164) {
+  const phone = String(phoneE164 || '');
+  return phone.startsWith('+66') ? '0' + phone.slice(3) : phone;
+}
+
 function authUserToMemberDoc(userRecord) {
   const providerIds = Array.isArray(userRecord.providerData)
     ? userRecord.providerData.map(provider => provider.providerId).filter(Boolean)
     : [];
   const authCreatedAt = timestampFromAuthDate(userRecord.metadata?.creationTime);
   const lastLoginAt = timestampFromAuthDate(userRecord.metadata?.lastSignInTime);
+  const publicAuthEmail = isInternalPhoneEmail(userRecord.email) ? '' : cleanString(userRecord.email || '', 180);
+  const phoneNumber = cleanString(userRecord.phoneNumber || '', 40);
+  const phoneDisplay = cleanString(displayThaiPhone(phoneNumber), 40);
+  const phoneAuthEmail = isInternalPhoneEmail(userRecord.email) ? cleanString(userRecord.email || '', 180) : '';
+  const displayName = cleanString(userRecord.displayName || publicAuthEmail || (phoneNumber ? 'Eden Member ' + phoneNumber.slice(-4) : 'Eden Member'), 120);
 
   const data = {
     uid: userRecord.uid,
-    displayName: cleanString(userRecord.displayName || userRecord.email || 'Eden Member', 120),
-    email: cleanString(userRecord.email || '', 180),
+    displayName,
+    email: publicAuthEmail,
+    phoneE164: phoneNumber,
+    phone: phoneDisplay,
+    loginUsername: phoneDisplay,
+    phoneAuthEmail,
     photoURL: cleanString(userRecord.photoURL || '', 500),
     memberCode: authMemberCode(userRecord.uid),
     authProviderIds: providerIds,
     authDisabled: !!userRecord.disabled,
-    emailVerified: !!userRecord.emailVerified,
+    emailVerified: !!publicAuthEmail && !!userRecord.emailVerified,
     authCreatedAt,
     lastLoginAt,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -323,13 +467,19 @@ function availabilityDocId(date, time) {
 async function uidFromAuthHeader(req) {
   const header = req.get('authorization') || '';
   const match = header.match(/^Bearer\s+(.+)$/i);
-  if (!match) return '';
+  if (!match) {
+    const error = new Error('Missing Authorization token');
+    error.statusCode = 401;
+    throw error;
+  }
   try {
     const decoded = await admin.auth().verifyIdToken(match[1]);
     return decoded.uid || '';
   } catch (error) {
-    logger.warn('Ignoring invalid booking auth token', { message: error.message });
-    return '';
+    logger.warn('Booking auth token rejected', { message: error.message });
+    const authError = new Error('Invalid Authorization token');
+    authError.statusCode = 401;
+    throw authError;
   }
 }
 
@@ -348,8 +498,8 @@ function normalizeBookingPayload(raw, verifiedUid = '') {
     status: 'pending',
   };
 
-  if (verifiedUid) booking.uid = verifiedUid;
-  if (raw.uid && verifiedUid) booking.uid = verifiedUid;
+  if (!verifiedUid) throw new Error('Missing Authorization token');
+  booking.uid = verifiedUid;
 
   if (!['table', 'room'].includes(bookingType)) throw new Error('Invalid booking type');
   if (!booking.name || !booking.phone || !isISODate(date)) throw new Error('Missing booking fields');
@@ -506,6 +656,7 @@ exports.getTableAvailability = onRequest(
     setCors(req, res);
 
     try {
+      checkRateLimit(req, 'tableAvailability', 120, 10 * 60 * 1000);
       const date = cleanString(req.query.date, 20);
       const time = cleanString(req.query.time, 10);
       if (!isISODate(date) || !isTime(time)) {
@@ -521,7 +672,8 @@ exports.getTableAvailability = onRequest(
       res.json({ date, time, tableIds });
     } catch (error) {
       logger.error('Unable to read table availability', { message: error.message });
-      res.status(500).json({ error: 'Unable to read table availability' });
+      const publicError = publicApiError(error, 'Unable to read table availability');
+      res.status(publicError.status).json({ error: publicError.message });
     }
   }
 );
@@ -538,6 +690,7 @@ exports.createBooking = onRequest(
     }
 
     try {
+      checkRateLimit(req, 'createBooking', 12, 10 * 60 * 1000);
       const verifiedUid = await uidFromAuthHeader(req);
       const booking = normalizeBookingPayload(req.body || {}, verifiedUid);
       const bookingRef = db.collection('bookings').doc();
@@ -581,9 +734,10 @@ exports.createBooking = onRequest(
     } catch (error) {
       const status = error.statusCode || (/Invalid|Missing|Large/.test(error.message) ? 400 : 500);
       logger.warn('Booking create failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Booking create failed. Please check the details and try again.');
       res.status(status).json({
-        error: error.message || 'Booking create failed',
-        conflictIds: error.conflictIds || [],
+        error: status === 409 ? 'Selected table is already booked.' : publicError.message,
+        conflictIds: status === 409 ? (error.conflictIds || []) : [],
       });
     }
   }
@@ -627,7 +781,8 @@ exports.uploadSpaceshipImage = onRequest(
     } catch (error) {
       const status = error.statusCode || (/Missing|Invalid|Unsupported|large|configured/i.test(error.message) ? 400 : 500);
       logger.warn('Spaceship image upload failed', { message: error.message, status });
-      res.status(status).json({ error: error.message || 'Spaceship image upload failed' });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to upload image. Please check the file and try again.');
+      res.status(status).json({ error: publicError.message });
     }
   }
 );
@@ -773,7 +928,165 @@ exports.upsertAdminAccessUser = onRequest(
     } catch (error) {
       const status = error.statusCode || (/required|valid|password|uid|email/i.test(error.message) ? 400 : 500);
       logger.warn('Admin access user upsert failed', { message: error.message, status });
-      res.status(status).json({ error: error.message || 'Admin access user upsert failed' });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to save admin access user. Please check the required fields.');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+function normalizePublicEmail(value) {
+  const email = cleanString(value || '', 180).toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
+}
+
+function emailVerificationHash(uid, email, code) {
+  return crypto
+    .createHash('sha256')
+    .update(`${uid}:${email}:${code}`)
+    .digest('hex');
+}
+
+function createMailTransporter() {
+  const host = SMTP_HOST.value();
+  const port = Number(SMTP_PORT.value() || 587);
+  const user = SMTP_USER.value();
+  const pass = SMTP_PASS.value();
+  if (!host || !user || !pass) {
+    const error = new Error('Email sender is not configured');
+    error.statusCode = 503;
+    throw error;
+  }
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: { user, pass },
+  });
+}
+
+exports.sendEmailVerificationCode = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM],
+  },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'sendEmailVerificationCode', 8, 10 * 60 * 1000);
+      const decoded = await requireSignedInUser(req);
+      checkRateLimitKey(`sendEmailVerificationCodeUid:${decoded.uid}`, 5, 10 * 60 * 1000);
+      const email = normalizePublicEmail(req.body?.email);
+      if (!email) {
+        const error = new Error('Valid email is required');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      const now = admin.firestore.Timestamp.now();
+      const expiresAt = admin.firestore.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000));
+      await db.collection('email_verification_codes').doc(decoded.uid).set({
+        uid: decoded.uid,
+        email,
+        codeHash: emailVerificationHash(decoded.uid, email, code),
+        attempts: 0,
+        createdAt: now,
+        expiresAt,
+      });
+
+      const from = SMTP_FROM.value() || SMTP_USER.value();
+      await createMailTransporter().sendMail({
+        from,
+        to: email,
+        subject: 'Eden Cafe email verification code',
+        text: `Your Eden Cafe verification code is ${code}. This code expires in 10 minutes.`,
+        html: `<p>Your Eden Cafe verification code is:</p><h2 style="letter-spacing:0.2em;">${code}</h2><p>This code expires in 10 minutes.</p>`,
+      });
+
+      logger.info('Email verification code sent', { uid: decoded.uid, email });
+      res.json({ ok: true, expiresInMinutes: 10 });
+    } catch (error) {
+      const status = error.statusCode || (/email|required|configured/i.test(error.message) ? 400 : 500);
+      logger.warn('Email verification send failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to send verification code.');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+exports.verifyEmailCode = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'verifyEmailCode', 30, 10 * 60 * 1000);
+      const decoded = await requireSignedInUser(req);
+      checkRateLimitKey(`verifyEmailCodeUid:${decoded.uid}`, 12, 10 * 60 * 1000);
+      const email = normalizePublicEmail(req.body?.email);
+      const code = cleanString(req.body?.code || '', 6);
+      if (!email || !/^\d{6}$/.test(code)) {
+        const error = new Error('Valid email and 6-digit code are required');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const codeRef = db.collection('email_verification_codes').doc(decoded.uid);
+      const codeSnap = await codeRef.get();
+      if (!codeSnap.exists) {
+        const error = new Error('Verification code was not found or expired');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const record = codeSnap.data() || {};
+      const expiresAt = record.expiresAt?.toDate ? record.expiresAt.toDate().getTime() : 0;
+      if (record.email !== email || !expiresAt || expiresAt < Date.now()) {
+        await codeRef.delete().catch(() => {});
+        const error = new Error('Verification code was not found or expired');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      if (Number(record.attempts || 0) >= 5 || record.codeHash !== emailVerificationHash(decoded.uid, email, code)) {
+        await codeRef.set({ attempts: admin.firestore.FieldValue.increment(1) }, { merge: true });
+        const error = new Error('Verification code is incorrect');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      await db.runTransaction(async tx => {
+        tx.set(db.collection('users').doc(decoded.uid), {
+          uid: decoded.uid,
+          email,
+          emailVerified: true,
+          emailVerifiedAt: now,
+          updatedAt: now,
+        }, { merge: true });
+        tx.delete(codeRef);
+      });
+
+      logger.info('Email verified by code', { uid: decoded.uid, email });
+      res.json({ ok: true, email, emailVerifiedAt: new Date().toISOString() });
+    } catch (error) {
+      const status = error.statusCode || (/email|code|expired|incorrect|required/i.test(error.message) ? 400 : 500);
+      logger.warn('Email verification failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to verify email code.');
+      res.status(status).json({ error: publicError.message });
     }
   }
 );
@@ -820,7 +1133,8 @@ exports.syncAuthUsersToFirestore = onRequest(
     } catch (error) {
       const status = error.statusCode || 500;
       logger.warn('Auth user sync failed', { message: error.message, status });
-      res.status(status).json({ error: error.message || 'Auth user sync failed' });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to sync members.');
+      res.status(status).json({ error: publicError.message });
     }
   }
 );
@@ -943,7 +1257,401 @@ exports.adjustMemberPoints = onRequest(
     } catch (error) {
       const status = error.statusCode || 500;
       logger.warn('Member point adjustment failed', { message: error.message, status });
-      res.status(status).json({ error: error.message || 'Member point adjustment failed' });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to update loyalty points.');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+function normalizeLoyaltySettings(raw = {}) {
+  const numberOr = (value, fallback) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const defaultTierMultipliers = { Silver: 1, Gold: 1.25, Platinum: 1.5 };
+  const tierMultipliers = raw.tierMultipliers && typeof raw.tierMultipliers === 'object'
+    ? {
+      ...defaultTierMultipliers,
+      ...Object.fromEntries(Object.entries(raw.tierMultipliers)
+        .map(([tier, value]) => [tier, Math.max(0, numberOr(value, 1))])
+        .filter(([, value]) => value > 0)),
+    }
+    : defaultTierMultipliers;
+
+  return {
+    enabled: raw.enabled !== false,
+    spendPerPoint: Math.max(0, numberOr(raw.spendPerPoint, 25)),
+    pointValue: Math.max(0, numberOr(raw.pointValue, 1)),
+    expiryMonths: Math.max(0, Math.trunc(numberOr(raw.expiryMonths, 24))),
+    maxRedeemPercent: Math.min(100, Math.max(0, numberOr(raw.maxRedeemPercent, 30))),
+    minRedeemPoints: Math.max(0, Math.trunc(numberOr(raw.minRedeemPoints, 20))),
+    earnAfterDiscount: raw.earnAfterDiscount !== false,
+    earnOnRedeemedAmount: raw.earnOnRedeemedAmount === true,
+    excludedCategories: Array.isArray(raw.excludedCategories)
+      ? raw.excludedCategories.map(value => cleanString(value, 120).toLowerCase()).filter(Boolean)
+      : ['เครื่องดื่มแอลกอฮอล์', 'ฝากเงิน', 'โปรแรง'],
+    tierMultipliers,
+  };
+}
+
+function safeLedgerKey(value) {
+  return cleanString(value || Date.now(), 140)
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '') || String(Date.now());
+}
+
+function normalizePosSaleItems(items) {
+  return Array.isArray(items)
+    ? items.map(item => ({
+      productId: cleanString(item.productId || '', 120),
+      variantId: cleanString(item.variantId || 'base', 80),
+      sku: cleanString(item.sku || '', 80),
+      name: cleanString(item.name || 'POS item', 180),
+      variantName: cleanString(item.variantName || '', 120),
+      category: cleanString(item.category || '', 160),
+      quantity: Math.max(0, Number(item.quantity || 0)),
+      unitPrice: Math.max(0, Number(item.unitPrice || 0)),
+      lineDiscount: Math.max(0, Number(item.lineDiscount || 0)),
+      taxEnabled: item.taxEnabled !== false,
+    })).filter(item => item.quantity > 0)
+    : [];
+}
+
+function eligibleSubtotalForPosSale(items, excludedCategories) {
+  const excluded = new Set(excludedCategories);
+  return items.reduce((sum, item) => {
+    const category = cleanString(item.category, 160).toLowerCase();
+    if (category && excluded.has(category)) return sum;
+    return sum + Math.max(0, item.unitPrice * item.quantity - item.lineDiscount);
+  }, 0);
+}
+
+function expiryTimestamp(months) {
+  if (!months) return null;
+  const date = new Date();
+  date.setMonth(date.getMonth() + months);
+  return admin.firestore.Timestamp.fromDate(date);
+}
+
+exports.applyPosLoyaltySale = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const decoded = await requireAdminAccess(req, 'pos');
+      const body = req.body || {};
+      const orderId = cleanString(body.orderId || body.firestoreId || '', 180);
+      const receiptNo = cleanString(body.receiptNo || orderId, 120);
+      const customerUid = cleanString(body.customerUid || '', 180);
+      const idempotencyKey = safeLedgerKey(body.idempotencyKey || receiptNo || orderId);
+      const netAmount = Math.max(0, Number(body.netAmount || 0));
+      const normalDiscount = Math.max(0, Number(body.normalDiscount || 0));
+      const subtotal = Math.max(0, Number(body.subtotal || 0));
+      const requestedRedeemedPoints = Math.max(0, Math.trunc(Number(body.redeemedPoints || 0)));
+      const items = normalizePosSaleItems(body.items || []);
+
+      if (!orderId) {
+        const error = new Error('Order ID is required');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (!receiptNo) {
+        const error = new Error('Receipt number is required');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (!customerUid) {
+        const error = new Error('Customer UID is required');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (netAmount <= 0) {
+        const error = new Error('Net amount must be greater than zero');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const orderRef = db.collection('orders').doc(orderId);
+      const userRef = db.collection('users').doc(customerUid);
+      const summaryRef = db.collection('member_summaries').doc(customerUid);
+      const loyaltyRef = db.collection('site_settings').doc('loyalty');
+      const earnLedgerRef = db.collection('point_ledger').doc(`pos-earn-${idempotencyKey}`);
+      const redeemLedgerRef = db.collection('point_ledger').doc(`pos-redeem-${idempotencyKey}`);
+      let resultPayload = null;
+
+      await db.runTransaction(async transaction => {
+        const [
+          orderSnap,
+          userSnap,
+          summarySnap,
+          loyaltySnap,
+          earnLedgerSnap,
+          redeemLedgerSnap,
+        ] = await Promise.all([
+          transaction.get(orderRef),
+          transaction.get(userRef),
+          transaction.get(summaryRef),
+          transaction.get(loyaltyRef),
+          transaction.get(earnLedgerRef),
+          transaction.get(redeemLedgerRef),
+        ]);
+
+        if (!orderSnap.exists) {
+          const error = new Error('Synced order was not found');
+          error.statusCode = 404;
+          throw error;
+        }
+        if (!userSnap.exists) {
+          const error = new Error('Member profile was not found');
+          error.statusCode = 404;
+          throw error;
+        }
+
+        const order = orderSnap.data() || {};
+        if (
+          order.loyaltySyncStatus === 'synced' &&
+          order.loyaltyIdempotencyKey === idempotencyKey &&
+          order.loyalty
+        ) {
+          resultPayload = order.loyalty;
+          return;
+        }
+        if (earnLedgerSnap.exists || redeemLedgerSnap.exists) {
+          resultPayload = order.loyalty || {
+            customerUid,
+            earnedPoints: Number(earnLedgerSnap.data()?.pointsDelta || 0),
+            redeemedPoints: Math.abs(Number(redeemLedgerSnap.data()?.pointsDelta || 0)),
+            loyaltyDiscount: Number(order.loyaltyDiscount || 0),
+            idempotencyKey,
+            ledgerIds: {
+              earn: earnLedgerSnap.exists ? earnLedgerRef.id : '',
+              redeem: redeemLedgerSnap.exists ? redeemLedgerRef.id : '',
+            },
+            syncedAt: new Date().toISOString(),
+          };
+          transaction.set(orderRef, {
+            loyalty: resultPayload,
+            loyaltySyncStatus: 'synced',
+            loyaltyError: '',
+            loyaltyIdempotencyKey: idempotencyKey,
+            loyaltySyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+          return;
+        }
+
+        const config = normalizeLoyaltySettings(
+          loyaltySnap.exists ? loyaltySnap.data() || {} : {}
+        );
+        if (!config.enabled) {
+          const error = new Error('Loyalty is disabled');
+          error.statusCode = 400;
+          throw error;
+        }
+
+        const member = userSnap.data() || {};
+        const summary = summarySnap.exists ? summarySnap.data() || {} : {};
+        const memberTotalSpent = Math.max(0, Number(member.totalSpent || 0));
+        const memberVisitCount = Math.max(0, Math.floor(Number(member.visitCount || 0)));
+        const summaryTotalSpent = Math.max(0, Number(summary.totalSpent ?? memberTotalSpent));
+        const summaryVisitCount = Math.max(0, Math.floor(Number(summary.visitCount ?? memberVisitCount)));
+        const summaryLifetimePoints = Math.max(0, Number(summary.lifetimePoints || 0));
+        const summaryTotalRedeemed = Math.max(0, Number(summary.totalRedeemed || 0));
+        const memberPoints = Math.max(0, Math.floor(Number(member.points || 0)));
+        const estimatedLegacyPoints = config.spendPerPoint > 0
+          ? Math.floor(memberTotalSpent / config.spendPerPoint)
+          : 0;
+        const pointsBefore = summarySnap.exists && summary.pointsBalance !== undefined
+          ? Math.max(0, Math.floor(Number(summary.pointsBalance || 0)))
+          : Math.max(memberPoints, estimatedLegacyPoints);
+        const summaryLifetimeBase = Math.max(summaryLifetimePoints, pointsBefore);
+
+        if (requestedRedeemedPoints > pointsBefore) {
+          const error = new Error('Redeemed points exceed member balance');
+          error.statusCode = 400;
+          throw error;
+        }
+        if (
+          requestedRedeemedPoints > 0 &&
+          config.minRedeemPoints > 0 &&
+          requestedRedeemedPoints < config.minRedeemPoints
+        ) {
+          const error = new Error(`Minimum redeem points is ${config.minRedeemPoints}`);
+          error.statusCode = 400;
+          throw error;
+        }
+
+        const requestedDiscount = requestedRedeemedPoints * config.pointValue;
+        const maxRedeemDiscount = (netAmount * config.maxRedeemPercent) / 100;
+        if (requestedDiscount > maxRedeemDiscount + 0.0001) {
+          const error = new Error('Redeemed points exceed max redeem percent');
+          error.statusCode = 400;
+          throw error;
+        }
+        if (requestedDiscount > netAmount + 0.0001) {
+          const error = new Error('Redeemed points exceed sale amount');
+          error.statusCode = 400;
+          throw error;
+        }
+
+        const loyaltyDiscount = Math.min(netAmount, requestedDiscount);
+        const payableAmount = Math.max(0, netAmount - loyaltyDiscount);
+        const eligibleSubtotal = eligibleSubtotalForPosSale(items, config.excludedCategories);
+        const subtotalBase = subtotal > 0
+          ? subtotal
+          : items.reduce((sum, item) => sum + Math.max(0, item.unitPrice * item.quantity), 0);
+        const eligibleRatio = subtotalBase > 0 ? Math.min(1, eligibleSubtotal / subtotalBase) : 0;
+        const normalDiscountShare = config.earnAfterDiscount
+          ? normalDiscount * eligibleRatio
+          : 0;
+        const redeemedDiscountShare = config.earnOnRedeemedAmount
+          ? 0
+          : loyaltyDiscount * eligibleRatio;
+        const earnBase = Math.max(0, eligibleSubtotal - normalDiscountShare - redeemedDiscountShare);
+        const currentTier = cleanString(member.tier || summary.tier || 'Silver', 40);
+        const multiplier = Number(config.tierMultipliers[currentTier] || 1);
+        const earnedPoints = config.spendPerPoint > 0
+          ? Math.floor((earnBase / config.spendPerPoint) * multiplier)
+          : 0;
+        const pointsAfter = Math.max(0, pointsBefore - requestedRedeemedPoints + earnedPoints);
+        const totalSpentAfter = memberTotalSpent + payableAmount;
+        const visitCountAfter = memberVisitCount + 1;
+        const tier = memberTierFromMetrics(pointsAfter, totalSpentAfter, visitCountAfter);
+        const now = admin.firestore.FieldValue.serverTimestamp();
+        const syncedAt = new Date().toISOString();
+        const memberCode = cleanString(member.memberCode || '', 80);
+        const memberName = cleanString(member.displayName || member.name || member.customerName || 'Eden Member', 160);
+        const memberEmail = cleanString(member.email || '', 180);
+
+        resultPayload = {
+          customerUid,
+          earnedPoints,
+          redeemedPoints: requestedRedeemedPoints,
+          loyaltyDiscount,
+          pointsBefore,
+          pointsAfter,
+          tier,
+          eligibleAmount: eligibleSubtotal,
+          earnBase,
+          idempotencyKey,
+          ledgerIds: {
+            earn: earnedPoints > 0 ? earnLedgerRef.id : '',
+            redeem: requestedRedeemedPoints > 0 ? redeemLedgerRef.id : '',
+          },
+          syncedAt,
+        };
+
+        if (requestedRedeemedPoints > 0) {
+          transaction.set(redeemLedgerRef, {
+            userId: customerUid,
+            memberCode,
+            memberName,
+            memberEmail,
+            type: 'pos_redeem',
+            pointsDelta: -requestedRedeemedPoints,
+            pointsBefore,
+            pointsAfter: pointsBefore - requestedRedeemedPoints,
+            amount: loyaltyDiscount,
+            receiptNo,
+            orderId,
+            idempotencyKey,
+            source: 'pos',
+            createdAt: now,
+            createdBy: decoded.uid || '',
+            createdByEmail: cleanString(decoded.email || '', 180),
+          });
+        }
+        if (earnedPoints > 0) {
+          const earnPayload = {
+            userId: customerUid,
+            memberCode,
+            memberName,
+            memberEmail,
+            type: 'pos_earn',
+            pointsDelta: earnedPoints,
+            pointsBefore: pointsBefore - requestedRedeemedPoints,
+            pointsAfter,
+            amount: earnBase,
+            receiptNo,
+            orderId,
+            idempotencyKey,
+            source: 'pos',
+            createdAt: now,
+            createdBy: decoded.uid || '',
+            createdByEmail: cleanString(decoded.email || '', 180),
+          };
+          const expiresAt = expiryTimestamp(config.expiryMonths);
+          if (expiresAt) earnPayload.expiresAt = expiresAt;
+          transaction.set(earnLedgerRef, earnPayload);
+        }
+
+        transaction.set(userRef, {
+          points: pointsAfter,
+          totalSpent: totalSpentAfter,
+          visitCount: visitCountAfter,
+          tier,
+          loyaltyUpdatedAt: now,
+          updatedAt: now,
+        }, { merge: true });
+
+        transaction.set(summaryRef, {
+          userId: customerUid,
+          memberCode,
+          memberName,
+          memberEmail,
+          pointsBalance: pointsAfter,
+          tier,
+          lifetimePoints: summaryLifetimeBase + earnedPoints,
+          totalRedeemed: summaryTotalRedeemed + requestedRedeemedPoints,
+          totalSpent: summaryTotalSpent + payableAmount,
+          visitCount: summaryVisitCount + 1,
+          lastLedgerId:
+            earnedPoints > 0
+              ? earnLedgerRef.id
+              : requestedRedeemedPoints > 0
+                ? redeemLedgerRef.id
+                : cleanString(summary.lastLedgerId || '', 180),
+          updatedAt: now,
+        }, { merge: true });
+
+        transaction.set(orderRef, {
+          loyalty: resultPayload,
+          earnedPoints,
+          redeemedPoints: requestedRedeemedPoints,
+          loyaltyDiscount,
+          totalBeforeLoyalty: netAmount,
+          totalAmount: payableAmount,
+          total: payableAmount,
+          loyaltySyncStatus: 'synced',
+          loyaltyError: '',
+          loyaltyIdempotencyKey: idempotencyKey,
+          loyaltySyncedAt: now,
+          updatedAt: now,
+        }, { merge: true });
+      });
+
+      logger.info('POS loyalty sale applied', {
+        orderId,
+        receiptNo,
+        customerUid,
+        idempotencyKey,
+        earnedPoints: resultPayload?.earnedPoints,
+        redeemedPoints: resultPayload?.redeemedPoints,
+      });
+      res.status(201).json({ ok: true, loyalty: resultPayload });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('POS loyalty sale failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to apply loyalty sale.');
+      res.status(status).json({ error: publicError.message });
     }
   }
 );

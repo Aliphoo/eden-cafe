@@ -7,6 +7,8 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
     const USER_KEY = 'eden_user';
     const ORDER_HISTORY_KEY = 'eden_order_history';
     const CART_KEY = 'eden_cart';
+    const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net';
+    const PHONE_AUTH_EMAIL_DOMAIN = 'phone.edencafe.co';
     let cloudOrders = null;
     let cloudBookings = null;
     let cloudHistoryUid = '';
@@ -15,6 +17,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
     let cloudProfileUid = '';
     let cloudProfileLoading = false;
     let cloudProfileSaving = false;
+    let emailVerificationBusy = false;
     let loyaltyConfig = null;
     let loyaltyLedger = [];
     let loyaltySummary = null;
@@ -22,6 +25,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
     let loyaltyLoading = false;
     let currentAuthUser = null;
     let selectedPreviewTier = '';
+    const CAN_LOG_CLIENT_ERRORS = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
 
     const DEFAULT_LOYALTY_CONFIG = {
         enabled: true,
@@ -38,6 +42,10 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
 
     function isEnglishPage() {
         return location.pathname.includes('-en');
+    }
+
+    function logClientError(label, error) {
+        if (CAN_LOG_CLIENT_ERRORS) console.warn(label, error);
     }
 
     function escapeHTML(value) {
@@ -60,6 +68,14 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
 
     function cleanString(value, maxLength = 300) {
         return String(value ?? '').trim().slice(0, maxLength);
+    }
+
+    function isInternalPhoneEmail(email) {
+        return String(email || '').toLowerCase().endsWith('@' + PHONE_AUTH_EMAIL_DOMAIN);
+    }
+
+    function publicEmail(email, fallback = '') {
+        return isInternalPhoneEmail(email) ? fallback : (email || fallback || '');
     }
 
     function money(value) {
@@ -129,7 +145,6 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             visits: 'Visits',
             cartItems: 'Cart Items',
             pointValue: 'Point Value',
-            pointsTab: 'Points',
             loyaltyWallet: 'Eden Points Wallet',
             loyaltyRule: 'Earning & redemption rules',
             loyaltyHistory: 'Recent point history',
@@ -169,10 +184,23 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             pending: 'Pending Payment',
             paid: 'Paid',
             profileInfo: 'Profile Information',
-            googleInfo: 'Google Account',
+            googleInfo: 'Member Account',
             editableInfo: 'Additional customer information',
             name: 'Name',
             email: 'Email',
+            emailVerification: 'Email verification',
+            emailVerified: 'Verified',
+            emailUnverified: 'Not verified',
+            emailOptional: 'Optional. Verify with a 6-digit code if you want email-based contact.',
+            emailCode: 'Verification code',
+            emailCodePlaceholder: '123456',
+            sendEmailCode: 'Send code',
+            verifyEmailCode: 'Verify code',
+            sendingEmailCode: 'Sending code...',
+            verifyingEmailCode: 'Verifying...',
+            emailCodeSent: 'Verification code sent. Please check your email.',
+            emailCodeVerified: 'Email verified successfully.',
+            emailCodeFailed: 'Unable to verify email right now.',
             phone: 'Phone number',
             shippingAddress: 'Shipping address',
             birthDate: 'Birthday',
@@ -214,7 +242,6 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             visits: 'จำนวนครั้งที่ใช้บริการ',
             cartItems: 'สินค้าในตะกร้า',
             pointValue: 'มูลค่าแต้ม',
-            pointsTab: 'แต้ม',
             loyaltyWallet: 'กระเป๋าแต้ม Eden',
             loyaltyRule: 'กติกาสะสมและใช้แต้ม',
             loyaltyHistory: 'ประวัติแต้มล่าสุด',
@@ -254,10 +281,23 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             pending: 'รอชำระเงิน',
             paid: 'ชำระเงินแล้ว',
             profileInfo: 'ข้อมูลสมาชิก',
-            googleInfo: 'บัญชี Google',
+            googleInfo: 'บัญชีสมาชิก',
             editableInfo: 'ข้อมูลเพิ่มเติมสำหรับบริการลูกค้า',
             name: 'ชื่อ',
             email: 'อีเมล',
+            emailVerification: 'ยืนยันอีเมล',
+            emailVerified: 'ยืนยันแล้ว',
+            emailUnverified: 'ยังไม่ยืนยัน',
+            emailOptional: 'ไม่บังคับ หากต้องการให้ร้านติดต่อทางอีเมล สามารถยืนยันด้วยโค้ด 6 หลักได้',
+            emailCode: 'รหัสยืนยันอีเมล',
+            emailCodePlaceholder: '123456',
+            sendEmailCode: 'ส่งโค้ด',
+            verifyEmailCode: 'ยืนยันโค้ด',
+            sendingEmailCode: 'กำลังส่งโค้ด...',
+            verifyingEmailCode: 'กำลังยืนยัน...',
+            emailCodeSent: 'ส่งโค้ดยืนยันแล้ว กรุณาตรวจสอบอีเมล',
+            emailCodeVerified: 'ยืนยันอีเมลเรียบร้อยแล้ว',
+            emailCodeFailed: 'ยังไม่สามารถยืนยันอีเมลได้ในขณะนี้',
             phone: 'เบอร์โทร',
             shippingAddress: 'ที่อยู่จัดส่ง',
             birthDate: 'วันเกิด',
@@ -293,7 +333,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             return {
                 uid: currentAuthUser.uid,
                 name: currentAuthUser.displayName || stored?.name || 'Eden Member',
-                email: currentAuthUser.email || stored?.email || '',
+                email: publicEmail(currentAuthUser.email, stored?.email || ''),
                 avatar: currentAuthUser.photoURL || stored?.avatar || 'https://ui-avatars.com/api/?name=Eden+Member&background=4caf50&color=fff'
             };
         }
@@ -327,7 +367,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             cloudHistoryUid = user.uid;
             renderProfile();
         } catch (error) {
-            console.warn('Unable to load profile history from cloud:', error);
+            logClientError('Unable to load profile history from cloud:', error);
         } finally {
             cloudHistoryLoading = false;
         }
@@ -342,7 +382,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             cloudProfileUid = user.uid;
             renderProfile();
         } catch (error) {
-            console.warn('Unable to load member profile:', error);
+            logClientError('Unable to load member profile:', error);
         } finally {
             cloudProfileLoading = false;
         }
@@ -370,7 +410,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             loyaltyUid = user.uid;
             renderProfile();
         } catch (error) {
-            console.warn('Unable to load loyalty information:', error);
+            logClientError('Unable to load loyalty information:', error);
         } finally {
             loyaltyLoading = false;
         }
@@ -382,8 +422,10 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
     }
 
     function memberId(user) {
-        const source = String(user?.uid || '000000').replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase().padStart(6, '0');
-        return 'ED-' + source;
+        const source = String(user.uid || user.email || 'eden');
+        let hash = 0;
+        for (let i = 0; i < source.length; i += 1) hash = ((hash << 5) - hash) + source.charCodeAt(i);
+        return 'ED-' + Math.abs(hash).toString().slice(0, 6).padStart(6, '0');
     }
 
     function profileValue(key, fallback = '') {
@@ -406,7 +448,6 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         const paidLikeOrders = orders.filter(order => {
             const status = String(order.status || '').toLowerCase();
             const paymentStatus = String(order.paymentStatus || '').toLowerCase();
-            if (order.isTestOrder === true) return false;
             if (status === 'cancelled' || paymentStatus === 'refunded' || paymentStatus === 'failed') return false;
             if (paymentStatus) return paymentStatus === 'paid';
             return status === 'paid' || status === 'completed';
@@ -416,7 +457,6 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         const bookingCount = bookings.length;
         const computedVisitCount = orderCount + bookingCount;
         const config = getLoyaltyConfig();
-        const canonicalMemberCode = memberId(user);
         const computedPoints = config.enabled ? Math.floor(orderSpent / config.spendPerPoint) : 0;
         const summaryPoints = loyaltySummary?.pointsBalance;
         const summaryTotalSpent = loyaltySummary?.totalSpent;
@@ -429,22 +469,18 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             : savedPoints != null
                 ? Math.max(0, Number(savedPoints) || 0)
                 : computedPoints;
-        const savedTotalSpent = Number(profileValue('totalSpent', 0)) || 0;
-        const savedVisitCount = Number(profileValue('visitCount', 0)) || 0;
-        const savedOrderCount = Number(profileValue('orderCount', 0)) || 0;
-        const savedBookingCount = Number(profileValue('bookingCount', 0)) || 0;
 
         return {
             id: user.uid,
             name: profileValue('displayName', user.name || ''),
             email: profileValue('email', user.email || ''),
             avatarUrl: profileValue('photoURL', user.avatar || ''),
-            memberCode: canonicalMemberCode,
+            memberCode: profileValue('memberCode', memberId(user)),
             points,
-            totalSpent: summaryTotalSpent != null ? Math.max(0, Number(summaryTotalSpent) || 0) : Math.max(savedTotalSpent, orderSpent),
-            visitCount: summaryVisitCount != null ? Math.max(0, Number(summaryVisitCount) || 0) : Math.max(savedVisitCount, computedVisitCount),
-            orderCount: summaryOrderCount != null ? Math.max(0, Number(summaryOrderCount) || 0) : Math.max(savedOrderCount, orderCount),
-            bookingCount: summaryBookingCount != null ? Math.max(0, Number(summaryBookingCount) || 0) : Math.max(savedBookingCount, bookingCount),
+            totalSpent: Math.max(Number(profileValue('totalSpent', 0)) || 0, Number(summaryTotalSpent) || 0, orderSpent),
+            visitCount: Math.max(Number(profileValue('visitCount', 0)) || 0, Number(summaryVisitCount) || 0, computedVisitCount),
+            orderCount: Math.max(Number(profileValue('orderCount', 0)) || 0, Number(summaryOrderCount) || 0, orderCount),
+            bookingCount: Math.max(Number(profileValue('bookingCount', 0)) || 0, Number(summaryBookingCount) || 0, bookingCount),
             cartItemCount: cartCount(),
             createdAt: profileValue('createdAt', ''),
             updatedAt: profileValue('updatedAt', '')
@@ -485,54 +521,33 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         return template.replace('{value}', value).replace('{tier}', progress.nextTier);
     }
 
-    function renderMemberCard(user, labels, membershipUser, avatar, displayName, email) {
+    function renderMemberCard(user, labels, membershipUser) {
         const tier = getMemberTier(membershipUser);
         const theme = getTierTheme(tier);
         const progress = getNextTierProgress(membershipUser);
         const progressLabel = progress.completed ? labels.highestTier : `${labels.progressTo} ${progress.nextTier}`;
         const percent = progress.completed ? 100 : progress.percent;
-        const config = getLoyaltyConfig();
-        const pointCashValue = Math.floor((Number(membershipUser.points) || 0) * config.pointValue);
-        const memberCode = membershipUser.memberCode || memberId(user);
 
         return `
-            <section class="member-card profile-hero ${theme.className}" id="profile-overview">
-                <div class="profile-hero-identity">
-                    <img src="${escapeHTML(avatar)}" alt="Profile" class="profile-hero-avatar">
-                    <div class="profile-hero-copy">
-                        <span class="profile-kicker">${escapeHTML(labels.profileInfo)}</span>
-                        <h1>${escapeHTML(displayName || membershipUser.name || labels.member)}</h1>
-                        <p>${escapeHTML(email || labels.notProvided)}</p>
-                        <div class="profile-identity-meta">
-                            <span class="member-tier-badge ${theme.badgeClass}">${escapeHTML(tier)}</span>
-                            <span class="member-id">${escapeHTML(labels.memberId)}: ${escapeHTML(memberCode)}</span>
-                        </div>
+            <div class="member-card ${theme.className}" id="profile-overview">
+                <div class="member-card-header">
+                    <div>
+                        <div class="member-tier-badge ${theme.badgeClass}">${escapeHTML(tier)}</div>
+                        <p class="member-name">${escapeHTML(membershipUser.name || labels.member)}</p>
                     </div>
+                    <div class="member-id">${escapeHTML(labels.memberId)}: ${escapeHTML(membershipUser.memberCode || memberId(user))}</div>
                 </div>
-                <div class="profile-summary-grid">
-                    <div class="profile-summary-tile">
-                        <span>${escapeHTML(labels.points)}</span>
-                        <strong>${formatNumber(membershipUser.points)}</strong>
-                    </div>
-                    <div class="profile-summary-tile">
-                        <span>${escapeHTML(labels.pointValue)}</span>
-                        <strong>฿${formatBaht(pointCashValue)}</strong>
-                    </div>
-                    <div class="profile-summary-tile">
-                        <span>${escapeHTML(labels.totalSpent)}</span>
-                        <strong>฿${formatBaht(membershipUser.totalSpent)}</strong>
-                    </div>
-                    <div class="profile-summary-tile">
-                        <span>${escapeHTML(labels.visits)}</span>
-                        <strong>${formatNumber(membershipUser.visitCount)}</strong>
-                    </div>
+                <div class="member-metrics-row">
+                    <span>${escapeHTML(labels.points)} <strong>${formatNumber(membershipUser.points)}</strong></span>
+                    <span>${escapeHTML(labels.totalSpent)} <strong>฿${formatBaht(membershipUser.totalSpent)}</strong></span>
+                    <span>${escapeHTML(labels.visits)} <strong>${formatNumber(membershipUser.visitCount)}</strong></span>
                 </div>
                 <div class="member-progress-container">
                     <div class="member-progress-text"><span>${escapeHTML(progressLabel)}</span><span>${percent}%</span></div>
                     <div class="member-progress-bar"><div class="member-progress-fill" style="width:${percent}%"></div></div>
                     <p class="member-progress-goal">${escapeHTML(progressMessage(progress, labels))}</p>
                 </div>
-            </section>
+            </div>
         `;
     }
 
@@ -559,44 +574,43 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             return `
                 <div class="membership-rule-row">
                     <span>${escapeHTML(formatDate(row.createdAt))}</span>
-                    <strong class="${delta < 0 ? 'is-negative' : 'is-positive'}">${escapeHTML(prefix + formatNumber(delta))}</strong>
+                    <strong style="color:${delta < 0 ? '#b42318' : 'var(--primary-color)'};">${escapeHTML(prefix + formatNumber(delta))}</strong>
                     <em>${escapeHTML(reason)}</em>
                 </div>
             `;
         }).join('');
 
         return `
-            <section class="membership-panel profile-section" id="profile-loyalty-wallet">
-                <div class="profile-section-head">
-                    <div>
-                        <span class="profile-section-kicker">${escapeHTML(labels.pointsTab)}</span>
-                        <h2>${escapeHTML(labels.loyaltyWallet)}</h2>
-                    </div>
-                    <strong class="profile-wallet-value">${escapeHTML(walletValue)}</strong>
+            <div class="membership-panel" id="profile-loyalty-wallet">
+                <h2>${escapeHTML(labels.loyaltyWallet)}</h2>
+                <div class="stats-grid">
+                    <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.points)}</div><div class="stat-label">${escapeHTML(labels.points)}</div></div>
+                    <div class="stat-box"><div class="stat-value">฿${formatBaht(pointCashValue)}</div><div class="stat-label">${escapeHTML(labels.pointValue)}</div></div>
                 </div>
-                <div class="benefit-grid profile-rule-grid">
+                <p class="membership-rule-lead">${escapeHTML(walletValue)}</p>
+                <div class="benefit-grid">
                     <div class="benefit-pill">${escapeHTML(earnRule)}</div>
                     <div class="benefit-pill">${escapeHTML(redeemRule)}</div>
                     <div class="benefit-pill">${escapeHTML(expiryRule)}</div>
                 </div>
-                <h3 class="profile-subsection-title">${escapeHTML(labels.loyaltyHistory)}</h3>
+                <h3 style="margin:24px 0 10px;">${escapeHTML(labels.loyaltyHistory)}</h3>
                 ${loyaltyLoading ? `<p class="membership-rule-lead">${escapeHTML(labels.loyaltyLoading)}</p>` : ''}
                 <div class="membership-rule-list">
                     ${historyRows || `<p class="membership-rule-lead">${escapeHTML(labels.noLoyaltyHistory)}</p>`}
                 </div>
-            </section>
+            </div>
         `;
     }
 
     function renderBenefits(tier, labels) {
         const benefits = getTierBenefits(tier, isEnglishPage() ? 'en' : 'th');
         return `
-            <section class="membership-panel profile-section">
+            <div class="membership-panel">
                 <h2>${escapeHTML(labels.benefits)}</h2>
                 <div class="benefit-grid">
                     ${benefits.map(item => `<div class="benefit-pill">${escapeHTML(item)}</div>`).join('')}
                 </div>
-            </section>
+            </div>
         `;
     }
 
@@ -608,7 +622,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         const isPreviewLocked = tierRank(previewTier) > tierRank(actualTier);
 
         return `
-            <section class="membership-panel profile-section tier-preview-panel">
+            <div class="membership-panel tier-preview-panel">
                 <div class="tier-preview-heading">
                     <div>
                         <h2>${escapeHTML(labels.tierPreview)}</h2>
@@ -643,7 +657,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                     </div>
                     ${isPreviewLocked ? tierUnlockRules(previewTier, labels) : ''}
                 </div>
-            </section>
+            </div>
         `;
     }
 
@@ -652,10 +666,10 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         const rules = getTierRules();
         if (progress.completed || !progress.nextTier) {
             return `
-                <section class="membership-panel profile-section">
+                <div class="membership-panel">
                     <h2>${escapeHTML(labels.nextLevel)}</h2>
                     <p class="membership-max-note">${escapeHTML(labels.highestTier)}</p>
-                </section>
+                </div>
             `;
         }
 
@@ -667,7 +681,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         ];
 
         return `
-            <section class="membership-panel profile-section">
+            <div class="membership-panel">
                 <h2>${escapeHTML(labels.nextLevel)}</h2>
                 <p class="membership-rule-lead">${escapeHTML(labels.nextRulesPrefix)}</p>
                 <div class="membership-rule-list">
@@ -679,23 +693,23 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                         </div>
                     `).join('')}
                 </div>
-            </section>
+            </div>
         `;
     }
 
     function renderSignedOut(container, labels) {
         container.innerHTML = `
-            <div class="profile-container profile-signed-out">
-                <img src="Images/Logo.webp" alt="Eden Cafe" class="profile-signed-out-logo">
-                <h1>${escapeHTML(labels.profile)}</h1>
-                <p>${escapeHTML(labels.signInPrompt)}</p>
-                <button class="btn btn-outline" onclick="openLoginModal()">${escapeHTML(labels.signIn)}</button>
+            <div class="profile-container" style="text-align:center;">
+                <img src="Images/Logo.webp" alt="Eden Cafe" style="width:84px;height:84px;border-radius:50%;object-fit:cover;margin-bottom:18px;">
+                <h1 style="margin-bottom:10px;">${escapeHTML(labels.profile)}</h1>
+                <p style="color:#666;">${escapeHTML(labels.signInPrompt)}</p>
+                <button class="btn btn-outline" onclick="openLoginModal()" style="margin-top:15px;">${escapeHTML(labels.signIn)}</button>
             </div>
         `;
     }
 
     function renderOrderList(orders, labels) {
-        if (!orders.length) return `<p class="profile-empty-state">${escapeHTML(labels.noOrders)}</p>`;
+        if (!orders.length) return `<p style="color:#777;">${escapeHTML(labels.noOrders)}</p>`;
         return orders.map(order => {
             const items = Array.isArray(order.items) ? order.items : [];
             const status = order.status === 'paid' ? labels.paid : labels.pending;
@@ -703,25 +717,25 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                 <div class="order-card">
                     <div class="order-card-header">
                         <strong>${escapeHTML(labels.orderId)} ${escapeHTML(order.id || '-')}</strong>
-                        <span class="profile-status-pill">${escapeHTML(status)}</span>
+                        <span style="color:var(--primary-color);font-weight:600;">${escapeHTML(status)}</span>
                     </div>
-                    <p class="profile-list-meta">${formatDate(order.date || order.timestamp)}</p>
-                    <p class="profile-list-items">${escapeHTML(labels.items)}: ${items.map(item => escapeHTML(item.name || '')).join(', ') || '-'}</p>
-                    <strong class="profile-list-total">${escapeHTML(labels.total)}: ${money(order.totalAmount || order.total || 0)}</strong>
+                    <p style="margin:0 0 8px;color:#666;">${formatDate(order.date || order.timestamp)}</p>
+                    <p style="margin:0 0 8px;">${escapeHTML(labels.items)}: ${items.map(item => escapeHTML(item.name || '')).join(', ') || '-'}</p>
+                    <strong>${escapeHTML(labels.total)}: ${money(order.totalAmount || order.total || 0)}</strong>
                 </div>
             `;
         }).join('');
     }
 
     function renderBookingList(bookings, labels) {
-        if (!bookings.length) return `<p class="profile-empty-state">${escapeHTML(labels.noBookings)}</p>`;
+        if (!bookings.length) return `<p style="color:#777;">${escapeHTML(labels.noBookings)}</p>`;
         return bookings.map(booking => `
             <div class="order-card">
                 <div class="order-card-header">
                     <strong>${escapeHTML(booking.id || booking.date || '-')}</strong>
-                    <span class="profile-status-pill">${escapeHTML(booking.status || 'confirmed')}</span>
+                    <span style="color:var(--primary-color);font-weight:600;">${escapeHTML(booking.status || 'confirmed')}</span>
                 </div>
-                <p class="profile-list-meta">${escapeHTML([booking.date, booking.time || booking.arrivalTime || booking.startTime, booking.tableIds || booking.table || booking.zone || booking.tableZone].filter(Boolean).join(' | '))}</p>
+                <p style="margin:0;color:#666;">${escapeHTML([booking.date, booking.time || booking.arrivalTime || booking.startTime, booking.tableIds || booking.table || booking.zone || booking.tableZone].filter(Boolean).join(' | '))}</p>
             </div>
         `).join('');
     }
@@ -734,9 +748,12 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         const healthNote = profileValue('healthNote', '');
         const lineId = profileValue('lineId', '');
         const displayName = profileValue('displayName', user.name || labels.member);
-        const email = profileValue('email', user.email || '');
+        const email = profileValue('email', publicEmail(user.email || ''));
         const avatar = profileValue('photoURL', user.avatar || user.photoURL || 'Images/Logo.webp');
         const loadingText = cloudProfileLoading ? `<p class="profile-save-message">${escapeHTML(labels.loadingProfile)}</p>` : '';
+        const emailVerified = !!email && cloudProfile?.emailVerified === true && cleanString(cloudProfile?.email, 180).toLowerCase() === cleanString(email, 180).toLowerCase();
+        const emailStatusClass = emailVerified ? 'is-verified' : 'is-unverified';
+        const emailStatusText = emailVerified ? labels.emailVerified : labels.emailUnverified;
 
         return `
             <div class="profile-account-card">
@@ -751,6 +768,22 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                 ${loadingText}
                 <form class="profile-edit-form" id="member-profile-form" onsubmit="return saveMemberProfile(event)">
                     <div class="profile-form-grid">
+                        <label>
+                            <span>${escapeHTML(labels.email)}</span>
+                            <input name="email" type="email" autocomplete="email" maxlength="180" value="${escapeHTML(email)}" placeholder="name@example.com">
+                        </label>
+                        <div class="profile-email-verify profile-form-full ${emailStatusClass}">
+                            <div>
+                                <strong>${escapeHTML(labels.emailVerification)}</strong>
+                                <span>${escapeHTML(emailStatusText)}</span>
+                                <small>${escapeHTML(labels.emailOptional)}</small>
+                            </div>
+                            <div class="profile-email-actions">
+                                <button class="btn btn-outline" type="button" onclick="sendMemberEmailVerificationCode()" ${emailVerificationBusy ? 'disabled' : ''}>${escapeHTML(emailVerificationBusy ? labels.sendingEmailCode : labels.sendEmailCode)}</button>
+                                <input name="emailCode" type="text" inputmode="numeric" maxlength="6" placeholder="${escapeHTML(labels.emailCodePlaceholder)}" aria-label="${escapeHTML(labels.emailCode)}">
+                                <button class="btn" type="button" onclick="verifyMemberEmailCode()" ${emailVerificationBusy ? 'disabled' : ''}>${escapeHTML(emailVerificationBusy ? labels.verifyingEmailCode : labels.verifyEmailCode)}</button>
+                            </div>
+                        </div>
                         <label>
                             <span>${escapeHTML(labels.phone)}</span>
                             <input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="40" value="${escapeHTML(phone)}" placeholder="${escapeHTML(labels.phonePlaceholder)}">
@@ -787,32 +820,9 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         `;
     }
 
-    function setupProfileNavigation(container) {
-        const navItems = Array.from(container.querySelectorAll('.profile-nav-item[href^="#profile"]'));
-        const activate = hash => {
-            navItems.forEach(item => item.classList.toggle('active', item.getAttribute('href') === hash));
-        };
-        navItems.forEach(item => {
-            item.addEventListener('click', () => activate(item.getAttribute('href')));
-        });
-        if (!('IntersectionObserver' in window)) return;
-        const sections = navItems
-            .map(item => document.querySelector(item.getAttribute('href')))
-            .filter(Boolean);
-        if (!sections.length) return;
-        const observer = new IntersectionObserver(entries => {
-            const activeEntry = entries
-                .filter(entry => entry.isIntersecting)
-                .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-            if (activeEntry?.target?.id) activate(`#${activeEntry.target.id}`);
-        }, { rootMargin: '-30% 0px -58% 0px', threshold: [0.1, 0.35, 0.6] });
-        sections.forEach(section => observer.observe(section));
-    }
-
     function renderSignedIn(container, user, labels) {
-        const hasFirebaseUser = !!currentAuthUser?.uid;
-        const orders = hasFirebaseUser ? (Array.isArray(cloudOrders) ? cloudOrders : []) : (cloudOrders || readOrders());
-        const bookings = hasFirebaseUser ? (Array.isArray(cloudBookings) ? cloudBookings : []) : (cloudBookings || readBookings());
+        const orders = cloudOrders || readOrders();
+        const bookings = cloudBookings || readBookings();
         const membershipUser = buildMembershipUser(user, orders, bookings);
         const tier = getMemberTier(membershipUser);
         const avatar = profileValue('photoURL', user.avatar || user.photoURL || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user.name || labels.member) + '&background=4caf50&color=fff');
@@ -821,43 +831,58 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
 
         container.innerHTML = `
             <div class="profile-layout">
-                <nav class="profile-sidebar" aria-label="Profile sections">
+                <aside class="profile-sidebar">
                     <a class="profile-nav-item active" href="#profile-overview">${escapeHTML(labels.overview)}</a>
-                    <a class="profile-nav-item" href="#profile-loyalty-wallet">${escapeHTML(labels.pointsTab)}</a>
                     <a class="profile-nav-item" href="#profile-orders">${escapeHTML(labels.orders)}</a>
+                    <a class="profile-nav-item" href="#profile-bookings">${escapeHTML(labels.bookings)}</a>
                     <a class="profile-nav-item" href="#profile-account">${escapeHTML(labels.account)}</a>
-                    <button type="button" class="profile-nav-item profile-nav-item--logout" onclick="logout()">${escapeHTML(labels.logout)}</button>
-                </nav>
+                    <a class="profile-nav-item" href="#" onclick="logout(); return false;">${escapeHTML(labels.logout)}</a>
+                </aside>
                 <section class="profile-main">
-                    ${renderMemberCard(user, labels, membershipUser, avatar, displayName, email)}
-                    <div class="profile-action-row">
-                        <a class="btn" href="${isEnglishPage() ? '/shop-en' : '/shop'}">${escapeHTML(labels.shopNow)}</a>
-                        <a class="btn btn-outline" href="${isEnglishPage() ? '/booking-en' : '/booking'}">${escapeHTML(labels.bookTable)}</a>
-                        <button type="button" class="btn btn-quiet" onclick="logout()">${escapeHTML(labels.logout)}</button>
+                    <div class="profile-header">
+                        <img src="${escapeHTML(avatar)}" alt="Profile">
+                        <div>
+                            <h1 style="margin:0;">${escapeHTML(displayName || labels.member)}</h1>
+                            <p style="margin:5px 0 0;color:#666;">${escapeHTML(email || '')}</p>
+                        </div>
                     </div>
+
+                    ${renderMemberCard(user, labels, membershipUser)}
                     ${renderLoyaltyWallet(membershipUser, labels)}
                     ${renderTierPreview(tier, labels)}
+
+                    <div class="stats-grid">
+                        <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.points)}</div><div class="stat-label">${escapeHTML(labels.points)}</div></div>
+                        <div class="stat-box"><div class="stat-value">฿${formatBaht(membershipUser.totalSpent)}</div><div class="stat-label">${escapeHTML(labels.totalSpent)}</div></div>
+                        <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.visitCount)}</div><div class="stat-label">${escapeHTML(labels.visits)}</div></div>
+                        <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.cartItemCount)}</div><div class="stat-label">${escapeHTML(labels.cartItems)}</div></div>
+                    </div>
+
                     ${renderBenefits(tier, labels)}
                     ${renderNextTierRequirements(membershipUser, labels)}
 
-                    <section class="order-history profile-section" id="profile-orders">
-                        <h2>${escapeHTML(labels.recentOrders)}</h2>
-                        ${renderOrderList(orders, labels)}
-                    </section>
+                    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:30px;">
+                        <a class="btn" href="${isEnglishPage() ? '/shop-en' : '/shop'}">${escapeHTML(labels.shopNow)}</a>
+                        <a class="btn btn-outline" href="${isEnglishPage() ? '/booking-en' : '/booking'}">${escapeHTML(labels.bookTable)}</a>
+                    </div>
 
-                    <section class="order-history profile-section" id="profile-bookings">
-                        <h2>${escapeHTML(labels.bookings)}</h2>
-                        ${renderBookingList(bookings, labels)}
-                    </section>
-
-                    <section class="order-history profile-section" id="profile-account">
+                    <div class="order-history" id="profile-account">
                         <h2>${escapeHTML(labels.editableInfo)}</h2>
                         ${renderProfileForm(user, labels)}
-                    </section>
+                    </div>
+
+                    <div class="order-history" id="profile-orders">
+                        <h2>${escapeHTML(labels.recentOrders)}</h2>
+                        ${renderOrderList(orders, labels)}
+                    </div>
+
+                    <div class="order-history" id="profile-bookings">
+                        <h2>${escapeHTML(labels.bookings)}</h2>
+                        ${renderBookingList(bookings, labels)}
+                    </div>
                 </section>
             </div>
         `;
-        setupProfileNavigation(container);
         refreshLoyaltyData(user);
         refreshCloudProfile(user);
         refreshCloudHistory(user);
@@ -877,6 +902,91 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         submitBtn.textContent = isSaving ? labels.saving : labels.save;
     }
 
+    async function profileApiRequest(path, body) {
+        if (!auth?.currentUser) throw new Error('Sign in required');
+        const response = await fetch(FUNCTIONS_BASE_URL + path, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: 'Bearer ' + await auth.currentUser.getIdToken()
+            },
+            body: JSON.stringify(body || {})
+        });
+        let data = {};
+        try {
+            data = await response.json();
+        } catch (_) {
+            data = {};
+        }
+        if (!response.ok) throw new Error(data.error || 'Request failed');
+        return data;
+    }
+
+    function getProfileFormEmail() {
+        const form = document.getElementById('member-profile-form');
+        const email = cleanString(form?.querySelector('input[name="email"]')?.value, 180).toLowerCase();
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            const error = new Error(isEnglishPage() ? 'Please enter a valid email first.' : 'กรุณากรอกอีเมลให้ถูกต้องก่อน');
+            error.userMessage = true;
+            throw error;
+        }
+        return email;
+    }
+
+    async function sendMemberEmailVerificationCode() {
+        const labels = getLabels();
+        if (emailVerificationBusy) return false;
+        emailVerificationBusy = true;
+        showSaveMessage(labels.sendingEmailCode);
+        let finalMessage = labels.emailCodeSent;
+        let finalError = false;
+        try {
+            const email = getProfileFormEmail();
+            await profileApiRequest('/sendEmailVerificationCode', { email });
+        } catch (error) {
+            logClientError('Email verification send failed:', error);
+            finalMessage = error?.userMessage ? error.message : labels.emailCodeFailed;
+            finalError = true;
+        } finally {
+            emailVerificationBusy = false;
+            renderProfile();
+            requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
+        }
+        return false;
+    }
+
+    async function verifyMemberEmailCode() {
+        const labels = getLabels();
+        if (emailVerificationBusy) return false;
+        const form = document.getElementById('member-profile-form');
+        const code = cleanString(form?.querySelector('input[name="emailCode"]')?.value, 6);
+        if (!/^\d{6}$/.test(code)) {
+            showSaveMessage(isEnglishPage() ? 'Please enter the 6-digit code.' : 'กรุณากรอกรหัส 6 หลัก', true);
+            return false;
+        }
+
+        emailVerificationBusy = true;
+        showSaveMessage(labels.verifyingEmailCode);
+        let finalMessage = labels.emailCodeVerified;
+        let finalError = false;
+        try {
+            const email = getProfileFormEmail();
+            const result = await profileApiRequest('/verifyEmailCode', { email, code });
+            cloudProfile = { ...(cloudProfile || {}), email, emailVerified: true, emailVerifiedAt: result.emailVerifiedAt || new Date().toISOString() };
+            const user = readUser() || {};
+            localStorage.setItem(USER_KEY, JSON.stringify({ ...user, email }));
+        } catch (error) {
+            logClientError('Email verification failed:', error);
+            finalMessage = error?.userMessage ? error.message : labels.emailCodeFailed;
+            finalError = true;
+        } finally {
+            emailVerificationBusy = false;
+            renderProfile();
+            requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
+        }
+        return false;
+    }
+
     async function saveMemberProfile(event) {
         event.preventDefault();
         const labels = getLabels();
@@ -888,12 +998,13 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             return false;
         }
         const formData = new FormData(form);
+        const email = cleanString(formData.get('email'), 180).toLowerCase();
+        const previousEmail = cleanString(cloudProfile?.email, 180).toLowerCase();
         const payload = {
             uid: user.uid,
             displayName: cleanString(user.name || currentAuthUser?.displayName || labels.member, 120),
-            email: cleanString(user.email || currentAuthUser?.email || '', 180),
+            email,
             photoURL: cleanString(user.avatar || currentAuthUser?.photoURL || '', 500),
-            memberCode: memberId(user),
             phone: cleanString(formData.get('phone'), 40),
             shippingAddress: cleanString(formData.get('shippingAddress'), 500),
             birthDate: cleanString(formData.get('birthDate'), 20),
@@ -902,6 +1013,10 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             lineId: cleanString(formData.get('lineId'), 80),
             updatedAt: serverTimestamp()
         };
+        if (email !== previousEmail) {
+            payload.emailVerified = false;
+            payload.emailVerifiedAt = null;
+        }
 
         cloudProfileSaving = true;
         setProfileSavingState(form, true, labels);
@@ -913,6 +1028,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             const mergedUser = {
                 ...user,
                 phone: payload.phone,
+                email: payload.email,
                 shippingAddress: payload.shippingAddress,
                 address: payload.shippingAddress,
                 lineId: payload.lineId
@@ -920,7 +1036,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             localStorage.setItem(USER_KEY, JSON.stringify(mergedUser));
             showSaveMessage(labels.saved);
         } catch (error) {
-            console.error('Profile save failed:', error);
+            logClientError('Profile save failed:', error);
             const message = error?.code === 'permission-denied'
                 ? (isEnglishPage() ? 'Unable to save profile because profile permissions are not ready. Please try again after refresh.' : 'บันทึกไม่สำเร็จ: สิทธิ์โปรไฟล์ยังไม่พร้อม กรุณารีเฟรชแล้วลองใหม่อีกครั้ง')
                 : labels.saveFailed;
@@ -958,6 +1074,8 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
     window.saveMemberProfile = saveMemberProfile;
     window.resetMemberProfileForm = resetMemberProfileForm;
     window.previewMemberTier = previewMemberTier;
+    window.sendMemberEmailVerificationCode = sendMemberEmailVerificationCode;
+    window.verifyMemberEmailCode = verifyMemberEmailCode;
 
     document.addEventListener('DOMContentLoaded', () => {
         renderProfile();
