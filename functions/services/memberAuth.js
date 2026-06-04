@@ -292,6 +292,29 @@ function createMemberAuthHandlers({
 
   async function findUserByEmail(email) {
     const lowerEmail = normalizeEmail(email);
+    const credentialSnap = await db.collection(CREDENTIAL_COLLECTION)
+      .where('email_lower', '==', lowerEmail)
+      .limit(10)
+      .get();
+
+    const credentialDocs = credentialSnap.docs
+      .map(doc => ({ id: doc.id, data: doc.data() || {} }))
+      .filter(item => item.data.uid || item.id);
+    const credentialWithPassword = credentialDocs.find(item => !!item.data.password_hash);
+    const preferredCredential = credentialWithPassword || credentialDocs[0];
+    if (preferredCredential) {
+      const uid = cleanString(preferredCredential.data.uid || preferredCredential.id, 160);
+      const userSnap = await db.collection('users').doc(uid).get();
+      return {
+        uid,
+        data: userSnap.exists ? userSnap.data() || {} : {
+          uid,
+          email: lowerEmail,
+          email_lower: lowerEmail,
+        },
+      };
+    }
+
     const queries = await Promise.all([
       db.collection('users').where('email_lower', '==', lowerEmail).limit(1).get(),
       db.collection('users').where('email', '==', lowerEmail).limit(1).get(),
@@ -303,22 +326,6 @@ function createMemberAuthHandlers({
       }
     }
 
-    const credentialSnap = await db.collection(CREDENTIAL_COLLECTION)
-      .where('email_lower', '==', lowerEmail)
-      .limit(1)
-      .get();
-    if (!credentialSnap.empty) {
-      const credentialDoc = credentialSnap.docs[0];
-      const userSnap = await db.collection('users').doc(credentialDoc.id).get();
-      return {
-        uid: credentialDoc.id,
-        data: userSnap.exists ? userSnap.data() || {} : {
-          uid: credentialDoc.id,
-          email: lowerEmail,
-          email_lower: lowerEmail,
-        },
-      };
-    }
     return null;
   }
 

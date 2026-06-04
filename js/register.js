@@ -10,6 +10,7 @@ import {
 import {
     completeRegister,
     displayThaiPhone,
+    getMyProfile,
     normalizeThaiPhone,
     storeProfile
 } from './member-auth-service.js';
@@ -177,12 +178,40 @@ async function beginGooglePasswordSetup(firebaseUser) {
     setStatus('ยืนยัน Google สำเร็จ กรุณาตั้งรหัสผ่านเพื่อให้ครั้งต่อไปเข้าสู่ระบบด้วยอีเมลได้', 'success');
 }
 
+async function redirectIfGoogleAlreadyHasPassword() {
+    try {
+        const result = await getMyProfile();
+        const profile = result.profile || {};
+        const hasPasswordLogin = profile.password_login_enabled === true
+            || profile.passwordLoginEnabled === true;
+
+        if (!hasPasswordLogin) return false;
+
+        if (result.customToken) {
+            await signInWithCustomToken(auth, result.customToken);
+        }
+        storeProfile(profile);
+        sessionStorage.removeItem(GOOGLE_SETUP_KEY);
+        setStatus('บัญชีนี้ตั้งรหัสผ่านไว้แล้ว กำลังพาไปหน้าโปรไฟล์...', 'success');
+        window.setTimeout(() => {
+            window.location.href = '/profile';
+        }, 250);
+        return true;
+    } catch (error) {
+        if (error.status && error.status !== 404) {
+            console.warn('Google profile lookup failed before password setup:', error);
+        }
+        return false;
+    }
+}
+
 async function startGoogleRegistration() {
     if (!auth) throw new Error('ไม่พบระบบยืนยันตัวตน กรุณาลองใหม่อีกครั้ง');
     const googleProvider = new GoogleAuthProvider();
     googleProvider.setCustomParameters({ prompt: 'select_account' });
     sessionStorage.setItem(GOOGLE_SETUP_KEY, '1');
     const credential = await signInWithPopup(auth, googleProvider);
+    if (await redirectIfGoogleAlreadyHasPassword()) return;
     await beginGooglePasswordSetup(credential.user);
 }
 
@@ -321,6 +350,7 @@ onAuthStateChanged(auth, async user => {
     const shouldSetupGoogle = params.get('google') === '1' || sessionStorage.getItem(GOOGLE_SETUP_KEY) === '1';
     if (user && shouldSetupGoogle && !state.googleSetupStarted) {
         try {
+            if (isGoogleUser(user) && await redirectIfGoogleAlreadyHasPassword()) return;
             await beginGooglePasswordSetup(user);
         } catch (error) {
             sessionStorage.removeItem(GOOGLE_SETUP_KEY);
