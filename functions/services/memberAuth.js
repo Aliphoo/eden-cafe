@@ -331,7 +331,17 @@ function createMemberAuthHandlers({
   }
 
   async function completeFirebasePhoneRegister(req, res, firebaseIdToken) {
-    const decoded = await admin.auth().verifyIdToken(firebaseIdToken);
+    let decoded;
+    try {
+      decoded = await admin.auth().verifyIdToken(firebaseIdToken);
+    } catch (error) {
+      logger.warn('Firebase phone registration token verification failed', {
+        message: error.message,
+        code: error.code || '',
+      });
+      throw createPublicError('ไม่สามารถยืนยันบัญชี Firebase ได้ กรุณายืนยัน OTP อีกครั้ง', 401);
+    }
+
     const uid = cleanString(decoded.uid, 160);
     if (!uid) throw createPublicError('ไม่สามารถยืนยันบัญชี Firebase ได้ กรุณาลองใหม่อีกครั้ง', 401);
 
