@@ -2633,6 +2633,56 @@ footer p {
     box-shadow: 0 1px 3px rgba(60,64,67,0.3);
 }
 
+.auth-social-entry {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    gap: 12px;
+    margin: 0 0 20px;
+}
+
+.auth-google-btn {
+    min-height: 54px;
+    border-radius: 16px;
+    border-color: rgba(26, 147, 69, 0.22);
+    font-family: 'Prompt', 'Inter', sans-serif;
+    font-weight: 800;
+    box-shadow: 0 12px 26px rgba(18, 78, 48, 0.08);
+}
+
+.auth-google-btn::before {
+    content: 'G';
+    display: inline-grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    margin-right: 10px;
+    border-radius: 50%;
+    background: #fff;
+    color: #1a9345;
+    border: 1px solid rgba(26, 147, 69, 0.18);
+    font-weight: 900;
+}
+
+.auth-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: #718078;
+    font-size: 0.9rem;
+    font-weight: 700;
+    line-height: 1.4;
+    text-align: center;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(26, 147, 69, 0.16);
+}
+
 .phone-register-link {
     display: block;
     margin-top: 14px;

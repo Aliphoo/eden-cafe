@@ -1,9 +1,17 @@
-import { auth } from './firebase-config.js';
-import { onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { loginMember, storeProfile } from './member-auth-service.js';
+﻿import { auth } from './firebase-config.js';
+import {
+    GoogleAuthProvider,
+    onAuthStateChanged,
+    signInWithCustomToken,
+    signInWithPopup
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getMyProfile, loginMember, storeProfile } from './member-auth-service.js';
+
+const GOOGLE_SETUP_KEY = 'eden_google_password_setup';
 
 const els = {
     form: document.getElementById('login-form'),
+    google: document.getElementById('login-google'),
     identifier: document.getElementById('login-identifier'),
     password: document.getElementById('login-password'),
     status: document.getElementById('login-status'),
@@ -29,8 +37,20 @@ function setBusy(isBusy) {
     if (els.password) els.password.disabled = isBusy;
 }
 
+function setGoogleBusy(isBusy) {
+    if (!els.google) return;
+    if (!els.google.dataset.defaultText) els.google.dataset.defaultText = els.google.textContent;
+    els.google.disabled = isBusy;
+    els.google.textContent = isBusy ? 'กำลังเปิด Google...' : els.google.dataset.defaultText;
+}
+
 function redirectToProfile() {
     window.location.href = '/profile';
+}
+
+function redirectToGooglePasswordSetup() {
+    sessionStorage.setItem(GOOGLE_SETUP_KEY, '1');
+    window.location.href = '/register?google=1';
 }
 
 function showRegisteredMessage() {
@@ -42,7 +62,49 @@ function showRegisteredMessage() {
 
 onAuthStateChanged(auth, user => {
     authResolved = true;
-    if (user && !loginInProgress) redirectToProfile();
+    const waitingForGoogleSetup = sessionStorage.getItem(GOOGLE_SETUP_KEY) === '1';
+    if (user && !loginInProgress && !waitingForGoogleSetup) redirectToProfile();
+});
+
+els.google?.addEventListener('click', async () => {
+    if (!auth) {
+        setStatus('ไม่พบระบบยืนยันตัวตน กรุณาลองใหม่อีกครั้ง', 'error');
+        return;
+    }
+
+    loginInProgress = true;
+    setGoogleBusy(true);
+    setStatus('กำลังยืนยันบัญชี Google...', 'info');
+    try {
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: 'select_account' });
+        await signInWithPopup(auth, provider);
+
+        try {
+            const result = await getMyProfile();
+            if (result.profile?.password_login_enabled === true || result.profile?.passwordLoginEnabled === true) {
+                storeProfile(result.profile);
+                setStatus('เข้าสู่ระบบด้วย Google สำเร็จ กำลังไปหน้าโปรไฟล์...', 'success');
+                window.setTimeout(redirectToProfile, 250);
+                return;
+            }
+        } catch (profileError) {
+            if (profileError.status && profileError.status !== 404) {
+                console.warn('Google profile lookup failed:', profileError);
+            }
+        }
+
+        setStatus('ยืนยัน Google สำเร็จ กรุณาตั้งรหัสผ่านสำหรับ Email Login', 'success');
+        window.setTimeout(redirectToGooglePasswordSetup, 350);
+    } catch (error) {
+        loginInProgress = false;
+        sessionStorage.removeItem(GOOGLE_SETUP_KEY);
+        setStatus(error.message || 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง', 'error');
+    } finally {
+        if (!sessionStorage.getItem(GOOGLE_SETUP_KEY)) {
+            setGoogleBusy(false);
+        }
+    }
 });
 
 els.form?.addEventListener('submit', async event => {

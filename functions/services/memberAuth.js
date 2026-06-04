@@ -189,6 +189,8 @@ function sanitizeProfile(uid, data = {}) {
     avatar_url: avatarUrl || null,
     member_level: ['Silver', 'Gold', 'Platinum'].includes(memberLevel) ? memberLevel : 'Silver',
     points: Math.max(0, Math.floor(Number(data.points || 0))),
+    password_login_enabled: data.passwordLoginEnabled === true || data.password_login_enabled === true,
+    auth_provider_ids: Array.isArray(data.authProviderIds) ? data.authProviderIds : [],
     created_at: timestampToIso(data.created_at || data.createdAt || data.authCreatedAt),
     updated_at: timestampToIso(data.updated_at || data.updatedAt),
     last_login_at: timestampToIso(data.last_login_at || data.lastLoginAt),
@@ -313,6 +315,31 @@ function createMemberAuthHandlers({
     return '';
   }
 
+  function firebaseProviderIds(decoded = {}) {
+    const firebase = decoded.firebase || {};
+    const identities = firebase.identities || {};
+    const providers = new Set();
+    if (firebase.sign_in_provider) providers.add(firebase.sign_in_provider);
+    Object.keys(identities).forEach(providerId => providers.add(providerId));
+    return Array.from(providers).filter(Boolean);
+  }
+
+  function googleEmailFromFirebaseToken(decoded = {}) {
+    const providers = firebaseProviderIds(decoded);
+    const identities = decoded.firebase?.identities || {};
+    const identityEmail = Array.isArray(identities.email) ? identities.email[0] : '';
+    const email = normalizeEmail(decoded.email || identityEmail || '');
+    const isGoogleProvider = providers.includes('google.com') || decoded.firebase?.sign_in_provider === 'google.com';
+    if (!isGoogleProvider) return '';
+    if (!email) {
+      throw createPublicError('บัญชี Google นี้ไม่มีอีเมล กรุณาเลือกบัญชี Google อื่น', 401);
+    }
+    if (decoded.email_verified !== true) {
+      throw createPublicError('กรุณายืนยันอีเมล Google ก่อนสมัครสมาชิก Eden Cafe', 401);
+    }
+    return email;
+  }
+
   async function ensurePhoneIsAvailableForUid(phoneNumber, allowedUid) {
     const existing = await findUserByPhone(phoneNumber);
     if (existing && existing.uid !== allowedUid) {
@@ -323,6 +350,24 @@ function createMemberAuthHandlers({
       const authUser = await admin.auth().getUserByPhoneNumber(phoneNumber);
       if (authUser.uid !== allowedUid) {
         throw createPublicError('เบอร์โทรศัพท์นี้สมัครสมาชิกแล้ว กรุณาเข้าสู่ระบบ', 409);
+      }
+    } catch (error) {
+      if (error.publicMessage) throw error;
+      if (error.code !== 'auth/user-not-found') throw error;
+    }
+  }
+
+  async function ensureEmailIsAvailableForUid(email, allowedUid) {
+    const normalizedEmail = normalizeEmail(email);
+    const existing = await findUserByEmail(normalizedEmail);
+    if (existing && existing.uid !== allowedUid) {
+      throw createPublicError('อีเมลนี้มีบัญชีสมาชิกแล้ว กรุณาเข้าสู่ระบบด้วยอีเมลหรือเลือกบัญชี Google เดิม', 409);
+    }
+
+    try {
+      const authUser = await admin.auth().getUserByEmail(normalizedEmail);
+      if (authUser.uid !== allowedUid) {
+        throw createPublicError('อีเมลนี้ผูกกับบัญชี Firebase อื่นแล้ว กรุณาเลือกบัญชี Google เดิม', 409);
       }
     } catch (error) {
       if (error.publicMessage) throw error;
@@ -456,6 +501,96 @@ function createMemberAuthHandlers({
     res.status(201).json({
       ok: true,
       message: 'สมัครสมาชิกสำเร็จ',
+      profile: sanitizeProfile(uid, profileForResponse || {}),
+    });
+  }
+
+  async function completeFirebaseGoogleRegister(req, res, decoded) {
+    const uid = cleanString(decoded.uid, 160);
+    if (!uid) throw createPublicError('ไม่สามารถยืนยันบัญชี Google ได้ กรุณาลองใหม่อีกครั้ง', 401);
+
+    const email = googleEmailFromFirebaseToken(decoded);
+    checkRateLimitKey(`completeFirebaseGoogleRegister:${uid}`, 8, 15 * 60 * 1000);
+    checkRateLimitKey(`completeFirebaseGoogleRegisterEmail:${sha256(email).slice(0, 48)}`, 8, 15 * 60 * 1000);
+
+    const password = validatePassword(req.body?.password);
+    if (String(req.body?.confirmPassword || password) !== password) {
+      throw createPublicError('Password และ Confirm Password ไม่ตรงกัน');
+    }
+
+    await ensureEmailIsAvailableForUid(email, uid);
+
+    const authUser = await admin.auth().getUser(uid).catch(() => null);
+    const passwordHash = await hashPassword(password, getPasswordPepper());
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const userRef = db.collection('users').doc(uid);
+    const credentialRef = db.collection(CREDENTIAL_COLLECTION).doc(uid);
+
+    let profileForResponse = null;
+    await db.runTransaction(async tx => {
+      const [userSnap, credentialSnap] = await Promise.all([
+        tx.get(userRef),
+        tx.get(credentialRef),
+      ]);
+
+      const existing = userSnap.exists ? userSnap.data() || {} : {};
+      const credential = credentialSnap.exists ? credentialSnap.data() || {} : {};
+      const existingProviders = Array.isArray(existing.authProviderIds) ? existing.authProviderIds : [];
+      const authProviderIds = Array.from(new Set([...existingProviders, ...firebaseProviderIds(decoded), 'google.com', 'custom_password']));
+      const displayName = cleanString(
+        existing.display_name || existing.displayName || authUser?.displayName || decoded.name || email.split('@')[0] || 'สมาชิก Eden',
+        120
+      );
+      const avatarUrl = cleanString(existing.avatar_url || existing.photoURL || authUser?.photoURL || decoded.picture || '', 500);
+      const memberLevel = cleanString(existing.member_level || existing.tier || 'Silver', 40) || 'Silver';
+      const points = Math.max(0, Math.floor(Number(existing.points || 0)));
+
+      const userPayload = {
+        id: cleanString(existing.id || uid, 160),
+        uid,
+        email,
+        email_lower: email,
+        display_name: displayName,
+        displayName,
+        avatar_url: avatarUrl,
+        photoURL: avatarUrl,
+        member_level: ['Silver', 'Gold', 'Platinum'].includes(memberLevel) ? memberLevel : 'Silver',
+        tier: ['Silver', 'Gold', 'Platinum'].includes(memberLevel) ? memberLevel : 'Silver',
+        points,
+        memberCode: cleanString(existing.memberCode || authMemberCode(uid), 40),
+        status: cleanString(existing.status || 'active', 40) || 'active',
+        passwordLoginEnabled: true,
+        profileCompleted: true,
+        authProviderIds,
+        registrationSource: cleanString(existing.registrationSource || 'google_password', 80),
+        updated_at: now,
+        updatedAt: now,
+      };
+      if (existing.phone_number) userPayload.phone_number = existing.phone_number;
+      if (existing.phone_display) userPayload.phone_display = existing.phone_display;
+      if (existing.phone) userPayload.phone = existing.phone;
+      if (existing.phoneE164) userPayload.phoneE164 = existing.phoneE164;
+      if (!userSnap.exists || !existing.created_at) userPayload.created_at = now;
+      if (!userSnap.exists || !existing.createdAt) userPayload.createdAt = now;
+
+      tx.set(userRef, userPayload, { merge: true });
+      tx.set(credentialRef, {
+        uid,
+        phone_number: credential.phone_number || existing.phone_number || '',
+        phone_index_key: credential.phone_index_key || '',
+        email_lower: email,
+        password_hash: passwordHash,
+        password_algorithm: 'scrypt',
+        created_at: credential.created_at || now,
+        updated_at: now,
+      }, { merge: true });
+
+      profileForResponse = { ...existing, ...userPayload };
+    });
+
+    res.status(201).json({
+      ok: true,
+      message: 'สมัครสมาชิกด้วย Google สำเร็จ',
       profile: sanitizeProfile(uid, profileForResponse || {}),
     });
   }
@@ -604,7 +739,22 @@ function createMemberAuthHandlers({
       checkRateLimit(req, 'completeRegister', 12, 15 * 60 * 1000);
       const firebaseIdToken = cleanString(req.body?.firebaseIdToken || req.body?.idToken, 4000);
       if (firebaseIdToken) {
-        await completeFirebasePhoneRegister(req, res, firebaseIdToken);
+        const decoded = await admin.auth().verifyIdToken(firebaseIdToken).catch(error => {
+          logger.warn('Firebase registration token verification failed', {
+            message: error.message,
+            code: error.code || '',
+          });
+          throw createPublicError('ไม่สามารถยืนยันบัญชี Firebase ได้ กรุณาเข้าสู่ระบบอีกครั้ง', 401);
+        });
+        if (phoneNumberFromFirebaseToken(decoded)) {
+          await completeFirebasePhoneRegister(req, res, firebaseIdToken);
+          return;
+        }
+        if (googleEmailFromFirebaseToken(decoded)) {
+          await completeFirebaseGoogleRegister(req, res, decoded);
+          return;
+        }
+        throw createPublicError('กรุณาสมัครด้วยเบอร์โทรศัพท์หรือบัญชี Google ที่ยืนยันแล้ว', 401);
         return;
       }
 

@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>สมัครสมาชิก | Eden Cafe</title>
-    <meta name="description" content="สมัครสมาชิก Eden Cafe ด้วยเบอร์โทรศัพท์ รับ OTP และตั้งรหัสผ่านสำหรับบัญชีสมาชิก">
+    <meta name="description" content="สมัครสมาชิก Eden Cafe ด้วยเบอร์โทรศัพท์หรือ Google แล้วตั้งรหัสผ่านสำหรับบัญชีสมาชิก">
     <link rel="icon" type="image/webp" href="Images/Logo.webp">
-    <link rel="stylesheet" href="style.css?v=auth-member-1">
+    <link rel="stylesheet" href="style.css?v=auth-google-1">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -70,6 +70,14 @@
 
                     <div class="register-status" id="register-status" role="status" aria-live="polite"></div>
 
+                    <div class="auth-social-entry">
+                        <button class="google-login-btn auth-google-btn" type="button" id="register-google">
+                            สมัคร / เข้าสู่ระบบด้วย Google
+                        </button>
+                        <p class="phone-login-note">ยืนยัน Google แล้วระบบจะพาไปตั้งรหัสผ่าน เพื่อให้ครั้งต่อไปเข้าสู่ระบบด้วยอีเมลได้</p>
+                        <div class="auth-divider"><span>หรือสมัครด้วยเบอร์โทรศัพท์</span></div>
+                    </div>
+
                     <form class="register-form active" id="phone-register-form">
                         <p class="register-form-kicker">ขั้นตอนที่ 1</p>
                         <h2>กรอกเบอร์โทรศัพท์</h2>
@@ -99,9 +107,9 @@
                     </form>
 
                     <form class="register-form" id="profile-register-form">
-                        <p class="register-form-kicker">ขั้นตอนที่ 3</p>
-                        <h2>ตั้งรหัสผ่าน</h2>
-                        <p class="register-muted">เบอร์ที่ยืนยันแล้ว: <strong id="register-confirmed-phone">-</strong></p>
+                        <p class="register-form-kicker" id="register-password-kicker">ขั้นตอนที่ 3</p>
+                        <h2 id="register-password-title">ตั้งรหัสผ่าน</h2>
+                        <p class="register-muted" id="register-identity-note">เบอร์ที่ยืนยันแล้ว: <strong id="register-confirmed-phone">-</strong></p>
                         <label>
                             <span>Password</span>
                             <input id="register-password" name="password" type="password" autocomplete="new-password"
@@ -147,7 +155,7 @@
             });
         }
     </script>
-    <script type="module" src="js/register.js?v=auth-member-2"></script>
-    <script type="module" src="js/auth.js?v=auth-member-2"></script>
+    <script type="module" src="js/register.js?v=auth-google-1"></script>
+    <script type="module" src="js/auth.js?v=auth-google-1"></script>
 </body>
 </html>

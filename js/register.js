@@ -1,26 +1,36 @@
-import { auth } from './firebase-config.js';
+﻿import { auth } from './firebase-config.js';
 import {
+    GoogleAuthProvider,
     onAuthStateChanged,
     RecaptchaVerifier,
-    signInWithPhoneNumber
+    signInWithPhoneNumber,
+    signInWithPopup
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
     completeRegister,
     displayThaiPhone,
-    normalizeThaiPhone
+    normalizeThaiPhone,
+    storeProfile
 } from './member-auth-service.js';
 
+const GOOGLE_SETUP_KEY = 'eden_google_password_setup';
+
 const state = {
+    authMode: '',
     phoneNumber: '',
     phoneDisplay: '',
+    googleEmail: '',
+    googleName: '',
     confirmationResult: null,
     firebaseIdToken: '',
     recaptchaVerifier: null,
-    registrationStarted: false
+    registrationStarted: false,
+    googleSetupStarted: false
 };
 
 const els = {
     status: document.getElementById('register-status'),
+    googleButton: document.getElementById('register-google'),
     phoneForm: document.getElementById('phone-register-form'),
     otpForm: document.getElementById('otp-register-form'),
     profileForm: document.getElementById('profile-register-form'),
@@ -28,6 +38,9 @@ const els = {
     phone: document.getElementById('register-phone'),
     phonePreview: document.getElementById('register-phone-preview'),
     confirmedPhone: document.getElementById('register-confirmed-phone'),
+    identityNote: document.getElementById('register-identity-note'),
+    passwordTitle: document.getElementById('register-password-title'),
+    passwordKicker: document.getElementById('register-password-kicker'),
     otp: document.getElementById('register-otp'),
     resend: document.getElementById('register-resend'),
     password: document.getElementById('register-password'),
@@ -51,6 +64,13 @@ function setBusy(form, isBusy, label) {
     form?.querySelectorAll('input').forEach(input => {
         input.disabled = isBusy;
     });
+}
+
+function setButtonBusy(button, isBusy, label) {
+    if (!button) return;
+    if (!button.dataset.defaultText) button.dataset.defaultText = button.textContent;
+    button.disabled = isBusy;
+    button.textContent = isBusy ? label : button.dataset.defaultText;
 }
 
 function activateStep(step) {
@@ -96,13 +116,73 @@ async function sendOtp() {
     const result = await signInWithPhoneNumber(auth, phoneNumber, verifier);
 
     state.registrationStarted = true;
+    state.authMode = 'phone';
     state.phoneNumber = phoneNumber;
     state.phoneDisplay = displayThaiPhone(phoneNumber);
     state.confirmationResult = result;
     state.firebaseIdToken = '';
+    state.googleEmail = '';
+    state.googleName = '';
+    sessionStorage.removeItem(GOOGLE_SETUP_KEY);
 
     if (els.phonePreview) els.phonePreview.textContent = state.phoneDisplay;
-    if (els.confirmedPhone) els.confirmedPhone.textContent = state.phoneDisplay;
+    setPasswordStepForPhone();
+}
+
+function isGoogleUser(user) {
+    return !!user && (user.providerData || []).some(provider => provider.providerId === 'google.com');
+}
+
+function setPasswordStepForPhone() {
+    if (els.passwordKicker) els.passwordKicker.textContent = 'ขั้นตอนที่ 3';
+    if (els.passwordTitle) els.passwordTitle.textContent = 'ตั้งรหัสผ่าน';
+    if (els.identityNote) {
+        els.identityNote.innerHTML = `เบอร์ที่ยืนยันแล้ว: <strong id="register-confirmed-phone">${state.phoneDisplay || '-'}</strong>`;
+        els.confirmedPhone = document.getElementById('register-confirmed-phone');
+    } else if (els.confirmedPhone) {
+        els.confirmedPhone.textContent = state.phoneDisplay || '-';
+    }
+}
+
+function setPasswordStepForGoogle() {
+    const label = state.googleEmail || 'บัญชี Google ของคุณ';
+    if (els.passwordKicker) els.passwordKicker.textContent = 'Google verified';
+    if (els.passwordTitle) els.passwordTitle.textContent = 'ตั้งรหัสผ่านสำหรับ Email Login';
+    if (els.identityNote) {
+        els.identityNote.innerHTML = `อีเมล Google ที่ยืนยันแล้ว: <strong id="register-confirmed-phone">${label}</strong>`;
+        els.confirmedPhone = document.getElementById('register-confirmed-phone');
+    } else if (els.confirmedPhone) {
+        els.confirmedPhone.textContent = label;
+    }
+}
+
+async function beginGooglePasswordSetup(firebaseUser) {
+    if (!firebaseUser || !isGoogleUser(firebaseUser)) {
+        throw new Error('กรุณาเลือกบัญชี Google เพื่อสมัครสมาชิก');
+    }
+
+    state.registrationStarted = true;
+    state.googleSetupStarted = true;
+    state.authMode = 'google';
+    state.phoneNumber = '';
+    state.phoneDisplay = '';
+    state.confirmationResult = null;
+    state.googleEmail = firebaseUser.email || '';
+    state.googleName = firebaseUser.displayName || '';
+    state.firebaseIdToken = await firebaseUser.getIdToken(true);
+
+    setPasswordStepForGoogle();
+    activateStep('profile');
+    setStatus('ยืนยัน Google สำเร็จ กรุณาตั้งรหัสผ่านเพื่อให้ครั้งต่อไปเข้าสู่ระบบด้วยอีเมลได้', 'success');
+}
+
+async function startGoogleRegistration() {
+    if (!auth) throw new Error('ไม่พบระบบยืนยันตัวตน กรุณาลองใหม่อีกครั้ง');
+    const googleProvider = new GoogleAuthProvider();
+    googleProvider.setCustomParameters({ prompt: 'select_account' });
+    sessionStorage.setItem(GOOGLE_SETUP_KEY, '1');
+    const credential = await signInWithPopup(auth, googleProvider);
+    await beginGooglePasswordSetup(credential.user);
 }
 
 function validateOtp() {
@@ -118,6 +198,19 @@ function validatePassword() {
     if (password !== confirmPassword) throw new Error('Password และ Confirm Password ไม่ตรงกัน');
     return { password, confirmPassword };
 }
+
+els.googleButton?.addEventListener('click', async () => {
+    setButtonBusy(els.googleButton, true, 'กำลังเปิด Google...');
+    setStatus('กำลังเปิดหน้าต่าง Google เพื่อยืนยันตัวตน...', 'info');
+    try {
+        await startGoogleRegistration();
+    } catch (error) {
+        sessionStorage.removeItem(GOOGLE_SETUP_KEY);
+        setStatus(error.message || 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง', 'error');
+    } finally {
+        setButtonBusy(els.googleButton, false);
+    }
+});
 
 els.phoneForm?.addEventListener('submit', async event => {
     event.preventDefault();
@@ -145,10 +238,11 @@ els.otpForm?.addEventListener('submit', async event => {
 
         const credential = await state.confirmationResult.confirm(otp);
         const firebaseUser = credential.user;
+        state.authMode = 'phone';
         state.firebaseIdToken = await firebaseUser.getIdToken(true);
         state.phoneNumber = normalizeThaiPhone(firebaseUser.phoneNumber || state.phoneNumber);
         state.phoneDisplay = displayThaiPhone(state.phoneNumber);
-        if (els.confirmedPhone) els.confirmedPhone.textContent = state.phoneDisplay;
+        setPasswordStepForPhone();
 
         activateStep('profile');
         setStatus('ยืนยัน OTP สำเร็จ กรุณาตั้งรหัสผ่าน', 'success');
@@ -192,14 +286,18 @@ els.profileForm?.addEventListener('submit', async event => {
     setStatus('กำลังสร้างบัญชีสมาชิก...', 'info');
     try {
         const { password, confirmPassword } = validatePassword();
-        if (!state.firebaseIdToken) throw new Error('ยังไม่ได้ยืนยัน OTP กรุณายืนยันเบอร์โทรศัพท์ก่อน');
+        if (!state.firebaseIdToken) throw new Error('ยังไม่ได้ยืนยันบัญชี กรุณายืนยันเบอร์โทรศัพท์หรือ Google ก่อน');
 
-        await completeRegister({
+        const payload = {
             firebaseIdToken: state.firebaseIdToken,
-            phoneNumber: state.phoneNumber,
             password,
             confirmPassword
-        });
+        };
+        if (state.authMode === 'phone') payload.phoneNumber = state.phoneNumber;
+
+        const result = await completeRegister(payload);
+        if (result.profile) storeProfile(result.profile);
+        sessionStorage.removeItem(GOOGLE_SETUP_KEY);
 
         els.profileForm?.classList.remove('active');
         if (els.complete) els.complete.hidden = false;
@@ -214,6 +312,17 @@ els.profileForm?.addEventListener('submit', async event => {
     }
 });
 
-onAuthStateChanged(auth, user => {
+onAuthStateChanged(auth, async user => {
+    const params = new URLSearchParams(window.location.search);
+    const shouldSetupGoogle = params.get('google') === '1' || sessionStorage.getItem(GOOGLE_SETUP_KEY) === '1';
+    if (user && shouldSetupGoogle && !state.googleSetupStarted) {
+        try {
+            await beginGooglePasswordSetup(user);
+        } catch (error) {
+            sessionStorage.removeItem(GOOGLE_SETUP_KEY);
+            setStatus(error.message || 'ไม่สามารถเตรียมบัญชี Google ได้ กรุณาลองใหม่อีกครั้ง', 'error');
+        }
+        return;
+    }
     if (user && !state.registrationStarted) window.location.href = '/profile';
 });
