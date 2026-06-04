@@ -1,12 +1,12 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="th">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>สมัครสมาชิกด้วยเบอร์โทร | Eden Cafe</title>
-    <meta name="description" content="สมัครสมาชิก Eden Cafe ด้วยเบอร์โทรศัพท์ รับ OTP และบันทึกข้อมูลสมาชิกเพื่อสะสมแต้ม จองโต๊ะ และใช้งานบริการของร้าน">
+    <title>สมัครสมาชิก | Eden Cafe</title>
+    <meta name="description" content="สมัครสมาชิก Eden Cafe ด้วยเบอร์โทรศัพท์ รับ OTP และตั้งรหัสผ่านสำหรับบัญชีสมาชิก">
     <link rel="icon" type="image/webp" href="Images/Logo.webp">
-    <link rel="stylesheet" href="style.css?v=auth-phone-1">
+    <link rel="stylesheet" href="style.css?v=auth-member-1">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -52,15 +52,12 @@
             <div class="container register-shell">
                 <div class="register-copy">
                     <p class="register-eyebrow">Eden Cafe Membership</p>
-                    <h1>สมัครสมาชิกด้วยเบอร์โทร</h1>
-                    <p>
-                        ใช้เบอร์โทรรับ OTP เพื่อเข้าสู่ระบบ หลังยืนยันแล้วระบบจะบังคับกรอกชื่อจริง
-                        นามสกุล และตั้งรหัสผ่าน โดยใช้เบอร์โทรเป็น USERNAME
-                    </p>
+                    <h1>สมัครสมาชิก Eden</h1>
+                    <p>สมัครด้วยเบอร์โทรศัพท์ ยืนยัน OTP แล้วตั้งรหัสผ่านเพื่อใช้งานบัญชีสมาชิกของคุณ</p>
                     <div class="register-benefits">
                         <span>สะสมแต้มอัตโนมัติ</span>
                         <span>จองโต๊ะง่ายขึ้น</span>
-                        <span>รองรับ POS หน้าร้าน</span>
+                        <span>เข้าสู่ระบบง่าย</span>
                     </div>
                 </div>
 
@@ -75,22 +72,13 @@
 
                     <form class="register-form active" id="phone-register-form">
                         <p class="register-form-kicker">ขั้นตอนที่ 1</p>
-                        <h2>ยืนยันเบอร์โทรศัพท์</h2>
+                        <h2>กรอกเบอร์โทรศัพท์</h2>
                         <p class="register-muted">กรอกเบอร์ไทย เช่น 08X-XXX-XXXX ระบบจะแปลงเป็นรูปแบบ +66 อัตโนมัติ</p>
                         <label>
                             <span>เบอร์โทรศัพท์</span>
                             <input id="register-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel"
                                 placeholder="08X-XXX-XXXX" required>
                         </label>
-                        <label class="register-check">
-                            <input id="register-privacy" type="checkbox" required>
-                            <span>ยอมรับการใช้ข้อมูลเพื่อสมัครสมาชิกและให้ Eden Cafe ติดต่อเกี่ยวกับบริการที่เกี่ยวข้อง</span>
-                        </label>
-                        <label class="register-check">
-                            <input id="register-marketing" type="checkbox">
-                            <span>รับข่าวสาร โปรโมชัน และสิทธิพิเศษจาก Eden Cafe</span>
-                        </label>
-                        <div id="register-recaptcha" class="register-recaptcha"></div>
                         <button class="btn register-submit" type="submit">ส่งรหัส OTP</button>
                     </form>
 
@@ -105,74 +93,33 @@
                         </label>
                         <div class="register-actions">
                             <button class="btn register-submit" type="submit">ยืนยัน OTP</button>
-                            <button class="btn btn-outline" type="button" id="register-resend">ส่ง OTP ใหม่</button>
+                            <button class="btn btn-outline" type="button" id="register-resend">ส่ง OTP อีกครั้ง</button>
                         </div>
                     </form>
 
                     <form class="register-form" id="profile-register-form">
                         <p class="register-form-kicker">ขั้นตอนที่ 3</p>
-                        <h2>ตั้งค่าบัญชีสมาชิก</h2>
-                        <p class="register-muted">กรอกข้อมูลบังคับให้ครบก่อนใช้งาน USERNAME ของคุณคือเบอร์โทรศัพท์ที่ผ่าน OTP แล้ว</p>
+                        <h2>ตั้งรหัสผ่าน</h2>
+                        <p class="register-muted">เบอร์ที่ยืนยันแล้ว: <strong id="register-confirmed-phone">-</strong></p>
                         <label>
-                            <span>USERNAME</span>
-                            <input id="register-username" name="username" type="text" autocomplete="username" readonly>
-                        </label>
-                        <div class="register-grid">
-                            <label>
-                                <span>ชื่อจริง</span>
-                                <input id="register-first-name" name="firstName" type="text" autocomplete="given-name"
-                                    placeholder="ชื่อจริง" required>
-                            </label>
-                            <label>
-                                <span>นามสกุล</span>
-                                <input id="register-last-name" name="lastName" type="text" autocomplete="family-name"
-                                    placeholder="นามสกุล" required>
-                            </label>
-                            <label>
-                                <span>ตั้งรหัสผ่านใหม่</span>
-                                <input id="register-password" name="password" type="password" autocomplete="new-password"
-                                    minlength="8" maxlength="128" placeholder="อย่างน้อย 8 ตัวอักษร" required>
-                            </label>
-                            <label>
-                                <span>ยืนยันรหัสผ่าน</span>
-                                <input id="register-password-confirm" name="passwordConfirm" type="password"
-                                    autocomplete="new-password" minlength="8" maxlength="128" placeholder="กรอกรหัสผ่านอีกครั้ง" required>
-                            </label>
-                            <label>
-                                <span>LINE ID</span>
-                                <input id="register-line" name="lineId" type="text" autocomplete="off"
-                                    placeholder="LINE ID ของคุณ">
-                            </label>
-                            <label>
-                                <span>วันเกิด</span>
-                                <input id="register-birthdate" name="birthDate" type="date">
-                            </label>
-                            <label>
-                                <span>แพ้อาหาร</span>
-                                <input id="register-allergies" name="allergies" type="text"
-                                    placeholder="เช่น ถั่ว นม กุ้ง กลูเตน">
-                            </label>
-                        </div>
-                        <label>
-                            <span>ที่อยู่จัดส่ง</span>
-                            <textarea id="register-address" name="shippingAddress" rows="3"
-                                placeholder="บ้านเลขที่ ถนน เขต/อำเภอ จังหวัด รหัสไปรษณีย์"></textarea>
+                            <span>Password</span>
+                            <input id="register-password" name="password" type="password" autocomplete="new-password"
+                                minlength="8" maxlength="128" placeholder="อย่างน้อย 8 ตัวอักษร" required>
                         </label>
                         <label>
-                            <span>หมายเหตุสุขภาพ</span>
-                            <textarea id="register-health" name="healthNote" rows="3"
-                                placeholder="ข้อมูลที่ต้องการแจ้งร้าน"></textarea>
+                            <span>Confirm Password</span>
+                            <input id="register-password-confirm" name="passwordConfirm" type="password"
+                                autocomplete="new-password" minlength="8" maxlength="128" placeholder="กรอกรหัสผ่านอีกครั้ง" required>
                         </label>
-                        <button class="btn register-submit" type="submit">บันทึกและเริ่มใช้งาน</button>
+                        <button class="btn register-submit" type="submit">สมัครสมาชิก</button>
                     </form>
 
                     <div class="register-complete" id="register-complete" hidden>
                         <div class="register-complete-icon">✓</div>
-                        <h2>สมัครสมาชิกเรียบร้อย</h2>
-                        <p>บัญชี Eden Cafe ของคุณพร้อมใช้งานแล้ว</p>
+                        <h2>สมัครสมาชิกสำเร็จ</h2>
+                        <p>กรุณาเข้าสู่ระบบด้วยเบอร์โทรศัพท์และรหัสผ่านของคุณ</p>
                         <div class="register-actions">
-                            <a class="btn" href="/profile">ไปหน้าโปรไฟล์</a>
-                            <a class="btn btn-outline" href="/menu">ดูเมนู</a>
+                            <a class="btn" href="/login?registered=1">ไปหน้า Login</a>
                         </div>
                     </div>
                 </section>
@@ -199,7 +146,7 @@
             });
         }
     </script>
-    <script type="module" src="js/register.js?v=phone-register-3"></script>
-    <script type="module" src="js/auth.js?v=phone-register-3"></script>
+    <script type="module" src="js/register.js?v=auth-member-1"></script>
+    <script type="module" src="js/auth.js?v=auth-member-1"></script>
 </body>
 </html>

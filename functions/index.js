@@ -9,6 +9,7 @@ const nodemailer = require('nodemailer');
 const fs = require('fs');
 const path = require('path');
 const { Readable } = require('stream');
+const { createMemberAuthHandlers } = require('./services/memberAuth');
 
 admin.initializeApp();
 
@@ -17,6 +18,11 @@ const SPACESHIP_FTP_SERVER = defineSecret('SPACESHIP_FTP_SERVER');
 const SPACESHIP_FTP_USERNAME = defineSecret('SPACESHIP_FTP_USERNAME');
 const SPACESHIP_FTP_PASSWORD = defineSecret('SPACESHIP_FTP_PASSWORD');
 const GOOGLE_MAPS_SERVER_KEY = defineSecret('GOOGLE_MAPS_SERVER_KEY');
+const AUTH_OTP_PEPPER = defineSecret('AUTH_OTP_PEPPER');
+const AUTH_PASSWORD_PEPPER = defineSecret('AUTH_PASSWORD_PEPPER');
+const OTP_SMS_API_URL = defineSecret('OTP_SMS_API_URL');
+const OTP_SMS_API_KEY = defineSecret('OTP_SMS_API_KEY');
+const OTP_SMS_SENDER = defineSecret('OTP_SMS_SENDER');
 
 const PLACE_ID = 'ChIJVTN6cGwB1zAR66OQ_OBKRkM';
 const PLACE_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
@@ -389,6 +395,61 @@ async function requireSignedInUser(req) {
   }
   return admin.auth().verifyIdToken(match[1]);
 }
+
+const memberAuthHandlers = createMemberAuthHandlers({
+  admin,
+  db,
+  logger,
+  setCors,
+  handleOptions,
+  checkRateLimit,
+  checkRateLimitKey,
+  requireSignedInUser,
+  getOtpPepper: () => AUTH_OTP_PEPPER.value() || process.env.AUTH_OTP_PEPPER || '',
+  getPasswordPepper: () => AUTH_PASSWORD_PEPPER.value() || process.env.AUTH_PASSWORD_PEPPER || '',
+  getSmsConfig: () => ({
+    url: OTP_SMS_API_URL.value() || process.env.OTP_SMS_API_URL || '',
+    apiKey: OTP_SMS_API_KEY.value() || process.env.OTP_SMS_API_KEY || '',
+    sender: OTP_SMS_SENDER.value() || process.env.OTP_SMS_SENDER || 'Eden Cafe',
+  }),
+});
+
+exports.requestRegisterOtp = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [AUTH_OTP_PEPPER, OTP_SMS_API_URL, OTP_SMS_API_KEY, OTP_SMS_SENDER],
+  },
+  memberAuthHandlers.requestRegisterOtp
+);
+
+exports.verifyRegisterOtp = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [AUTH_OTP_PEPPER],
+  },
+  memberAuthHandlers.verifyRegisterOtp
+);
+
+exports.completeRegister = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [AUTH_OTP_PEPPER, AUTH_PASSWORD_PEPPER],
+  },
+  memberAuthHandlers.completeRegister
+);
+
+exports.loginMember = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [AUTH_PASSWORD_PEPPER],
+  },
+  memberAuthHandlers.loginMember
+);
+
+exports.getMyProfile = onRequest(
+  { region: 'asia-southeast1' },
+  memberAuthHandlers.getMyProfile
+);
 
 function normalizeAdminRole(role) {
   return ['owner', 'head_manager', 'manager'].includes(role) ? role : 'manager';

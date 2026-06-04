@@ -146,6 +146,7 @@ function canUsePosAccess(access) {
 }
 
 async function maybeRedirectToPhoneOnboarding(user, access) {
+    return;
     if (!user?.phoneNumber || !db || isBackOfficeAccess(access)) return;
     if (window.location.pathname.includes('/register')) return;
     try {
@@ -225,6 +226,7 @@ async function loadFaqs() {
 }
 
 function ensureLoginModal() {
+    return;
     if (document.getElementById('login-modal')) return;
 
     const modalHTML = `
@@ -247,9 +249,9 @@ function ensureLoginModal() {
 }
 
 function openLoginModal() {
-    ensureLoginModal();
-    const modal = document.getElementById('login-modal');
-    if (modal) modal.style.display = 'flex';
+    const current = window.location.pathname + window.location.search + window.location.hash;
+    const next = current && !current.includes('/login') ? '?next=' + encodeURIComponent(current) : '';
+    window.location.href = '/login' + next;
 }
 
 function closeLoginModal() {
@@ -258,9 +260,7 @@ function closeLoginModal() {
 }
 
 function startPhoneLogin() {
-    const current = window.location.pathname + window.location.search + window.location.hash;
-    const next = current && !current.includes('/register') ? '?next=' + encodeURIComponent(current) : '';
-    window.location.href = '/register' + next;
+    window.location.href = '/register';
 }
 
 async function logout() {
@@ -274,7 +274,7 @@ async function logout() {
     }
 
     checkLoginStatus();
-    if (window.location.pathname.includes('profile')) window.location.href = '/';
+    if (window.location.pathname.includes('profile')) window.location.href = '/login';
     else if (window.location.pathname.includes('checkout')) location.reload();
 }
 
@@ -297,7 +297,7 @@ function checkLoginStatus() {
     authContainers.forEach(container => {
         if (!user) {
             const loginText = isEn ? 'Sign In' : 'เข้าสู่ระบบ';
-            container.innerHTML = `<button class="btn btn-outline" style="padding:5px 15px; font-size:0.9rem;" onclick="openLoginModal()">${loginText}</button>`;
+            container.innerHTML = `<a class="btn btn-outline" style="padding:5px 15px; font-size:0.9rem;" href="/login">${loginText}</a>`;
             return;
         }
 

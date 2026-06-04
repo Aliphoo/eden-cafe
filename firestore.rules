@@ -466,11 +466,14 @@ service cloud.firestore {
         && request.auth.uid == userId
         && request.resource.data.keys().hasOnly([
           'uid', 'displayName', 'email', 'photoURL', 'phone', 'phoneE164',
+          'id', 'phone_number', 'phone_display', 'email_lower', 'display_name',
+          'avatar_url', 'member_level',
           'firstName', 'lastName', 'loginUsername', 'phoneAuthEmail',
           'shippingAddress', 'birthDate', 'allergies', 'healthNote',
           'lineId', 'authProviderIds', 'registrationSource',
           'marketingConsent', 'privacyConsent', 'phoneVerifiedAt',
           'passwordLoginEnabled', 'profileCompleted', 'onboardingCompletedAt',
+          'created_at', 'updated_at', 'last_login_at',
           'updatedAt'
         ])
         && request.resource.data.keys().hasAll(['uid', 'displayName', 'email', 'updatedAt'])
@@ -478,6 +481,13 @@ service cloud.firestore {
         && isShortString(request.resource.data.displayName, 120)
         && request.resource.data.email is string
         && request.resource.data.email.size() <= 180
+        && (!request.resource.data.keys().hasAny(['id']) || (request.resource.data.id is string && request.resource.data.id.size() <= 160))
+        && (!request.resource.data.keys().hasAny(['phone_number']) || (request.resource.data.phone_number is string && request.resource.data.phone_number.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['phone_display']) || (request.resource.data.phone_display is string && request.resource.data.phone_display.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['email_lower']) || (request.resource.data.email_lower is string && request.resource.data.email_lower.size() <= 180))
+        && (!request.resource.data.keys().hasAny(['display_name']) || (request.resource.data.display_name is string && request.resource.data.display_name.size() <= 120))
+        && (!request.resource.data.keys().hasAny(['avatar_url']) || (request.resource.data.avatar_url is string && request.resource.data.avatar_url.size() <= 500))
+        && (!request.resource.data.keys().hasAny(['member_level']) || request.resource.data.member_level in ['Silver', 'Gold', 'Platinum'])
         && (!request.resource.data.keys().hasAny(['photoURL']) || (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 500))
         && (!request.resource.data.keys().hasAny(['phone']) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40))
         && (!request.resource.data.keys().hasAny(['phoneE164']) || (request.resource.data.phoneE164 is string && request.resource.data.phoneE164.size() <= 40))
@@ -513,6 +523,8 @@ service cloud.firestore {
         ])
         && request.resource.data.keys().hasOnly([
           'uid', 'displayName', 'email', 'photoURL', 'phone', 'phoneE164',
+          'id', 'phone_number', 'phone_display', 'email_lower', 'display_name',
+          'avatar_url', 'member_level',
           'firstName', 'lastName', 'loginUsername', 'phoneAuthEmail',
           'shippingAddress', 'birthDate', 'allergies', 'healthNote',
           'lineId', 'authProviderIds', 'registrationSource',
@@ -523,12 +535,20 @@ service cloud.firestore {
           'authDisabled', 'emailVerified', 'emailVerifiedAt',
           'passwordLoginEnabled', 'profileCompleted', 'onboardingCompletedAt',
           'authCreatedAt', 'lastLoginAt',
+          'created_at', 'updated_at', 'last_login_at',
           'createdAt', 'updatedAt'
         ])
         && request.resource.data.uid == request.auth.uid
         && isShortString(request.resource.data.displayName, 120)
         && request.resource.data.email is string
         && request.resource.data.email.size() <= 180
+        && (!request.resource.data.keys().hasAny(['id']) || (request.resource.data.id is string && request.resource.data.id.size() <= 160))
+        && (!request.resource.data.keys().hasAny(['phone_number']) || (request.resource.data.phone_number is string && request.resource.data.phone_number.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['phone_display']) || (request.resource.data.phone_display is string && request.resource.data.phone_display.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['email_lower']) || (request.resource.data.email_lower is string && request.resource.data.email_lower.size() <= 180))
+        && (!request.resource.data.keys().hasAny(['display_name']) || (request.resource.data.display_name is string && request.resource.data.display_name.size() <= 120))
+        && (!request.resource.data.keys().hasAny(['avatar_url']) || (request.resource.data.avatar_url is string && request.resource.data.avatar_url.size() <= 500))
+        && (!request.resource.data.keys().hasAny(['member_level']) || request.resource.data.member_level in ['Silver', 'Gold', 'Platinum'])
         && (!request.resource.data.keys().hasAny(['photoURL']) || (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 500))
         && (!request.resource.data.keys().hasAny(['phone']) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40))
         && (!request.resource.data.keys().hasAny(['phoneE164']) || (request.resource.data.phoneE164 is string && request.resource.data.phoneE164.size() <= 40))
@@ -553,6 +573,15 @@ service cloud.firestore {
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['emailVerifiedAt']) || request.resource.data.emailVerifiedAt == null)
         && request.resource.data.updatedAt == request.time;
       allow delete: if isAdmin();
+    }
+    match /user_credentials/{userId} {
+      allow read, write: if false;
+    }
+    match /otp_verifications/{docId} {
+      allow read, write: if false;
+    }
+    match /phone_number_index/{docId} {
+      allow read, write: if false;
     }
 
     // User data (orders, bookings)

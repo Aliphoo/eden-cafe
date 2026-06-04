@@ -2,6 +2,7 @@ import { auth, db } from './firebase-config.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, doc, getDoc, getDocs, query, setDoc, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getTierRules } from './membership.js';
+import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
 
 (() => {
     const USER_KEY = 'eden_user';
@@ -24,6 +25,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
     let loyaltyUid = '';
     let loyaltyLoading = false;
     let currentAuthUser = null;
+    let authStateResolved = false;
     let selectedPreviewTier = '';
     const CAN_LOG_CLIENT_ERRORS = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
 
@@ -331,10 +333,11 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         const stored = readJSON(USER_KEY, null);
         if (currentAuthUser) {
             return {
+                ...(stored && typeof stored === 'object' ? stored : {}),
                 uid: currentAuthUser.uid,
-                name: currentAuthUser.displayName || stored?.name || 'Eden Member',
+                name: stored?.name || currentAuthUser.displayName || 'Eden Member',
                 email: publicEmail(currentAuthUser.email, stored?.email || ''),
-                avatar: currentAuthUser.photoURL || stored?.avatar || 'https://ui-avatars.com/api/?name=Eden+Member&background=4caf50&color=fff'
+                avatar: stored?.avatar || currentAuthUser.photoURL || 'https://ui-avatars.com/api/?name=Eden+Member&background=4caf50&color=fff'
             };
         }
         return stored && typeof stored === 'object' ? stored : null;
@@ -374,11 +377,25 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
     }
 
     async function refreshCloudProfile(user) {
-        if (!db || !user?.uid || cloudProfileLoading || cloudProfileUid === user.uid) return;
+        if (!user?.uid || cloudProfileLoading || cloudProfileUid === user.uid) return;
         cloudProfileLoading = true;
         try {
-            const snap = await getDoc(doc(db, 'users', user.uid));
-            cloudProfile = snap.exists() ? snap.data() : {};
+            const result = await getMyProfile();
+            const profile = result.profile || {};
+            cloudProfile = {
+                ...profile,
+                displayName: profile.display_name || 'สมาชิก Eden',
+                photoURL: profile.avatar_url || 'Images/Logo.webp',
+                phone: profile.phone_display || '',
+                phoneE164: profile.phone_number || '',
+                tier: profile.member_level || 'Silver',
+                member_level: profile.member_level || 'Silver',
+                points: Number(profile.points || 0),
+                createdAt: profile.created_at || '',
+                updatedAt: profile.updated_at || '',
+                lastLoginAt: profile.last_login_at || ''
+            };
+            localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(profile)));
             cloudProfileUid = user.uid;
             renderProfile();
         } catch (error) {
@@ -703,7 +720,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                 <img src="Images/Logo.webp" alt="Eden Cafe" style="width:84px;height:84px;border-radius:50%;object-fit:cover;margin-bottom:18px;">
                 <h1 style="margin-bottom:10px;">${escapeHTML(labels.profile)}</h1>
                 <p style="color:#666;">${escapeHTML(labels.signInPrompt)}</p>
-                <button class="btn btn-outline" onclick="openLoginModal()" style="margin-top:15px;">${escapeHTML(labels.signIn)}</button>
+                <a class="btn btn-outline" href="/login" style="margin-top:15px;">${escapeHTML(labels.signIn)}</a>
             </div>
         `;
     }
@@ -738,6 +755,43 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                 <p style="margin:0;color:#666;">${escapeHTML([booking.date, booking.time || booking.arrivalTime || booking.startTime, booking.tableIds || booking.table || booking.zone || booking.tableZone].filter(Boolean).join(' | '))}</p>
             </div>
         `).join('');
+    }
+
+    function renderMemberIdentity(user, labels) {
+        const en = isEnglishPage();
+        const displayName = profileValue('displayName', profileValue('display_name', user.name || labels.member)) || labels.member;
+        const phone = profileValue('phone', profileValue('phone_display', user.phone || user.phoneNumber || ''));
+        const email = profileValue('email', user.email || '');
+        const avatar = profileValue('photoURL', profileValue('avatar_url', user.avatar || 'Images/Logo.webp')) || 'Images/Logo.webp';
+        const memberLevel = profileValue('member_level', profileValue('tier', 'Silver')) || 'Silver';
+        const points = Number(profileValue('points', user.points || 0)) || 0;
+        const createdAt = profileValue('created_at', profileValue('createdAt', ''));
+        const rows = [
+            { label: en ? 'Phone number' : 'เบอร์โทรศัพท์', value: phone || '-' },
+            { label: en ? 'Email' : 'อีเมล', value: email || (en ? 'No email added yet' : 'ยังไม่ได้เพิ่มอีเมล') },
+            { label: en ? 'Display name' : 'ชื่อผู้ใช้', value: displayName || (en ? 'Eden Member' : 'สมาชิก Eden') },
+            { label: en ? 'Member level' : 'ระดับสมาชิก', value: memberLevel },
+            { label: en ? 'Reward points' : 'คะแนนสะสม', value: formatNumber(points) },
+            { label: en ? 'Member since' : 'วันที่สมัครสมาชิก', value: formatDate(createdAt) }
+        ];
+
+        return `
+            <section class="profile-identity-card" aria-label="${escapeHTML(en ? 'Member profile' : 'ข้อมูลสมาชิก')}">
+                <img src="${escapeHTML(avatar)}" alt="Profile" class="profile-identity-avatar">
+                <div class="profile-identity-main">
+                    <p class="profile-kicker">${escapeHTML(en ? 'Eden member' : 'สมาชิก Eden')}</p>
+                    <h2>${escapeHTML(displayName || (en ? 'Eden Member' : 'สมาชิก Eden'))}</h2>
+                    <div class="profile-identity-grid">
+                        ${rows.map(row => `
+                            <div>
+                                <span>${escapeHTML(row.label)}</span>
+                                <strong>${escapeHTML(row.value)}</strong>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </section>
+        `;
     }
 
     function renderProfileForm(user, labels) {
@@ -847,6 +901,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                         </div>
                     </div>
 
+                    ${renderMemberIdentity(user, labels)}
                     ${renderMemberCard(user, labels, membershipUser)}
                     ${renderLoyaltyWallet(membershipUser, labels)}
                     ${renderTierPreview(tier, labels)}
@@ -1066,8 +1121,15 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         if (!container) return;
         const labels = getLabels();
         const user = readUser();
-        if (!user || !user.uid) renderSignedOut(container, labels);
-        else renderSignedIn(container, user, labels);
+        if (!user || !user.uid) {
+            if (authStateResolved) {
+                window.location.href = '/login';
+                return;
+            }
+            renderSignedOut(container, labels);
+            return;
+        }
+        renderSignedIn(container, user, labels);
     }
 
     window.renderProfile = renderProfile;
@@ -1081,7 +1143,13 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         renderProfile();
         if (auth) {
             onAuthStateChanged(auth, user => {
+                authStateResolved = true;
                 currentAuthUser = user;
+                if (!user) {
+                    localStorage.removeItem(USER_KEY);
+                    window.location.href = '/login';
+                    return;
+                }
                 cloudOrders = null;
                 cloudBookings = null;
                 cloudHistoryUid = '';
