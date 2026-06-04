@@ -1,8 +1,9 @@
-﻿import { auth } from './firebase-config.js';
+import { auth } from './firebase-config.js';
 import {
     GoogleAuthProvider,
     onAuthStateChanged,
     RecaptchaVerifier,
+    signInWithCustomToken,
     signInWithPhoneNumber,
     signInWithPopup
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
@@ -296,6 +297,9 @@ els.profileForm?.addEventListener('submit', async event => {
         if (state.authMode === 'phone') payload.phoneNumber = state.phoneNumber;
 
         const result = await completeRegister(payload);
+        if (result.customToken) {
+            await signInWithCustomToken(auth, result.customToken);
+        }
         if (result.profile) storeProfile(result.profile);
         sessionStorage.removeItem(GOOGLE_SETUP_KEY);
 

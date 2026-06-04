@@ -173,23 +173,27 @@ function authMemberCode(uid) {
   return `ED-${source}`;
 }
 
-function sanitizeProfile(uid, data = {}) {
+function sanitizeProfile(uid, data = {}, credential = {}) {
   const phoneNumber = cleanString(data.phone_number || data.phoneE164 || data.phone || '', 40);
   const phoneDisplay = cleanString(data.phone_display || data.phone || displayThaiPhone(phoneNumber), 40);
   const displayName = cleanString(data.display_name || data.displayName || data.name || '', 120);
   const avatarUrl = cleanString(data.avatar_url || data.photoURL || '', 500);
   const memberLevel = cleanString(data.member_level || data.tier || 'Silver', 40) || 'Silver';
+  const hasPasswordHash = !!cleanString(credential.password_hash || '', 2000);
+  const emailVerifiedAt = data.emailVerifiedAt || data.email_verified_at || null;
   return {
     id: cleanString(data.id || data.uid || uid, 160),
     uid: cleanString(data.uid || uid, 160),
     phone_number: phoneNumber,
     phone_display: phoneDisplay,
-    email: cleanString(data.email || '', 180) || null,
+    email: cleanString(data.email || data.email_lower || '', 180) || null,
+    emailVerified: data.emailVerified === true || data.email_verified === true,
+    emailVerifiedAt: timestampToIso(emailVerifiedAt),
     display_name: displayName || null,
     avatar_url: avatarUrl || null,
     member_level: ['Silver', 'Gold', 'Platinum'].includes(memberLevel) ? memberLevel : 'Silver',
     points: Math.max(0, Math.floor(Number(data.points || 0))),
-    password_login_enabled: data.passwordLoginEnabled === true || data.password_login_enabled === true,
+    password_login_enabled: hasPasswordHash || data.passwordLoginEnabled === true || data.password_login_enabled === true,
     auth_provider_ids: Array.isArray(data.authProviderIds) ? data.authProviderIds : [],
     created_at: timestampToIso(data.created_at || data.createdAt || data.authCreatedAt),
     updated_at: timestampToIso(data.updated_at || data.updatedAt),
@@ -265,6 +269,24 @@ function createMemberAuthHandlers({
         return { uid: doc.id, data: doc.data() || {} };
       }
     }
+
+    const credentialSnap = await db.collection(CREDENTIAL_COLLECTION)
+      .where('phone_number', '==', phoneNumber)
+      .limit(1)
+      .get();
+    if (!credentialSnap.empty) {
+      const credentialDoc = credentialSnap.docs[0];
+      const userSnap = await db.collection('users').doc(credentialDoc.id).get();
+      return {
+        uid: credentialDoc.id,
+        data: userSnap.exists ? userSnap.data() || {} : {
+          uid: credentialDoc.id,
+          phone_number: phoneNumber,
+          phone_display: displayThaiPhone(phoneNumber),
+          phone: displayThaiPhone(phoneNumber),
+        },
+      };
+    }
     return null;
   }
 
@@ -280,7 +302,43 @@ function createMemberAuthHandlers({
         return { uid: doc.id, data: doc.data() || {} };
       }
     }
+
+    const credentialSnap = await db.collection(CREDENTIAL_COLLECTION)
+      .where('email_lower', '==', lowerEmail)
+      .limit(1)
+      .get();
+    if (!credentialSnap.empty) {
+      const credentialDoc = credentialSnap.docs[0];
+      const userSnap = await db.collection('users').doc(credentialDoc.id).get();
+      return {
+        uid: credentialDoc.id,
+        data: userSnap.exists ? userSnap.data() || {} : {
+          uid: credentialDoc.id,
+          email: lowerEmail,
+          email_lower: lowerEmail,
+        },
+      };
+    }
     return null;
+  }
+
+  async function getCredential(uid) {
+    const snap = await db.collection(CREDENTIAL_COLLECTION).doc(cleanString(uid, 160)).get();
+    return snap.exists ? snap.data() || {} : {};
+  }
+
+  async function loadMemberByUid(uid) {
+    const safeUid = cleanString(uid, 160);
+    if (!safeUid) return null;
+    const snap = await db.collection('users').doc(safeUid).get();
+    return snap.exists ? { uid: snap.id, data: snap.data() || {} } : null;
+  }
+
+  async function findCanonicalMemberForGoogle(decoded = {}) {
+    const email = googleEmailFromFirebaseToken(decoded);
+    if (!email) return null;
+    const byEmail = await findUserByEmail(email);
+    return byEmail ? { ...byEmail, email } : null;
   }
 
   async function ensurePhoneIsAvailable(phoneNumber) {
@@ -433,9 +491,6 @@ function createMemberAuthHandlers({
       }
 
       const credential = credentialSnap.exists ? credentialSnap.data() || {} : {};
-      if (credential.password_hash) {
-        throw createPublicError('เบอร์โทรศัพท์นี้สมัครสมาชิกแล้ว กรุณาเข้าสู่ระบบ', 409);
-      }
 
       const existing = userSnap.exists ? userSnap.data() || {} : {};
       const existingProviders = Array.isArray(existing.authProviderIds) ? existing.authProviderIds : [];
@@ -448,6 +503,13 @@ function createMemberAuthHandlers({
       const email = normalizeEmail(existing.email || authUser?.email || '');
       const memberLevel = cleanString(existing.member_level || existing.tier || 'Silver', 40) || 'Silver';
       const points = Math.max(0, Math.floor(Number(existing.points || 0)));
+      let existingPhoneNumber = '';
+      try {
+        existingPhoneNumber = normalizeThaiPhone(credential.phone_number || existing.phone_number || existing.phoneE164 || existing.phone || '');
+      } catch (_) {
+        existingPhoneNumber = '';
+      }
+      const existingPhoneKey = existingPhoneNumber ? phoneIndexKey(existingPhoneNumber) : '';
 
       const userPayload = {
         id: cleanString(existing.id || uid, 160),
@@ -501,16 +563,16 @@ function createMemberAuthHandlers({
     res.status(201).json({
       ok: true,
       message: 'สมัครสมาชิกสำเร็จ',
-      profile: sanitizeProfile(uid, profileForResponse || {}),
+      profile: sanitizeProfile(uid, profileForResponse || {}, { password_hash: passwordHash }),
     });
   }
 
   async function completeFirebaseGoogleRegister(req, res, decoded) {
-    const uid = cleanString(decoded.uid, 160);
-    if (!uid) throw createPublicError('ไม่สามารถยืนยันบัญชี Google ได้ กรุณาลองใหม่อีกครั้ง', 401);
+    const googleUid = cleanString(decoded.uid, 160);
+    if (!googleUid) throw createPublicError('ไม่สามารถยืนยันบัญชี Google ได้ กรุณาลองใหม่อีกครั้ง', 401);
 
     const email = googleEmailFromFirebaseToken(decoded);
-    checkRateLimitKey(`completeFirebaseGoogleRegister:${uid}`, 8, 15 * 60 * 1000);
+    checkRateLimitKey(`completeFirebaseGoogleRegister:${googleUid}`, 8, 15 * 60 * 1000);
     checkRateLimitKey(`completeFirebaseGoogleRegisterEmail:${sha256(email).slice(0, 48)}`, 8, 15 * 60 * 1000);
 
     const password = validatePassword(req.body?.password);
@@ -518,13 +580,17 @@ function createMemberAuthHandlers({
       throw createPublicError('Password และ Confirm Password ไม่ตรงกัน');
     }
 
-    await ensureEmailIsAvailableForUid(email, uid);
+    const canonicalMember = await findCanonicalMemberForGoogle(decoded);
+    const memberUid = cleanString(canonicalMember?.uid || googleUid, 160);
+    if (!canonicalMember) {
+      await ensureEmailIsAvailableForUid(email, memberUid);
+    }
 
-    const authUser = await admin.auth().getUser(uid).catch(() => null);
+    const authUser = await admin.auth().getUser(googleUid).catch(() => null);
     const passwordHash = await hashPassword(password, getPasswordPepper());
     const now = admin.firestore.FieldValue.serverTimestamp();
-    const userRef = db.collection('users').doc(uid);
-    const credentialRef = db.collection(CREDENTIAL_COLLECTION).doc(uid);
+    const userRef = db.collection('users').doc(memberUid);
+    const credentialRef = db.collection(CREDENTIAL_COLLECTION).doc(memberUid);
 
     let profileForResponse = null;
     await db.runTransaction(async tx => {
@@ -544,10 +610,17 @@ function createMemberAuthHandlers({
       const avatarUrl = cleanString(existing.avatar_url || existing.photoURL || authUser?.photoURL || decoded.picture || '', 500);
       const memberLevel = cleanString(existing.member_level || existing.tier || 'Silver', 40) || 'Silver';
       const points = Math.max(0, Math.floor(Number(existing.points || 0)));
+      let existingPhoneNumber = '';
+      try {
+        existingPhoneNumber = normalizeThaiPhone(credential.phone_number || existing.phone_number || existing.phoneE164 || existing.phone || '');
+      } catch (_) {
+        existingPhoneNumber = '';
+      }
+      const existingPhoneKey = existingPhoneNumber ? phoneIndexKey(existingPhoneNumber) : '';
 
       const userPayload = {
-        id: cleanString(existing.id || uid, 160),
-        uid,
+        id: cleanString(existing.id || memberUid, 160),
+        uid: memberUid,
         email,
         email_lower: email,
         display_name: displayName,
@@ -557,12 +630,13 @@ function createMemberAuthHandlers({
         member_level: ['Silver', 'Gold', 'Platinum'].includes(memberLevel) ? memberLevel : 'Silver',
         tier: ['Silver', 'Gold', 'Platinum'].includes(memberLevel) ? memberLevel : 'Silver',
         points,
-        memberCode: cleanString(existing.memberCode || authMemberCode(uid), 40),
+        memberCode: cleanString(existing.memberCode || authMemberCode(memberUid), 40),
         status: cleanString(existing.status || 'active', 40) || 'active',
         passwordLoginEnabled: true,
         profileCompleted: true,
         authProviderIds,
         registrationSource: cleanString(existing.registrationSource || 'google_password', 80),
+        googleAuthUid: cleanString(existing.googleAuthUid || googleUid, 160),
         updated_at: now,
         updatedAt: now,
       };
@@ -575,9 +649,9 @@ function createMemberAuthHandlers({
 
       tx.set(userRef, userPayload, { merge: true });
       tx.set(credentialRef, {
-        uid,
-        phone_number: credential.phone_number || existing.phone_number || '',
-        phone_index_key: credential.phone_index_key || '',
+        uid: memberUid,
+        phone_number: existingPhoneNumber,
+        phone_index_key: credential.phone_index_key || existingPhoneKey,
         email_lower: email,
         password_hash: passwordHash,
         password_algorithm: 'scrypt',
@@ -588,10 +662,16 @@ function createMemberAuthHandlers({
       profileForResponse = { ...existing, ...userPayload };
     });
 
+    const customToken = await admin.auth().createCustomToken(memberUid, {
+      edenMember: true,
+      googleAuthUid: googleUid,
+    });
+
     res.status(201).json({
       ok: true,
       message: 'สมัครสมาชิกด้วย Google สำเร็จ',
-      profile: sanitizeProfile(uid, profileForResponse || {}),
+      customToken,
+      profile: sanitizeProfile(memberUid, profileForResponse || {}, { password_hash: passwordHash }),
     });
   }
 
@@ -918,7 +998,7 @@ function createMemberAuthHandlers({
       res.json({
         ok: true,
         customToken,
-        profile: sanitizeProfile(lookup.uid, freshUserSnap.exists ? freshUserSnap.data() || {} : lookup.data),
+        profile: sanitizeProfile(lookup.uid, freshUserSnap.exists ? freshUserSnap.data() || {} : lookup.data, credential),
       });
     } catch (error) {
       logger.warn('Member login failed', {
@@ -939,9 +1019,34 @@ function createMemberAuthHandlers({
 
     try {
       const decoded = await requireSignedInUser(req);
-      const snap = await db.collection('users').doc(decoded.uid).get();
-      if (!snap.exists) throw createPublicError('ไม่พบข้อมูลสมาชิก', 404);
-      res.json({ ok: true, profile: sanitizeProfile(decoded.uid, snap.data() || {}) });
+      let member = await loadMemberByUid(decoded.uid);
+      let credential = member ? await getCredential(member.uid) : {};
+      let customToken = '';
+
+      const canonicalMember = await findCanonicalMemberForGoogle(decoded).catch(error => {
+        if (error.publicMessage) throw error;
+        logger.warn('Google canonical member lookup failed', {
+          uid: decoded.uid,
+          message: error.message,
+        });
+        return null;
+      });
+
+      if (canonicalMember && canonicalMember.uid !== decoded.uid) {
+        member = canonicalMember;
+        credential = await getCredential(member.uid);
+        customToken = await admin.auth().createCustomToken(member.uid, {
+          edenMember: true,
+          googleAuthUid: decoded.uid,
+        });
+      }
+
+      if (!member) throw createPublicError('ไม่พบข้อมูลสมาชิก', 404);
+      res.json({
+        ok: true,
+        customToken,
+        profile: sanitizeProfile(member.uid, member.data || {}, credential),
+      });
     } catch (error) {
       logger.warn('Member profile fetch failed', {
         message: error.message,

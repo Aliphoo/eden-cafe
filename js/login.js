@@ -1,4 +1,4 @@
-﻿import { auth } from './firebase-config.js';
+import { auth } from './firebase-config.js';
 import {
     GoogleAuthProvider,
     onAuthStateChanged,
@@ -82,7 +82,12 @@ els.google?.addEventListener('click', async () => {
 
         try {
             const result = await getMyProfile();
-            if (result.profile?.password_login_enabled === true || result.profile?.passwordLoginEnabled === true) {
+            const hasPasswordLogin = result.profile?.password_login_enabled === true
+                || result.profile?.passwordLoginEnabled === true;
+            if (hasPasswordLogin) {
+                if (result.customToken) {
+                    await signInWithCustomToken(auth, result.customToken);
+                }
                 storeProfile(result.profile);
                 setStatus('เข้าสู่ระบบด้วย Google สำเร็จ กำลังไปหน้าโปรไฟล์...', 'success');
                 window.setTimeout(redirectToProfile, 250);

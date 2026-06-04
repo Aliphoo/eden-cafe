@@ -1,5 +1,5 @@
 import { auth, db } from './firebase-config.js';
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, doc, getDoc, getDocs, query, setDoc, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getTierRules } from './membership.js';
 import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
@@ -193,7 +193,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             emailVerification: 'Email verification',
             emailVerified: 'Verified',
             emailUnverified: 'Not verified',
-            emailOptional: 'Optional. Verify with a 6-digit code if you want email-based contact.',
+            emailOptional: 'We will send a 6-digit code to this email. After verification, you can use this email with your existing password.',
             emailCode: 'Verification code',
             emailCodePlaceholder: '123456',
             sendEmailCode: 'Send code',
@@ -290,7 +290,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             emailVerification: 'ยืนยันอีเมล',
             emailVerified: 'ยืนยันแล้ว',
             emailUnverified: 'ยังไม่ยืนยัน',
-            emailOptional: 'ไม่บังคับ หากต้องการให้ร้านติดต่อทางอีเมล สามารถยืนยันด้วยโค้ด 6 หลักได้',
+            emailOptional: 'ระบบจะส่งรหัส 6 หลักไปที่อีเมลนี้ หลังยืนยันแล้ว คุณสามารถเข้าสู่ระบบด้วยอีเมลและรหัสผ่านเดิมได้',
             emailCode: 'รหัสยืนยันอีเมล',
             emailCodePlaceholder: '123456',
             sendEmailCode: 'ส่งโค้ด',
@@ -382,6 +382,10 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         try {
             const result = await getMyProfile();
             const profile = result.profile || {};
+            if (result.customToken && profile.uid && auth?.currentUser?.uid !== profile.uid) {
+                await signInWithCustomToken(auth, result.customToken);
+                return;
+            }
             cloudProfile = {
                 ...profile,
                 displayName: profile.display_name || 'สมาชิก Eden',
@@ -973,7 +977,12 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         } catch (_) {
             data = {};
         }
-        if (!response.ok) throw new Error(data.error || 'Request failed');
+        if (!response.ok) {
+            const error = new Error(data.error || 'Request failed');
+            error.userMessage = true;
+            error.status = response.status;
+            throw error;
+        }
         return data;
     }
 
@@ -1029,7 +1038,12 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             const result = await profileApiRequest('/verifyEmailCode', { email, code });
             cloudProfile = { ...(cloudProfile || {}), email, emailVerified: true, emailVerifiedAt: result.emailVerifiedAt || new Date().toISOString() };
             const user = readUser() || {};
-            localStorage.setItem(USER_KEY, JSON.stringify({ ...user, email }));
+            localStorage.setItem(USER_KEY, JSON.stringify({
+                ...user,
+                email,
+                emailVerified: true,
+                emailVerifiedAt: result.emailVerifiedAt || new Date().toISOString()
+            }));
         } catch (error) {
             logClientError('Email verification failed:', error);
             finalMessage = error?.userMessage ? error.message : labels.emailCodeFailed;

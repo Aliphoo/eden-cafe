@@ -37,6 +37,8 @@ export function profileToStoredUser(profile = {}) {
         phoneNumber: profile.phone_number || '',
         memberLevel: profile.member_level || 'Silver',
         points: Number(profile.points || 0),
+        emailVerified: profile.emailVerified === true || profile.email_verified === true,
+        emailVerifiedAt: profile.emailVerifiedAt || profile.email_verified_at || '',
         passwordLoginEnabled: profile.password_login_enabled === true || profile.passwordLoginEnabled === true,
         authProviderIds: Array.isArray(profile.auth_provider_ids) ? profile.auth_provider_ids : [],
         isAdmin: false,
