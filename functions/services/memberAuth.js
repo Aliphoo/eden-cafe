@@ -294,6 +294,162 @@ function createMemberAuthHandlers({
     }
   }
 
+  function phoneNumberFromFirebaseToken(decoded = {}) {
+    const identities = decoded.firebase?.identities || {};
+    const candidates = [
+      decoded.phone_number,
+      Array.isArray(identities.phone) ? identities.phone[0] : '',
+      Array.isArray(identities.phone_number) ? identities.phone_number[0] : '',
+    ];
+
+    for (const value of candidates) {
+      if (!value) continue;
+      try {
+        return normalizeThaiPhone(value);
+      } catch (_) {
+        // Ignore malformed identity values and continue checking candidates.
+      }
+    }
+    return '';
+  }
+
+  async function ensurePhoneIsAvailableForUid(phoneNumber, allowedUid) {
+    const existing = await findUserByPhone(phoneNumber);
+    if (existing && existing.uid !== allowedUid) {
+      throw createPublicError('เบอร์โทรศัพท์นี้สมัครสมาชิกแล้ว กรุณาเข้าสู่ระบบ', 409);
+    }
+
+    try {
+      const authUser = await admin.auth().getUserByPhoneNumber(phoneNumber);
+      if (authUser.uid !== allowedUid) {
+        throw createPublicError('เบอร์โทรศัพท์นี้สมัครสมาชิกแล้ว กรุณาเข้าสู่ระบบ', 409);
+      }
+    } catch (error) {
+      if (error.publicMessage) throw error;
+      if (error.code !== 'auth/user-not-found') throw error;
+    }
+  }
+
+  async function completeFirebasePhoneRegister(req, res, firebaseIdToken) {
+    const decoded = await admin.auth().verifyIdToken(firebaseIdToken);
+    const uid = cleanString(decoded.uid, 160);
+    if (!uid) throw createPublicError('ไม่สามารถยืนยันบัญชี Firebase ได้ กรุณาลองใหม่อีกครั้ง', 401);
+
+    const phoneNumber = phoneNumberFromFirebaseToken(decoded);
+    if (!phoneNumber) throw createPublicError('บัญชีนี้ยังไม่ได้ยืนยันเบอร์โทรศัพท์ กรุณายืนยัน OTP อีกครั้ง', 401);
+
+    if (req.body?.phoneNumber || req.body?.phone) {
+      const requestedPhone = normalizeThaiPhone(req.body.phoneNumber || req.body.phone);
+      if (requestedPhone !== phoneNumber) {
+        throw createPublicError('เบอร์โทรศัพท์ไม่ตรงกับข้อมูลที่ยืนยัน OTP กรุณาลองใหม่อีกครั้ง', 400);
+      }
+    }
+
+    checkRateLimitKey(`completeFirebasePhoneRegister:${uid}`, 8, 15 * 60 * 1000);
+    checkRateLimitKey(`completeFirebasePhoneRegisterPhone:${phoneIndexKey(phoneNumber)}`, 8, 15 * 60 * 1000);
+
+    const password = validatePassword(req.body?.password);
+    if (String(req.body?.confirmPassword || password) !== password) {
+      throw createPublicError('Password และ Confirm Password ไม่ตรงกัน');
+    }
+
+    await ensurePhoneIsAvailableForUid(phoneNumber, uid);
+
+    const authUser = await admin.auth().getUser(uid).catch(() => null);
+    const passwordHash = await hashPassword(password, getPasswordPepper());
+    const phoneDisplay = displayThaiPhone(phoneNumber);
+    const phoneKey = phoneIndexKey(phoneNumber);
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const userRef = db.collection('users').doc(uid);
+    const credentialRef = db.collection(CREDENTIAL_COLLECTION).doc(uid);
+    const phoneIndexRef = db.collection(PHONE_INDEX_COLLECTION).doc(phoneKey);
+
+    let profileForResponse = null;
+    await db.runTransaction(async tx => {
+      const [userSnap, credentialSnap, phoneIndexSnap] = await Promise.all([
+        tx.get(userRef),
+        tx.get(credentialRef),
+        tx.get(phoneIndexRef),
+      ]);
+
+      const phoneIndex = phoneIndexSnap.exists ? phoneIndexSnap.data() || {} : {};
+      if (phoneIndexSnap.exists && phoneIndex.uid && phoneIndex.uid !== uid) {
+        throw createPublicError('เบอร์โทรศัพท์นี้สมัครสมาชิกแล้ว กรุณาเข้าสู่ระบบ', 409);
+      }
+
+      const credential = credentialSnap.exists ? credentialSnap.data() || {} : {};
+      if (credential.password_hash) {
+        throw createPublicError('เบอร์โทรศัพท์นี้สมัครสมาชิกแล้ว กรุณาเข้าสู่ระบบ', 409);
+      }
+
+      const existing = userSnap.exists ? userSnap.data() || {} : {};
+      const existingProviders = Array.isArray(existing.authProviderIds) ? existing.authProviderIds : [];
+      const authProviderIds = Array.from(new Set([...existingProviders, 'phone', 'custom_password']));
+      const displayName = cleanString(
+        existing.display_name || existing.displayName || authUser?.displayName || 'สมาชิก Eden',
+        120
+      );
+      const avatarUrl = cleanString(existing.avatar_url || existing.photoURL || authUser?.photoURL || '', 500);
+      const email = normalizeEmail(existing.email || authUser?.email || '');
+      const memberLevel = cleanString(existing.member_level || existing.tier || 'Silver', 40) || 'Silver';
+      const points = Math.max(0, Math.floor(Number(existing.points || 0)));
+
+      const userPayload = {
+        id: cleanString(existing.id || uid, 160),
+        uid,
+        phone_number: phoneNumber,
+        phone_display: phoneDisplay,
+        phone: phoneDisplay,
+        phoneE164: phoneNumber,
+        email,
+        email_lower: email,
+        display_name: displayName,
+        displayName,
+        avatar_url: avatarUrl,
+        photoURL: avatarUrl,
+        member_level: ['Silver', 'Gold', 'Platinum'].includes(memberLevel) ? memberLevel : 'Silver',
+        tier: ['Silver', 'Gold', 'Platinum'].includes(memberLevel) ? memberLevel : 'Silver',
+        points,
+        memberCode: cleanString(existing.memberCode || authMemberCode(uid), 40),
+        status: cleanString(existing.status || 'active', 40) || 'active',
+        passwordLoginEnabled: true,
+        profileCompleted: true,
+        authProviderIds,
+        registrationSource: cleanString(existing.registrationSource || 'firebase_phone_password', 80),
+        updated_at: now,
+        updatedAt: now,
+      };
+      if (!userSnap.exists || !existing.created_at) userPayload.created_at = now;
+      if (!userSnap.exists || !existing.createdAt) userPayload.createdAt = now;
+
+      tx.set(userRef, userPayload, { merge: true });
+      tx.set(credentialRef, {
+        uid,
+        phone_number: phoneNumber,
+        phone_index_key: phoneKey,
+        email_lower: email,
+        password_hash: passwordHash,
+        password_algorithm: 'scrypt',
+        created_at: credential.created_at || now,
+        updated_at: now,
+      }, { merge: true });
+      tx.set(phoneIndexRef, {
+        uid,
+        phone_number: phoneNumber,
+        updated_at: now,
+        created_at: phoneIndex.created_at || now,
+      }, { merge: true });
+
+      profileForResponse = { ...existing, ...userPayload };
+    });
+
+    res.status(201).json({
+      ok: true,
+      message: 'สมัครสมาชิกสำเร็จ',
+      profile: sanitizeProfile(uid, profileForResponse || {}),
+    });
+  }
+
   async function requestRegisterOtp(req, res) {
     if (handleOptions(req, res)) return;
     setCors(req, res);
@@ -436,6 +592,12 @@ function createMemberAuthHandlers({
 
     try {
       checkRateLimit(req, 'completeRegister', 12, 15 * 60 * 1000);
+      const firebaseIdToken = cleanString(req.body?.firebaseIdToken || req.body?.idToken, 4000);
+      if (firebaseIdToken) {
+        await completeFirebasePhoneRegister(req, res, firebaseIdToken);
+        return;
+      }
+
       const verificationId = cleanString(req.body?.verificationId, 160);
       const phoneNumber = normalizeThaiPhone(req.body?.phoneNumber || req.body?.phone);
       const registrationToken = cleanString(req.body?.registrationToken, 1200);

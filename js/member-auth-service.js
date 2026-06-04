@@ -94,15 +94,15 @@ export function verifyRegisterOtp({ verificationId, phoneNumber, otp }) {
     });
 }
 
-export function completeRegister({ verificationId, registrationToken, phoneNumber, password, confirmPassword }) {
+export function completeRegister({ verificationId, registrationToken, phoneNumber, password, confirmPassword, firebaseIdToken }) {
+    const body = { password, confirmPassword };
+    if (firebaseIdToken) body.firebaseIdToken = cleanString(firebaseIdToken, 4000);
+    if (verificationId) body.verificationId = cleanString(verificationId, 160);
+    if (registrationToken) body.registrationToken = cleanString(registrationToken, 1200);
+    if (phoneNumber) body.phoneNumber = normalizeThaiPhone(phoneNumber);
+
     return edenAuthRequest('/completeRegister', {
-        body: {
-            verificationId,
-            registrationToken,
-            phoneNumber: normalizeThaiPhone(phoneNumber),
-            password,
-            confirmPassword
-        }
+        body
     });
 }
 
