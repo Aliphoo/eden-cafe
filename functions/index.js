@@ -4,7 +4,12 @@ const { defineSecret } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 const ftp = require('basic-ftp');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
+const fs = require('fs');
+const path = require('path');
 const { Readable } = require('stream');
+const { createMemberAuthHandlers } = require('./services/memberAuth');
 
 admin.initializeApp();
 
@@ -13,9 +18,15 @@ const SPACESHIP_FTP_SERVER = defineSecret('SPACESHIP_FTP_SERVER');
 const SPACESHIP_FTP_USERNAME = defineSecret('SPACESHIP_FTP_USERNAME');
 const SPACESHIP_FTP_PASSWORD = defineSecret('SPACESHIP_FTP_PASSWORD');
 const GOOGLE_MAPS_SERVER_KEY = defineSecret('GOOGLE_MAPS_SERVER_KEY');
+const AUTH_OTP_PEPPER = defineSecret('AUTH_OTP_PEPPER');
+const AUTH_PASSWORD_PEPPER = defineSecret('AUTH_PASSWORD_PEPPER');
+const OTP_SMS_API_URL = defineSecret('OTP_SMS_API_URL');
+const OTP_SMS_API_KEY = defineSecret('OTP_SMS_API_KEY');
+const OTP_SMS_SENDER = defineSecret('OTP_SMS_SENDER');
 
 const PLACE_ID = 'ChIJVTN6cGwB1zAR66OQ_OBKRkM';
 const PLACE_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
+const PHONE_AUTH_EMAIL_DOMAIN = 'phone.edencafe.co';
 const REVIEW_LIMIT = 5;
 const ADMIN_EMAILS = new Set([
   'admin@edencafe.com',
@@ -61,7 +72,7 @@ const ALLOWED_ORIGINS = new Set([
 
 function setCors(req, res) {
   const origin = req.get('origin') || '';
-  if (ALLOWED_ORIGINS.has(origin)) {
+  if (ALLOWED_ORIGINS.has(origin) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
     res.set('Access-Control-Allow-Origin', origin);
     res.set('Vary', 'Origin');
   }
@@ -78,6 +89,228 @@ function handleOptions(req, res) {
   }
   return false;
 }
+
+const RATE_LIMIT_BUCKETS = new Map();
+
+function clientIp(req) {
+  const forwarded = String(req.get('x-forwarded-for') || '').split(',')[0].trim();
+  return forwarded || String(req.ip || req.get('x-real-ip') || 'unknown');
+}
+
+function checkRateLimit(req, bucketName, maxRequests, windowMs) {
+  const now = Date.now();
+  const key = `${bucketName}:${clientIp(req)}`;
+  checkRateLimitKey(key, maxRequests, windowMs, now);
+}
+
+function checkRateLimitKey(key, maxRequests, windowMs, now = Date.now()) {
+  const bucket = RATE_LIMIT_BUCKETS.get(key);
+  if (!bucket || bucket.expiresAt <= now) {
+    RATE_LIMIT_BUCKETS.set(key, { count: 1, expiresAt: now + windowMs });
+    return;
+  }
+  if (bucket.count >= maxRequests) {
+    const error = new Error('Too many requests');
+    error.statusCode = 429;
+    throw error;
+  }
+  bucket.count += 1;
+}
+
+function publicApiError(error, fallback = 'Unable to process request') {
+  const status = error.statusCode || 500;
+  if (status === 401) return { status, message: 'Please sign in and try again.' };
+  if (status === 403) return { status, message: 'You do not have permission to perform this action.' };
+  if (status === 409) return { status, message: 'The selected resource is no longer available.' };
+  if (status === 429) return { status, message: 'Too many requests. Please try again later.' };
+  if (status >= 500) return { status, message: fallback };
+  return { status, message: fallback };
+}
+
+const VISITOR_COUNTER_DOC = db.collection('stats').doc('pageViews');
+const VISITOR_COUNTER_SESSION_COLLECTION = 'visitor_counter_sessions';
+const VISITOR_COUNTER_IP_BUCKET_COLLECTION = 'visitor_counter_ip_buckets';
+const VISITOR_COUNTER_IP_DAILY_LIMIT = 80;
+const VISITOR_COUNTER_LOADING_MESSAGE = '\u0e01\u0e33\u0e25\u0e31\u0e07\u0e2d\u0e31\u0e1b\u0e40\u0e14\u0e15\u0e2a\u0e16\u0e34\u0e15\u0e34';
+
+function bangkokDateKey(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(String(value || '')).digest('hex');
+}
+
+function normalizeCounterStats(data = {}, today = bangkokDateKey()) {
+  const totalViews = Math.max(0, Math.floor(Number(data.totalViews) || 0));
+  const lastUpdateDate = typeof data.lastUpdateDate === 'string' ? data.lastUpdateDate : today;
+  const dailyViews = lastUpdateDate === today
+    ? Math.max(0, Math.floor(Number(data.dailyViews) || 0))
+    : 0;
+  return { totalViews, dailyViews, lastUpdateDate: lastUpdateDate === today ? today : lastUpdateDate };
+}
+
+function counterPayload(stats, counted = false) {
+  return {
+    ok: true,
+    counted,
+    dailyViews: stats.dailyViews,
+    totalViews: stats.totalViews,
+    lastUpdateDate: stats.lastUpdateDate,
+    timezone: 'Asia/Bangkok',
+    fallbackText: VISITOR_COUNTER_LOADING_MESSAGE,
+  };
+}
+
+exports.trackVisitorCounter = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    res.set('Cache-Control', 'no-store, max-age=0');
+    res.set('X-Content-Type-Options', 'nosniff');
+
+    if (!['GET', 'POST'].includes(req.method)) {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'visitor-counter', 120, 15 * 60 * 1000);
+
+      const today = bangkokDateKey();
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const wantsCount = req.method === 'POST' && body.count !== false;
+      let result = null;
+
+      await db.runTransaction(async transaction => {
+        const statsSnap = await transaction.get(VISITOR_COUNTER_DOC);
+        const currentStats = statsSnap.exists
+          ? normalizeCounterStats(statsSnap.data(), today)
+          : { totalViews: 0, dailyViews: 0, lastUpdateDate: today };
+
+        if (!wantsCount) {
+          result = counterPayload(currentStats, false);
+          return;
+        }
+
+        const ip = clientIp(req);
+        const userAgent = cleanString(req.get('user-agent') || 'unknown', 300);
+        const visitorId = cleanString(body.visitorId || '', 160);
+        const ipHash = sha256(ip).slice(0, 32);
+        const visitorHash = sha256(`${today}:${visitorId || 'anonymous'}:${ipHash}:${userAgent}`).slice(0, 48);
+        const sessionRef = db.collection(VISITOR_COUNTER_SESSION_COLLECTION).doc(`${today}_${visitorHash}`);
+        const ipBucketRef = db.collection(VISITOR_COUNTER_IP_BUCKET_COLLECTION).doc(`${today}_${ipHash}`);
+        const [sessionSnap, ipBucketSnap] = await Promise.all([
+          transaction.get(sessionRef),
+          transaction.get(ipBucketRef),
+        ]);
+
+        if (sessionSnap.exists) {
+          result = counterPayload(currentStats, false);
+          return;
+        }
+
+        const ipBucketCount = ipBucketSnap.exists ? Math.max(0, Number(ipBucketSnap.data().count) || 0) : 0;
+        if (ipBucketCount >= VISITOR_COUNTER_IP_DAILY_LIMIT) {
+          logger.warn('Visitor counter IP bucket limit reached', { ipHash, today });
+          result = counterPayload(currentStats, false);
+          return;
+        }
+
+        const nextStats = {
+          totalViews: currentStats.totalViews + 1,
+          dailyViews: currentStats.lastUpdateDate === today ? currentStats.dailyViews + 1 : 1,
+          lastUpdateDate: today,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+
+        transaction.set(VISITOR_COUNTER_DOC, nextStats, { merge: true });
+        transaction.set(sessionRef, {
+          date: today,
+          visitorHash,
+          ipHash,
+          userAgentHash: sha256(userAgent).slice(0, 32),
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        transaction.set(ipBucketRef, {
+          date: today,
+          ipHash,
+          count: admin.firestore.FieldValue.increment(1),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+        result = counterPayload(nextStats, true);
+      });
+
+      res.status(200).json(result || counterPayload({ totalViews: 0, dailyViews: 0, lastUpdateDate: today }, false));
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('Visitor counter failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, VISITOR_COUNTER_LOADING_MESSAGE);
+      res.status(status).json({ error: publicError.message, fallbackText: VISITOR_COUNTER_LOADING_MESSAGE });
+    }
+  }
+);
+
+exports.downloadPosApk = onRequest(
+  { region: 'asia-southeast1', timeoutSeconds: 120, memory: '512MiB' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'GET') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const decoded = await requireAdminAccess(req, 'pos');
+      const fileName = 'EdenCafePOS-release.apk';
+      const filePath = path.join(__dirname, 'assets', fileName);
+
+      if (!fs.existsSync(filePath)) {
+        res.status(404).json({ error: 'POS APK file is not available' });
+        return;
+      }
+
+      const stat = fs.statSync(filePath);
+      res.set('Cache-Control', 'no-store, max-age=0');
+      res.set('Content-Type', 'application/vnd.android.package-archive');
+      res.set('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.set('Content-Length', String(stat.size));
+      res.set('X-Content-Type-Options', 'nosniff');
+
+      logger.info('Protected POS APK download started', {
+        uid: decoded.uid || '',
+        email: decoded.email || '',
+        bytes: stat.size,
+      });
+
+      fs.createReadStream(filePath)
+        .on('error', error => {
+          logger.error('Protected POS APK stream failed', { message: error.message });
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Unable to stream POS APK' });
+            return;
+          }
+          res.end();
+        })
+        .pipe(res);
+    } catch (error) {
+      const isTokenError = /Firebase ID token|verify ID token|Decoding Firebase|jwt/i.test(error.message || '');
+      const status = error.statusCode || (isTokenError ? 401 : 500);
+      logger.warn('Protected POS APK download denied', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to download POS APK');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
 
 async function requireAdminUid(req) {
   const header = req.get('authorization') || '';
@@ -152,6 +385,72 @@ async function requireOwnerAccess(req) {
   throw error;
 }
 
+async function requireSignedInUser(req) {
+  const header = req.get('authorization') || '';
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match) {
+    const error = new Error('Missing Authorization token');
+    error.statusCode = 401;
+    throw error;
+  }
+  return admin.auth().verifyIdToken(match[1]);
+}
+
+const memberAuthHandlers = createMemberAuthHandlers({
+  admin,
+  db,
+  logger,
+  setCors,
+  handleOptions,
+  checkRateLimit,
+  checkRateLimitKey,
+  requireSignedInUser,
+  getOtpPepper: () => AUTH_OTP_PEPPER.value() || process.env.AUTH_OTP_PEPPER || '',
+  getPasswordPepper: () => AUTH_PASSWORD_PEPPER.value() || process.env.AUTH_PASSWORD_PEPPER || '',
+  getSmsConfig: () => ({
+    url: OTP_SMS_API_URL.value() || process.env.OTP_SMS_API_URL || '',
+    apiKey: OTP_SMS_API_KEY.value() || process.env.OTP_SMS_API_KEY || '',
+    sender: OTP_SMS_SENDER.value() || process.env.OTP_SMS_SENDER || 'Eden Cafe',
+  }),
+});
+
+exports.requestRegisterOtp = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [AUTH_OTP_PEPPER, OTP_SMS_API_URL, OTP_SMS_API_KEY, OTP_SMS_SENDER],
+  },
+  memberAuthHandlers.requestRegisterOtp
+);
+
+exports.verifyRegisterOtp = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [AUTH_OTP_PEPPER],
+  },
+  memberAuthHandlers.verifyRegisterOtp
+);
+
+exports.completeRegister = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [AUTH_OTP_PEPPER, AUTH_PASSWORD_PEPPER],
+  },
+  memberAuthHandlers.completeRegister
+);
+
+exports.loginMember = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [AUTH_PASSWORD_PEPPER],
+  },
+  memberAuthHandlers.loginMember
+);
+
+exports.getMyProfile = onRequest(
+  { region: 'asia-southeast1' },
+  memberAuthHandlers.getMyProfile
+);
+
 function normalizeAdminRole(role) {
   return ['owner', 'head_manager', 'manager'].includes(role) ? role : 'manager';
 }
@@ -199,22 +498,40 @@ function timestampFromAuthDate(value) {
   return date && !Number.isNaN(date.getTime()) ? admin.firestore.Timestamp.fromDate(date) : null;
 }
 
+function isInternalPhoneEmail(email) {
+  return String(email || '').toLowerCase().endsWith('@' + PHONE_AUTH_EMAIL_DOMAIN);
+}
+
+function displayThaiPhone(phoneE164) {
+  const phone = String(phoneE164 || '');
+  return phone.startsWith('+66') ? '0' + phone.slice(3) : phone;
+}
+
 function authUserToMemberDoc(userRecord) {
   const providerIds = Array.isArray(userRecord.providerData)
     ? userRecord.providerData.map(provider => provider.providerId).filter(Boolean)
     : [];
   const authCreatedAt = timestampFromAuthDate(userRecord.metadata?.creationTime);
   const lastLoginAt = timestampFromAuthDate(userRecord.metadata?.lastSignInTime);
+  const publicAuthEmail = isInternalPhoneEmail(userRecord.email) ? '' : cleanString(userRecord.email || '', 180);
+  const phoneNumber = cleanString(userRecord.phoneNumber || '', 40);
+  const phoneDisplay = cleanString(displayThaiPhone(phoneNumber), 40);
+  const phoneAuthEmail = isInternalPhoneEmail(userRecord.email) ? cleanString(userRecord.email || '', 180) : '';
+  const displayName = cleanString(userRecord.displayName || publicAuthEmail || (phoneNumber ? 'Eden Member ' + phoneNumber.slice(-4) : 'Eden Member'), 120);
 
   const data = {
     uid: userRecord.uid,
-    displayName: cleanString(userRecord.displayName || userRecord.email || 'Eden Member', 120),
-    email: cleanString(userRecord.email || '', 180),
+    displayName,
+    email: publicAuthEmail,
+    phoneE164: phoneNumber,
+    phone: phoneDisplay,
+    loginUsername: phoneDisplay,
+    phoneAuthEmail,
     photoURL: cleanString(userRecord.photoURL || '', 500),
     memberCode: authMemberCode(userRecord.uid),
     authProviderIds: providerIds,
     authDisabled: !!userRecord.disabled,
-    emailVerified: !!userRecord.emailVerified,
+    emailVerified: !!publicAuthEmail && !!userRecord.emailVerified,
     authCreatedAt,
     lastLoginAt,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -337,13 +654,19 @@ function availabilityDocId(date, time) {
 async function uidFromAuthHeader(req) {
   const header = req.get('authorization') || '';
   const match = header.match(/^Bearer\s+(.+)$/i);
-  if (!match) return '';
+  if (!match) {
+    const error = new Error('Missing Authorization token');
+    error.statusCode = 401;
+    throw error;
+  }
   try {
     const decoded = await admin.auth().verifyIdToken(match[1]);
     return decoded.uid || '';
   } catch (error) {
-    logger.warn('Ignoring invalid booking auth token', { message: error.message });
-    return '';
+    logger.warn('Booking auth token rejected', { message: error.message });
+    const authError = new Error('Invalid Authorization token');
+    authError.statusCode = 401;
+    throw authError;
   }
 }
 
@@ -362,8 +685,8 @@ function normalizeBookingPayload(raw, verifiedUid = '') {
     status: 'pending',
   };
 
-  if (verifiedUid) booking.uid = verifiedUid;
-  if (raw.uid && verifiedUid) booking.uid = verifiedUid;
+  if (!verifiedUid) throw new Error('Missing Authorization token');
+  booking.uid = verifiedUid;
 
   if (!['table', 'room'].includes(bookingType)) throw new Error('Invalid booking type');
   if (!booking.name || !booking.phone || !isISODate(date)) throw new Error('Missing booking fields');
@@ -520,6 +843,7 @@ exports.getTableAvailability = onRequest(
     setCors(req, res);
 
     try {
+      checkRateLimit(req, 'tableAvailability', 120, 10 * 60 * 1000);
       const date = cleanString(req.query.date, 20);
       const time = cleanString(req.query.time, 10);
       if (!isISODate(date) || !isTime(time)) {
@@ -535,7 +859,8 @@ exports.getTableAvailability = onRequest(
       res.json({ date, time, tableIds });
     } catch (error) {
       logger.error('Unable to read table availability', { message: error.message });
-      res.status(500).json({ error: 'Unable to read table availability' });
+      const publicError = publicApiError(error, 'Unable to read table availability');
+      res.status(publicError.status).json({ error: publicError.message });
     }
   }
 );
@@ -552,6 +877,7 @@ exports.createBooking = onRequest(
     }
 
     try {
+      checkRateLimit(req, 'createBooking', 12, 10 * 60 * 1000);
       const verifiedUid = await uidFromAuthHeader(req);
       const booking = normalizeBookingPayload(req.body || {}, verifiedUid);
       const bookingRef = db.collection('bookings').doc();
@@ -595,9 +921,10 @@ exports.createBooking = onRequest(
     } catch (error) {
       const status = error.statusCode || (/Invalid|Missing|Large/.test(error.message) ? 400 : 500);
       logger.warn('Booking create failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Booking create failed. Please check the details and try again.');
       res.status(status).json({
-        error: error.message || 'Booking create failed',
-        conflictIds: error.conflictIds || [],
+        error: status === 409 ? 'Selected table is already booked.' : publicError.message,
+        conflictIds: status === 409 ? (error.conflictIds || []) : [],
       });
     }
   }
@@ -641,7 +968,8 @@ exports.uploadSpaceshipImage = onRequest(
     } catch (error) {
       const status = error.statusCode || (/Missing|Invalid|Unsupported|large|configured/i.test(error.message) ? 400 : 500);
       logger.warn('Spaceship image upload failed', { message: error.message, status });
-      res.status(status).json({ error: error.message || 'Spaceship image upload failed' });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to upload image. Please check the file and try again.');
+      res.status(status).json({ error: publicError.message });
     }
   }
 );
@@ -787,7 +1115,162 @@ exports.upsertAdminAccessUser = onRequest(
     } catch (error) {
       const status = error.statusCode || (/required|valid|password|uid|email/i.test(error.message) ? 400 : 500);
       logger.warn('Admin access user upsert failed', { message: error.message, status });
-      res.status(status).json({ error: error.message || 'Admin access user upsert failed' });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to save admin access user. Please check the required fields.');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+function normalizePublicEmail(value) {
+  const email = cleanString(value || '', 180).toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
+}
+
+function emailVerificationHash(uid, email, code) {
+  return crypto
+    .createHash('sha256')
+    .update(`${uid}:${email}:${code}`)
+    .digest('hex');
+}
+
+function createMailTransporter() {
+  const host = process.env.SMTP_HOST || '';
+  const port = Number(process.env.SMTP_PORT || 587);
+  const user = process.env.SMTP_USER || '';
+  const pass = process.env.SMTP_PASS || '';
+  if (!host || !user || !pass) {
+    const error = new Error('Email sender is not configured');
+    error.statusCode = 503;
+    throw error;
+  }
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: { user, pass },
+  });
+}
+
+exports.sendEmailVerificationCode = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'sendEmailVerificationCode', 8, 10 * 60 * 1000);
+      const decoded = await requireSignedInUser(req);
+      checkRateLimitKey(`sendEmailVerificationCodeUid:${decoded.uid}`, 5, 10 * 60 * 1000);
+      const email = normalizePublicEmail(req.body?.email);
+      if (!email) {
+        const error = new Error('Valid email is required');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      const now = admin.firestore.Timestamp.now();
+      const expiresAt = admin.firestore.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000));
+      await db.collection('email_verification_codes').doc(decoded.uid).set({
+        uid: decoded.uid,
+        email,
+        codeHash: emailVerificationHash(decoded.uid, email, code),
+        attempts: 0,
+        createdAt: now,
+        expiresAt,
+      });
+
+      const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+      await createMailTransporter().sendMail({
+        from,
+        to: email,
+        subject: 'Eden Cafe email verification code',
+        text: `Your Eden Cafe verification code is ${code}. This code expires in 10 minutes.`,
+        html: `<p>Your Eden Cafe verification code is:</p><h2 style="letter-spacing:0.2em;">${code}</h2><p>This code expires in 10 minutes.</p>`,
+      });
+
+      logger.info('Email verification code sent', { uid: decoded.uid, email });
+      res.json({ ok: true, expiresInMinutes: 10 });
+    } catch (error) {
+      const status = error.statusCode || (/email|required|configured/i.test(error.message) ? 400 : 500);
+      logger.warn('Email verification send failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to send verification code.');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+exports.verifyEmailCode = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'verifyEmailCode', 30, 10 * 60 * 1000);
+      const decoded = await requireSignedInUser(req);
+      checkRateLimitKey(`verifyEmailCodeUid:${decoded.uid}`, 12, 10 * 60 * 1000);
+      const email = normalizePublicEmail(req.body?.email);
+      const code = cleanString(req.body?.code || '', 6);
+      if (!email || !/^\d{6}$/.test(code)) {
+        const error = new Error('Valid email and 6-digit code are required');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const codeRef = db.collection('email_verification_codes').doc(decoded.uid);
+      const codeSnap = await codeRef.get();
+      if (!codeSnap.exists) {
+        const error = new Error('Verification code was not found or expired');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const record = codeSnap.data() || {};
+      const expiresAt = record.expiresAt?.toDate ? record.expiresAt.toDate().getTime() : 0;
+      if (record.email !== email || !expiresAt || expiresAt < Date.now()) {
+        await codeRef.delete().catch(() => {});
+        const error = new Error('Verification code was not found or expired');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      if (Number(record.attempts || 0) >= 5 || record.codeHash !== emailVerificationHash(decoded.uid, email, code)) {
+        await codeRef.set({ attempts: admin.firestore.FieldValue.increment(1) }, { merge: true });
+        const error = new Error('Verification code is incorrect');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      await db.runTransaction(async tx => {
+        tx.set(db.collection('users').doc(decoded.uid), {
+          uid: decoded.uid,
+          email,
+          emailVerified: true,
+          emailVerifiedAt: now,
+          updatedAt: now,
+        }, { merge: true });
+        tx.delete(codeRef);
+      });
+
+      logger.info('Email verified by code', { uid: decoded.uid, email });
+      res.json({ ok: true, email, emailVerifiedAt: new Date().toISOString() });
+    } catch (error) {
+      const status = error.statusCode || (/email|code|expired|incorrect|required/i.test(error.message) ? 400 : 500);
+      logger.warn('Email verification failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to verify email code.');
+      res.status(status).json({ error: publicError.message });
     }
   }
 );
@@ -834,7 +1317,8 @@ exports.syncAuthUsersToFirestore = onRequest(
     } catch (error) {
       const status = error.statusCode || 500;
       logger.warn('Auth user sync failed', { message: error.message, status });
-      res.status(status).json({ error: error.message || 'Auth user sync failed' });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to sync members.');
+      res.status(status).json({ error: publicError.message });
     }
   }
 );
@@ -957,7 +1441,8 @@ exports.adjustMemberPoints = onRequest(
     } catch (error) {
       const status = error.statusCode || 500;
       logger.warn('Member point adjustment failed', { message: error.message, status });
-      res.status(status).json({ error: error.message || 'Member point adjustment failed' });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to update loyalty points.');
+      res.status(status).json({ error: publicError.message });
     }
   }
 );
@@ -1349,7 +1834,8 @@ exports.applyPosLoyaltySale = onRequest(
     } catch (error) {
       const status = error.statusCode || 500;
       logger.warn('POS loyalty sale failed', { message: error.message, status });
-      res.status(status).json({ error: error.message || 'POS loyalty sale failed' });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to apply loyalty sale.');
+      res.status(status).json({ error: publicError.message });
     }
   }
 );

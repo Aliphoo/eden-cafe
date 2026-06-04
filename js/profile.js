@@ -2,11 +2,14 @@ import { auth, db } from './firebase-config.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, doc, getDoc, getDocs, query, setDoc, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getTierRules } from './membership.js';
+import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
 
 (() => {
     const USER_KEY = 'eden_user';
     const ORDER_HISTORY_KEY = 'eden_order_history';
     const CART_KEY = 'eden_cart';
+    const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net';
+    const PHONE_AUTH_EMAIL_DOMAIN = 'phone.edencafe.co';
     let cloudOrders = null;
     let cloudBookings = null;
     let cloudHistoryUid = '';
@@ -15,13 +18,16 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
     let cloudProfileUid = '';
     let cloudProfileLoading = false;
     let cloudProfileSaving = false;
+    let emailVerificationBusy = false;
     let loyaltyConfig = null;
     let loyaltyLedger = [];
     let loyaltySummary = null;
     let loyaltyUid = '';
     let loyaltyLoading = false;
     let currentAuthUser = null;
+    let authStateResolved = false;
     let selectedPreviewTier = '';
+    const CAN_LOG_CLIENT_ERRORS = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
 
     const DEFAULT_LOYALTY_CONFIG = {
         enabled: true,
@@ -38,6 +44,10 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
 
     function isEnglishPage() {
         return location.pathname.includes('-en');
+    }
+
+    function logClientError(label, error) {
+        if (CAN_LOG_CLIENT_ERRORS) console.warn(label, error);
     }
 
     function escapeHTML(value) {
@@ -60,6 +70,14 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
 
     function cleanString(value, maxLength = 300) {
         return String(value ?? '').trim().slice(0, maxLength);
+    }
+
+    function isInternalPhoneEmail(email) {
+        return String(email || '').toLowerCase().endsWith('@' + PHONE_AUTH_EMAIL_DOMAIN);
+    }
+
+    function publicEmail(email, fallback = '') {
+        return isInternalPhoneEmail(email) ? fallback : (email || fallback || '');
     }
 
     function money(value) {
@@ -168,10 +186,23 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             pending: 'Pending Payment',
             paid: 'Paid',
             profileInfo: 'Profile Information',
-            googleInfo: 'Google Account',
+            googleInfo: 'Member Account',
             editableInfo: 'Additional customer information',
             name: 'Name',
             email: 'Email',
+            emailVerification: 'Email verification',
+            emailVerified: 'Verified',
+            emailUnverified: 'Not verified',
+            emailOptional: 'Optional. Verify with a 6-digit code if you want email-based contact.',
+            emailCode: 'Verification code',
+            emailCodePlaceholder: '123456',
+            sendEmailCode: 'Send code',
+            verifyEmailCode: 'Verify code',
+            sendingEmailCode: 'Sending code...',
+            verifyingEmailCode: 'Verifying...',
+            emailCodeSent: 'Verification code sent. Please check your email.',
+            emailCodeVerified: 'Email verified successfully.',
+            emailCodeFailed: 'Unable to verify email right now.',
             phone: 'Phone number',
             shippingAddress: 'Shipping address',
             birthDate: 'Birthday',
@@ -252,10 +283,23 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             pending: 'รอชำระเงิน',
             paid: 'ชำระเงินแล้ว',
             profileInfo: 'ข้อมูลสมาชิก',
-            googleInfo: 'บัญชี Google',
+            googleInfo: 'บัญชีสมาชิก',
             editableInfo: 'ข้อมูลเพิ่มเติมสำหรับบริการลูกค้า',
             name: 'ชื่อ',
             email: 'อีเมล',
+            emailVerification: 'ยืนยันอีเมล',
+            emailVerified: 'ยืนยันแล้ว',
+            emailUnverified: 'ยังไม่ยืนยัน',
+            emailOptional: 'ไม่บังคับ หากต้องการให้ร้านติดต่อทางอีเมล สามารถยืนยันด้วยโค้ด 6 หลักได้',
+            emailCode: 'รหัสยืนยันอีเมล',
+            emailCodePlaceholder: '123456',
+            sendEmailCode: 'ส่งโค้ด',
+            verifyEmailCode: 'ยืนยันโค้ด',
+            sendingEmailCode: 'กำลังส่งโค้ด...',
+            verifyingEmailCode: 'กำลังยืนยัน...',
+            emailCodeSent: 'ส่งโค้ดยืนยันแล้ว กรุณาตรวจสอบอีเมล',
+            emailCodeVerified: 'ยืนยันอีเมลเรียบร้อยแล้ว',
+            emailCodeFailed: 'ยังไม่สามารถยืนยันอีเมลได้ในขณะนี้',
             phone: 'เบอร์โทร',
             shippingAddress: 'ที่อยู่จัดส่ง',
             birthDate: 'วันเกิด',
@@ -289,10 +333,11 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         const stored = readJSON(USER_KEY, null);
         if (currentAuthUser) {
             return {
+                ...(stored && typeof stored === 'object' ? stored : {}),
                 uid: currentAuthUser.uid,
-                name: currentAuthUser.displayName || stored?.name || 'Eden Member',
-                email: currentAuthUser.email || stored?.email || '',
-                avatar: currentAuthUser.photoURL || stored?.avatar || 'https://ui-avatars.com/api/?name=Eden+Member&background=4caf50&color=fff'
+                name: stored?.name || currentAuthUser.displayName || 'Eden Member',
+                email: publicEmail(currentAuthUser.email, stored?.email || ''),
+                avatar: stored?.avatar || currentAuthUser.photoURL || 'https://ui-avatars.com/api/?name=Eden+Member&background=4caf50&color=fff'
             };
         }
         return stored && typeof stored === 'object' ? stored : null;
@@ -325,22 +370,36 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             cloudHistoryUid = user.uid;
             renderProfile();
         } catch (error) {
-            console.warn('Unable to load profile history from cloud:', error);
+            logClientError('Unable to load profile history from cloud:', error);
         } finally {
             cloudHistoryLoading = false;
         }
     }
 
     async function refreshCloudProfile(user) {
-        if (!db || !user?.uid || cloudProfileLoading || cloudProfileUid === user.uid) return;
+        if (!user?.uid || cloudProfileLoading || cloudProfileUid === user.uid) return;
         cloudProfileLoading = true;
         try {
-            const snap = await getDoc(doc(db, 'users', user.uid));
-            cloudProfile = snap.exists() ? snap.data() : {};
+            const result = await getMyProfile();
+            const profile = result.profile || {};
+            cloudProfile = {
+                ...profile,
+                displayName: profile.display_name || 'สมาชิก Eden',
+                photoURL: profile.avatar_url || 'Images/Logo.webp',
+                phone: profile.phone_display || '',
+                phoneE164: profile.phone_number || '',
+                tier: profile.member_level || 'Silver',
+                member_level: profile.member_level || 'Silver',
+                points: Number(profile.points || 0),
+                createdAt: profile.created_at || '',
+                updatedAt: profile.updated_at || '',
+                lastLoginAt: profile.last_login_at || ''
+            };
+            localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(profile)));
             cloudProfileUid = user.uid;
             renderProfile();
         } catch (error) {
-            console.warn('Unable to load member profile:', error);
+            logClientError('Unable to load member profile:', error);
         } finally {
             cloudProfileLoading = false;
         }
@@ -368,7 +427,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             loyaltyUid = user.uid;
             renderProfile();
         } catch (error) {
-            console.warn('Unable to load loyalty information:', error);
+            logClientError('Unable to load loyalty information:', error);
         } finally {
             loyaltyLoading = false;
         }
@@ -661,7 +720,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                 <img src="Images/Logo.webp" alt="Eden Cafe" style="width:84px;height:84px;border-radius:50%;object-fit:cover;margin-bottom:18px;">
                 <h1 style="margin-bottom:10px;">${escapeHTML(labels.profile)}</h1>
                 <p style="color:#666;">${escapeHTML(labels.signInPrompt)}</p>
-                <button class="btn btn-outline" onclick="openLoginModal()" style="margin-top:15px;">${escapeHTML(labels.signIn)}</button>
+                <a class="btn btn-outline" href="/login" style="margin-top:15px;">${escapeHTML(labels.signIn)}</a>
             </div>
         `;
     }
@@ -698,6 +757,43 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         `).join('');
     }
 
+    function renderMemberIdentity(user, labels) {
+        const en = isEnglishPage();
+        const displayName = profileValue('displayName', profileValue('display_name', user.name || labels.member)) || labels.member;
+        const phone = profileValue('phone', profileValue('phone_display', user.phone || user.phoneNumber || ''));
+        const email = profileValue('email', user.email || '');
+        const avatar = profileValue('photoURL', profileValue('avatar_url', user.avatar || 'Images/Logo.webp')) || 'Images/Logo.webp';
+        const memberLevel = profileValue('member_level', profileValue('tier', 'Silver')) || 'Silver';
+        const points = Number(profileValue('points', user.points || 0)) || 0;
+        const createdAt = profileValue('created_at', profileValue('createdAt', ''));
+        const rows = [
+            { label: en ? 'Phone number' : 'เบอร์โทรศัพท์', value: phone || '-' },
+            { label: en ? 'Email' : 'อีเมล', value: email || (en ? 'No email added yet' : 'ยังไม่ได้เพิ่มอีเมล') },
+            { label: en ? 'Display name' : 'ชื่อผู้ใช้', value: displayName || (en ? 'Eden Member' : 'สมาชิก Eden') },
+            { label: en ? 'Member level' : 'ระดับสมาชิก', value: memberLevel },
+            { label: en ? 'Reward points' : 'คะแนนสะสม', value: formatNumber(points) },
+            { label: en ? 'Member since' : 'วันที่สมัครสมาชิก', value: formatDate(createdAt) }
+        ];
+
+        return `
+            <section class="profile-identity-card" aria-label="${escapeHTML(en ? 'Member profile' : 'ข้อมูลสมาชิก')}">
+                <img src="${escapeHTML(avatar)}" alt="Profile" class="profile-identity-avatar">
+                <div class="profile-identity-main">
+                    <p class="profile-kicker">${escapeHTML(en ? 'Eden member' : 'สมาชิก Eden')}</p>
+                    <h2>${escapeHTML(displayName || (en ? 'Eden Member' : 'สมาชิก Eden'))}</h2>
+                    <div class="profile-identity-grid">
+                        ${rows.map(row => `
+                            <div>
+                                <span>${escapeHTML(row.label)}</span>
+                                <strong>${escapeHTML(row.value)}</strong>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </section>
+        `;
+    }
+
     function renderProfileForm(user, labels) {
         const phone = profileValue('phone', user.phone || '');
         const shippingAddress = profileValue('shippingAddress', user.shippingAddress || user.address || '');
@@ -706,9 +802,12 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         const healthNote = profileValue('healthNote', '');
         const lineId = profileValue('lineId', '');
         const displayName = profileValue('displayName', user.name || labels.member);
-        const email = profileValue('email', user.email || '');
+        const email = profileValue('email', publicEmail(user.email || ''));
         const avatar = profileValue('photoURL', user.avatar || user.photoURL || 'Images/Logo.webp');
         const loadingText = cloudProfileLoading ? `<p class="profile-save-message">${escapeHTML(labels.loadingProfile)}</p>` : '';
+        const emailVerified = !!email && cloudProfile?.emailVerified === true && cleanString(cloudProfile?.email, 180).toLowerCase() === cleanString(email, 180).toLowerCase();
+        const emailStatusClass = emailVerified ? 'is-verified' : 'is-unverified';
+        const emailStatusText = emailVerified ? labels.emailVerified : labels.emailUnverified;
 
         return `
             <div class="profile-account-card">
@@ -723,6 +822,22 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                 ${loadingText}
                 <form class="profile-edit-form" id="member-profile-form" onsubmit="return saveMemberProfile(event)">
                     <div class="profile-form-grid">
+                        <label>
+                            <span>${escapeHTML(labels.email)}</span>
+                            <input name="email" type="email" autocomplete="email" maxlength="180" value="${escapeHTML(email)}" placeholder="name@example.com">
+                        </label>
+                        <div class="profile-email-verify profile-form-full ${emailStatusClass}">
+                            <div>
+                                <strong>${escapeHTML(labels.emailVerification)}</strong>
+                                <span>${escapeHTML(emailStatusText)}</span>
+                                <small>${escapeHTML(labels.emailOptional)}</small>
+                            </div>
+                            <div class="profile-email-actions">
+                                <button class="btn btn-outline" type="button" onclick="sendMemberEmailVerificationCode()" ${emailVerificationBusy ? 'disabled' : ''}>${escapeHTML(emailVerificationBusy ? labels.sendingEmailCode : labels.sendEmailCode)}</button>
+                                <input name="emailCode" type="text" inputmode="numeric" maxlength="6" placeholder="${escapeHTML(labels.emailCodePlaceholder)}" aria-label="${escapeHTML(labels.emailCode)}">
+                                <button class="btn" type="button" onclick="verifyMemberEmailCode()" ${emailVerificationBusy ? 'disabled' : ''}>${escapeHTML(emailVerificationBusy ? labels.verifyingEmailCode : labels.verifyEmailCode)}</button>
+                            </div>
+                        </div>
                         <label>
                             <span>${escapeHTML(labels.phone)}</span>
                             <input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="40" value="${escapeHTML(phone)}" placeholder="${escapeHTML(labels.phonePlaceholder)}">
@@ -786,6 +901,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
                         </div>
                     </div>
 
+                    ${renderMemberIdentity(user, labels)}
                     ${renderMemberCard(user, labels, membershipUser)}
                     ${renderLoyaltyWallet(membershipUser, labels)}
                     ${renderTierPreview(tier, labels)}
@@ -841,6 +957,91 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         submitBtn.textContent = isSaving ? labels.saving : labels.save;
     }
 
+    async function profileApiRequest(path, body) {
+        if (!auth?.currentUser) throw new Error('Sign in required');
+        const response = await fetch(FUNCTIONS_BASE_URL + path, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: 'Bearer ' + await auth.currentUser.getIdToken()
+            },
+            body: JSON.stringify(body || {})
+        });
+        let data = {};
+        try {
+            data = await response.json();
+        } catch (_) {
+            data = {};
+        }
+        if (!response.ok) throw new Error(data.error || 'Request failed');
+        return data;
+    }
+
+    function getProfileFormEmail() {
+        const form = document.getElementById('member-profile-form');
+        const email = cleanString(form?.querySelector('input[name="email"]')?.value, 180).toLowerCase();
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            const error = new Error(isEnglishPage() ? 'Please enter a valid email first.' : 'กรุณากรอกอีเมลให้ถูกต้องก่อน');
+            error.userMessage = true;
+            throw error;
+        }
+        return email;
+    }
+
+    async function sendMemberEmailVerificationCode() {
+        const labels = getLabels();
+        if (emailVerificationBusy) return false;
+        emailVerificationBusy = true;
+        showSaveMessage(labels.sendingEmailCode);
+        let finalMessage = labels.emailCodeSent;
+        let finalError = false;
+        try {
+            const email = getProfileFormEmail();
+            await profileApiRequest('/sendEmailVerificationCode', { email });
+        } catch (error) {
+            logClientError('Email verification send failed:', error);
+            finalMessage = error?.userMessage ? error.message : labels.emailCodeFailed;
+            finalError = true;
+        } finally {
+            emailVerificationBusy = false;
+            renderProfile();
+            requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
+        }
+        return false;
+    }
+
+    async function verifyMemberEmailCode() {
+        const labels = getLabels();
+        if (emailVerificationBusy) return false;
+        const form = document.getElementById('member-profile-form');
+        const code = cleanString(form?.querySelector('input[name="emailCode"]')?.value, 6);
+        if (!/^\d{6}$/.test(code)) {
+            showSaveMessage(isEnglishPage() ? 'Please enter the 6-digit code.' : 'กรุณากรอกรหัส 6 หลัก', true);
+            return false;
+        }
+
+        emailVerificationBusy = true;
+        showSaveMessage(labels.verifyingEmailCode);
+        let finalMessage = labels.emailCodeVerified;
+        let finalError = false;
+        try {
+            const email = getProfileFormEmail();
+            const result = await profileApiRequest('/verifyEmailCode', { email, code });
+            cloudProfile = { ...(cloudProfile || {}), email, emailVerified: true, emailVerifiedAt: result.emailVerifiedAt || new Date().toISOString() };
+            const user = readUser() || {};
+            localStorage.setItem(USER_KEY, JSON.stringify({ ...user, email }));
+        } catch (error) {
+            logClientError('Email verification failed:', error);
+            finalMessage = error?.userMessage ? error.message : labels.emailCodeFailed;
+            finalError = true;
+        } finally {
+            emailVerificationBusy = false;
+            renderProfile();
+            requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
+        }
+        return false;
+    }
+
     async function saveMemberProfile(event) {
         event.preventDefault();
         const labels = getLabels();
@@ -852,10 +1053,12 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             return false;
         }
         const formData = new FormData(form);
+        const email = cleanString(formData.get('email'), 180).toLowerCase();
+        const previousEmail = cleanString(cloudProfile?.email, 180).toLowerCase();
         const payload = {
             uid: user.uid,
             displayName: cleanString(user.name || currentAuthUser?.displayName || labels.member, 120),
-            email: cleanString(user.email || currentAuthUser?.email || '', 180),
+            email,
             photoURL: cleanString(user.avatar || currentAuthUser?.photoURL || '', 500),
             phone: cleanString(formData.get('phone'), 40),
             shippingAddress: cleanString(formData.get('shippingAddress'), 500),
@@ -865,6 +1068,10 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             lineId: cleanString(formData.get('lineId'), 80),
             updatedAt: serverTimestamp()
         };
+        if (email !== previousEmail) {
+            payload.emailVerified = false;
+            payload.emailVerifiedAt = null;
+        }
 
         cloudProfileSaving = true;
         setProfileSavingState(form, true, labels);
@@ -876,6 +1083,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             const mergedUser = {
                 ...user,
                 phone: payload.phone,
+                email: payload.email,
                 shippingAddress: payload.shippingAddress,
                 address: payload.shippingAddress,
                 lineId: payload.lineId
@@ -883,7 +1091,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
             localStorage.setItem(USER_KEY, JSON.stringify(mergedUser));
             showSaveMessage(labels.saved);
         } catch (error) {
-            console.error('Profile save failed:', error);
+            logClientError('Profile save failed:', error);
             const message = error?.code === 'permission-denied'
                 ? (isEnglishPage() ? 'Unable to save profile because profile permissions are not ready. Please try again after refresh.' : 'บันทึกไม่สำเร็จ: สิทธิ์โปรไฟล์ยังไม่พร้อม กรุณารีเฟรชแล้วลองใหม่อีกครั้ง')
                 : labels.saveFailed;
@@ -913,20 +1121,35 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
         if (!container) return;
         const labels = getLabels();
         const user = readUser();
-        if (!user || !user.uid) renderSignedOut(container, labels);
-        else renderSignedIn(container, user, labels);
+        if (!user || !user.uid) {
+            if (authStateResolved) {
+                window.location.href = '/login';
+                return;
+            }
+            renderSignedOut(container, labels);
+            return;
+        }
+        renderSignedIn(container, user, labels);
     }
 
     window.renderProfile = renderProfile;
     window.saveMemberProfile = saveMemberProfile;
     window.resetMemberProfileForm = resetMemberProfileForm;
     window.previewMemberTier = previewMemberTier;
+    window.sendMemberEmailVerificationCode = sendMemberEmailVerificationCode;
+    window.verifyMemberEmailCode = verifyMemberEmailCode;
 
     document.addEventListener('DOMContentLoaded', () => {
         renderProfile();
         if (auth) {
             onAuthStateChanged(auth, user => {
+                authStateResolved = true;
                 currentAuthUser = user;
+                if (!user) {
+                    localStorage.removeItem(USER_KEY);
+                    window.location.href = '/login';
+                    return;
+                }
                 cloudOrders = null;
                 cloudBookings = null;
                 cloudHistoryUid = '';

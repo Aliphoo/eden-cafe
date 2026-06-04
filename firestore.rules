@@ -51,10 +51,6 @@ service cloud.firestore {
     function isShortString(value, maxLength) {
       return value is string && value.size() > 0 && value.size() <= maxLength;
     }
-    function optionalUserMatchesAuth() {
-      return !request.resource.data.keys().hasAny(['uid'])
-        || (isSignedIn() && request.resource.data.uid == request.auth.uid);
-    }
     function isValidOptionalLoyaltyOrderFields() {
       return (!request.resource.data.keys().hasAny(['normalDiscount']) || (request.resource.data.normalDiscount is number && request.resource.data.normalDiscount >= 0 && request.resource.data.normalDiscount <= 1000000))
         && (!request.resource.data.keys().hasAny(['loyaltyDiscount']) || (request.resource.data.loyaltyDiscount is number && request.resource.data.loyaltyDiscount >= 0 && request.resource.data.loyaltyDiscount <= 1000000))
@@ -360,7 +356,7 @@ service cloud.firestore {
         && resource.data.keys().hasAny(['uid'])
         && resource.data.uid == request.auth.uid;
     }
-    
+
     // Publicly readable collections (content)
     match /shop_products/{docId} {
       allow read: if true;
@@ -470,9 +466,14 @@ service cloud.firestore {
         && request.auth.uid == userId
         && request.resource.data.keys().hasOnly([
           'uid', 'displayName', 'email', 'photoURL', 'phone', 'phoneE164',
+          'id', 'phone_number', 'phone_display', 'email_lower', 'display_name',
+          'avatar_url', 'member_level',
+          'firstName', 'lastName', 'loginUsername', 'phoneAuthEmail',
           'shippingAddress', 'birthDate', 'allergies', 'healthNote',
           'lineId', 'authProviderIds', 'registrationSource',
           'marketingConsent', 'privacyConsent', 'phoneVerifiedAt',
+          'passwordLoginEnabled', 'profileCompleted', 'onboardingCompletedAt',
+          'created_at', 'updated_at', 'last_login_at',
           'updatedAt'
         ])
         && request.resource.data.keys().hasAll(['uid', 'displayName', 'email', 'updatedAt'])
@@ -480,9 +481,20 @@ service cloud.firestore {
         && isShortString(request.resource.data.displayName, 120)
         && request.resource.data.email is string
         && request.resource.data.email.size() <= 180
+        && (!request.resource.data.keys().hasAny(['id']) || (request.resource.data.id is string && request.resource.data.id.size() <= 160))
+        && (!request.resource.data.keys().hasAny(['phone_number']) || (request.resource.data.phone_number is string && request.resource.data.phone_number.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['phone_display']) || (request.resource.data.phone_display is string && request.resource.data.phone_display.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['email_lower']) || (request.resource.data.email_lower is string && request.resource.data.email_lower.size() <= 180))
+        && (!request.resource.data.keys().hasAny(['display_name']) || (request.resource.data.display_name is string && request.resource.data.display_name.size() <= 120))
+        && (!request.resource.data.keys().hasAny(['avatar_url']) || (request.resource.data.avatar_url is string && request.resource.data.avatar_url.size() <= 500))
+        && (!request.resource.data.keys().hasAny(['member_level']) || request.resource.data.member_level in ['Silver', 'Gold', 'Platinum'])
         && (!request.resource.data.keys().hasAny(['photoURL']) || (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 500))
         && (!request.resource.data.keys().hasAny(['phone']) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40))
         && (!request.resource.data.keys().hasAny(['phoneE164']) || (request.resource.data.phoneE164 is string && request.resource.data.phoneE164.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['firstName']) || (request.resource.data.firstName is string && request.resource.data.firstName.size() <= 80))
+        && (!request.resource.data.keys().hasAny(['lastName']) || (request.resource.data.lastName is string && request.resource.data.lastName.size() <= 80))
+        && (!request.resource.data.keys().hasAny(['loginUsername']) || (request.resource.data.loginUsername is string && request.resource.data.loginUsername.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['phoneAuthEmail']) || (request.resource.data.phoneAuthEmail is string && request.resource.data.phoneAuthEmail.size() <= 180))
         && (!request.resource.data.keys().hasAny(['shippingAddress']) || (request.resource.data.shippingAddress is string && request.resource.data.shippingAddress.size() <= 500))
         && (!request.resource.data.keys().hasAny(['birthDate']) || (request.resource.data.birthDate is string && request.resource.data.birthDate.size() <= 20))
         && (!request.resource.data.keys().hasAny(['allergies']) || (request.resource.data.allergies is string && request.resource.data.allergies.size() <= 200))
@@ -493,35 +505,57 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['marketingConsent']) || request.resource.data.marketingConsent is bool)
         && (!request.resource.data.keys().hasAny(['privacyConsent']) || request.resource.data.privacyConsent is bool)
         && (!request.resource.data.keys().hasAny(['phoneVerifiedAt']) || request.resource.data.phoneVerifiedAt == request.time)
+        && (!request.resource.data.keys().hasAny(['passwordLoginEnabled']) || request.resource.data.passwordLoginEnabled is bool)
+        && (!request.resource.data.keys().hasAny(['profileCompleted']) || request.resource.data.profileCompleted is bool)
+        && (!request.resource.data.keys().hasAny(['onboardingCompletedAt']) || request.resource.data.onboardingCompletedAt == request.time)
         && request.resource.data.updatedAt == request.time;
       allow update: if isSignedIn()
         && request.auth.uid == userId
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'displayName', 'email', 'photoURL', 'phone', 'phoneE164',
+          'firstName', 'lastName', 'loginUsername', 'phoneAuthEmail',
           'shippingAddress', 'birthDate', 'allergies', 'healthNote',
           'lineId', 'authProviderIds', 'registrationSource',
           'marketingConsent', 'privacyConsent', 'phoneVerifiedAt',
+          'passwordLoginEnabled', 'profileCompleted', 'onboardingCompletedAt',
+          'emailVerified', 'emailVerifiedAt',
           'updatedAt'
         ])
         && request.resource.data.keys().hasOnly([
           'uid', 'displayName', 'email', 'photoURL', 'phone', 'phoneE164',
+          'id', 'phone_number', 'phone_display', 'email_lower', 'display_name',
+          'avatar_url', 'member_level',
+          'firstName', 'lastName', 'loginUsername', 'phoneAuthEmail',
           'shippingAddress', 'birthDate', 'allergies', 'healthNote',
           'lineId', 'authProviderIds', 'registrationSource',
           'marketingConsent', 'privacyConsent', 'phoneVerifiedAt',
           'memberCode', 'tier', 'points', 'totalSpent',
           'visitCount', 'orderCount', 'bookingCount', 'cartItemCount',
           'status', 'adminNote', 'adminTags',
-          'authDisabled', 'emailVerified',
+          'authDisabled', 'emailVerified', 'emailVerifiedAt',
+          'passwordLoginEnabled', 'profileCompleted', 'onboardingCompletedAt',
           'authCreatedAt', 'lastLoginAt',
+          'created_at', 'updated_at', 'last_login_at',
           'createdAt', 'updatedAt'
         ])
         && request.resource.data.uid == request.auth.uid
         && isShortString(request.resource.data.displayName, 120)
         && request.resource.data.email is string
         && request.resource.data.email.size() <= 180
+        && (!request.resource.data.keys().hasAny(['id']) || (request.resource.data.id is string && request.resource.data.id.size() <= 160))
+        && (!request.resource.data.keys().hasAny(['phone_number']) || (request.resource.data.phone_number is string && request.resource.data.phone_number.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['phone_display']) || (request.resource.data.phone_display is string && request.resource.data.phone_display.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['email_lower']) || (request.resource.data.email_lower is string && request.resource.data.email_lower.size() <= 180))
+        && (!request.resource.data.keys().hasAny(['display_name']) || (request.resource.data.display_name is string && request.resource.data.display_name.size() <= 120))
+        && (!request.resource.data.keys().hasAny(['avatar_url']) || (request.resource.data.avatar_url is string && request.resource.data.avatar_url.size() <= 500))
+        && (!request.resource.data.keys().hasAny(['member_level']) || request.resource.data.member_level in ['Silver', 'Gold', 'Platinum'])
         && (!request.resource.data.keys().hasAny(['photoURL']) || (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 500))
         && (!request.resource.data.keys().hasAny(['phone']) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40))
         && (!request.resource.data.keys().hasAny(['phoneE164']) || (request.resource.data.phoneE164 is string && request.resource.data.phoneE164.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['firstName']) || (request.resource.data.firstName is string && request.resource.data.firstName.size() <= 80))
+        && (!request.resource.data.keys().hasAny(['lastName']) || (request.resource.data.lastName is string && request.resource.data.lastName.size() <= 80))
+        && (!request.resource.data.keys().hasAny(['loginUsername']) || (request.resource.data.loginUsername is string && request.resource.data.loginUsername.size() <= 40))
+        && (!request.resource.data.keys().hasAny(['phoneAuthEmail']) || (request.resource.data.phoneAuthEmail is string && request.resource.data.phoneAuthEmail.size() <= 180))
         && (!request.resource.data.keys().hasAny(['shippingAddress']) || (request.resource.data.shippingAddress is string && request.resource.data.shippingAddress.size() <= 500))
         && (!request.resource.data.keys().hasAny(['birthDate']) || (request.resource.data.birthDate is string && request.resource.data.birthDate.size() <= 20))
         && (!request.resource.data.keys().hasAny(['allergies']) || (request.resource.data.allergies is string && request.resource.data.allergies.size() <= 200))
@@ -532,10 +566,24 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['marketingConsent']) || request.resource.data.marketingConsent is bool)
         && (!request.resource.data.keys().hasAny(['privacyConsent']) || request.resource.data.privacyConsent is bool)
         && (!request.resource.data.keys().hasAny(['phoneVerifiedAt']) || request.resource.data.phoneVerifiedAt is timestamp)
+        && (!request.resource.data.keys().hasAny(['passwordLoginEnabled']) || request.resource.data.passwordLoginEnabled is bool)
+        && (!request.resource.data.keys().hasAny(['profileCompleted']) || request.resource.data.profileCompleted is bool)
+        && (!request.resource.data.keys().hasAny(['onboardingCompletedAt']) || request.resource.data.onboardingCompletedAt is timestamp)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['emailVerified']) || request.resource.data.emailVerified == false)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['emailVerifiedAt']) || request.resource.data.emailVerifiedAt == null)
         && request.resource.data.updatedAt == request.time;
       allow delete: if isAdmin();
     }
-    
+    match /user_credentials/{userId} {
+      allow read, write: if false;
+    }
+    match /otp_verifications/{docId} {
+      allow read, write: if false;
+    }
+    match /phone_number_index/{docId} {
+      allow read, write: if false;
+    }
+
     // User data (orders, bookings)
     match /orders/{docId} {
       allow create: if isPosAdminOrderWrite()
@@ -573,13 +621,15 @@ service cloud.firestore {
       allow delete: if hasAdminPermission('orders');
     }
     match /bookings/{docId} {
-      allow create: if request.resource.data.keys().hasOnly([
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly([
           'bookingType', 'name', 'phone', 'guests', 'date', 'roomType',
           'tableZone', 'tableNo', 'tableIds', 'arrivalTime', 'startTime',
           'endTime', 'hours', 'price', 'addons', 'note', 'status',
           'uid', 'timestamp'
         ])
-        && request.resource.data.keys().hasAll(['bookingType', 'name', 'phone', 'date', 'timestamp'])
+        && request.resource.data.keys().hasAll(['bookingType', 'name', 'phone', 'date', 'uid', 'timestamp'])
+        && request.resource.data.uid == request.auth.uid
         && request.resource.data.bookingType in ['table', 'room']
         && isShortString(request.resource.data.name, 120)
         && isShortString(request.resource.data.phone, 40)
@@ -592,9 +642,16 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['endTime']) || (request.resource.data.endTime is string && request.resource.data.endTime.size() <= 10))
         && (!request.resource.data.keys().hasAny(['tableNo']) || isShortString(request.resource.data.tableNo, 80))
         && (!request.resource.data.keys().hasAny(['tableZone']) || isShortString(request.resource.data.tableZone, 120))
-        && (!request.resource.data.keys().hasAny(['tableIds']) || (request.resource.data.tableIds is list && request.resource.data.tableIds.size() <= 3))
+        && (
+          request.resource.data.bookingType != 'table'
+          || (
+            request.resource.data.keys().hasAny(['tableIds'])
+            && request.resource.data.tableIds is list
+            && request.resource.data.tableIds.size() > 0
+            && request.resource.data.tableIds.size() <= 3
+          )
+        )
         && (!request.resource.data.keys().hasAny(['addons']) || (request.resource.data.addons is list && request.resource.data.addons.size() <= 20))
-        && optionalUserMatchesAuth()
         && request.resource.data.timestamp == request.time;
       allow read: if hasAdminPermission('bookings') || ownsResource();
       allow update, delete: if hasAdminPermission('bookings');
@@ -605,22 +662,12 @@ service cloud.firestore {
     }
     match /stats/pageViews {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['totalViews', 'dailyViews', 'lastUpdateDate'])
-        && request.resource.data.totalViews is number
-        && request.resource.data.dailyViews is number
-        && request.resource.data.totalViews >= 0
-        && request.resource.data.dailyViews >= 0;
-      allow update: if request.resource.data.keys().hasOnly(['totalViews', 'dailyViews', 'lastUpdateDate'])
-        && request.resource.data.totalViews is number
-        && request.resource.data.dailyViews is number
-        && request.resource.data.totalViews >= resource.data.totalViews
-        && request.resource.data.totalViews <= resource.data.totalViews + 1
-        && request.resource.data.dailyViews >= 0;
+      allow create, update, delete: if false;
     }
 
     // Deny all by default
     match /{document=**} {
-      allow read, write: if false; 
+      allow read, write: if false;
     }
   }
 }
