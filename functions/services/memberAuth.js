@@ -316,14 +316,32 @@ function createMemberAuthHandlers({
     }
 
     const queries = await Promise.all([
-      db.collection('users').where('email_lower', '==', lowerEmail).limit(1).get(),
-      db.collection('users').where('email', '==', lowerEmail).limit(1).get(),
+      db.collection('users').where('email_lower', '==', lowerEmail).limit(10).get(),
+      db.collection('users').where('email', '==', lowerEmail).limit(10).get(),
     ]);
+
+    const userCandidates = [];
+    const seenUids = new Set();
     for (const snap of queries) {
-      if (!snap.empty) {
-        const doc = snap.docs[0];
-        return { uid: doc.id, data: doc.data() || {} };
+      for (const doc of snap.docs) {
+        if (seenUids.has(doc.id)) continue;
+        seenUids.add(doc.id);
+        const data = doc.data() || {};
+        const credential = await getCredential(doc.id);
+        const hasPasswordHash = !!credential.password_hash;
+        const hasPhone = !!(credential.phone_number || data.phone_number || data.phoneE164 || data.phone);
+        userCandidates.push({ uid: doc.id, data, credential, hasPasswordHash, hasPhone });
       }
+    }
+
+    if (userCandidates.length) {
+      userCandidates.sort((a, b) => {
+        if (a.hasPasswordHash !== b.hasPasswordHash) return a.hasPasswordHash ? -1 : 1;
+        if (a.hasPhone !== b.hasPhone) return a.hasPhone ? -1 : 1;
+        return 0;
+      });
+      const preferred = userCandidates[0];
+      return { uid: preferred.uid, data: preferred.data || {} };
     }
 
     return null;
