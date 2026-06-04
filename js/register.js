@@ -1,18 +1,22 @@
 import { auth } from './firebase-config.js';
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {
+    onAuthStateChanged,
+    RecaptchaVerifier,
+    signInWithPhoneNumber
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
     completeRegister,
     displayThaiPhone,
-    normalizeThaiPhone,
-    requestRegisterOtp,
-    verifyRegisterOtp
+    normalizeThaiPhone
 } from './member-auth-service.js';
 
 const state = {
     phoneNumber: '',
     phoneDisplay: '',
-    verificationId: '',
-    registrationToken: ''
+    confirmationResult: null,
+    firebaseIdToken: '',
+    recaptchaVerifier: null,
+    registrationStarted: false
 };
 
 const els = {
@@ -60,14 +64,43 @@ function activateStep(step) {
     if (step === 'profile') els.profileForm?.classList.add('active');
 }
 
+function resetRecaptcha() {
+    try {
+        state.recaptchaVerifier?.clear?.();
+    } catch (_) {
+        // Firebase can throw if the invisible verifier has not rendered yet.
+    }
+    state.recaptchaVerifier = null;
+}
+
+function getRecaptchaVerifier() {
+    if (!auth) throw new Error('ไม่พบระบบยืนยันตัวตน กรุณาลองใหม่อีกครั้ง');
+    if (state.recaptchaVerifier) return state.recaptchaVerifier;
+
+    const containerId = 'register-recaptcha-container';
+    if (!document.getElementById(containerId)) {
+        throw new Error('ไม่พบพื้นที่ยืนยันความปลอดภัย กรุณารีเฟรชหน้าเว็บ');
+    }
+
+    state.recaptchaVerifier = new RecaptchaVerifier(auth, containerId, {
+        size: 'invisible',
+        callback: () => {},
+        'expired-callback': () => resetRecaptcha()
+    });
+    return state.recaptchaVerifier;
+}
+
 async function sendOtp() {
     const phoneNumber = normalizeThaiPhone(els.phone?.value);
-    const result = await requestRegisterOtp(phoneNumber);
-    state.phoneNumber = result.phoneNumber || phoneNumber;
-    state.phoneDisplay = result.phoneDisplay || displayThaiPhone(state.phoneNumber);
-    state.verificationId = result.verificationId || '';
-    state.registrationToken = '';
-    if (!state.verificationId) throw new Error('ไม่สามารถสร้างรายการ OTP ได้ กรุณาลองใหม่');
+    const verifier = getRecaptchaVerifier();
+    const result = await signInWithPhoneNumber(auth, phoneNumber, verifier);
+
+    state.registrationStarted = true;
+    state.phoneNumber = phoneNumber;
+    state.phoneDisplay = displayThaiPhone(phoneNumber);
+    state.confirmationResult = result;
+    state.firebaseIdToken = '';
+
     if (els.phonePreview) els.phonePreview.textContent = state.phoneDisplay;
     if (els.confirmedPhone) els.confirmedPhone.textContent = state.phoneDisplay;
 }
@@ -89,12 +122,13 @@ function validatePassword() {
 els.phoneForm?.addEventListener('submit', async event => {
     event.preventDefault();
     setBusy(els.phoneForm, true, 'กำลังส่ง OTP...');
-    setStatus('กำลังส่ง OTP...', 'info');
+    setStatus('กำลังส่ง OTP ผ่าน Firebase Phone Auth...', 'info');
     try {
         await sendOtp();
         activateStep('otp');
         setStatus('ส่ง OTP สำเร็จ กรุณาตรวจสอบ SMS แล้วกรอกรหัส 6 หลัก', 'success');
     } catch (error) {
+        resetRecaptcha();
         setStatus(error.message || 'ส่ง OTP ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง', 'error');
     } finally {
         setBusy(els.phoneForm, false);
@@ -104,16 +138,18 @@ els.phoneForm?.addEventListener('submit', async event => {
 els.otpForm?.addEventListener('submit', async event => {
     event.preventDefault();
     setBusy(els.otpForm, true, 'กำลังยืนยัน OTP...');
-    setStatus('กำลังยืนยัน OTP...', 'info');
+    setStatus('กำลังยืนยัน OTP กับ Firebase...', 'info');
     try {
         const otp = validateOtp();
-        const result = await verifyRegisterOtp({
-            verificationId: state.verificationId,
-            phoneNumber: state.phoneNumber,
-            otp
-        });
-        state.registrationToken = result.registrationToken || '';
-        if (!state.registrationToken) throw new Error('ข้อมูลยืนยัน OTP ไม่ครบ กรุณาส่ง OTP ใหม่');
+        if (!state.confirmationResult) throw new Error('ไม่พบรายการ OTP กรุณาส่ง OTP ใหม่');
+
+        const credential = await state.confirmationResult.confirm(otp);
+        const firebaseUser = credential.user;
+        state.firebaseIdToken = await firebaseUser.getIdToken(true);
+        state.phoneNumber = normalizeThaiPhone(firebaseUser.phoneNumber || state.phoneNumber);
+        state.phoneDisplay = displayThaiPhone(state.phoneNumber);
+        if (els.confirmedPhone) els.confirmedPhone.textContent = state.phoneDisplay;
+
         activateStep('profile');
         setStatus('ยืนยัน OTP สำเร็จ กรุณาตั้งรหัสผ่าน', 'success');
     } catch (error) {
@@ -133,14 +169,17 @@ els.resend?.addEventListener('click', async () => {
             return;
         }
     }
+
     setBusy(els.otpForm, true, 'กำลังส่ง OTP อีกครั้ง...');
     setStatus('กำลังส่ง OTP อีกครั้ง...', 'info');
     try {
         if (els.phone) els.phone.value = displayThaiPhone(state.phoneNumber);
+        resetRecaptcha();
         await sendOtp();
         activateStep('otp');
         setStatus('ส่ง OTP อีกครั้งสำเร็จ', 'success');
     } catch (error) {
+        resetRecaptcha();
         setStatus(error.message || 'ส่ง OTP อีกครั้งไม่สำเร็จ', 'error');
     } finally {
         setBusy(els.otpForm, false);
@@ -153,18 +192,20 @@ els.profileForm?.addEventListener('submit', async event => {
     setStatus('กำลังสร้างบัญชีสมาชิก...', 'info');
     try {
         const { password, confirmPassword } = validatePassword();
+        if (!state.firebaseIdToken) throw new Error('ยังไม่ได้ยืนยัน OTP กรุณายืนยันเบอร์โทรศัพท์ก่อน');
+
         await completeRegister({
-            verificationId: state.verificationId,
-            registrationToken: state.registrationToken,
+            firebaseIdToken: state.firebaseIdToken,
             phoneNumber: state.phoneNumber,
             password,
             confirmPassword
         });
+
         els.profileForm?.classList.remove('active');
         if (els.complete) els.complete.hidden = false;
-        setStatus('สมัครสมาชิกสำเร็จ กรุณาเข้าสู่ระบบ', 'success');
+        setStatus('สมัครสมาชิกสำเร็จ กำลังพาไปหน้าโปรไฟล์', 'success');
         window.setTimeout(() => {
-            window.location.href = '/login?registered=1';
+            window.location.href = '/profile';
         }, 900);
     } catch (error) {
         setStatus(error.message || 'สมัครสมาชิกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง', 'error');
@@ -174,5 +215,5 @@ els.profileForm?.addEventListener('submit', async event => {
 });
 
 onAuthStateChanged(auth, user => {
-    if (user) window.location.href = '/profile';
+    if (user && !state.registrationStarted) window.location.href = '/profile';
 });
