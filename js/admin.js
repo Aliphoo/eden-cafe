@@ -28,6 +28,10 @@ function safeNumber(value, fallback = 0) {
     return Number.isFinite(number) ? number : fallback;
 }
 
+function safeAdminError(action = 'ดำเนินการไม่สำเร็จ') {
+    return `${action} กรุณาตรวจสอบสิทธิ์หรือข้อมูลที่จำเป็น แล้วลองใหม่อีกครั้ง`;
+}
+
 function escapeJSString(str) {
     if (!str) return '';
     return String(str).replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, '\\n');
@@ -350,6 +354,10 @@ let shopProductsData = {};
 let shopCategoriesData = {};
 let roomsData = {};
 let tablesData = {};
+let tableMapCurrentPage = 1;
+let tableMapPageSize = 25;
+let tableMapControlsBound = false;
+let tableMapSelectedId = '';
 let membersData = {};
 let memberUsersData = {};
 let memberSummariesData = {};
@@ -370,6 +378,8 @@ let shopProductsUnsubscribe = null;
 let blogsUnsubscribe = null;
 let faqsUnsubscribe = null;
 let memberFiltersBound = false;
+let memberAuthDiagnosticsBound = false;
+let lastMemberAuthDiagnosis = null;
 let salesSummaryChart = null;
 
 const ADMIN_ACTIVE_TAB_STORAGE_KEY = 'edenAdminActiveTab';
@@ -856,7 +866,7 @@ function initXLSXTools() {
             btnDownloadData.disabled = true;
             await downloadCategoryDataAsXLSX(select.value);
         } catch (error) {
-            alert('ดาวน์โหลดข้อมูลไม่สำเร็จ: ' + error.message);
+            alert(safeAdminError("ดาวน์โหลดข้อมูลไม่สำเร็จ"));
         } finally {
             btnDownloadData.disabled = false;
         }
@@ -865,7 +875,7 @@ function initXLSXTools() {
         try {
             downloadCategoryTemplateAsXLSX(select.value);
         } catch (error) {
-            alert('ดาวน์โหลดเทมเพลตไม่สำเร็จ: ' + error.message);
+            alert(safeAdminError("ดาวน์โหลดเทมเพลตไม่สำเร็จ"));
         }
     };
     btnUpload.onclick = async () => {
@@ -876,7 +886,7 @@ function initXLSXTools() {
             alert(`อัปโหลดสำเร็จ รวม ${result.total} รายการ (เพิ่ม ${result.created}, อัปเดต ${result.updated})`);
             fileInput.value = '';
         } catch (error) {
-            alert('อัปโหลดไม่สำเร็จ: ' + error.message);
+            alert(safeAdminError("อัปโหลดไม่สำเร็จ"));
         } finally {
             btnUpload.disabled = false;
             btnUpload.textContent = 'อัปโหลด XLSX';
@@ -1176,7 +1186,7 @@ window.refreshAdminSection = async (tabId, button = null) => {
         }
     } catch (error) {
         console.error('Unable to refresh admin section:', error);
-        alert('รีเฟรชข้อมูลไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("รีเฟรชข้อมูลไม่สำเร็จ"));
     } finally {
         if (button) {
             button.disabled = false;
@@ -1321,7 +1331,7 @@ function setupDiscountForm() {
             resetDiscountForm();
         } catch (error) {
             console.error('Unable to save POS discount:', error);
-            alert('บันทึกส่วนลดไม่สำเร็จ: ' + error.message);
+            alert(safeAdminError("บันทึกส่วนลดไม่สำเร็จ"));
         }
     });
     discountFormBound = true;
@@ -1385,7 +1395,7 @@ window.deleteDiscount = async function deleteDiscount(id) {
         await deleteDoc(doc(db, 'pos_discounts', id));
     } catch (error) {
         console.error('Unable to delete POS discount:', error);
-        alert('ลบส่วนลดไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("ลบส่วนลดไม่สำเร็จ"));
     }
 };
 
@@ -1409,7 +1419,7 @@ window.seedDefaultDiscounts = async function seedDefaultDiscounts() {
         alert('เติมชุดส่วนลดมาตรฐานเรียบร้อย');
     } catch (error) {
         console.error('Unable to seed POS discounts:', error);
-        alert('เติมชุดส่วนลดไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("เติมชุดส่วนลดไม่สำเร็จ"));
     }
 };
 
@@ -1561,7 +1571,7 @@ function bindLoyaltyForms() {
             alert('บันทึกกติกาแต้มเรียบร้อย');
         } catch (error) {
             console.error('Unable to save loyalty config:', error);
-            alert('บันทึกกติกาแต้มไม่สำเร็จ: ' + error.message);
+            alert(safeAdminError("บันทึกกติกาแต้มไม่สำเร็จ"));
         }
     });
 
@@ -1592,7 +1602,7 @@ function bindLoyaltyForms() {
             alert('บันทึกการปรับแต้มเรียบร้อย');
         } catch (error) {
             console.error('Unable to adjust member points:', error);
-            alert('ปรับแต้มไม่สำเร็จ: ' + error.message);
+            alert(safeAdminError("ปรับแต้มไม่สำเร็จ"));
         }
     });
 
@@ -2577,7 +2587,7 @@ window.exportSalesReportXLSX = () => {
         exportSalesWorkbook(activeSalesReport);
     } catch (error) {
         console.error('Export sales XLSX failed:', error);
-        alert('ดาวน์โหลดข้อมูลยอดขายไม่สำเร็จ: ' + (error.message || error));
+        alert(safeAdminError("ดาวน์โหลดข้อมูลยอดขายไม่สำเร็จ"));
     } finally {
         if (button) {
             button.disabled = false;
@@ -2781,7 +2791,7 @@ async function updateBookingTable(bookingId, tableNo) {
         alert('อัปเดตหมายเลขโต๊ะ/ห้องเรียบร้อย');
     } catch (error) {
         console.error("Error updating table number:", error);
-        alert("เกิดข้อผิดพลาด: " + error.message);
+        alert(safeAdminError("เกิดข้อผิดพลาด"));
     }
 }
 window.updateBookingTable = updateBookingTable;
@@ -2960,7 +2970,7 @@ categoryForm.addEventListener('submit', async (e) => {
         await setDoc(docRef, { name: catName }, { merge: true });
         closeCategoryModal();
     } catch (error) {
-        alert("บันทึกไม่สำเร็จ: " + error.message);
+        alert(safeAdminError("บันทึกไม่สำเร็จ"));
     }
 });
 
@@ -2993,6 +3003,11 @@ function clampPercent(value, fallback = 0) {
     return Math.max(0, Math.min(100, safeNumber(value, fallback)));
 }
 
+function normalizeRotation(value, fallback = 0) {
+    const number = safeNumber(value, fallback);
+    return ((Math.round(number) % 360) + 360) % 360;
+}
+
 function normalizeMapItem(id, data = {}) {
     const kind = data.kind === 'zone' ? 'zone' : 'table';
     if (kind === 'zone') {
@@ -3020,6 +3035,7 @@ function normalizeMapItem(id, data = {}) {
         status: ['available', 'booked', 'unavailable'].includes(data.status) ? data.status : 'available',
         x: clampPercent(data.x, 10),
         y: clampPercent(data.y, 10),
+        rotation: normalizeRotation(data.rotation, 0),
         mapEnabled: data.mapEnabled !== false && data.kind === 'table'
     };
 }
@@ -3035,6 +3051,111 @@ function updateZoneDatalist(items = getMapItems()) {
     if (!datalist) return;
     const zones = [...new Set(items.filter(item => item.kind === 'zone').map(item => item.name))];
     datalist.innerHTML = zones.map(zone => '<option value="' + escapeHTML(zone) + '"></option>').join('');
+}
+
+function getSortedMapItems(items = getMapItems()) {
+    return items.slice().sort((a, b) => {
+        if (a.kind !== b.kind) return a.kind === 'zone' ? -1 : 1;
+        return (a.name || a.code || a.id).localeCompare(b.name || b.code || b.id, 'th');
+    });
+}
+
+function updateTableZoneFilter(items = getMapItems()) {
+    const filter = document.getElementById('table-zone-filter');
+    if (!filter) return;
+    const current = filter.value || 'all';
+    const zones = [...new Set(items.map(item => item.kind === 'zone' ? item.name : item.zone).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, 'th'));
+    filter.innerHTML = '<option value="all">ทุกโซน</option>' + zones.map(zone => '<option value="' + escapeHTML(zone) + '">' + escapeHTML(zone) + '</option>').join('');
+    filter.value = current === 'all' || zones.includes(current) ? current : 'all';
+}
+
+function getFilteredMapItems(items = getSortedMapItems()) {
+    const search = (document.getElementById('table-map-search')?.value || '').trim().toLowerCase();
+    const kindFilter = document.getElementById('table-kind-filter')?.value || 'all';
+    const zoneFilter = document.getElementById('table-zone-filter')?.value || 'all';
+    const statusFilter = document.getElementById('table-status-filter')?.value || 'all';
+
+    return items.filter(item => {
+        if (kindFilter !== 'all' && item.kind !== kindFilter) return false;
+        if (zoneFilter !== 'all') {
+            const itemZone = item.kind === 'zone' ? item.name : item.zone;
+            if (itemZone !== zoneFilter) return false;
+        }
+        if (statusFilter !== 'all' && (item.kind !== 'table' || item.status !== statusFilter)) return false;
+        if (!search) return true;
+        const haystack = [
+            item.id, item.kind, item.name, item.code, item.zone, item.status, item.hint, item.shape,
+            item.seats, item.x, item.y, item.w, item.h, item.rotation
+        ].filter(value => value !== undefined && value !== null).join(' ').toLowerCase();
+        return haystack.includes(search);
+    });
+}
+
+function bindTableMapControls() {
+    if (tableMapControlsBound) return;
+    tableMapControlsBound = true;
+
+    const rerenderFromFirstPage = () => {
+        tableMapCurrentPage = 1;
+        renderTablesManagerView();
+    };
+
+    ['table-map-search', 'table-kind-filter', 'table-zone-filter', 'table-status-filter'].forEach(id => {
+        const control = document.getElementById(id);
+        if (!control) return;
+        control.addEventListener(id === 'table-map-search' ? 'input' : 'change', rerenderFromFirstPage);
+    });
+
+    const pageSize = document.getElementById('table-page-size');
+    pageSize?.addEventListener('change', () => {
+        tableMapPageSize = pageSize.value;
+        rerenderFromFirstPage();
+    });
+
+    document.getElementById('table-page-prev')?.addEventListener('click', () => {
+        tableMapCurrentPage = Math.max(1, tableMapCurrentPage - 1);
+        renderTablesManagerView();
+    });
+
+    document.getElementById('table-page-next')?.addEventListener('click', () => {
+        tableMapCurrentPage += 1;
+        renderTablesManagerView();
+    });
+
+    document.getElementById('table-page-input')?.addEventListener('change', (event) => {
+        tableMapCurrentPage = Math.max(1, safeNumber(event.target.value, 1));
+        renderTablesManagerView();
+    });
+
+    document.getElementById('table-filter-reset')?.addEventListener('click', () => {
+        const search = document.getElementById('table-map-search');
+        const kind = document.getElementById('table-kind-filter');
+        const zone = document.getElementById('table-zone-filter');
+        const status = document.getElementById('table-status-filter');
+        const size = document.getElementById('table-page-size');
+        if (search) search.value = '';
+        if (kind) kind.value = 'all';
+        if (zone) zone.value = 'all';
+        if (status) status.value = 'all';
+        if (size) size.value = '25';
+        tableMapPageSize = 25;
+        tableMapSelectedId = '';
+        rerenderFromFirstPage();
+    });
+
+    document.querySelectorAll('[data-rotation-value]').forEach(button => {
+        button.addEventListener('click', () => {
+            const input = document.getElementById('tableRotation');
+            if (input) input.value = normalizeRotation(button.dataset.rotationValue, 0);
+        });
+    });
+}
+
+function selectTableMapItem(id, options = {}) {
+    tableMapSelectedId = id || '';
+    renderTablesManagerView();
+    if (options.openEditor && id) window.editTable(id);
 }
 
 function setMapDesignerSummary(message) {
@@ -3099,7 +3220,7 @@ function attachMapDrag(element, item, stage) {
             window.removeEventListener('pointercancel', cancel);
 
             if (!moved) {
-                renderAdminTableMap(getMapItems());
+                selectTableMapItem(item.id, { openEditor: true });
                 return;
             }
 
@@ -3113,8 +3234,8 @@ function attachMapDrag(element, item, stage) {
                 setMapDesignerSummary('บันทึกตำแหน่งแล้ว: X ' + nextX + '% · Y ' + nextY + '%');
             } catch (error) {
                 console.error('Error updating map position:', error);
-                alert('บันทึกตำแหน่งไม่สำเร็จ: ' + error.message);
-                renderAdminTableMap(getMapItems());
+                alert(safeAdminError("บันทึกตำแหน่งไม่สำเร็จ"));
+                renderTablesManagerView();
             }
         };
 
@@ -3124,7 +3245,7 @@ function attachMapDrag(element, item, stage) {
             window.removeEventListener('pointermove', move);
             window.removeEventListener('pointerup', end);
             window.removeEventListener('pointercancel', cancel);
-            renderAdminTableMap(getMapItems());
+            renderTablesManagerView();
         };
 
         window.addEventListener('pointermove', move);
@@ -3142,7 +3263,7 @@ function renderAdminTableMap(items = getMapItems()) {
     const tableItems = items.filter(item => item.kind === 'table');
     zones.forEach(zone => {
         const el = document.createElement('div');
-        el.className = 'admin-map-zone';
+        el.className = 'admin-map-zone' + (zone.id === tableMapSelectedId ? ' is-selected' : '');
         el.style.left = zone.x + '%';
         el.style.top = zone.y + '%';
         el.style.width = zone.w + '%';
@@ -3153,49 +3274,111 @@ function renderAdminTableMap(items = getMapItems()) {
     });
     tableItems.forEach(table => {
         const el = document.createElement('div');
-        el.className = 'admin-map-table shape-' + table.shape + ' is-' + table.status;
+        el.className = 'admin-map-table shape-' + table.shape + ' is-' + table.status + (table.id === tableMapSelectedId ? ' is-selected' : '');
         el.style.left = table.x + '%';
         el.style.top = table.y + '%';
+        el.style.setProperty('--table-rotation', table.rotation + 'deg');
         el.innerHTML = '<span>' + escapeHTML(table.code) + '</span><small>' + escapeHTML(table.seats) + ' seats</small>';
         attachMapDrag(el, table, preview);
         preview.appendChild(el);
     });
-    if (summary) summary.textContent = 'โซน ' + zones.length + ' รายการ · โต๊ะ ' + tableItems.length + ' ตัว · คลิกแก้ไขจากตารางด้านซ้าย';
+    if (summary) summary.textContent = 'โซน ' + zones.length + ' รายการ · โต๊ะ ' + tableItems.length + ' ตัว · คลิก Preview เพื่อแก้ไขได้ทันที';
 }
 
-function renderTablesManager(snapshot) {
+function renderTablesManagerView() {
     const tbody = document.getElementById('tables-table-body');
     if (!tbody) return;
     tbody.innerHTML = '';
-    tablesData = {};
-    snapshot.forEach((docSnap) => { tablesData[docSnap.id] = docSnap.data(); });
-    const items = getMapItems().sort((a, b) => {
-        if (a.kind !== b.kind) return a.kind === 'zone' ? -1 : 1;
-        return (a.name || a.code || a.id).localeCompare(b.name || b.code || b.id);
-    });
-    if (items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">ยังไม่มีแผนผังโต๊ะ กด “ใช้แผนผังเริ่มต้น” เพื่อเริ่มได้เลย</td></tr>';
-        renderAdminTableMap([]);
-        updateZoneDatalist([]);
+
+    const allItems = getSortedMapItems();
+    if (tableMapSelectedId && !allItems.some(item => item.id === tableMapSelectedId)) {
+        tableMapSelectedId = '';
+    }
+    updateTableZoneFilter(allItems);
+    updateZoneDatalist(allItems);
+    renderAdminTableMap(allItems);
+
+    if (allItems.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">ยังไม่มีแผนผังโต๊ะ กด “ใช้แผนผังเริ่มต้น” เพื่อเริ่มได้เลย</td></tr>';
+        const summary = document.getElementById('table-list-summary');
+        if (summary) summary.textContent = 'ยังไม่มีรายการ';
+        const pageInput = document.getElementById('table-page-input');
+        const pageTotal = document.getElementById('table-page-total');
+        const prev = document.getElementById('table-page-prev');
+        const next = document.getElementById('table-page-next');
+        if (pageInput) pageInput.value = 1;
+        if (pageTotal) pageTotal.textContent = 'จาก 1';
+        if (prev) prev.disabled = true;
+        if (next) next.disabled = true;
         return;
     }
-    items.forEach(item => {
+
+    const filteredItems = getFilteredMapItems(allItems);
+    const pageSizeControl = document.getElementById('table-page-size');
+    const rawPageSize = pageSizeControl?.value || String(tableMapPageSize || 25);
+    const showAll = rawPageSize === 'all';
+    const pageSize = showAll ? Math.max(1, filteredItems.length) : Math.max(1, safeNumber(rawPageSize, 25));
+    const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+    tableMapCurrentPage = Math.max(1, Math.min(totalPages, tableMapCurrentPage));
+    const start = showAll ? 0 : (tableMapCurrentPage - 1) * pageSize;
+    const pageItems = filteredItems.slice(start, start + pageSize);
+
+    if (filteredItems.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">ไม่พบรายการที่ตรงกับตัวกรอง</td></tr>';
+    }
+
+    pageItems.forEach(item => {
         const tr = document.createElement('tr');
         const isZone = item.kind === 'zone';
+        tr.className = 'map-admin-row' + (item.id === tableMapSelectedId ? ' is-selected' : '');
+        tr.dataset.mapItemId = item.id;
         tr.innerHTML = '<td><span class="map-admin-pill ' + (isZone ? 'zone' : '') + '">' + (isZone ? 'โซน' : 'โต๊ะ') + '</span></td>'
             + '<td><strong>' + escapeHTML(isZone ? item.name : item.code) + '</strong><br><small class="text-muted">' + escapeHTML(item.id) + '</small></td>'
             + '<td>' + (isZone ? escapeHTML(item.hint || '-') : escapeHTML(item.zone) + '<br><small>' + escapeHTML(item.status) + '</small>') + '</td>'
             + '<td>X ' + escapeHTML(item.x) + '% · Y ' + escapeHTML(item.y) + '%</td>'
             + '<td>' + (isZone ? 'W ' + escapeHTML(item.w) + '% · H ' + escapeHTML(item.h) + '%' : escapeHTML(item.seats) + ' seats · ' + escapeHTML(item.shape)) + '</td>'
-            + '<td><button class="btn-action btn-edit" onclick="editTable(\'' + escapeJSString(item.id) + '\')">แก้ไข</button> '
-            + '<button class="btn-action btn-delete" onclick="deleteTable(\'' + escapeJSString(item.id) + '\')">ลบ</button></td>';
+            + '<td>' + (isZone ? '-' : escapeHTML(item.rotation) + '°') + '</td>'
+            + '<td><div class="map-admin-row-actions"><button class="btn-action btn-edit" onclick="editTable(\'' + escapeJSString(item.id) + '\')">แก้ไข</button>'
+            + '<button class="btn-action btn-delete" onclick="deleteTable(\'' + escapeJSString(item.id) + '\')">ลบ</button></div></td>';
+        tr.addEventListener('click', (event) => {
+            if (event.target.closest('button')) return;
+            selectTableMapItem(item.id);
+        });
         tbody.appendChild(tr);
     });
-    renderAdminTableMap(items);
-    updateZoneDatalist(items);
+
+    const summary = document.getElementById('table-list-summary');
+    if (summary) {
+        if (filteredItems.length === 0) {
+            summary.textContent = 'ไม่พบรายการจากทั้งหมด ' + allItems.length.toLocaleString('th-TH') + ' รายการ';
+        } else {
+            const end = Math.min(start + pageItems.length, filteredItems.length);
+            summary.textContent = 'แสดง ' + (start + 1).toLocaleString('th-TH') + '-' + end.toLocaleString('th-TH') + ' จาก ' + filteredItems.length.toLocaleString('th-TH') + ' รายการ (ทั้งหมด ' + allItems.length.toLocaleString('th-TH') + ')';
+        }
+    }
+
+    const pageInput = document.getElementById('table-page-input');
+    const pageTotal = document.getElementById('table-page-total');
+    const prev = document.getElementById('table-page-prev');
+    const next = document.getElementById('table-page-next');
+    if (pageInput) {
+        pageInput.value = tableMapCurrentPage;
+        pageInput.max = totalPages;
+        pageInput.disabled = showAll;
+    }
+    if (pageTotal) pageTotal.textContent = 'จาก ' + totalPages.toLocaleString('th-TH');
+    if (prev) prev.disabled = showAll || tableMapCurrentPage <= 1;
+    if (next) next.disabled = showAll || tableMapCurrentPage >= totalPages;
+}
+
+function renderTablesManager(snapshot) {
+    tablesData = {};
+    snapshot.forEach((docSnap) => { tablesData[docSnap.id] = docSnap.data(); });
+    renderTablesManagerView();
 }
 
 function setupRealtimeTables() {
+    bindTableMapControls();
     if (tablesUnsubscribe) {
         tablesUnsubscribe();
         tablesUnsubscribe = null;
@@ -3204,7 +3387,7 @@ function setupRealtimeTables() {
     tablesUnsubscribe = onSnapshot(q, renderTablesManager, (error) => {
         console.error('Error listening to table map:', error);
         const tbody = document.getElementById('tables-table-body');
-        if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:red;">โหลดข้อมูลแผนผังไม่สำเร็จ</td></tr>';
+        if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:red;">โหลดข้อมูลแผนผังไม่สำเร็จ</td></tr>';
     });
 }
 
@@ -3226,6 +3409,7 @@ function resetTableModal(kind = 'table') {
     document.getElementById('tableSeats').value = 4;
     document.getElementById('tableShape').value = 'rect';
     document.getElementById('tableStatus').value = 'available';
+    document.getElementById('tableRotation').value = 0;
     document.getElementById('tableX').value = 10;
     document.getElementById('tableY').value = 10;
     document.getElementById('zoneW').value = 35;
@@ -3251,6 +3435,10 @@ window.editTable = (id) => {
     const raw = tablesData[id];
     if (!raw) return;
     const item = normalizeMapItem(id, raw);
+    if (tableMapSelectedId !== id) {
+        tableMapSelectedId = id;
+        renderTablesManagerView();
+    }
     resetTableModal(item.kind);
     document.getElementById('tableId').value = id;
     document.getElementById('tableCode').value = id;
@@ -3267,6 +3455,7 @@ window.editTable = (id) => {
         document.getElementById('tableSeats').value = item.seats || 4;
         document.getElementById('tableShape').value = item.shape || 'rect';
         document.getElementById('tableStatus').value = item.status || 'available';
+        document.getElementById('tableRotation').value = item.rotation || 0;
     }
     document.getElementById('tableSubmitBtn').innerText = item.kind === 'zone' ? 'บันทึกโซน' : 'บันทึกโต๊ะ';
     tableModal.style.display = 'block';
@@ -3292,7 +3481,7 @@ window.seedDefaultTableMap = async () => {
         }));
         alert('สร้างแผนผังเริ่มต้นเรียบร้อย');
     } catch (error) {
-        alert('สร้างแผนผังไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("สร้างแผนผังไม่สำเร็จ"));
     }
 };
 
@@ -3326,6 +3515,7 @@ tableForm.addEventListener('submit', async (e) => {
                 seats: Math.max(1, safeNumber(document.getElementById('tableSeats').value, 4)),
                 shape: document.getElementById('tableShape').value,
                 status: document.getElementById('tableStatus').value,
+                rotation: normalizeRotation(document.getElementById('tableRotation').value, 0),
                 x: clampPercent(document.getElementById('tableX').value, 10),
                 y: clampPercent(document.getElementById('tableY').value, 10),
                 mapEnabled: true, updatedAt: new Date().toISOString()
@@ -3337,7 +3527,7 @@ tableForm.addEventListener('submit', async (e) => {
         closeTableModal();
     } catch (error) {
         console.error('Error saving table map item:', error);
-        alert('บันทึกไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("บันทึกไม่สำเร็จ"));
     } finally {
         submitBtn.disabled = false;
         submitBtn.innerText = kind === 'zone' ? 'บันทึกโซน' : 'บันทึกโต๊ะ';
@@ -3479,7 +3669,7 @@ roomForm.addEventListener('submit', async (e) => {
         closeRoomModal();
     } catch (error) {
         console.error("Error saving room:", error);
-        alert('เกิดข้อผิดพลาด: ' + error.message);
+        alert(safeAdminError("เกิดข้อผิดพลาด"));
     } finally {
         submitBtn.disabled = false;
         submitBtn.innerText = 'บันทึกข้อมูลห้อง';
@@ -4271,7 +4461,7 @@ window.checkoutPosOrder = async () => {
         alert(isTestOrder ? 'บันทึกออเดอร์ทดสอบ POS สำเร็จ' : 'บันทึกออเดอร์ POS สำเร็จ');
     } catch (error) {
         console.error('POS checkout failed:', error);
-        alert('บันทึกออเดอร์ POS ไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("บันทึกออเดอร์ POS ไม่สำเร็จ"));
     } finally {
         if (checkoutBtn) {
             checkoutBtn.disabled = false;
@@ -4507,7 +4697,7 @@ function bindProductManagerControls() {
                 const result = await uploadCategoryDataFromXLSX('products', upload.files[0]);
                 alert(`Upload complete: ${result.total} rows (created ${result.created}, updated ${result.updated})`);
             } catch (error) {
-                alert('Upload failed: ' + error.message);
+                alert(safeAdminError('Upload failed'));
             } finally {
                 upload.value = '';
             }
@@ -4533,7 +4723,7 @@ async function updateProductCategoryInline(productId, categoryId, selectEl) {
         if (productsData[productId]) productsData[productId].category = categoryId;
     } catch (error) {
         if (selectEl) selectEl.value = previousValue;
-        alert('Update category failed: ' + error.message);
+        alert(safeAdminError('Update category failed'));
     } finally {
         if (selectEl) {
             selectEl.disabled = false;
@@ -4546,7 +4736,7 @@ window.downloadProductDataXLSX = async () => {
     try {
         await downloadCategoryDataAsXLSX('products');
     } catch (error) {
-        alert('Export failed: ' + error.message);
+        alert(safeAdminError('Export failed'));
     }
 };
 
@@ -4910,7 +5100,7 @@ productForm.addEventListener('submit', async (e) => {
         alert('บันทึกเมนูสำเร็จ!');
     } catch (error) {
         console.error('Error saving product:', error);
-        alert("บันทึกไม่สำเร็จ: " + error.message);
+        alert(safeAdminError("บันทึกไม่สำเร็จ"));
     } finally {
         submitBtn.disabled = false;
         submitBtn.innerText = originalText;
@@ -4958,7 +5148,7 @@ window.voidPosOrder = async (id) => {
         alert('Void ออเดอร์ POS และคืนสต็อกเรียบร้อย');
     } catch (error) {
         console.error('Void POS order failed:', error);
-        alert('Void ออเดอร์ POS ไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("Void ออเดอร์ POS ไม่สำเร็จ"));
     }
 };
 
@@ -5124,7 +5314,7 @@ window.seedSeoBlogPosts = async () => {
         if (typeof fetchBlogsFromCloud === 'function') fetchBlogsFromCloud();
     } catch (error) {
         console.error('Seed SEO blogs failed:', error);
-        alert('นำเข้าบทความไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("นำเข้าบทความไม่สำเร็จ"));
     } finally {
         if (button) {
             button.innerText = originalText;
@@ -5261,7 +5451,7 @@ blogForm?.addEventListener('submit', async (e) => {
         }
         closeBlogModal();
     } catch (error) {
-        alert("บันทึกไม่สำเร็จ: " + error.message);
+        alert(safeAdminError("บันทึกไม่สำเร็จ"));
     } finally {
         submitBtn.innerText = originalText;
         submitBtn.disabled = false;
@@ -5525,7 +5715,7 @@ shopCategoryForm.addEventListener('submit', async (e) => {
         alert('บันทึกหมวดหมู่สำเร็จ!');
     } catch (error) {
         console.error('Error saving shop category:', error);
-        alert("บันทึกไม่สำเร็จ: " + error.message);
+        alert(safeAdminError("บันทึกไม่สำเร็จ"));
     } finally {
         submitBtn.disabled = false;
         submitBtn.innerText = 'บันทึกหมวดหมู่';
@@ -5621,7 +5811,7 @@ shopProductForm.addEventListener('submit', async (e) => {
         alert('บันทึกข้อมูลสำเร็จ!');
     } catch (error) {
         console.error('Error saving shop product:', error);
-        alert("บันทึกไม่สำเร็จ: " + error.message);
+        alert(safeAdminError("บันทึกไม่สำเร็จ"));
     } finally {
         submitBtn.disabled = false;
         submitBtn.innerText = originalText;
@@ -5652,7 +5842,7 @@ window.syncMembersFromAuth = async () => {
         renderMembersTable();
     } catch (error) {
         console.error('Unable to sync auth users:', error);
-        alert('Member sync failed: ' + error.message);
+        alert(safeAdminError('Member sync failed'));
     }
 };
 
@@ -5861,7 +6051,7 @@ async function saveAdminAccessFromForm() {
         resetAdminAccessForm();
     } catch (error) {
         console.error('Unable to save admin access:', error);
-        alert('บันทึกสิทธิ์ผู้จัดการไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("บันทึกสิทธิ์ผู้จัดการไม่สำเร็จ"));
     }
 }
 
@@ -5934,6 +6124,45 @@ const MEMBER_STATUS_LABELS = {
     vip: 'VIP',
     review: 'Needs review',
     suspended: 'Suspended'
+};
+
+const MEMBER_AUTH_RECOMMENDATIONS = {
+    READY_FOR_EMAIL_PHONE_PASSWORD_LOGIN: {
+        badge: 'พร้อม Login',
+        tone: 'ok',
+        title: 'ข้อมูลพร้อมสำหรับ Login ด้วยอีเมล/เบอร์ + รหัสผ่าน',
+        detail: 'UID, index และ password_hash พร้อมใช้งานแล้ว หากยัง login ไม่ได้ให้ตรวจฝั่งหน้า Login หรือรหัสที่สมาชิกกรอก'
+    },
+    SAFE_PASSWORD_SETUP_REQUIRED: {
+        badge: 'ต้องตั้งรหัส',
+        tone: 'warn',
+        title: 'ยังไม่มี password_hash',
+        detail: 'เพื่อความปลอดภัย ระบบไม่สามารถกู้รหัสเดิมได้ ต้องให้สมาชิกตั้งรหัสใหม่ผ่านขั้นตอนยืนยันตัวตน'
+    },
+    REPAIR_PHONE_INDEX: {
+        badge: 'ซ่อมได้',
+        tone: 'warn',
+        title: 'phone_number_index ขาดหรือไม่ตรง',
+        detail: 'กดปุ่มซ่อม Index ได้ ระบบจะซ่อมเฉพาะ index ที่ชี้ UID เดิม ไม่แตะรหัสผ่าน'
+    },
+    UID_CONFLICT_REVIEW_REQUIRED: {
+        badge: 'UID ชนกัน',
+        tone: 'error',
+        title: 'พบ UID มากกว่าหนึ่งชุด',
+        detail: 'ต้องตรวจด้วยคนก่อนซ่อม เพื่อเลี่ยงการรวมบัญชีผิดคน'
+    },
+    MEMBER_NOT_FOUND: {
+        badge: 'ไม่พบสมาชิก',
+        tone: 'error',
+        title: 'ไม่พบข้อมูลสมาชิกจากอีเมล/เบอร์/UID นี้',
+        detail: 'ตรวจตัวสะกด เบอร์โทร หรือให้สมาชิกสมัคร/ยืนยันตัวตนใหม่'
+    },
+    REVIEW_REQUIRED: {
+        badge: 'ต้องตรวจเพิ่ม',
+        tone: 'warn',
+        title: 'ระบบต้องให้แอดมินตรวจรายละเอียดเพิ่ม',
+        detail: 'อ่านผลด้านล่างแล้วเลือกซ่อมเฉพาะกรณีที่ UID ชัดเจน'
+    }
 };
 
 function memberText(value, fallback = '-') {
@@ -6104,6 +6333,208 @@ function memberStaffAccessHTML(uid, member) {
             </form>
         </div>`;
 }
+
+function memberAuthRecommendationInfo(key) {
+    return MEMBER_AUTH_RECOMMENDATIONS[key] || MEMBER_AUTH_RECOMMENDATIONS.REVIEW_REQUIRED;
+}
+
+function memberAuthChipHTML(label, value, options = {}) {
+    const { positiveLabel = 'พบ', negativeLabel = 'ไม่พบ', invert = false } = options;
+    const exists = !!value;
+    const good = invert ? !exists : exists;
+    const tone = good ? 'ok' : 'warn';
+    return `<span class="member-auth-chip ${tone}"><strong>${escapeHTML(label)}</strong> ${escapeHTML(exists ? positiveLabel : negativeLabel)}</span>`;
+}
+
+function memberAuthValue(value, fallback = '-') {
+    const text = String(value ?? '').trim();
+    return text || fallback;
+}
+
+function memberAuthSetupUrl(mode = 'phone') {
+    const path = mode === 'google' ? '/register?google=1' : '/register';
+    return new URL(path, window.location.origin).href;
+}
+
+function memberAuthSetStatus(message, tone = 'muted') {
+    const status = document.getElementById('member-auth-check-status');
+    if (!status) return;
+    status.textContent = message;
+    status.style.color = tone === 'error' ? '#b71c1c' : tone === 'ok' ? '#1b5e20' : '#62736a';
+}
+
+function memberAuthSetBadge(info = {}) {
+    const badge = document.getElementById('member-auth-check-badge');
+    if (!badge) return;
+    badge.textContent = info.badge || 'รอการตรวจ';
+    badge.className = `member-auth-chip ${info.tone || 'muted'}`;
+}
+
+function canRepairMemberAuthDiagnosis(result) {
+    const recommendation = result?.recommendation || '';
+    const canonicalUid = result?.found?.canonicalUid || result?.input?.requestedUid || '';
+    if (!canonicalUid) return false;
+    if (recommendation === 'MEMBER_NOT_FOUND' || recommendation === 'UID_CONFLICT_REVIEW_REQUIRED') return false;
+    if (recommendation === 'REPAIR_PHONE_INDEX') return true;
+
+    const selected = result?.selected || {};
+    const hasEmailInput = !!result?.input?.email;
+    const hasPhoneInput = !!result?.input?.phoneLast4;
+    return selected.credentialExists === false
+        || (hasEmailInput && (selected.emailLowerInUser === false || selected.emailLowerInCredential === false))
+        || (hasPhoneInput && (
+            selected.phoneInUser === false
+            || selected.phoneInCredential === false
+            || selected.phoneNumberIndexExists === false
+            || selected.phoneNumberIndexMatchesUid === false
+        ));
+}
+
+function renderMemberAuthDiagnosis(result) {
+    const resultEl = document.getElementById('member-auth-check-result');
+    const repairBtn = document.getElementById('member-auth-repair-btn');
+    if (!resultEl) return;
+
+    lastMemberAuthDiagnosis = result;
+    const info = memberAuthRecommendationInfo(result?.recommendation);
+    const found = result?.found || {};
+    const selected = result?.selected || {};
+    const repair = result?.repair || {};
+    const canRepair = canRepairMemberAuthDiagnosis(result);
+
+    memberAuthSetBadge(info);
+    memberAuthSetStatus(info.title, info.tone);
+    if (repairBtn) repairBtn.disabled = !canRepair;
+
+    const uidRows = [
+        ['UID จากอีเมล', found.uidFromEmail],
+        ['UID จากเบอร์', found.uidFromPhone],
+        ['UID หลักที่ระบบเลือก', found.canonicalUid],
+        ['UID ที่พบทั้งหมด', Array.isArray(found.candidateUids) && found.candidateUids.length ? found.candidateUids.join(', ') : '']
+    ].map(([label, value]) => `
+        <div class="member-detail-item">
+            <small>${escapeHTML(label)}</small>
+            <span class="member-auth-code">${escapeHTML(memberAuthValue(value))}</span>
+        </div>
+    `).join('');
+
+    const statusChips = [
+        memberAuthChipHTML('users doc', selected.userExists, { positiveLabel: 'มี', negativeLabel: 'ไม่มี' }),
+        memberAuthChipHTML('user_credentials', selected.credentialExists, { positiveLabel: 'มี', negativeLabel: 'ไม่มี' }),
+        memberAuthChipHTML('password_hash', selected.hasPasswordHash, { positiveLabel: 'มี', negativeLabel: 'ไม่มี' }),
+        memberAuthChipHTML('email_lower ใน users', selected.emailLowerInUser, { positiveLabel: 'ตรง', negativeLabel: 'ขาด/ไม่ตรง' }),
+        memberAuthChipHTML('email_lower ใน credentials', selected.emailLowerInCredential, { positiveLabel: 'ตรง', negativeLabel: 'ขาด/ไม่ตรง' }),
+        memberAuthChipHTML('เบอร์ใน users', selected.phoneInUser, { positiveLabel: 'ตรง', negativeLabel: 'ขาด/ไม่ตรง' }),
+        memberAuthChipHTML('เบอร์ใน credentials', selected.phoneInCredential, { positiveLabel: 'ตรง', negativeLabel: 'ขาด/ไม่ตรง' }),
+        memberAuthChipHTML('phone_number_index', selected.phoneNumberIndexMatchesUid || selected.phoneNumberIndexExists, { positiveLabel: selected.phoneNumberIndexMatchesUid ? 'ตรง UID' : 'มีแต่ต้องตรวจ', negativeLabel: 'ไม่มี' }),
+        memberAuthChipHTML('UID อีเมล/เบอร์', found.uidMatches || (!found.uidFromEmail || !found.uidFromPhone), { positiveLabel: found.uidMatches ? 'ตรงกัน' : 'มีฝั่งเดียว', negativeLabel: 'ไม่ตรงกัน' })
+    ].join('');
+
+    const repairMessage = repair.requested
+        ? repair.performed
+            ? `<div class="member-auth-safe-box"><strong>ซ่อม Index แล้ว</strong><br>credentials: ${safeNumber(repair.stats?.credentialLinksRepaired)} รายการ, phone index: ${safeNumber(repair.stats?.phoneIndexesRepaired)} รายการ, conflict: ${safeNumber(repair.stats?.phoneIndexConflicts)} รายการ</div>`
+            : `<div class="member-auth-warning-box"><strong>ยังไม่ได้ซ่อม</strong><br>เหตุผล: ${escapeHTML(repair.skippedReason || 'ระบบไม่พบรายการที่ซ่อมได้อย่างปลอดภัย')}</div>`
+        : '';
+
+    const passwordSetupBox = selected.hasPasswordHash === false || result?.recommendation === 'SAFE_PASSWORD_SETUP_REQUIRED'
+        ? `
+            <div class="member-auth-warning-box">
+                <strong>สมาชิกยังไม่มี password_hash</strong><br>
+                ระบบไม่สามารถกู้รหัสผ่านเดิมได้ ให้เจ้าของบัญชีตั้งรหัสใหม่ผ่านการยืนยันตัวตนเท่านั้น
+                <div class="member-auth-actions">
+                    <button type="button" class="btn-action" onclick="openMemberPasswordSetup('phone')">เปิดหน้าตั้งรหัสด้วยเบอร์ OTP</button>
+                    <button type="button" class="btn-action btn-view" onclick="openMemberPasswordSetup('google')">เปิดหน้าตั้งรหัสด้วย Google</button>
+                    <button type="button" class="btn-action btn-edit" onclick="copyMemberPasswordSetupLink('phone')">คัดลอกลิงก์เบอร์ OTP</button>
+                </div>
+            </div>
+        `
+        : '';
+
+    resultEl.hidden = false;
+    resultEl.innerHTML = `
+        <div class="member-auth-safe-box">
+            <strong>${escapeHTML(info.title)}</strong><br>
+            ${escapeHTML(info.detail)}
+        </div>
+        ${repairMessage}
+        ${passwordSetupBox}
+        <div class="member-detail-grid" style="margin-top:12px;">${uidRows}</div>
+        <div class="member-auth-status-grid">${statusChips}</div>
+        <div class="member-auth-code">
+            อีเมลที่ตรวจ: ${escapeHTML(result?.input?.email || '-')} |
+            เบอร์ท้าย: ${escapeHTML(result?.input?.phoneLast4 || '-')} |
+            UID ที่ระบุ: ${escapeHTML(result?.input?.requestedUid || '-')}
+        </div>
+    `;
+}
+
+async function diagnoseMemberAuthLogin(options = {}) {
+    const repair = options.repair === true;
+    const email = String(document.getElementById('member-auth-email')?.value || '').trim();
+    const phoneNumber = String(document.getElementById('member-auth-phone')?.value || '').trim();
+    const uid = String(document.getElementById('member-auth-uid')?.value || '').trim();
+    const resultEl = document.getElementById('member-auth-check-result');
+    const repairBtn = document.getElementById('member-auth-repair-btn');
+    const submitBtn = document.querySelector('#member-auth-check-form button[type="submit"]');
+
+    if (!email && !phoneNumber && !uid) {
+        memberAuthSetBadge({ badge: 'กรอกข้อมูลก่อน', tone: 'warn' });
+        memberAuthSetStatus('กรุณาใส่อีเมล เบอร์โทร หรือ UID อย่างน้อย 1 ช่อง', 'error');
+        return;
+    }
+
+    try {
+        if (submitBtn) submitBtn.disabled = true;
+        if (repairBtn) repairBtn.disabled = true;
+        if (resultEl && !repair) resultEl.hidden = true;
+        memberAuthSetBadge({ badge: repair ? 'กำลังซ่อม' : 'กำลังตรวจ', tone: 'muted' });
+        memberAuthSetStatus(repair ? 'กำลังซ่อม index อย่างปลอดภัย...' : 'กำลังตรวจข้อมูล login สมาชิก...');
+
+        const result = await callAdminFunction('diagnoseMemberAuthLink', { email, phoneNumber, uid, repair });
+        renderMemberAuthDiagnosis(result);
+    } catch (error) {
+        console.error('Member auth diagnosis failed:', error);
+        memberAuthSetBadge({ badge: 'ตรวจไม่สำเร็จ', tone: 'error' });
+        memberAuthSetStatus(error.message || 'ตรวจ Login สมาชิกไม่สำเร็จ', 'error');
+        if (resultEl) {
+            resultEl.hidden = false;
+            resultEl.innerHTML = `<div class="member-auth-warning-box"><strong>ตรวจไม่สำเร็จ</strong><br>${escapeHTML(error.message || safeAdminError('ตรวจ Login สมาชิกไม่สำเร็จ'))}</div>`;
+        }
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
+        if (repairBtn) repairBtn.disabled = !canRepairMemberAuthDiagnosis(lastMemberAuthDiagnosis);
+    }
+}
+
+function bindMemberAuthDiagnostics() {
+    if (memberAuthDiagnosticsBound) return;
+    const form = document.getElementById('member-auth-check-form');
+    const repairBtn = document.getElementById('member-auth-repair-btn');
+    if (form) {
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
+            diagnoseMemberAuthLogin();
+        });
+    }
+    if (repairBtn) {
+        repairBtn.addEventListener('click', () => diagnoseMemberAuthLogin({ repair: true }));
+    }
+    memberAuthDiagnosticsBound = true;
+}
+
+window.openMemberPasswordSetup = (mode = 'phone') => {
+    window.open(memberAuthSetupUrl(mode), '_blank', 'noopener');
+};
+
+window.copyMemberPasswordSetupLink = async (mode = 'phone') => {
+    const url = memberAuthSetupUrl(mode);
+    try {
+        await navigator.clipboard.writeText(url);
+        alert('คัดลอกลิงก์ตั้งรหัสแล้ว: ' + url);
+    } catch (error) {
+        alert('ลิงก์ตั้งรหัส: ' + url);
+    }
+};
 
 function formatMemberCurrency(value) {
     return 'THB ' + safeNumber(value).toLocaleString('th-TH');
@@ -6287,6 +6718,7 @@ function renderMembersTable() {
 
 function setupRealtimeMembers() {
     bindMemberFilters();
+    bindMemberAuthDiagnostics();
     if (membersUnsubscribe) membersUnsubscribe();
     if (memberSummariesUnsubscribe) memberSummariesUnsubscribe();
     if (memberOrdersMetricsUnsubscribe) memberOrdersMetricsUnsubscribe();
@@ -6537,7 +6969,7 @@ window.saveMemberAdminFields = async (event, uid) => {
             statusEl.textContent = 'Save failed: ' + error.message;
             statusEl.style.color = '#c62828';
         } else {
-            alert('Save failed: ' + error.message);
+            alert(safeAdminError('Save failed'));
         }
     }
     return false;
@@ -6619,7 +7051,7 @@ window.saveMemberStaffAccess = async (event, uid) => {
             statusEl.textContent = 'Save failed: ' + error.message;
             statusEl.style.color = '#c62828';
         } else {
-            alert('Save failed: ' + error.message);
+            alert(safeAdminError('Save failed'));
         }
     }
     return false;
@@ -6642,7 +7074,7 @@ window.deleteMemberStaffAccess = async (uid) => {
         window.openMemberModal(uid);
     } catch (error) {
         console.error('Unable to remove member staff access:', error);
-        alert('Remove staff access failed: ' + error.message);
+        alert(safeAdminError('Remove staff access failed'));
     }
 };
 
@@ -6650,111 +7082,305 @@ window.deleteMemberStaffAccess = async (uid) => {
 // FAQ Management Logic
 // ==========================================
 let faqsData = {};
+const FAQ_PAGE_OPTIONS = Object.freeze([
+    { key: 'home', label: 'Home / Index' },
+    { key: 'menu', label: 'เมนู' },
+    { key: 'shop', label: 'ร้านค้า' },
+    { key: 'booking', label: 'ระบบจอง' },
+    { key: 'faq', label: 'FAQ รวม' }
+]);
+const FAQ_STATUS_LABELS = Object.freeze({
+    published: 'เผยแพร่',
+    draft: 'ฉบับร่าง'
+});
+let faqFilters = {
+    search: '',
+    page: 'all',
+    status: 'all'
+};
 
-const faqModal = document.getElementById('faqModal');
-const faqForm = document.getElementById('faqForm');
+function getFaqPageLabel(pageKey) {
+    return FAQ_PAGE_OPTIONS.find(page => page.key === pageKey)?.label || pageKey || '-';
+}
+
+function normalizeFaqRecord(raw = {}, id = '') {
+    const legacyPublished = raw.published !== false;
+    const targetPages = Array.isArray(raw.targetPages) && raw.targetPages.length
+        ? raw.targetPages.filter(page => FAQ_PAGE_OPTIONS.some(option => option.key === page))
+        : ['home', 'faq'];
+    const pinnedPages = raw.pinnedPages && typeof raw.pinnedPages === 'object' ? raw.pinnedPages : {};
+    const pageOrder = raw.pageOrder && typeof raw.pageOrder === 'object' ? raw.pageOrder : {};
+    const hasPopularField = Object.prototype.hasOwnProperty.call(raw, 'isPopular');
+
+    return {
+        id,
+        question: String(raw.question || '').trim(),
+        answer: String(raw.answer || '').trim(),
+        category: String(raw.category || 'general').trim() || 'general',
+        status: String(raw.status || (legacyPublished ? 'published' : 'draft')).trim() === 'draft' ? 'draft' : 'published',
+        order: safeNumber(raw.order, 0),
+        targetPages,
+        pinnedPages,
+        pageOrder,
+        isPopular: hasPopularField ? Boolean(raw.isPopular) : targetPages.includes('faq'),
+        popularOrder: safeNumber(raw.popularOrder, safeNumber(raw.order, 0)),
+        createdAt: raw.createdAt || '',
+        updatedAt: raw.updatedAt || ''
+    };
+}
+
+function renderFaqControls() {
+    const pageFilter = document.getElementById('faqPageFilter');
+    if (pageFilter && !pageFilter.dataset.ready) {
+        pageFilter.innerHTML = '<option value="all">ทุกหน้าเพจ</option>' + FAQ_PAGE_OPTIONS.map(page => `<option value="${page.key}">${escapeHTML(page.label)}</option>`).join('');
+        pageFilter.dataset.ready = 'true';
+    }
+
+    const targetContainer = document.getElementById('faqTargetPages');
+    if (targetContainer && !targetContainer.dataset.ready) {
+        targetContainer.innerHTML = FAQ_PAGE_OPTIONS.map(page => `
+            <label class="faq-check-card">
+                <input type="checkbox" data-faq-page-target="${page.key}">
+                <span>${escapeHTML(page.label)}</span>
+            </label>
+        `).join('');
+        targetContainer.dataset.ready = 'true';
+    }
+
+    const pinnedContainer = document.getElementById('faqPinnedPages');
+    if (pinnedContainer && !pinnedContainer.dataset.ready) {
+        pinnedContainer.innerHTML = FAQ_PAGE_OPTIONS.map(page => `
+            <label class="faq-check-card">
+                <input type="checkbox" data-faq-pinned-page="${page.key}">
+                <span>ตรึงที่ ${escapeHTML(page.label)}</span>
+            </label>
+        `).join('');
+        pinnedContainer.dataset.ready = 'true';
+    }
+
+    const orderContainer = document.getElementById('faqPageOrders');
+    if (orderContainer && !orderContainer.dataset.ready) {
+        orderContainer.innerHTML = FAQ_PAGE_OPTIONS.map(page => `
+            <label>
+                ลำดับใน ${escapeHTML(page.label)}
+                <input type="number" min="0" step="1" value="0" data-faq-page-order="${page.key}">
+            </label>
+        `).join('');
+        orderContainer.dataset.ready = 'true';
+    }
+}
+
+function getFaqFormData() {
+    const targetPages = Array.from(document.querySelectorAll('[data-faq-page-target]:checked')).map(input => input.dataset.faqPageTarget);
+    const pinnedPages = {};
+    Array.from(document.querySelectorAll('[data-faq-pinned-page]')).forEach(input => {
+        pinnedPages[input.dataset.faqPinnedPage] = input.checked;
+    });
+    const pageOrder = {};
+    Array.from(document.querySelectorAll('[data-faq-page-order]')).forEach(input => {
+        pageOrder[input.dataset.faqPageOrder] = safeNumber(input.value, 0);
+    });
+
+    return {
+        question: document.getElementById('faqQuestion')?.value.trim() || '',
+        answer: document.getElementById('faqAnswer')?.value.trim() || '',
+        category: document.getElementById('faqCategory')?.value || 'general',
+        status: document.getElementById('faqStatus')?.value || 'published',
+        order: safeNumber(document.getElementById('faqOrder')?.value, 0),
+        targetPages: targetPages.length ? targetPages : ['faq'],
+        pinnedPages,
+        pageOrder,
+        isPopular: Boolean(document.getElementById('faqIsPopular')?.checked),
+        popularOrder: safeNumber(document.getElementById('faqPopularOrder')?.value, 0),
+        updatedAt: new Date().toISOString()
+    };
+}
+
+function setFaqFormData(faq = null) {
+    renderFaqControls();
+    const normalized = faq ? normalizeFaqRecord(faq, faq.id || '') : null;
+    document.getElementById('faqId').value = normalized?.id || '';
+    document.getElementById('faqQuestion').value = normalized?.question || '';
+    document.getElementById('faqAnswer').value = normalized?.answer || '';
+    document.getElementById('faqCategory').value = normalized?.category || 'general';
+    document.getElementById('faqStatus').value = normalized?.status || 'published';
+    document.getElementById('faqOrder').value = normalized?.order ?? Object.keys(faqsData).length + 1;
+    document.getElementById('faqPopularOrder').value = normalized?.popularOrder ?? Object.keys(faqsData).length + 1;
+    document.getElementById('faqIsPopular').checked = normalized ? normalized.isPopular : true;
+
+    Array.from(document.querySelectorAll('[data-faq-page-target]')).forEach(input => {
+        input.checked = normalized ? normalized.targetPages.includes(input.dataset.faqPageTarget) : input.dataset.faqPageTarget === 'faq';
+    });
+    Array.from(document.querySelectorAll('[data-faq-pinned-page]')).forEach(input => {
+        input.checked = normalized ? Boolean(normalized.pinnedPages?.[input.dataset.faqPinnedPage]) : false;
+    });
+    Array.from(document.querySelectorAll('[data-faq-page-order]')).forEach(input => {
+        input.value = normalized ? safeNumber(normalized.pageOrder?.[input.dataset.faqPageOrder], 0) : 0;
+    });
+}
+
+function renderFaqPageSummary() {
+    const container = document.getElementById('faq-page-summary');
+    if (!container) return;
+    const faqs = Object.values(faqsData).map(faq => normalizeFaqRecord(faq, faq.id));
+    container.innerHTML = FAQ_PAGE_OPTIONS.map(page => {
+        const published = faqs.filter(faq => faq.status === 'published' && faq.targetPages.includes(page.key));
+        const pinned = published.filter(faq => faq.pinnedPages?.[page.key]);
+        return `
+            <div class="faq-page-summary-card">
+                <strong>${escapeHTML(page.label)}</strong>
+                <span>${published.length} คำถามเผยแพร่</span>
+                <span>${pinned.length} คำถามตรึง</span>
+            </div>
+        `;
+    }).join('');
+}
+
+function getFilteredFaqs() {
+    const search = faqFilters.search.toLowerCase().trim();
+    return Object.values(faqsData)
+        .map(faq => normalizeFaqRecord(faq, faq.id))
+        .filter(faq => {
+            if (faqFilters.status !== 'all' && faq.status !== faqFilters.status) return false;
+            if (faqFilters.page !== 'all' && !faq.targetPages.includes(faqFilters.page)) return false;
+            if (search) {
+                const haystack = [faq.question, faq.answer, faq.targetPages.map(getFaqPageLabel).join(' ')].join(' ').toLowerCase();
+                if (!haystack.includes(search)) return false;
+            }
+            return true;
+        })
+        .sort((a, b) => (a.order - b.order) || a.question.localeCompare(b.question, 'th'));
+}
+
+function renderFaqAdmin() {
+    renderFaqControls();
+    renderFaqPageSummary();
+    const tbody = document.getElementById('faqs-table-body');
+    if (!tbody) return;
+
+    const faqs = getFilteredFaqs();
+    if (!faqs.length) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#667; padding:24px;">ยังไม่มีคำถามตามเงื่อนไขที่เลือก</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = faqs.map(faq => {
+        const pageBadges = faq.targetPages.map(page => `<span class="faq-badge">${escapeHTML(getFaqPageLabel(page))}</span>`).join('');
+        const pinnedBadges = FAQ_PAGE_OPTIONS
+            .filter(page => faq.pinnedPages?.[page.key])
+            .map(page => `<span class="faq-badge pinned">ตรึง ${escapeHTML(page.label)}</span>`)
+            .join('');
+        const popularBadge = faq.isPopular ? '<span class="faq-badge pinned">ยอดฮิต</span>' : '';
+        const statusBadge = faq.status === 'published'
+            ? '<span class="faq-badge">เผยแพร่</span>'
+            : '<span class="faq-badge draft">ฉบับร่าง</span>';
+        return `
+            <tr>
+                <td class="faq-question-cell">
+                    <strong>${escapeHTML(faq.question)}</strong>
+                    <div class="faq-answer-preview">${escapeHTML(faq.answer)}</div>
+                </td>
+                <td><div class="faq-badge-row">${pageBadges}${pinnedBadges}${popularBadge}</div></td>
+                <td>${statusBadge}</td>
+                <td>
+                    <button class="btn-action btn-edit" type="button" onclick="editFaq('${escapeJSString(faq.id)}')">แก้ไข</button>
+                    <button class="btn-action btn-delete" type="button" onclick="deleteFaq('${escapeJSString(faq.id)}')">ลบ</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
 
 window.fetchFaqsFromCloud = function() {
+    renderFaqControls();
     if (faqsUnsubscribe) {
         faqsUnsubscribe();
         faqsUnsubscribe = null;
     }
-    const q = query(collection(db, "faqs"), orderBy("order", "asc"));
+    const q = query(collection(db, 'faqs'), orderBy('order', 'asc'));
     faqsUnsubscribe = onSnapshot(q, (snapshot) => {
-        const tbody = document.getElementById('faqs-table-body');
-        if (!tbody) return;
-        
-        tbody.innerHTML = '';
         faqsData = {};
-        
-        let index = 1;
         snapshot.forEach((docSnap) => {
-            const faq = docSnap.data();
-            const id = docSnap.id;
-            faqsData[id] = faq;
-            
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td>${escapeHTML(faq.order || index)}</td>
-                <td><strong>${escapeHTML(faq.question)}</strong></td>
-                <td><div style="max-height: 80px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;">${escapeHTML(faq.answer)}</div></td>
-                <td>
-                    <button class="btn-action btn-edit" onclick="editFaq('${escapeJSString(id)}')">แก้ไข</button>
-                    <button class="btn-action btn-delete" onclick="deleteFaq('${escapeJSString(id)}')">ลบ</button>
-                </td>
-            `;
-            tbody.appendChild(tr);
-            index++;
+            const faq = normalizeFaqRecord(docSnap.data(), docSnap.id);
+            faqsData[docSnap.id] = faq;
         });
+        renderFaqAdmin();
     }, (error) => {
-        console.error("Error fetching FAQs:", error);
+        console.error('Error fetching FAQs:', error);
+        const tbody = document.getElementById('faqs-table-body');
+        if (tbody) tbody.innerHTML = `<tr><td colspan="4" style="color:#b42318; text-align:center; padding:24px;">โหลด FAQ ไม่สำเร็จ: ${escapeHTML(error.message)}</td></tr>`;
     });
-}
-
-window.openFaqModal = () => {
-    faqForm.reset();
-    document.getElementById('faqId').value = '';
-    document.getElementById('faqOrder').value = Object.keys(faqsData).length + 1;
-    document.getElementById('faqModalTitle').innerText = 'เพิ่มคำถามใหม่';
-    faqModal.style.display = 'block';
 };
 
-window.closeFaqModal = () => {
-    faqModal.style.display = 'none';
+window.openFaqModal = () => window.resetFaqForm();
+window.closeFaqModal = () => window.resetFaqForm();
+
+window.resetFaqForm = () => {
+    const form = document.getElementById('faqForm');
+    form?.reset();
+    setFaqFormData(null);
+    form?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
 window.editFaq = (id) => {
     const faq = faqsData[id];
     if (!faq) return;
-    
-    document.getElementById('faqId').value = id;
-    document.getElementById('faqQuestion').value = faq.question || '';
-    document.getElementById('faqAnswer').value = faq.answer || '';
-    document.getElementById('faqOrder').value = faq.order || 0;
-    
-    document.getElementById('faqModalTitle').innerText = 'แก้ไขคำถาม';
-    faqModal.style.display = 'block';
+    setFaqFormData({ ...faq, id });
+    document.getElementById('faqForm')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
 window.deleteFaq = async (id) => {
-    if (confirm("คุณแน่ใจหรือไม่ว่าต้องการลบคำถามนี้?")) {
-        try {
-            await deleteDoc(doc(db, "faqs", id));
-        } catch (e) {
-            alert("ลบไม่สำเร็จ: " + e.message);
-        }
+    const faq = faqsData[id];
+    if (!faq) return;
+    if (!confirm(`ต้องการลบคำถาม "${faq.question}" ใช่ไหม?`)) return;
+    try {
+        await deleteDoc(doc(db, 'faqs', id));
+    } catch (error) {
+        alert(safeAdminError("ลบ FAQ ไม่สำเร็จ"));
     }
 };
 
+const faqForm = document.getElementById('faqForm');
 faqForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    
-    const id = document.getElementById('faqId').value;
-    const faqData = {
-        question: document.getElementById('faqQuestion').value,
-        answer: document.getElementById('faqAnswer').value,
-        order: Number(document.getElementById('faqOrder').value),
-        updatedAt: new Date().toISOString()
-    };
-    
+    const id = document.getElementById('faqId')?.value || '';
+    const faqData = getFaqFormData();
+    if (!faqData.question || !faqData.answer) {
+        alert('กรุณากรอกคำถามและคำตอบ');
+        return;
+    }
+
     try {
         if (id) {
-            await updateDoc(doc(db, "faqs", id), faqData);
+            await updateDoc(doc(db, 'faqs', id), faqData);
         } else {
             faqData.createdAt = new Date().toISOString();
-            await addDoc(collection(db, "faqs"), faqData);
+            await addDoc(collection(db, 'faqs'), faqData);
         }
-        closeFaqModal();
+        window.resetFaqForm();
+        alert('บันทึก FAQ สำเร็จ');
     } catch (error) {
-        alert("บันทึกไม่สำเร็จ: " + error.message);
+        alert(safeAdminError("บันทึก FAQ ไม่สำเร็จ"));
     }
 });
+
+function bindFaqFilters() {
+    renderFaqControls();
+    const search = document.getElementById('faqSearch');
+    const page = document.getElementById('faqPageFilter');
+    const status = document.getElementById('faqStatusFilter');
+    search?.addEventListener('input', () => { faqFilters.search = search.value; renderFaqAdmin(); });
+    page?.addEventListener('change', () => { faqFilters.page = page.value; renderFaqAdmin(); });
+    status?.addEventListener('change', () => { faqFilters.status = status.value; renderFaqAdmin(); });
+}
+bindFaqFilters();
+setFaqFormData(null);
 
 // Start fetching FAQs when logged in
 onAuthStateChanged(auth, (user) => {
     if (user) {
-        if(typeof fetchFaqsFromCloud === 'function') fetchFaqsFromCloud();
-        if(typeof loadFooterSettings === 'function') loadFooterSettings();
+        if (typeof fetchFaqsFromCloud === 'function') fetchFaqsFromCloud();
+        if (typeof loadFooterSettings === 'function') loadFooterSettings();
     }
 });
 
@@ -7242,7 +7868,7 @@ marketingSettingsForm?.addEventListener('submit', async (event) => {
         alert('Marketing settings saved. Public pages will load the tools only after visitor consent.');
         updateMarketingPreview();
     } catch (error) {
-        alert('Unable to save marketing settings: ' + error.message);
+        alert(safeAdminError('Unable to save marketing settings'));
     } finally {
         if (submitBtn) {
             submitBtn.disabled = false;
@@ -7340,7 +7966,7 @@ footerSettingsForm?.addEventListener('submit', async (e) => {
         await setDoc(doc(db, 'site_settings', 'footer'), footerData, { merge: true });
         alert('\u2705 \u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25 Footer \u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08');
     } catch (error) {
-        alert('\u274c \u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08: ' + error.message);
+        alert(safeAdminError('บันทึกไม่สำเร็จ'));
     } finally {
         if (submitBtn) {
             submitBtn.disabled = false;

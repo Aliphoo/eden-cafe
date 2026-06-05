@@ -303,13 +303,29 @@
         .map-admin-grid { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 20px; align-items: start; }
         .map-admin-help { background: #f2fbf3; border: 1px solid #d9efdc; border-radius: 12px; padding: 14px 16px; color: #345; font-size: 0.92rem; line-height: 1.6; margin-bottom: 16px; }
         .map-admin-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+        .map-admin-panel { min-width: 0; }
+        .map-admin-toolbar { display: grid; grid-template-columns: minmax(220px, 1fr) 140px 150px 150px 150px auto; gap: 10px; margin-bottom: 12px; }
+        .map-admin-toolbar input, .map-admin-toolbar select { width: 100%; min-height: 42px; border: 1px solid #dfe8df; border-radius: 8px; padding: 9px 12px; font: inherit; background: #fff; }
+        .map-admin-reset { min-height: 42px; border: 1px solid #dfe8df; border-radius: 8px; padding: 0 14px; background: #f8fbf8; color: #345; font-weight: 700; cursor: pointer; white-space: nowrap; }
+        .map-admin-table-scroll { max-height: 680px; overflow: auto; border: 1px solid #edf1ed; border-radius: 12px; background: #fff; }
+        .map-admin-table { min-width: 920px; }
+        .map-admin-table thead th { position: sticky; top: 0; z-index: 2; background: #f8faf8; }
+        .map-admin-row { cursor: pointer; }
+        .map-admin-row:hover, .map-admin-row.is-selected { background: #f4fbf4; }
+        .map-admin-row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .map-admin-pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; color: #667; flex-wrap: wrap; }
+        .map-admin-page-controls { display: flex; align-items: center; gap: 8px; }
+        .map-admin-page-btn { width: 42px; height: 38px; border: 1px solid #dfe8df; border-radius: 8px; background: #fff; color: #345; font-size: 1.2rem; cursor: pointer; }
+        .map-admin-page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .map-admin-page-input { width: 58px; height: 38px; border: 1px solid #dfe8df; border-radius: 8px; text-align: center; }
         .map-admin-preview-card { background: #fbfff8; border: 1px solid #e0eadc; border-radius: 14px; padding: 14px; position: sticky; top: 20px; }
         .admin-map-stage { position: relative; width: 100%; aspect-ratio: 1.35 / 1; min-height: 310px; overflow: hidden; border-radius: 18px; background: linear-gradient(135deg, #063b29, #0b5b3a 58%, #103c2d); border: 1px solid rgba(0,0,0,0.08); touch-action: none; user-select: none; }
         .admin-map-zone { position: absolute; border: 1px solid rgba(255,255,255,0.18); border-radius: 18px; background: rgba(255,255,255,0.12); color: white; padding: 10px; font-size: 0.76rem; overflow: hidden; cursor: grab; touch-action: none; }
         .admin-map-zone strong { display: block; letter-spacing: 0.14em; text-transform: uppercase; }
         .admin-map-zone small { color: rgba(255,255,255,0.72); }
-        .admin-map-table { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2px solid #0b5b3a; background: #fffdf6; color: #123f2b; font-size: 0.68rem; font-weight: 700; box-shadow: 0 6px 14px rgba(0,0,0,0.12); cursor: grab; touch-action: none; }
+        .admin-map-table { --table-rotation: 0deg; position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2px solid #0b5b3a; background: #fffdf6; color: #123f2b; font-size: 0.68rem; font-weight: 700; box-shadow: 0 6px 14px rgba(0,0,0,0.12); cursor: grab; touch-action: none; transform: rotate(var(--table-rotation)); transform-origin: center center; }
         .admin-map-zone.is-dragging, .admin-map-table.is-dragging { cursor: grabbing; outline: 2px solid rgba(255,255,255,0.85); outline-offset: 3px; z-index: 20; }
+        .admin-map-zone.is-selected, .admin-map-table.is-selected { outline: 3px solid rgba(255, 204, 102, 0.95); outline-offset: 4px; z-index: 12; }
         .admin-map-table.shape-round { width: 44px; height: 44px; border-radius: 999px; }
         .admin-map-table.shape-rect { width: 66px; height: 42px; border-radius: 14px; }
         .admin-map-table.shape-wide { width: 88px; height: 42px; border-radius: 14px; }
@@ -318,10 +334,14 @@
         .map-admin-mini { color: #789; font-size: 0.82rem; margin-top: 10px; }
         .map-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         .map-form-grid .full { grid-column: 1 / -1; }
+        .map-rotation-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .map-rotation-chip { min-height: 34px; border: 1px solid #dfe8df; border-radius: 999px; background: #fff; color: #345; padding: 0 12px; font-weight: 700; cursor: pointer; }
         .modal-content.map-modal { max-width: 760px; margin: 4% auto; }
         .map-admin-pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 9px; font-size: 0.78rem; font-weight: 500; background: #eef6f0; color: #2e7d32; }
         .map-admin-pill.zone { background: #e3f2fd; color: #1565c0; }
+        @media (max-width: 1300px) { .map-admin-toolbar { grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(130px, 1fr)); } }
         @media (max-width: 1100px) { .map-admin-grid { grid-template-columns: 1fr; } .map-admin-preview-card { position: static; } }
+        @media (max-width: 720px) { .map-admin-toolbar { grid-template-columns: 1fr; } }
         @media (max-width: 640px) { .map-form-grid { grid-template-columns: 1fr; } }
 
 
@@ -368,7 +388,27 @@
         .member-staff-summary { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; color: #52645a; font-size: 0.9rem; }
         .member-staff-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
         .member-staff-hint { color: #66766d; font-size: 0.86rem; line-height: 1.5; margin-top: 8px; }
+        .member-auth-check-card { border: 1px solid #dfeee1; background: linear-gradient(135deg, #fbfff8, #ffffff); border-radius: 18px; padding: 18px; margin: 0 0 18px; box-shadow: 0 12px 26px rgba(44, 62, 80, 0.05); }
+        .member-auth-check-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+        .member-auth-check-head h3 { color: var(--primary-color); margin: 0 0 4px; }
+        .member-auth-check-head p, .member-auth-hint { color: #62736a; line-height: 1.55; margin: 0; }
+        .member-auth-check-form { display: grid; grid-template-columns: minmax(190px, 1fr) minmax(160px, 0.8fr) minmax(170px, 0.9fr) auto auto; gap: 10px; align-items: center; margin: 14px 0; }
+        .member-auth-check-form input { width: 100%; padding: 11px 12px; border: 1px solid #dbe8df; border-radius: 12px; background: #fff; font-size: 0.92rem; }
+        .member-auth-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 6px 11px; font-size: 0.8rem; font-weight: 700; border: 1px solid #dfe8df; background: #f8fbf8; color: #52645a; }
+        .member-auth-chip.ok { background: #eaf7ec; border-color: #b9dfc0; color: #1b5e20; }
+        .member-auth-chip.warn { background: #fff8df; border-color: #f3d37a; color: #7a5700; }
+        .member-auth-chip.error { background: #ffebee; border-color: #ffcdd2; color: #b71c1c; }
+        .member-auth-chip.muted { background: #f3f6f3; color: #65726a; }
+        .member-auth-result { border-top: 1px solid #e7f0e8; margin-top: 14px; padding-top: 14px; }
+        .member-auth-result[hidden] { display: none; }
+        .member-auth-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; margin: 12px 0; }
+        .member-auth-safe-box { background: #f8fff4; border: 1px solid #cfe8d1; border-radius: 14px; padding: 13px; color: #264236; line-height: 1.55; margin-top: 12px; }
+        .member-auth-warning-box { background: #fff8e7; border: 1px solid #f4d89a; border-radius: 14px; padding: 13px; color: #6f4f00; line-height: 1.55; margin-top: 12px; }
+        .member-auth-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+        .member-auth-code { font-family: Consolas, "Courier New", monospace; font-size: 0.83rem; color: #455a64; word-break: break-all; }
         @media (max-width: 920px) { .member-toolbar { grid-template-columns: 1fr; } .member-detail-grid, .member-mini-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 1100px) { .member-auth-check-form { grid-template-columns: 1fr 1fr; } }
+        @media (max-width: 640px) { .member-auth-check-form { grid-template-columns: 1fr; } }
 
         /* Admin Access Management */
         .access-help { background: #f6fbf7; border: 1px solid #dcefe0; border-radius: 14px; padding: 14px 16px; color: #40544a; line-height: 1.6; margin-bottom: 16px; }
@@ -427,6 +467,41 @@
         
 
         /* Content Sections */
+
+        .faq-manager-shell { display: flex; flex-direction: column; gap: 22px; }
+        .faq-admin-grid { display: grid; grid-template-columns: minmax(320px, 0.9fr) minmax(420px, 1.4fr); gap: 24px; align-items: start; }
+        .faq-admin-card { background: #fbfff8; border: 1px solid #dcebdd; border-radius: 16px; padding: 22px; box-shadow: 0 10px 24px rgba(24, 94, 47, 0.06); }
+        .faq-admin-card h3 { margin: 0 0 14px; color: #123528; }
+        .faq-admin-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+        .faq-admin-form-grid .full { grid-column: 1 / -1; }
+        .faq-admin-form input[type="text"], .faq-admin-form input[type="number"], .faq-admin-form select, .faq-admin-form textarea,
+        .faq-filter-row input, .faq-filter-row select { width: 100%; border: 1px solid #d7e5d7; border-radius: 10px; padding: 11px 12px; font: inherit; background: #fff; color: #1d2d22; }
+        .faq-admin-form textarea { resize: vertical; min-height: 120px; }
+        .faq-fieldset { border: 1px solid #dcebdd; border-radius: 14px; padding: 14px; background: #fff; }
+        .faq-fieldset legend { padding: 0 8px; font-weight: 700; color: #184b34; }
+        .faq-check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .faq-check-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #e2eee3; border-radius: 12px; background: #f8fff7; font-weight: 700; color: #21362a; }
+        .faq-page-order-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+        .faq-page-order-grid label { display: grid; gap: 6px; font-weight: 700; color: #334; }
+        .faq-form-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+        .faq-form-actions button { border: 0; border-radius: 10px; padding: 12px 16px; font-weight: 800; cursor: pointer; }
+        .faq-save-btn { background: #11843a; color: #fff; }
+        .faq-reset-btn { background: #eef5ef; color: #19472f; }
+        .faq-page-summary-grid { display: grid; grid-template-columns: repeat(5, minmax(110px, 1fr)); gap: 12px; }
+        .faq-page-summary-card { border: 1px solid #e2eee3; border-radius: 14px; padding: 14px; background: #fff; }
+        .faq-page-summary-card strong { display: block; color: #0b4b2c; font-size: 1.05rem; }
+        .faq-page-summary-card span { display: block; color: #667; margin-top: 4px; }
+        .faq-filter-row { display: grid; grid-template-columns: 1.4fr 0.8fr 0.8fr; gap: 12px; margin: 16px 0; }
+        .faq-badge-row { display: flex; gap: 6px; flex-wrap: wrap; }
+        .faq-badge { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 5px 9px; font-size: 0.78rem; font-weight: 800; background: #eef8ef; color: #116437; border: 1px solid #d6ead8; }
+        .faq-badge.pinned { background: #fff7d9; color: #8b6400; border-color: #f0dc8a; }
+        .faq-badge.draft { background: #f3f4f6; color: #5f6670; border-color: #e5e7eb; }
+        .faq-question-cell strong { color: #132b20; }
+        .faq-question-cell small { display: block; color: #778; margin-top: 4px; }
+        .faq-answer-preview { max-height: 64px; overflow: hidden; color: #4d5d52; line-height: 1.5; }
+        @media (max-width: 1180px) { .faq-admin-grid { grid-template-columns: 1fr; } .faq-filter-row { grid-template-columns: 1fr 1fr; } .faq-page-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 720px) { .faq-admin-form-grid, .faq-check-grid, .faq-page-order-grid, .faq-filter-row { grid-template-columns: 1fr; } .faq-page-summary-grid { grid-template-columns: 1fr; } }
+
         .content-section { display: none; }
         .content-section.active { display: block; }
 
@@ -792,6 +867,25 @@
                     <div class="member-summary-card"><small>Gold</small><strong id="member-stat-gold">0</strong></div>
                     <div class="member-summary-card"><small>Platinum</small><strong id="member-stat-platinum">0</strong></div>
                     <div class="member-summary-card"><small>สมาชิกใหม่เดือนนี้</small><strong id="member-stat-new-month">0</strong></div>
+                </div>
+
+                <div class="member-auth-check-card" id="member-auth-check-card">
+                    <div class="member-auth-check-head">
+                        <div>
+                            <h3>ตรวจ/ซ่อม Login สมาชิก</h3>
+                            <p>ใส่อีเมล เบอร์โทร หรือ UID เพื่อตรวจว่า users, user_credentials และ phone_number_index ชี้ไป UID เดียวกันหรือไม่</p>
+                        </div>
+                        <span id="member-auth-check-badge" class="member-auth-chip muted">รอการตรวจ</span>
+                    </div>
+                    <form id="member-auth-check-form" class="member-auth-check-form">
+                        <input type="email" id="member-auth-email" placeholder="อีเมล เช่น phoo1236@gmail.com" autocomplete="off">
+                        <input type="tel" id="member-auth-phone" placeholder="เบอร์โทร เช่น 093-140-4812" autocomplete="off">
+                        <input type="text" id="member-auth-uid" placeholder="UID ถ้ามี (ไม่บังคับ)" autocomplete="off">
+                        <button type="submit" class="btn-action">ตรวจ Login</button>
+                        <button type="button" id="member-auth-repair-btn" class="btn-action btn-edit" disabled>ซ่อม Index</button>
+                    </form>
+                    <p id="member-auth-check-status" class="member-auth-hint">ระบบจะซ่อมเฉพาะ email_lower และ phone_number_index ที่ขาดเท่านั้น หากไม่มี password_hash ต้องให้สมาชิกตั้งรหัสใหม่เองอย่างปลอดภัย</p>
+                    <div id="member-auth-check-result" class="member-auth-result" hidden></div>
                 </div>
 
                 <div class="member-toolbar">
@@ -1253,8 +1347,33 @@
                 </div>
 
                 <div class="map-admin-grid">
-                    <div style="overflow-x:auto;">
-                        <table>
+                    <div class="map-admin-panel">
+                        <div class="map-admin-toolbar">
+                            <input type="search" id="table-map-search" placeholder="ค้นหารหัสโต๊ะ ชื่อ โซน หรือสถานะ">
+                            <select id="table-kind-filter" aria-label="กรองประเภท">
+                                <option value="all">ทั้งหมด</option>
+                                <option value="table">เฉพาะโต๊ะ</option>
+                                <option value="zone">เฉพาะโซน</option>
+                            </select>
+                            <select id="table-zone-filter" aria-label="กรองโซน">
+                                <option value="all">ทุกโซน</option>
+                            </select>
+                            <select id="table-status-filter" aria-label="กรองสถานะ">
+                                <option value="all">ทุกสถานะ</option>
+                                <option value="available">ว่าง</option>
+                                <option value="booked">จองแล้ว</option>
+                                <option value="unavailable">ปิดใช้งาน</option>
+                            </select>
+                            <select id="table-page-size" aria-label="จำนวนรายการต่อหน้า">
+                                <option value="25">แสดง 25</option>
+                                <option value="50">แสดง 50</option>
+                                <option value="100">แสดง 100</option>
+                                <option value="all">แสดงทั้งหมด</option>
+                            </select>
+                            <button class="map-admin-reset" id="table-filter-reset" type="button">ล้างตัวกรอง</button>
+                        </div>
+                        <div class="map-admin-table-scroll">
+                        <table class="map-admin-table">
                             <thead>
                                 <tr>
                                     <th>ประเภท</th>
@@ -1262,20 +1381,31 @@
                                     <th>โซน/สถานะ</th>
                                     <th>ตำแหน่ง</th>
                                     <th>ขนาด/ที่นั่ง</th>
+                                    <th>มุมหมุน</th>
                                     <th>จัดการ</th>
                                 </tr>
                             </thead>
                             <tbody id="tables-table-body">
-                                <tr><td colspan="6" style="text-align:center;">กำลังโหลดข้อมูล...</td></tr>
+                                <tr><td colspan="7" style="text-align:center;">กำลังโหลดข้อมูล...</td></tr>
                             </tbody>
                         </table>
+                        </div>
+                        <div class="map-admin-pager">
+                            <span id="table-list-summary">กำลังโหลดข้อมูล...</span>
+                            <div class="map-admin-page-controls">
+                                <button class="map-admin-page-btn" id="table-page-prev" type="button" aria-label="ก่อนหน้า">‹</button>
+                                <input class="map-admin-page-input" id="table-page-input" type="number" min="1" value="1" aria-label="หน้า">
+                                <span id="table-page-total">จาก 1</span>
+                                <button class="map-admin-page-btn" id="table-page-next" type="button" aria-label="ถัดไป">›</button>
+                            </div>
+                        </div>
                     </div>
 
                     <aside class="map-admin-preview-card">
                         <h3 style="margin-bottom:10px; color:var(--primary-color);">Preview แผนผัง</h3>
                         <div id="admin-table-map-preview" class="admin-map-stage"></div>
                         <p id="admin-table-map-summary" class="map-admin-mini">ยังไม่มีข้อมูลแผนผัง</p>
-                        <p class="map-admin-mini" style="color:#2e7d32;">ลากโซนหรือโต๊ะใน Preview เพื่อย้ายตำแหน่ง แล้วปล่อยเมาส์เพื่อบันทึกอัตโนมัติ</p>
+                        <p class="map-admin-mini" style="color:#2e7d32;">คลิกโต๊ะ/โซนใน Preview เพื่อแก้ไข หรือลากเพื่อย้ายตำแหน่งแล้วปล่อยเมาส์เพื่อบันทึกอัตโนมัติ</p>
                     </aside>
                 </div>
             </div>
@@ -1482,27 +1612,100 @@
 
         <!-- FAQs Section -->
         <div id="faqs" class="content-section">
-            <div class="section-container">
+            <div class="section-container faq-manager-shell">
                 <div class="section-header">
-                    <h2>จัดการคำถามที่พบบ่อย (FAQ)</h2>
-                    <button class="btn-action" onclick="openFaqModal()">+ เพิ่มคำถามใหม่</button>
+                    <div>
+                        <h2>จัดการคำถามที่พบบ่อย (FAQ)</h2>
+                        <p style="color:#667; margin-top:8px;">คุมคำถามทั้งหมดจากหลังบ้าน เลือกได้ว่าจะให้ไปแสดงหน้า Home, เมนู, ร้านค้า, ระบบจอง หรือหน้า FAQ รวม</p>
+                    </div>
+                    <button class="btn-action" type="button" onclick="resetFaqForm()">+ เพิ่มคำถามใหม่</button>
                 </div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>ลำดับ</th>
-                            <th style="width: 30%">คำถาม</th>
-                            <th style="width: 40%">คำตอบ</th>
-                            <th>จัดการ</th>
-                        </tr>
-                    </thead>
-                    <tbody id="faqs-table-body">
-                        <!-- Data injected via JS -->
-                    </tbody>
-                </table>
+
+                <div class="faq-page-summary-grid" id="faq-page-summary">
+                    <!-- FAQ page summary injected via JS -->
+                </div>
+
+                <div class="faq-admin-grid">
+                    <form id="faqForm" class="faq-admin-card faq-admin-form">
+                        <input type="hidden" id="faqId">
+                        <h3>เพิ่ม / แก้ไขคำถาม</h3>
+                        <div class="faq-admin-form-grid">
+                            <div class="full">
+                                <label for="faqQuestion">คำถาม</label>
+                                <input type="text" id="faqQuestion" placeholder="เช่น จองโต๊ะต้องมัดจำไหม?" required>
+                            </div>
+                            <div class="full">
+                                <label for="faqAnswer">คำตอบ</label>
+                                <textarea id="faqAnswer" rows="5" placeholder="คำตอบที่ต้องการให้ลูกค้าเห็น" required></textarea>
+                            </div>
+                            <input type="hidden" id="faqCategory" value="general">
+                            <div>
+                                <label for="faqStatus">สถานะ</label>
+                                <select id="faqStatus">
+                                    <option value="published">เผยแพร่</option>
+                                    <option value="draft">ฉบับร่าง</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="faqOrder">ลำดับรวม</label>
+                                <input type="number" id="faqOrder" value="0" min="0" step="1">
+                            </div>
+                            <div>
+                                <label for="faqPopularOrder">ลำดับในหน้า FAQ รวม</label>
+                                <input type="number" id="faqPopularOrder" value="0" min="0" step="1">
+                            </div>
+                            <label class="faq-check-card full">
+                                <input type="checkbox" id="faqIsPopular">
+                                <span>คำถามยอดฮิต / แสดงในพรีวิว 12 คำถามบนหน้า FAQ รวม</span>
+                            </label>
+                        </div>
+
+                        <fieldset class="faq-fieldset" style="margin-top:16px;">
+                            <legend>เลือกหน้าเพจที่จะให้แสดง</legend>
+                            <div class="faq-check-grid" id="faqTargetPages"></div>
+                        </fieldset>
+
+                        <fieldset class="faq-fieldset" style="margin-top:16px;">
+                            <legend>ตรึงคำถามที่หน้าเพจ</legend>
+                            <p style="margin:0 0 10px; color:#667;">คำถามที่ตรึงจะถูกดึงขึ้นก่อน และแต่ละหน้าเว็บจะแสดงแค่ 3 คำถาม</p>
+                            <div class="faq-check-grid" id="faqPinnedPages"></div>
+                            <div class="faq-page-order-grid" id="faqPageOrders"></div>
+                        </fieldset>
+
+                        <div class="faq-form-actions">
+                            <button type="submit" class="faq-save-btn">บันทึก FAQ</button>
+                            <button type="button" class="faq-reset-btn" onclick="resetFaqForm()">ล้างฟอร์ม</button>
+                        </div>
+                    </form>
+
+                    <div class="faq-admin-card">
+                        <h3>รายการคำถามทั้งหมด</h3>
+                        <div class="faq-filter-row">
+                            <input type="search" id="faqSearch" placeholder="ค้นหาคำถาม / คำตอบ">
+                            <select id="faqPageFilter"></select>
+                            <select id="faqStatusFilter">
+                                <option value="all">ทุกสถานะ</option>
+                                <option value="published">เผยแพร่</option>
+                                <option value="draft">ฉบับร่าง</option>
+                            </select>
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>คำถาม</th>
+                                    <th>หน้าเพจ</th>
+                                    <th>สถานะ</th>
+                                    <th>จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="faqs-table-body">
+                                <!-- Data injected via JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
-
         <!-- PromptPay Settings Section -->
         <div id="promptpay" class="content-section">
             <div class="section-container promptpay-admin-shell">
@@ -1694,9 +1897,9 @@
                         </div>
                         <div>
                             <h4>ติดต่อและสถานที่ตั้ง</h4>
-                            <p id="fp-address">123 ถนนสุขุมวิท กรุงเทพมหานคร 10110</p>
-                            <p id="fp-email">อีเมล: hello@edencafe.co</p>
-                            <p id="fp-phone">โทร: +66-2-000-0000</p>
+                            <p id="fp-address">306 หมู่ 7 ตำบลนางแล อำเภอเมืองเชียงราย จังหวัดเชียงราย 57100</p>
+                            <p id="fp-email">อีเมล: edencafe.2565@gmail.com</p>
+                            <p id="fp-phone">โทร: 098-008-0383</p>
                         </div>
                         <div>
                             <h4>ติดตามเรา</h4>
@@ -1734,15 +1937,15 @@
                             <h3>📍 ติดต่อและสถานที่ตั้ง</h3>
                             <div class="form-group">
                                 <label for="footer-address">ที่อยู่ร้าน (Address)</label>
-                                <input type="text" id="footer-address" value="123 ถนนสุขุมวิท กรุงเทพมหานคร 10110" oninput="updateFooterPreview()">
+                                <input type="text" id="footer-address" value="306 หมู่ 7 ตำบลนางแล อำเภอเมืองเชียงราย จังหวัดเชียงราย 57100" oninput="updateFooterPreview()">
                             </div>
                             <div class="form-group">
                                 <label for="footer-email">อีเมลติดต่อ (Email)</label>
-                                <input type="email" id="footer-email" value="hello@edencafe.co" oninput="updateFooterPreview()">
+                                <input type="email" id="footer-email" value="edencafe.2565@gmail.com" oninput="updateFooterPreview()">
                             </div>
                             <div class="form-group">
                                 <label for="footer-phone">เบอร์โทรศัพท์ (Phone)</label>
-                                <input type="tel" id="footer-phone" value="+66-2-000-0000" oninput="updateFooterPreview()">
+                                <input type="tel" id="footer-phone" value="098-008-0383" oninput="updateFooterPreview()">
                             </div>
                         </div>
 
@@ -1752,15 +1955,15 @@
                             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px;">
                                 <div class="form-group">
                                     <label for="footer-instagram">Instagram URL</label>
-                                    <input type="url" id="footer-instagram" value="https://instagram.com" placeholder="https://instagram.com/yourpage" oninput="updateFooterPreview()">
+                                    <input type="url" id="footer-instagram" value="" placeholder="https://instagram.com/your-official-page" oninput="updateFooterPreview()">
                                 </div>
                                 <div class="form-group">
                                     <label for="footer-facebook">Facebook URL</label>
-                                    <input type="url" id="footer-facebook" value="https://facebook.com" placeholder="https://facebook.com/yourpage" oninput="updateFooterPreview()">
+                                    <input type="url" id="footer-facebook" value="" placeholder="https://facebook.com/your-official-page" oninput="updateFooterPreview()">
                                 </div>
                                 <div class="form-group">
                                     <label for="footer-line">LINE URL</label>
-                                    <input type="url" id="footer-line" value="https://line.me" placeholder="https://line.me/yourID" oninput="updateFooterPreview()">
+                                    <input type="url" id="footer-line" value="" placeholder="https://line.me/your-official-id" oninput="updateFooterPreview()">
                                 </div>
                             </div>
                         </div>
@@ -1986,6 +2189,17 @@
                             <option value="unavailable">ปิดใช้งาน</option>
                         </select>
                     </div>
+                    <div class="form-group table-only-field">
+                        <label>มุมหมุนโต๊ะ (องศา)</label>
+                        <input type="number" id="tableRotation" min="0" max="359" step="1" value="0">
+                        <div class="map-rotation-actions" aria-label="มุมหมุนลัด">
+                            <button class="map-rotation-chip" type="button" data-rotation-value="0">0°</button>
+                            <button class="map-rotation-chip" type="button" data-rotation-value="45">45°</button>
+                            <button class="map-rotation-chip" type="button" data-rotation-value="90">90°</button>
+                            <button class="map-rotation-chip" type="button" data-rotation-value="180">180°</button>
+                            <button class="map-rotation-chip" type="button" data-rotation-value="270">270°</button>
+                        </div>
+                    </div>
                     <div class="form-group zone-only-field">
                         <label>คำอธิบายโซน</label>
                         <input type="text" id="zoneHint" placeholder="Quiet AC seating">
@@ -2165,29 +2379,7 @@
         </div>
     </div>
 
-    <!-- FAQ Modal -->
-    <div id="faqModal" class="modal">
-        <div class="modal-content" style="max-width: 600px;">
-            <span class="close-modal" onclick="closeFaqModal()">&times;</span>
-            <h2 id="faqModalTitle">เพิ่มคำถามที่พบบ่อย</h2>
-            <form id="faqForm">
-                <input type="hidden" id="faqId">
-                <div class="form-group">
-                    <label for="faqQuestion">คำถาม (Question)</label>
-                    <input type="text" id="faqQuestion" required>
-                </div>
-                <div class="form-group">
-                    <label for="faqAnswer">คำตอบ (Answer)</label>
-                    <textarea id="faqAnswer" rows="4" required></textarea>
-                </div>
-                <div class="form-group">
-                    <label for="faqOrder">ลำดับการแสดงผล (ตัวเลข)</label>
-                    <input type="number" id="faqOrder" value="0" required>
-                </div>
-                <button type="submit" class="btn-submit">บันทึกข้อมูล</button>
-            </form>
-        </div>
-    </div>
+    <!-- Legacy FAQ modal removed: FAQ is now managed inline in the FAQ section. -->
 
     <!-- Member Detail Modal -->
     <div id="memberModal" class="modal">
@@ -2201,7 +2393,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=50"></script>
+    <script type="module" src="js/admin.js?v=51"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {
@@ -2228,7 +2420,6 @@
                 url.hash = tabId;
                 window.history.replaceState(null, '', url.toString());
             } catch (error) {
-                console.warn('Unable to save current admin tab:', error);
             }
         }
     </script>

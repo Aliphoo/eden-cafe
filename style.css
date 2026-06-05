@@ -704,6 +704,7 @@ section {
 
 .faq-card summary span {
     display: block;
+    flex: 1;
 }
 
 .faq-card summary small {
@@ -765,7 +766,7 @@ section {
 
 .faq-hub-toolbar {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 260px;
+    grid-template-columns: minmax(0, 1fr);
     gap: 16px;
     margin-bottom: 28px;
 }
@@ -780,16 +781,6 @@ section {
     background: #fff;
     font: inherit;
     color: #21382b;
-}
-
-.faq-hub-category {
-    margin-bottom: 38px;
-}
-
-.faq-hub-category h2 {
-    color: var(--primary-color);
-    font-size: 1.55rem;
-    margin: 0 0 16px;
 }
 
 .faq-hub-grid {
@@ -807,6 +798,10 @@ section {
     .faq-card summary::after {
         position: absolute;
         right: 18px;
+    }
+
+    .faq-card summary span {
+        padding-right: 44px;
     }
 
     .faq-hub-toolbar,
@@ -2631,6 +2626,56 @@ footer p {
 .google-login-btn:hover {
     background-color: #f8f9fa;
     box-shadow: 0 1px 3px rgba(60,64,67,0.3);
+}
+
+.auth-social-entry {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    gap: 12px;
+    margin: 0 0 20px;
+}
+
+.auth-google-btn {
+    min-height: 54px;
+    border-radius: 16px;
+    border-color: rgba(26, 147, 69, 0.22);
+    font-family: 'Prompt', 'Inter', sans-serif;
+    font-weight: 800;
+    box-shadow: 0 12px 26px rgba(18, 78, 48, 0.08);
+}
+
+.auth-google-btn::before {
+    content: 'G';
+    display: inline-grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    margin-right: 10px;
+    border-radius: 50%;
+    background: #fff;
+    color: #1a9345;
+    border: 1px solid rgba(26, 147, 69, 0.18);
+    font-weight: 900;
+}
+
+.auth-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: #718078;
+    font-size: 0.9rem;
+    font-weight: 700;
+    line-height: 1.4;
+    text-align: center;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(26, 147, 69, 0.16);
 }
 
 .phone-register-link {
