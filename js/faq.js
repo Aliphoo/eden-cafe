@@ -12,19 +12,6 @@ const PAGE_LABELS = {
     faq: 'คำถามทั้งหมด'
 };
 
-const CATEGORY_LABELS = {
-    general: 'ทั่วไป',
-    home: 'หน้า Home',
-    menu: 'เมนู',
-    shop: 'ร้านค้า',
-    booking: 'ระบบจอง',
-    payment: 'การชำระเงิน',
-    membership: 'สมาชิก',
-    delivery: 'จัดส่ง / รับหน้าร้าน',
-    parking: 'ที่จอดรถ / การเดินทาง',
-    wellness: 'Wellness'
-};
-
 const FALLBACK_FAQS = [
     {
         id: 'fallback-home-location',
@@ -231,14 +218,12 @@ function getPageFaqs(faqs, pageKey, limit = PAGE_LIMIT) {
 }
 
 function renderFaqCard(faq, options = {}) {
-    const category = CATEGORY_LABELS[faq.category] || faq.category || 'ทั่วไป';
     const open = options.open ? ' open' : '';
     return `
         <article class="faq-card" data-faq-id="${escapeHTML(faq.id)}">
             <details${open}>
                 <summary>
                     <span>${escapeHTML(faq.question)}</span>
-                    <small>${escapeHTML(category)}</small>
                 </summary>
                 <p>${escapeHTML(faq.answer)}</p>
             </details>
@@ -307,22 +292,12 @@ async function renderPageFaqs(container) {
     }
 }
 
-function groupByCategory(faqs) {
-    return faqs.reduce((groups, faq) => {
-        const category = faq.category || 'general';
-        if (!groups[category]) groups[category] = [];
-        groups[category].push(faq);
-        return groups;
-    }, {});
-}
-
-function renderHubList(container, faqs, expanded = false, categoryFilter = 'all', searchTerm = '') {
+function renderHubList(container, faqs, expanded = false, searchTerm = '') {
     const search = searchTerm.trim().toLowerCase();
     const filtered = faqs
-        .filter(faq => categoryFilter === 'all' || faq.category === categoryFilter)
         .filter(faq => {
             if (!search) return true;
-            return `${faq.question} ${faq.answer} ${CATEGORY_LABELS[faq.category] || faq.category}`.toLowerCase().includes(search);
+            return `${faq.question} ${faq.answer}`.toLowerCase().includes(search);
         })
         .sort((a, b) => {
             const popularDiff = Number(b.isPopular) - Number(a.isPopular);
@@ -330,24 +305,14 @@ function renderHubList(container, faqs, expanded = false, categoryFilter = 'all'
             return safeNumber(a.popularOrder, a.order) - safeNumber(b.popularOrder, b.order);
         });
     const visible = expanded ? filtered : filtered.slice(0, HUB_PREVIEW_LIMIT);
-    const groups = groupByCategory(visible);
-    const body = Object.entries(groups).map(([category, items]) => `
-        <section class="faq-hub-category">
-            <h2>${escapeHTML(CATEGORY_LABELS[category] || category)}</h2>
-            <div class="faq-hub-grid">
-                ${items.map((faq, index) => renderFaqCard(faq, { open: index === 0 })).join('')}
-            </div>
-        </section>
-    `).join('');
+    const body = visible.length
+        ? `<div class="faq-hub-grid">${visible.map((faq, index) => renderFaqCard(faq, { open: index === 0 })).join('')}</div>`
+        : '<p class="faq-empty">ไม่พบคำถามตามเงื่อนไขที่ค้นหา</p>';
 
     const resultTarget = container.querySelector('[data-faq-hub-results]');
     const loadMore = container.querySelector('[data-faq-load-more]');
-    if (resultTarget) {
-        resultTarget.innerHTML = body || '<p class="faq-empty">ไม่พบคำถามตามเงื่อนไขที่ค้นหา</p>';
-    }
-    if (loadMore) {
-        loadMore.hidden = expanded || filtered.length <= HUB_PREVIEW_LIMIT;
-    }
+    if (resultTarget) resultTarget.innerHTML = body;
+    if (loadMore) loadMore.hidden = expanded || filtered.length <= HUB_PREVIEW_LIMIT;
     renderPageSchema('hub', visible.slice(0, HUB_PREVIEW_LIMIT));
 }
 
@@ -361,13 +326,9 @@ async function renderFaqHub(container) {
         const faqs = (await fetchFaqs())
             .filter(faq => faq.targetPages.includes('faq') || faq.isPopular)
             .sort((a, b) => safeNumber(a.popularOrder, a.order) - safeNumber(b.popularOrder, b.order));
-        const categories = ['all', ...Array.from(new Set(faqs.map(faq => faq.category || 'general')))];
         container.innerHTML = `
             <div class="faq-hub-toolbar">
                 <input type="search" data-faq-hub-search placeholder="ค้นหาคำถาม เช่น จองโต๊ะ, ชำระเงิน, สมาชิก">
-                <select data-faq-hub-category>
-                    ${categories.map(category => `<option value="${escapeHTML(category)}">${escapeHTML(category === 'all' ? 'ทุกหมวดหมู่' : (CATEGORY_LABELS[category] || category))}</option>`).join('')}
-                </select>
             </div>
             <div data-faq-hub-results></div>
             <div class="faq-more-link">
@@ -377,12 +338,10 @@ async function renderFaqHub(container) {
 
         let expanded = false;
         const search = container.querySelector('[data-faq-hub-search]');
-        const category = container.querySelector('[data-faq-hub-category]');
         const loadMore = container.querySelector('[data-faq-load-more]');
-        const refresh = () => renderHubList(container, faqs, expanded, category?.value || 'all', search?.value || '');
+        const refresh = () => renderHubList(container, faqs, expanded, search?.value || '');
 
         search?.addEventListener('input', refresh);
-        category?.addEventListener('change', refresh);
         loadMore?.addEventListener('click', () => {
             expanded = true;
             refresh();
@@ -393,7 +352,7 @@ async function renderFaqHub(container) {
             .filter(faq => faq.targetPages.includes('faq') || faq.isPopular)
             .sort((a, b) => safeNumber(a.popularOrder, a.order) - safeNumber(b.popularOrder, b.order));
         container.innerHTML = '<div data-faq-hub-results></div>';
-        renderHubList(container, faqs, false, 'all', '');
+        renderHubList(container, faqs, false, '');
     }
 }
 

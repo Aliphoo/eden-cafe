@@ -491,7 +491,7 @@
         .faq-page-summary-card { border: 1px solid #e2eee3; border-radius: 14px; padding: 14px; background: #fff; }
         .faq-page-summary-card strong { display: block; color: #0b4b2c; font-size: 1.05rem; }
         .faq-page-summary-card span { display: block; color: #667; margin-top: 4px; }
-        .faq-filter-row { display: grid; grid-template-columns: 1.4fr 0.8fr 0.8fr 0.8fr; gap: 12px; margin: 16px 0; }
+        .faq-filter-row { display: grid; grid-template-columns: 1.4fr 0.8fr 0.8fr; gap: 12px; margin: 16px 0; }
         .faq-badge-row { display: flex; gap: 6px; flex-wrap: wrap; }
         .faq-badge { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 5px 9px; font-size: 0.78rem; font-weight: 800; background: #eef8ef; color: #116437; border: 1px solid #d6ead8; }
         .faq-badge.pinned { background: #fff7d9; color: #8b6400; border-color: #f0dc8a; }
@@ -1638,10 +1638,7 @@
                                 <label for="faqAnswer">คำตอบ</label>
                                 <textarea id="faqAnswer" rows="5" placeholder="คำตอบที่ต้องการให้ลูกค้าเห็น" required></textarea>
                             </div>
-                            <div>
-                                <label for="faqCategory">หมวดหมู่</label>
-                                <select id="faqCategory"></select>
-                            </div>
+                            <input type="hidden" id="faqCategory" value="general">
                             <div>
                                 <label for="faqStatus">สถานะ</label>
                                 <select id="faqStatus">
@@ -1684,9 +1681,8 @@
                     <div class="faq-admin-card">
                         <h3>รายการคำถามทั้งหมด</h3>
                         <div class="faq-filter-row">
-                            <input type="search" id="faqSearch" placeholder="ค้นหาคำถาม / คำตอบ / หมวดหมู่">
+                            <input type="search" id="faqSearch" placeholder="ค้นหาคำถาม / คำตอบ">
                             <select id="faqPageFilter"></select>
-                            <select id="faqCategoryFilter"></select>
                             <select id="faqStatusFilter">
                                 <option value="all">ทุกสถานะ</option>
                                 <option value="published">เผยแพร่</option>

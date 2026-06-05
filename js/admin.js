@@ -7084,18 +7084,6 @@ const FAQ_PAGE_OPTIONS = Object.freeze([
     { key: 'booking', label: 'ระบบจอง' },
     { key: 'faq', label: 'FAQ รวม' }
 ]);
-const FAQ_CATEGORY_OPTIONS = Object.freeze([
-    { key: 'general', label: 'ทั่วไป' },
-    { key: 'home', label: 'หน้า Home' },
-    { key: 'menu', label: 'เมนู' },
-    { key: 'shop', label: 'ร้านค้า' },
-    { key: 'booking', label: 'ระบบจอง' },
-    { key: 'payment', label: 'การชำระเงิน' },
-    { key: 'membership', label: 'สมาชิก' },
-    { key: 'delivery', label: 'จัดส่ง / รับหน้าร้าน' },
-    { key: 'parking', label: 'ที่จอดรถ / การเดินทาง' },
-    { key: 'wellness', label: 'Wellness' }
-]);
 const FAQ_STATUS_LABELS = Object.freeze({
     published: 'เผยแพร่',
     draft: 'ฉบับร่าง'
@@ -7103,7 +7091,6 @@ const FAQ_STATUS_LABELS = Object.freeze({
 let faqFilters = {
     search: '',
     page: 'all',
-    category: 'all',
     status: 'all'
 };
 
@@ -7111,9 +7098,6 @@ function getFaqPageLabel(pageKey) {
     return FAQ_PAGE_OPTIONS.find(page => page.key === pageKey)?.label || pageKey || '-';
 }
 
-function getFaqCategoryLabel(categoryKey) {
-    return FAQ_CATEGORY_OPTIONS.find(category => category.key === categoryKey)?.label || categoryKey || 'ทั่วไป';
-}
 
 function normalizeFaqRecord(raw = {}, id = '') {
     const legacyPublished = raw.published !== false;
@@ -7142,16 +7126,6 @@ function normalizeFaqRecord(raw = {}, id = '') {
 }
 
 function renderFaqControls() {
-    const categorySelect = document.getElementById('faqCategory');
-    const categoryFilter = document.getElementById('faqCategoryFilter');
-    if (categorySelect && !categorySelect.dataset.ready) {
-        categorySelect.innerHTML = FAQ_CATEGORY_OPTIONS.map(category => `<option value="${category.key}">${escapeHTML(category.label)}</option>`).join('');
-        categorySelect.dataset.ready = 'true';
-    }
-    if (categoryFilter && !categoryFilter.dataset.ready) {
-        categoryFilter.innerHTML = '<option value="all">ทุกหมวดหมู่</option>' + FAQ_CATEGORY_OPTIONS.map(category => `<option value="${category.key}">${escapeHTML(category.label)}</option>`).join('');
-        categoryFilter.dataset.ready = 'true';
-    }
 
     const pageFilter = document.getElementById('faqPageFilter');
     if (pageFilter && !pageFilter.dataset.ready) {
@@ -7265,10 +7239,9 @@ function getFilteredFaqs() {
         .map(faq => normalizeFaqRecord(faq, faq.id))
         .filter(faq => {
             if (faqFilters.status !== 'all' && faq.status !== faqFilters.status) return false;
-            if (faqFilters.category !== 'all' && faq.category !== faqFilters.category) return false;
             if (faqFilters.page !== 'all' && !faq.targetPages.includes(faqFilters.page)) return false;
             if (search) {
-                const haystack = [faq.question, faq.answer, faq.category, getFaqCategoryLabel(faq.category), faq.targetPages.map(getFaqPageLabel).join(' ')].join(' ').toLowerCase();
+                const haystack = [faq.question, faq.answer, faq.targetPages.map(getFaqPageLabel).join(' ')].join(' ').toLowerCase();
                 if (!haystack.includes(search)) return false;
             }
             return true;
@@ -7302,7 +7275,6 @@ function renderFaqAdmin() {
             <tr>
                 <td class="faq-question-cell">
                     <strong>${escapeHTML(faq.question)}</strong>
-                    <small>${escapeHTML(getFaqCategoryLabel(faq.category))} · ลำดับรวม ${escapeHTML(faq.order)}</small>
                     <div class="faq-answer-preview">${escapeHTML(faq.answer)}</div>
                 </td>
                 <td><div class="faq-badge-row">${pageBadges}${pinnedBadges}${popularBadge}</div></td>
@@ -7393,11 +7365,9 @@ function bindFaqFilters() {
     renderFaqControls();
     const search = document.getElementById('faqSearch');
     const page = document.getElementById('faqPageFilter');
-    const category = document.getElementById('faqCategoryFilter');
     const status = document.getElementById('faqStatusFilter');
     search?.addEventListener('input', () => { faqFilters.search = search.value; renderFaqAdmin(); });
     page?.addEventListener('change', () => { faqFilters.page = page.value; renderFaqAdmin(); });
-    category?.addEventListener('change', () => { faqFilters.category = category.value; renderFaqAdmin(); });
     status?.addEventListener('change', () => { faqFilters.status = status.value; renderFaqAdmin(); });
 }
 bindFaqFilters();
