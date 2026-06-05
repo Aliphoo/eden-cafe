@@ -28,6 +28,10 @@ function safeNumber(value, fallback = 0) {
     return Number.isFinite(number) ? number : fallback;
 }
 
+function safeAdminError(action = 'ดำเนินการไม่สำเร็จ') {
+    return `${action} กรุณาตรวจสอบสิทธิ์หรือข้อมูลที่จำเป็น แล้วลองใหม่อีกครั้ง`;
+}
+
 function escapeJSString(str) {
     if (!str) return '';
     return String(str).replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, '\\n');
@@ -374,6 +378,8 @@ let shopProductsUnsubscribe = null;
 let blogsUnsubscribe = null;
 let faqsUnsubscribe = null;
 let memberFiltersBound = false;
+let memberAuthDiagnosticsBound = false;
+let lastMemberAuthDiagnosis = null;
 let salesSummaryChart = null;
 
 const ADMIN_ACTIVE_TAB_STORAGE_KEY = 'edenAdminActiveTab';
@@ -860,7 +866,7 @@ function initXLSXTools() {
             btnDownloadData.disabled = true;
             await downloadCategoryDataAsXLSX(select.value);
         } catch (error) {
-            alert('ดาวน์โหลดข้อมูลไม่สำเร็จ: ' + error.message);
+            alert(safeAdminError("ดาวน์โหลดข้อมูลไม่สำเร็จ"));
         } finally {
             btnDownloadData.disabled = false;
         }
@@ -869,7 +875,7 @@ function initXLSXTools() {
         try {
             downloadCategoryTemplateAsXLSX(select.value);
         } catch (error) {
-            alert('ดาวน์โหลดเทมเพลตไม่สำเร็จ: ' + error.message);
+            alert(safeAdminError("ดาวน์โหลดเทมเพลตไม่สำเร็จ"));
         }
     };
     btnUpload.onclick = async () => {
@@ -880,7 +886,7 @@ function initXLSXTools() {
             alert(`อัปโหลดสำเร็จ รวม ${result.total} รายการ (เพิ่ม ${result.created}, อัปเดต ${result.updated})`);
             fileInput.value = '';
         } catch (error) {
-            alert('อัปโหลดไม่สำเร็จ: ' + error.message);
+            alert(safeAdminError("อัปโหลดไม่สำเร็จ"));
         } finally {
             btnUpload.disabled = false;
             btnUpload.textContent = 'อัปโหลด XLSX';
@@ -1180,7 +1186,7 @@ window.refreshAdminSection = async (tabId, button = null) => {
         }
     } catch (error) {
         console.error('Unable to refresh admin section:', error);
-        alert('รีเฟรชข้อมูลไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("รีเฟรชข้อมูลไม่สำเร็จ"));
     } finally {
         if (button) {
             button.disabled = false;
@@ -1325,7 +1331,7 @@ function setupDiscountForm() {
             resetDiscountForm();
         } catch (error) {
             console.error('Unable to save POS discount:', error);
-            alert('บันทึกส่วนลดไม่สำเร็จ: ' + error.message);
+            alert(safeAdminError("บันทึกส่วนลดไม่สำเร็จ"));
         }
     });
     discountFormBound = true;
@@ -1389,7 +1395,7 @@ window.deleteDiscount = async function deleteDiscount(id) {
         await deleteDoc(doc(db, 'pos_discounts', id));
     } catch (error) {
         console.error('Unable to delete POS discount:', error);
-        alert('ลบส่วนลดไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("ลบส่วนลดไม่สำเร็จ"));
     }
 };
 
@@ -1413,7 +1419,7 @@ window.seedDefaultDiscounts = async function seedDefaultDiscounts() {
         alert('เติมชุดส่วนลดมาตรฐานเรียบร้อย');
     } catch (error) {
         console.error('Unable to seed POS discounts:', error);
-        alert('เติมชุดส่วนลดไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("เติมชุดส่วนลดไม่สำเร็จ"));
     }
 };
 
@@ -1565,7 +1571,7 @@ function bindLoyaltyForms() {
             alert('บันทึกกติกาแต้มเรียบร้อย');
         } catch (error) {
             console.error('Unable to save loyalty config:', error);
-            alert('บันทึกกติกาแต้มไม่สำเร็จ: ' + error.message);
+            alert(safeAdminError("บันทึกกติกาแต้มไม่สำเร็จ"));
         }
     });
 
@@ -1596,7 +1602,7 @@ function bindLoyaltyForms() {
             alert('บันทึกการปรับแต้มเรียบร้อย');
         } catch (error) {
             console.error('Unable to adjust member points:', error);
-            alert('ปรับแต้มไม่สำเร็จ: ' + error.message);
+            alert(safeAdminError("ปรับแต้มไม่สำเร็จ"));
         }
     });
 
@@ -2581,7 +2587,7 @@ window.exportSalesReportXLSX = () => {
         exportSalesWorkbook(activeSalesReport);
     } catch (error) {
         console.error('Export sales XLSX failed:', error);
-        alert('ดาวน์โหลดข้อมูลยอดขายไม่สำเร็จ: ' + (error.message || error));
+        alert(safeAdminError("ดาวน์โหลดข้อมูลยอดขายไม่สำเร็จ"));
     } finally {
         if (button) {
             button.disabled = false;
@@ -2785,7 +2791,7 @@ async function updateBookingTable(bookingId, tableNo) {
         alert('อัปเดตหมายเลขโต๊ะ/ห้องเรียบร้อย');
     } catch (error) {
         console.error("Error updating table number:", error);
-        alert("เกิดข้อผิดพลาด: " + error.message);
+        alert(safeAdminError("เกิดข้อผิดพลาด"));
     }
 }
 window.updateBookingTable = updateBookingTable;
@@ -2964,7 +2970,7 @@ categoryForm.addEventListener('submit', async (e) => {
         await setDoc(docRef, { name: catName }, { merge: true });
         closeCategoryModal();
     } catch (error) {
-        alert("บันทึกไม่สำเร็จ: " + error.message);
+        alert(safeAdminError("บันทึกไม่สำเร็จ"));
     }
 });
 
@@ -3228,7 +3234,7 @@ function attachMapDrag(element, item, stage) {
                 setMapDesignerSummary('บันทึกตำแหน่งแล้ว: X ' + nextX + '% · Y ' + nextY + '%');
             } catch (error) {
                 console.error('Error updating map position:', error);
-                alert('บันทึกตำแหน่งไม่สำเร็จ: ' + error.message);
+                alert(safeAdminError("บันทึกตำแหน่งไม่สำเร็จ"));
                 renderTablesManagerView();
             }
         };
@@ -3475,7 +3481,7 @@ window.seedDefaultTableMap = async () => {
         }));
         alert('สร้างแผนผังเริ่มต้นเรียบร้อย');
     } catch (error) {
-        alert('สร้างแผนผังไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("สร้างแผนผังไม่สำเร็จ"));
     }
 };
 
@@ -3521,7 +3527,7 @@ tableForm.addEventListener('submit', async (e) => {
         closeTableModal();
     } catch (error) {
         console.error('Error saving table map item:', error);
-        alert('บันทึกไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("บันทึกไม่สำเร็จ"));
     } finally {
         submitBtn.disabled = false;
         submitBtn.innerText = kind === 'zone' ? 'บันทึกโซน' : 'บันทึกโต๊ะ';
@@ -3663,7 +3669,7 @@ roomForm.addEventListener('submit', async (e) => {
         closeRoomModal();
     } catch (error) {
         console.error("Error saving room:", error);
-        alert('เกิดข้อผิดพลาด: ' + error.message);
+        alert(safeAdminError("เกิดข้อผิดพลาด"));
     } finally {
         submitBtn.disabled = false;
         submitBtn.innerText = 'บันทึกข้อมูลห้อง';
@@ -4455,7 +4461,7 @@ window.checkoutPosOrder = async () => {
         alert(isTestOrder ? 'บันทึกออเดอร์ทดสอบ POS สำเร็จ' : 'บันทึกออเดอร์ POS สำเร็จ');
     } catch (error) {
         console.error('POS checkout failed:', error);
-        alert('บันทึกออเดอร์ POS ไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("บันทึกออเดอร์ POS ไม่สำเร็จ"));
     } finally {
         if (checkoutBtn) {
             checkoutBtn.disabled = false;
@@ -4691,7 +4697,7 @@ function bindProductManagerControls() {
                 const result = await uploadCategoryDataFromXLSX('products', upload.files[0]);
                 alert(`Upload complete: ${result.total} rows (created ${result.created}, updated ${result.updated})`);
             } catch (error) {
-                alert('Upload failed: ' + error.message);
+                alert(safeAdminError('Upload failed'));
             } finally {
                 upload.value = '';
             }
@@ -4717,7 +4723,7 @@ async function updateProductCategoryInline(productId, categoryId, selectEl) {
         if (productsData[productId]) productsData[productId].category = categoryId;
     } catch (error) {
         if (selectEl) selectEl.value = previousValue;
-        alert('Update category failed: ' + error.message);
+        alert(safeAdminError('Update category failed'));
     } finally {
         if (selectEl) {
             selectEl.disabled = false;
@@ -4730,7 +4736,7 @@ window.downloadProductDataXLSX = async () => {
     try {
         await downloadCategoryDataAsXLSX('products');
     } catch (error) {
-        alert('Export failed: ' + error.message);
+        alert(safeAdminError('Export failed'));
     }
 };
 
@@ -5094,7 +5100,7 @@ productForm.addEventListener('submit', async (e) => {
         alert('บันทึกเมนูสำเร็จ!');
     } catch (error) {
         console.error('Error saving product:', error);
-        alert("บันทึกไม่สำเร็จ: " + error.message);
+        alert(safeAdminError("บันทึกไม่สำเร็จ"));
     } finally {
         submitBtn.disabled = false;
         submitBtn.innerText = originalText;
@@ -5142,7 +5148,7 @@ window.voidPosOrder = async (id) => {
         alert('Void ออเดอร์ POS และคืนสต็อกเรียบร้อย');
     } catch (error) {
         console.error('Void POS order failed:', error);
-        alert('Void ออเดอร์ POS ไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("Void ออเดอร์ POS ไม่สำเร็จ"));
     }
 };
 
@@ -5308,7 +5314,7 @@ window.seedSeoBlogPosts = async () => {
         if (typeof fetchBlogsFromCloud === 'function') fetchBlogsFromCloud();
     } catch (error) {
         console.error('Seed SEO blogs failed:', error);
-        alert('นำเข้าบทความไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("นำเข้าบทความไม่สำเร็จ"));
     } finally {
         if (button) {
             button.innerText = originalText;
@@ -5445,7 +5451,7 @@ blogForm?.addEventListener('submit', async (e) => {
         }
         closeBlogModal();
     } catch (error) {
-        alert("บันทึกไม่สำเร็จ: " + error.message);
+        alert(safeAdminError("บันทึกไม่สำเร็จ"));
     } finally {
         submitBtn.innerText = originalText;
         submitBtn.disabled = false;
@@ -5709,7 +5715,7 @@ shopCategoryForm.addEventListener('submit', async (e) => {
         alert('บันทึกหมวดหมู่สำเร็จ!');
     } catch (error) {
         console.error('Error saving shop category:', error);
-        alert("บันทึกไม่สำเร็จ: " + error.message);
+        alert(safeAdminError("บันทึกไม่สำเร็จ"));
     } finally {
         submitBtn.disabled = false;
         submitBtn.innerText = 'บันทึกหมวดหมู่';
@@ -5805,7 +5811,7 @@ shopProductForm.addEventListener('submit', async (e) => {
         alert('บันทึกข้อมูลสำเร็จ!');
     } catch (error) {
         console.error('Error saving shop product:', error);
-        alert("บันทึกไม่สำเร็จ: " + error.message);
+        alert(safeAdminError("บันทึกไม่สำเร็จ"));
     } finally {
         submitBtn.disabled = false;
         submitBtn.innerText = originalText;
@@ -5836,7 +5842,7 @@ window.syncMembersFromAuth = async () => {
         renderMembersTable();
     } catch (error) {
         console.error('Unable to sync auth users:', error);
-        alert('Member sync failed: ' + error.message);
+        alert(safeAdminError('Member sync failed'));
     }
 };
 
@@ -6045,7 +6051,7 @@ async function saveAdminAccessFromForm() {
         resetAdminAccessForm();
     } catch (error) {
         console.error('Unable to save admin access:', error);
-        alert('บันทึกสิทธิ์ผู้จัดการไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("บันทึกสิทธิ์ผู้จัดการไม่สำเร็จ"));
     }
 }
 
@@ -6118,6 +6124,45 @@ const MEMBER_STATUS_LABELS = {
     vip: 'VIP',
     review: 'Needs review',
     suspended: 'Suspended'
+};
+
+const MEMBER_AUTH_RECOMMENDATIONS = {
+    READY_FOR_EMAIL_PHONE_PASSWORD_LOGIN: {
+        badge: 'พร้อม Login',
+        tone: 'ok',
+        title: 'ข้อมูลพร้อมสำหรับ Login ด้วยอีเมล/เบอร์ + รหัสผ่าน',
+        detail: 'UID, index และ password_hash พร้อมใช้งานแล้ว หากยัง login ไม่ได้ให้ตรวจฝั่งหน้า Login หรือรหัสที่สมาชิกกรอก'
+    },
+    SAFE_PASSWORD_SETUP_REQUIRED: {
+        badge: 'ต้องตั้งรหัส',
+        tone: 'warn',
+        title: 'ยังไม่มี password_hash',
+        detail: 'เพื่อความปลอดภัย ระบบไม่สามารถกู้รหัสเดิมได้ ต้องให้สมาชิกตั้งรหัสใหม่ผ่านขั้นตอนยืนยันตัวตน'
+    },
+    REPAIR_PHONE_INDEX: {
+        badge: 'ซ่อมได้',
+        tone: 'warn',
+        title: 'phone_number_index ขาดหรือไม่ตรง',
+        detail: 'กดปุ่มซ่อม Index ได้ ระบบจะซ่อมเฉพาะ index ที่ชี้ UID เดิม ไม่แตะรหัสผ่าน'
+    },
+    UID_CONFLICT_REVIEW_REQUIRED: {
+        badge: 'UID ชนกัน',
+        tone: 'error',
+        title: 'พบ UID มากกว่าหนึ่งชุด',
+        detail: 'ต้องตรวจด้วยคนก่อนซ่อม เพื่อเลี่ยงการรวมบัญชีผิดคน'
+    },
+    MEMBER_NOT_FOUND: {
+        badge: 'ไม่พบสมาชิก',
+        tone: 'error',
+        title: 'ไม่พบข้อมูลสมาชิกจากอีเมล/เบอร์/UID นี้',
+        detail: 'ตรวจตัวสะกด เบอร์โทร หรือให้สมาชิกสมัคร/ยืนยันตัวตนใหม่'
+    },
+    REVIEW_REQUIRED: {
+        badge: 'ต้องตรวจเพิ่ม',
+        tone: 'warn',
+        title: 'ระบบต้องให้แอดมินตรวจรายละเอียดเพิ่ม',
+        detail: 'อ่านผลด้านล่างแล้วเลือกซ่อมเฉพาะกรณีที่ UID ชัดเจน'
+    }
 };
 
 function memberText(value, fallback = '-') {
@@ -6292,6 +6337,208 @@ function memberStaffAccessHTML(uid, member) {
             </form>
         </div>`;
 }
+
+function memberAuthRecommendationInfo(key) {
+    return MEMBER_AUTH_RECOMMENDATIONS[key] || MEMBER_AUTH_RECOMMENDATIONS.REVIEW_REQUIRED;
+}
+
+function memberAuthChipHTML(label, value, options = {}) {
+    const { positiveLabel = 'พบ', negativeLabel = 'ไม่พบ', invert = false } = options;
+    const exists = !!value;
+    const good = invert ? !exists : exists;
+    const tone = good ? 'ok' : 'warn';
+    return `<span class="member-auth-chip ${tone}"><strong>${escapeHTML(label)}</strong> ${escapeHTML(exists ? positiveLabel : negativeLabel)}</span>`;
+}
+
+function memberAuthValue(value, fallback = '-') {
+    const text = String(value ?? '').trim();
+    return text || fallback;
+}
+
+function memberAuthSetupUrl(mode = 'phone') {
+    const path = mode === 'google' ? '/register?google=1' : '/register';
+    return new URL(path, window.location.origin).href;
+}
+
+function memberAuthSetStatus(message, tone = 'muted') {
+    const status = document.getElementById('member-auth-check-status');
+    if (!status) return;
+    status.textContent = message;
+    status.style.color = tone === 'error' ? '#b71c1c' : tone === 'ok' ? '#1b5e20' : '#62736a';
+}
+
+function memberAuthSetBadge(info = {}) {
+    const badge = document.getElementById('member-auth-check-badge');
+    if (!badge) return;
+    badge.textContent = info.badge || 'รอการตรวจ';
+    badge.className = `member-auth-chip ${info.tone || 'muted'}`;
+}
+
+function canRepairMemberAuthDiagnosis(result) {
+    const recommendation = result?.recommendation || '';
+    const canonicalUid = result?.found?.canonicalUid || result?.input?.requestedUid || '';
+    if (!canonicalUid) return false;
+    if (recommendation === 'MEMBER_NOT_FOUND' || recommendation === 'UID_CONFLICT_REVIEW_REQUIRED') return false;
+    if (recommendation === 'REPAIR_PHONE_INDEX') return true;
+
+    const selected = result?.selected || {};
+    const hasEmailInput = !!result?.input?.email;
+    const hasPhoneInput = !!result?.input?.phoneLast4;
+    return selected.credentialExists === false
+        || (hasEmailInput && (selected.emailLowerInUser === false || selected.emailLowerInCredential === false))
+        || (hasPhoneInput && (
+            selected.phoneInUser === false
+            || selected.phoneInCredential === false
+            || selected.phoneNumberIndexExists === false
+            || selected.phoneNumberIndexMatchesUid === false
+        ));
+}
+
+function renderMemberAuthDiagnosis(result) {
+    const resultEl = document.getElementById('member-auth-check-result');
+    const repairBtn = document.getElementById('member-auth-repair-btn');
+    if (!resultEl) return;
+
+    lastMemberAuthDiagnosis = result;
+    const info = memberAuthRecommendationInfo(result?.recommendation);
+    const found = result?.found || {};
+    const selected = result?.selected || {};
+    const repair = result?.repair || {};
+    const canRepair = canRepairMemberAuthDiagnosis(result);
+
+    memberAuthSetBadge(info);
+    memberAuthSetStatus(info.title, info.tone);
+    if (repairBtn) repairBtn.disabled = !canRepair;
+
+    const uidRows = [
+        ['UID จากอีเมล', found.uidFromEmail],
+        ['UID จากเบอร์', found.uidFromPhone],
+        ['UID หลักที่ระบบเลือก', found.canonicalUid],
+        ['UID ที่พบทั้งหมด', Array.isArray(found.candidateUids) && found.candidateUids.length ? found.candidateUids.join(', ') : '']
+    ].map(([label, value]) => `
+        <div class="member-detail-item">
+            <small>${escapeHTML(label)}</small>
+            <span class="member-auth-code">${escapeHTML(memberAuthValue(value))}</span>
+        </div>
+    `).join('');
+
+    const statusChips = [
+        memberAuthChipHTML('users doc', selected.userExists, { positiveLabel: 'มี', negativeLabel: 'ไม่มี' }),
+        memberAuthChipHTML('user_credentials', selected.credentialExists, { positiveLabel: 'มี', negativeLabel: 'ไม่มี' }),
+        memberAuthChipHTML('password_hash', selected.hasPasswordHash, { positiveLabel: 'มี', negativeLabel: 'ไม่มี' }),
+        memberAuthChipHTML('email_lower ใน users', selected.emailLowerInUser, { positiveLabel: 'ตรง', negativeLabel: 'ขาด/ไม่ตรง' }),
+        memberAuthChipHTML('email_lower ใน credentials', selected.emailLowerInCredential, { positiveLabel: 'ตรง', negativeLabel: 'ขาด/ไม่ตรง' }),
+        memberAuthChipHTML('เบอร์ใน users', selected.phoneInUser, { positiveLabel: 'ตรง', negativeLabel: 'ขาด/ไม่ตรง' }),
+        memberAuthChipHTML('เบอร์ใน credentials', selected.phoneInCredential, { positiveLabel: 'ตรง', negativeLabel: 'ขาด/ไม่ตรง' }),
+        memberAuthChipHTML('phone_number_index', selected.phoneNumberIndexMatchesUid || selected.phoneNumberIndexExists, { positiveLabel: selected.phoneNumberIndexMatchesUid ? 'ตรง UID' : 'มีแต่ต้องตรวจ', negativeLabel: 'ไม่มี' }),
+        memberAuthChipHTML('UID อีเมล/เบอร์', found.uidMatches || (!found.uidFromEmail || !found.uidFromPhone), { positiveLabel: found.uidMatches ? 'ตรงกัน' : 'มีฝั่งเดียว', negativeLabel: 'ไม่ตรงกัน' })
+    ].join('');
+
+    const repairMessage = repair.requested
+        ? repair.performed
+            ? `<div class="member-auth-safe-box"><strong>ซ่อม Index แล้ว</strong><br>credentials: ${safeNumber(repair.stats?.credentialLinksRepaired)} รายการ, phone index: ${safeNumber(repair.stats?.phoneIndexesRepaired)} รายการ, conflict: ${safeNumber(repair.stats?.phoneIndexConflicts)} รายการ</div>`
+            : `<div class="member-auth-warning-box"><strong>ยังไม่ได้ซ่อม</strong><br>เหตุผล: ${escapeHTML(repair.skippedReason || 'ระบบไม่พบรายการที่ซ่อมได้อย่างปลอดภัย')}</div>`
+        : '';
+
+    const passwordSetupBox = selected.hasPasswordHash === false || result?.recommendation === 'SAFE_PASSWORD_SETUP_REQUIRED'
+        ? `
+            <div class="member-auth-warning-box">
+                <strong>สมาชิกยังไม่มี password_hash</strong><br>
+                ระบบไม่สามารถกู้รหัสผ่านเดิมได้ ให้เจ้าของบัญชีตั้งรหัสใหม่ผ่านการยืนยันตัวตนเท่านั้น
+                <div class="member-auth-actions">
+                    <button type="button" class="btn-action" onclick="openMemberPasswordSetup('phone')">เปิดหน้าตั้งรหัสด้วยเบอร์ OTP</button>
+                    <button type="button" class="btn-action btn-view" onclick="openMemberPasswordSetup('google')">เปิดหน้าตั้งรหัสด้วย Google</button>
+                    <button type="button" class="btn-action btn-edit" onclick="copyMemberPasswordSetupLink('phone')">คัดลอกลิงก์เบอร์ OTP</button>
+                </div>
+            </div>
+        `
+        : '';
+
+    resultEl.hidden = false;
+    resultEl.innerHTML = `
+        <div class="member-auth-safe-box">
+            <strong>${escapeHTML(info.title)}</strong><br>
+            ${escapeHTML(info.detail)}
+        </div>
+        ${repairMessage}
+        ${passwordSetupBox}
+        <div class="member-detail-grid" style="margin-top:12px;">${uidRows}</div>
+        <div class="member-auth-status-grid">${statusChips}</div>
+        <div class="member-auth-code">
+            อีเมลที่ตรวจ: ${escapeHTML(result?.input?.email || '-')} |
+            เบอร์ท้าย: ${escapeHTML(result?.input?.phoneLast4 || '-')} |
+            UID ที่ระบุ: ${escapeHTML(result?.input?.requestedUid || '-')}
+        </div>
+    `;
+}
+
+async function diagnoseMemberAuthLogin(options = {}) {
+    const repair = options.repair === true;
+    const email = String(document.getElementById('member-auth-email')?.value || '').trim();
+    const phoneNumber = String(document.getElementById('member-auth-phone')?.value || '').trim();
+    const uid = String(document.getElementById('member-auth-uid')?.value || '').trim();
+    const resultEl = document.getElementById('member-auth-check-result');
+    const repairBtn = document.getElementById('member-auth-repair-btn');
+    const submitBtn = document.querySelector('#member-auth-check-form button[type="submit"]');
+
+    if (!email && !phoneNumber && !uid) {
+        memberAuthSetBadge({ badge: 'กรอกข้อมูลก่อน', tone: 'warn' });
+        memberAuthSetStatus('กรุณาใส่อีเมล เบอร์โทร หรือ UID อย่างน้อย 1 ช่อง', 'error');
+        return;
+    }
+
+    try {
+        if (submitBtn) submitBtn.disabled = true;
+        if (repairBtn) repairBtn.disabled = true;
+        if (resultEl && !repair) resultEl.hidden = true;
+        memberAuthSetBadge({ badge: repair ? 'กำลังซ่อม' : 'กำลังตรวจ', tone: 'muted' });
+        memberAuthSetStatus(repair ? 'กำลังซ่อม index อย่างปลอดภัย...' : 'กำลังตรวจข้อมูล login สมาชิก...');
+
+        const result = await callAdminFunction('diagnoseMemberAuthLink', { email, phoneNumber, uid, repair });
+        renderMemberAuthDiagnosis(result);
+    } catch (error) {
+        console.error('Member auth diagnosis failed:', error);
+        memberAuthSetBadge({ badge: 'ตรวจไม่สำเร็จ', tone: 'error' });
+        memberAuthSetStatus(error.message || 'ตรวจ Login สมาชิกไม่สำเร็จ', 'error');
+        if (resultEl) {
+            resultEl.hidden = false;
+            resultEl.innerHTML = `<div class="member-auth-warning-box"><strong>ตรวจไม่สำเร็จ</strong><br>${escapeHTML(error.message || safeAdminError('ตรวจ Login สมาชิกไม่สำเร็จ'))}</div>`;
+        }
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
+        if (repairBtn) repairBtn.disabled = !canRepairMemberAuthDiagnosis(lastMemberAuthDiagnosis);
+    }
+}
+
+function bindMemberAuthDiagnostics() {
+    if (memberAuthDiagnosticsBound) return;
+    const form = document.getElementById('member-auth-check-form');
+    const repairBtn = document.getElementById('member-auth-repair-btn');
+    if (form) {
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
+            diagnoseMemberAuthLogin();
+        });
+    }
+    if (repairBtn) {
+        repairBtn.addEventListener('click', () => diagnoseMemberAuthLogin({ repair: true }));
+    }
+    memberAuthDiagnosticsBound = true;
+}
+
+window.openMemberPasswordSetup = (mode = 'phone') => {
+    window.open(memberAuthSetupUrl(mode), '_blank', 'noopener');
+};
+
+window.copyMemberPasswordSetupLink = async (mode = 'phone') => {
+    const url = memberAuthSetupUrl(mode);
+    try {
+        await navigator.clipboard.writeText(url);
+        alert('คัดลอกลิงก์ตั้งรหัสแล้ว: ' + url);
+    } catch (error) {
+        alert('ลิงก์ตั้งรหัส: ' + url);
+    }
+};
 
 function formatMemberCurrency(value) {
     return 'THB ' + safeNumber(value).toLocaleString('th-TH');
@@ -6474,6 +6721,7 @@ function renderMembersTable() {
 
 function setupRealtimeMembers() {
     bindMemberFilters();
+    bindMemberAuthDiagnostics();
     if (membersUnsubscribe) membersUnsubscribe();
     if (memberSummariesUnsubscribe) memberSummariesUnsubscribe();
     if (memberOrdersMetricsUnsubscribe) memberOrdersMetricsUnsubscribe();
@@ -6716,7 +6964,7 @@ window.saveMemberAdminFields = async (event, uid) => {
             statusEl.textContent = 'Save failed: ' + error.message;
             statusEl.style.color = '#c62828';
         } else {
-            alert('Save failed: ' + error.message);
+            alert(safeAdminError('Save failed'));
         }
     }
     return false;
@@ -6798,7 +7046,7 @@ window.saveMemberStaffAccess = async (event, uid) => {
             statusEl.textContent = 'Save failed: ' + error.message;
             statusEl.style.color = '#c62828';
         } else {
-            alert('Save failed: ' + error.message);
+            alert(safeAdminError('Save failed'));
         }
     }
     return false;
@@ -6821,7 +7069,7 @@ window.deleteMemberStaffAccess = async (uid) => {
         window.openMemberModal(uid);
     } catch (error) {
         console.error('Unable to remove member staff access:', error);
-        alert('Remove staff access failed: ' + error.message);
+        alert(safeAdminError('Remove staff access failed'));
     }
 };
 
@@ -7113,7 +7361,7 @@ window.deleteFaq = async (id) => {
     try {
         await deleteDoc(doc(db, 'faqs', id));
     } catch (error) {
-        alert('ลบ FAQ ไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("ลบ FAQ ไม่สำเร็จ"));
     }
 };
 
@@ -7137,7 +7385,7 @@ faqForm?.addEventListener('submit', async (e) => {
         window.resetFaqForm();
         alert('บันทึก FAQ สำเร็จ');
     } catch (error) {
-        alert('บันทึก FAQ ไม่สำเร็จ: ' + error.message);
+        alert(safeAdminError("บันทึก FAQ ไม่สำเร็จ"));
     }
 });
 
@@ -7647,7 +7895,7 @@ marketingSettingsForm?.addEventListener('submit', async (event) => {
         alert('Marketing settings saved. Public pages will load the tools only after visitor consent.');
         updateMarketingPreview();
     } catch (error) {
-        alert('Unable to save marketing settings: ' + error.message);
+        alert(safeAdminError('Unable to save marketing settings'));
     } finally {
         if (submitBtn) {
             submitBtn.disabled = false;
@@ -7745,7 +7993,7 @@ footerSettingsForm?.addEventListener('submit', async (e) => {
         await setDoc(doc(db, 'site_settings', 'footer'), footerData, { merge: true });
         alert('\u2705 \u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25 Footer \u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08');
     } catch (error) {
-        alert('\u274c \u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08: ' + error.message);
+        alert(safeAdminError('บันทึกไม่สำเร็จ'));
     } finally {
         if (submitBtn) {
             submitBtn.disabled = false;

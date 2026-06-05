@@ -704,6 +704,7 @@ section {
 
 .faq-card summary span {
     display: block;
+    flex: 1;
 }
 
 .faq-card summary small {
@@ -765,7 +766,7 @@ section {
 
 .faq-hub-toolbar {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 260px;
+    grid-template-columns: minmax(0, 1fr);
     gap: 16px;
     margin-bottom: 28px;
 }
@@ -780,16 +781,6 @@ section {
     background: #fff;
     font: inherit;
     color: #21382b;
-}
-
-.faq-hub-category {
-    margin-bottom: 38px;
-}
-
-.faq-hub-category h2 {
-    color: var(--primary-color);
-    font-size: 1.55rem;
-    margin: 0 0 16px;
 }
 
 .faq-hub-grid {
@@ -807,6 +798,10 @@ section {
     .faq-card summary::after {
         position: absolute;
         right: 18px;
+    }
+
+    .faq-card summary span {
+        padding-right: 44px;
     }
 
     .faq-hub-toolbar,

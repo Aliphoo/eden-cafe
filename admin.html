@@ -388,7 +388,27 @@
         .member-staff-summary { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; color: #52645a; font-size: 0.9rem; }
         .member-staff-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
         .member-staff-hint { color: #66766d; font-size: 0.86rem; line-height: 1.5; margin-top: 8px; }
+        .member-auth-check-card { border: 1px solid #dfeee1; background: linear-gradient(135deg, #fbfff8, #ffffff); border-radius: 18px; padding: 18px; margin: 0 0 18px; box-shadow: 0 12px 26px rgba(44, 62, 80, 0.05); }
+        .member-auth-check-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+        .member-auth-check-head h3 { color: var(--primary-color); margin: 0 0 4px; }
+        .member-auth-check-head p, .member-auth-hint { color: #62736a; line-height: 1.55; margin: 0; }
+        .member-auth-check-form { display: grid; grid-template-columns: minmax(190px, 1fr) minmax(160px, 0.8fr) minmax(170px, 0.9fr) auto auto; gap: 10px; align-items: center; margin: 14px 0; }
+        .member-auth-check-form input { width: 100%; padding: 11px 12px; border: 1px solid #dbe8df; border-radius: 12px; background: #fff; font-size: 0.92rem; }
+        .member-auth-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 6px 11px; font-size: 0.8rem; font-weight: 700; border: 1px solid #dfe8df; background: #f8fbf8; color: #52645a; }
+        .member-auth-chip.ok { background: #eaf7ec; border-color: #b9dfc0; color: #1b5e20; }
+        .member-auth-chip.warn { background: #fff8df; border-color: #f3d37a; color: #7a5700; }
+        .member-auth-chip.error { background: #ffebee; border-color: #ffcdd2; color: #b71c1c; }
+        .member-auth-chip.muted { background: #f3f6f3; color: #65726a; }
+        .member-auth-result { border-top: 1px solid #e7f0e8; margin-top: 14px; padding-top: 14px; }
+        .member-auth-result[hidden] { display: none; }
+        .member-auth-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; margin: 12px 0; }
+        .member-auth-safe-box { background: #f8fff4; border: 1px solid #cfe8d1; border-radius: 14px; padding: 13px; color: #264236; line-height: 1.55; margin-top: 12px; }
+        .member-auth-warning-box { background: #fff8e7; border: 1px solid #f4d89a; border-radius: 14px; padding: 13px; color: #6f4f00; line-height: 1.55; margin-top: 12px; }
+        .member-auth-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+        .member-auth-code { font-family: Consolas, "Courier New", monospace; font-size: 0.83rem; color: #455a64; word-break: break-all; }
         @media (max-width: 920px) { .member-toolbar { grid-template-columns: 1fr; } .member-detail-grid, .member-mini-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 1100px) { .member-auth-check-form { grid-template-columns: 1fr 1fr; } }
+        @media (max-width: 640px) { .member-auth-check-form { grid-template-columns: 1fr; } }
 
         /* Admin Access Management */
         .access-help { background: #f6fbf7; border: 1px solid #dcefe0; border-radius: 14px; padding: 14px 16px; color: #40544a; line-height: 1.6; margin-bottom: 16px; }
@@ -847,6 +867,25 @@
                     <div class="member-summary-card"><small>Gold</small><strong id="member-stat-gold">0</strong></div>
                     <div class="member-summary-card"><small>Platinum</small><strong id="member-stat-platinum">0</strong></div>
                     <div class="member-summary-card"><small>สมาชิกใหม่เดือนนี้</small><strong id="member-stat-new-month">0</strong></div>
+                </div>
+
+                <div class="member-auth-check-card" id="member-auth-check-card">
+                    <div class="member-auth-check-head">
+                        <div>
+                            <h3>ตรวจ/ซ่อม Login สมาชิก</h3>
+                            <p>ใส่อีเมล เบอร์โทร หรือ UID เพื่อตรวจว่า users, user_credentials และ phone_number_index ชี้ไป UID เดียวกันหรือไม่</p>
+                        </div>
+                        <span id="member-auth-check-badge" class="member-auth-chip muted">รอการตรวจ</span>
+                    </div>
+                    <form id="member-auth-check-form" class="member-auth-check-form">
+                        <input type="email" id="member-auth-email" placeholder="อีเมล เช่น phoo1236@gmail.com" autocomplete="off">
+                        <input type="tel" id="member-auth-phone" placeholder="เบอร์โทร เช่น 093-140-4812" autocomplete="off">
+                        <input type="text" id="member-auth-uid" placeholder="UID ถ้ามี (ไม่บังคับ)" autocomplete="off">
+                        <button type="submit" class="btn-action">ตรวจ Login</button>
+                        <button type="button" id="member-auth-repair-btn" class="btn-action btn-edit" disabled>ซ่อม Index</button>
+                    </form>
+                    <p id="member-auth-check-status" class="member-auth-hint">ระบบจะซ่อมเฉพาะ email_lower และ phone_number_index ที่ขาดเท่านั้น หากไม่มี password_hash ต้องให้สมาชิกตั้งรหัสใหม่เองอย่างปลอดภัย</p>
+                    <div id="member-auth-check-result" class="member-auth-result" hidden></div>
                 </div>
 
                 <div class="member-toolbar">
