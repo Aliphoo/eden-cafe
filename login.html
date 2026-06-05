@@ -6,7 +6,7 @@
     <title>เข้าสู่ระบบ | Eden Cafe</title>
     <meta name="description" content="เข้าสู่ระบบสมาชิก Eden Cafe ด้วย Google เบอร์โทรศัพท์ หรืออีเมล">
     <link rel="icon" type="image/webp" href="Images/Logo.webp">
-    <link rel="stylesheet" href="style.css?v=auth-loop-fix-2-20260604">
+    <link rel="stylesheet" href="style.css?v=phone-reset-firebase-20260605">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -74,7 +74,55 @@
                         minlength="8" maxlength="128" placeholder="รหัสผ่านของคุณ" required>
                 </label>
                 <button class="btn register-submit" id="login-submit" type="submit">เข้าสู่ระบบ</button>
+                <button class="auth-forgot-link" id="forgot-password-open" type="button">ลืมรหัสสมาชิก?</button>
             </form>
+
+            <div class="forgot-password-panel" id="forgot-password-panel" hidden>
+                <div class="forgot-password-head">
+                    <h2>ลืมรหัสสมาชิก</h2>
+                    <button class="auth-close-button" id="forgot-password-close" type="button" aria-label="ปิด">ปิด</button>
+                </div>
+
+                <form class="auth-form forgot-form" id="forgot-request-form">
+                    <fieldset class="forgot-channel-group">
+                        <legend>เลือกช่องทางรับ OTP</legend>
+                        <label>
+                            <input type="radio" name="forgot-channel" value="phone" checked>
+                            <span>เบอร์โทรศัพท์</span>
+                        </label>
+                        <label>
+                            <input type="radio" name="forgot-channel" value="email">
+                            <span>อีเมล</span>
+                        </label>
+                    </fieldset>
+                    <label>
+                        <span id="forgot-identifier-label">เบอร์โทรศัพท์</span>
+                        <input id="forgot-identifier" name="identifier" type="text" autocomplete="username"
+                            placeholder="08X-XXX-XXXX" required>
+                    </label>
+                    <button class="btn register-submit" id="forgot-request-submit" type="submit">ส่ง OTP</button>
+                    <div class="register-recaptcha" id="forgot-recaptcha-container"></div>
+                </form>
+
+                <form class="auth-form forgot-form" id="forgot-complete-form" hidden>
+                    <label>
+                        <span>OTP</span>
+                        <input id="forgot-otp" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code"
+                            minlength="6" maxlength="6" placeholder="กรอกรหัส 6 หลัก" required>
+                    </label>
+                    <label>
+                        <span>รหัสผ่านใหม่</span>
+                        <input id="forgot-password" name="password" type="password" autocomplete="new-password"
+                            minlength="8" maxlength="128" placeholder="อย่างน้อย 8 ตัวอักษร" required>
+                    </label>
+                    <label>
+                        <span>ยืนยันรหัสผ่านใหม่</span>
+                        <input id="forgot-password-confirm" name="confirmPassword" type="password"
+                            autocomplete="new-password" minlength="8" maxlength="128" placeholder="กรอกรหัสผ่านอีกครั้ง" required>
+                    </label>
+                    <button class="btn register-submit" id="forgot-complete-submit" type="submit">รีเซ็ตรหัสผ่าน</button>
+                </form>
+            </div>
 
             <p class="auth-switch">
                 ยังไม่มีบัญชี? <a href="/register">สมัครสมาชิก</a>
@@ -101,7 +149,7 @@
             });
         }
     </script>
-    <script type="module" src="js/login.js?v=auth-loop-fix-2-20260604"></script>
+    <script type="module" src="js/login.js?v=phone-reset-firebase-20260605"></script>
     <script type="module" src="js/auth.js?v=auth-loop-fix-2-20260604"></script>
 </body>
 </html>

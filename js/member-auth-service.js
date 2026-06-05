@@ -92,6 +92,12 @@ export function requestRegisterOtp(phoneNumber) {
     });
 }
 
+export function checkRegisterPhone(phoneNumber) {
+    return edenAuthRequest('/checkRegisterPhone', {
+        body: { phoneNumber: normalizeThaiPhone(phoneNumber) }
+    });
+}
+
 export function verifyRegisterOtp({ verificationId, phoneNumber, otp }) {
     return edenAuthRequest('/verifyRegisterOtp', {
         body: { verificationId, phoneNumber: normalizeThaiPhone(phoneNumber), otp: cleanString(otp, 6) }
@@ -113,6 +119,36 @@ export function completeRegister({ verificationId, registrationToken, phoneNumbe
 export function loginMember({ identifier, password }) {
     return edenAuthRequest('/loginMember', {
         body: { identifier: cleanString(identifier, 180), password }
+    });
+}
+
+export function requestPasswordResetOtp({ channel, identifier }) {
+    const resetChannel = cleanString(channel, 20).toLowerCase();
+    const resetIdentifier = resetChannel === 'phone'
+        ? normalizeThaiPhone(identifier)
+        : cleanString(identifier, 180).toLowerCase();
+    return edenAuthRequest('/requestPasswordResetOtp', {
+        body: { channel: resetChannel, identifier: resetIdentifier }
+    });
+}
+
+export function completePasswordReset({ verificationId, channel, identifier, otp, password, confirmPassword, firebaseIdToken, idToken }) {
+    const resetChannel = cleanString(channel, 20).toLowerCase();
+    const resetIdentifier = resetChannel === 'phone'
+        ? normalizeThaiPhone(identifier)
+        : cleanString(identifier, 180).toLowerCase();
+    const verifiedFirebaseIdToken = cleanString(firebaseIdToken || idToken, 4000);
+    const body = {
+        channel: resetChannel,
+        identifier: resetIdentifier,
+        password,
+        confirmPassword
+    };
+    if (verifiedFirebaseIdToken) body.firebaseIdToken = verifiedFirebaseIdToken;
+    if (verificationId) body.verificationId = cleanString(verificationId, 160);
+    if (otp) body.otp = cleanString(otp, 6);
+    return edenAuthRequest('/completePasswordReset', {
+        body
     });
 }
 

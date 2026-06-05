@@ -8,6 +8,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
     const USER_KEY = 'eden_user';
     const ORDER_HISTORY_KEY = 'eden_order_history';
     const CART_KEY = 'eden_cart';
+    const GOOGLE_SETUP_KEY = 'eden_google_password_setup';
     const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net';
     const PHONE_AUTH_EMAIL_DOMAIN = 'phone.edencafe.co';
     let cloudOrders = null;
@@ -78,6 +79,15 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
 
     function publicEmail(email, fallback = '') {
         return isInternalPhoneEmail(email) ? fallback : (email || fallback || '');
+    }
+
+    function hasPasswordLogin(user = {}) {
+        return user.passwordLoginEnabled === true || user.password_login_enabled === true;
+    }
+
+    function redirectToPasswordSetup() {
+        sessionStorage.setItem(GOOGLE_SETUP_KEY, '1');
+        window.location.href = '/register?google=1';
     }
 
     function money(value) {
@@ -384,6 +394,12 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             const profile = result.profile || {};
             if (result.customToken && profile.uid && auth?.currentUser?.uid !== profile.uid) {
                 await signInWithCustomToken(auth, result.customToken);
+                return;
+            }
+            if (!hasPasswordLogin(profile)) {
+                localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(profile)));
+                cloudProfileUid = user.uid;
+                redirectToPasswordSetup();
                 return;
             }
             cloudProfile = {
@@ -1141,6 +1157,15 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                 return;
             }
             renderSignedOut(container, labels);
+            return;
+        }
+        if (user.passwordLoginEnabled === false || user.password_login_enabled === false) {
+            redirectToPasswordSetup();
+            return;
+        }
+        if (authStateResolved && currentAuthUser && !cloudProfile && cloudProfileUid !== user.uid) {
+            container.innerHTML = `<div class="profile-loading"><p>${escapeHTML(labels.loadingProfile)}</p></div>`;
+            refreshCloudProfile(user);
             return;
         }
         renderSignedIn(container, user, labels);

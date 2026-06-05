@@ -8,6 +8,7 @@ import {
     signInWithPopup
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
+    checkRegisterPhone,
     completeRegister,
     displayThaiPhone,
     getMyProfile,
@@ -114,6 +115,7 @@ function getRecaptchaVerifier() {
 
 async function sendOtp() {
     const phoneNumber = normalizeThaiPhone(els.phone?.value);
+    await checkRegisterPhone(phoneNumber);
     const verifier = getRecaptchaVerifier();
     const result = await signInWithPhoneNumber(auth, phoneNumber, verifier);
 

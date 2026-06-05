@@ -117,6 +117,7 @@ function checkRateLimitKey(key, maxRequests, windowMs, now = Date.now()) {
   if (bucket.count >= maxRequests) {
     const error = new Error('Too many requests');
     error.statusCode = 429;
+    error.publicMessage = 'ขอ OTP บ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่อีกครั้ง';
     throw error;
   }
   bucket.count += 1;
@@ -127,7 +128,7 @@ function publicApiError(error, fallback = 'Unable to process request') {
   if (status === 401) return { status, message: 'Please sign in and try again.' };
   if (status === 403) return { status, message: 'You do not have permission to perform this action.' };
   if (status === 409) return { status, message: 'The selected resource is no longer available.' };
-  if (status === 429) return { status, message: 'Too many requests. Please try again later.' };
+  if (status === 429) return { status, message: error.publicMessage || 'ขอ OTP บ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่อีกครั้ง' };
   if (status >= 500) return { status, message: fallback };
   return { status, message: fallback };
 }
@@ -417,7 +418,29 @@ const memberAuthHandlers = createMemberAuthHandlers({
     apiKey: OTP_SMS_API_KEY.value() || process.env.OTP_SMS_API_KEY || '',
     sender: OTP_SMS_SENDER.value() || process.env.OTP_SMS_SENDER || 'Eden Cafe',
   }),
+  sendOtpEmail: async (email, code) => {
+    const from = safeSecretValue(SMTP_FROM, 180) || safeSecretValue(SMTP_USER, 180);
+    await createMailTransporter().sendMail({
+      from,
+      to: email,
+      subject: 'Eden Cafe password reset OTP',
+      text: `รหัส OTP สำหรับรีเซ็ตรหัสผ่านสมาชิก Eden Cafe คือ ${code} รหัสนี้หมดอายุใน 5 นาที`,
+      html: [
+        '<div style="font-family:Arial,sans-serif;line-height:1.6;color:#123526;">',
+        '<h2 style="margin:0 0 12px;">Eden Cafe password reset</h2>',
+        '<p>ใช้รหัส OTP นี้เพื่อรีเซ็ตรหัสผ่านสมาชิก Eden Cafe</p>',
+        `<div style="font-size:32px;font-weight:700;letter-spacing:0.18em;background:#f2fbf3;border-radius:14px;padding:18px 22px;display:inline-block;">${code}</div>`,
+        '<p>รหัสนี้หมดอายุใน 5 นาที หากคุณไม่ได้ขอรีเซ็ตรหัสผ่าน สามารถละเว้นอีเมลนี้ได้</p>',
+        '</div>',
+      ].join(''),
+    });
+  },
 });
+
+exports.checkRegisterPhone = onRequest(
+  { region: 'asia-southeast1' },
+  memberAuthHandlers.checkRegisterPhone
+);
 
 exports.requestRegisterOtp = onRequest(
   {
@@ -441,6 +464,32 @@ exports.completeRegister = onRequest(
     secrets: [AUTH_OTP_PEPPER, AUTH_PASSWORD_PEPPER],
   },
   memberAuthHandlers.completeRegister
+);
+
+exports.requestPasswordResetOtp = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [
+      AUTH_OTP_PEPPER,
+      OTP_SMS_API_URL,
+      OTP_SMS_API_KEY,
+      OTP_SMS_SENDER,
+      SMTP_HOST,
+      SMTP_PORT,
+      SMTP_USER,
+      SMTP_PASS,
+      SMTP_FROM,
+    ],
+  },
+  memberAuthHandlers.requestPasswordResetOtp
+);
+
+exports.completePasswordReset = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [AUTH_OTP_PEPPER, AUTH_PASSWORD_PEPPER],
+  },
+  memberAuthHandlers.completePasswordReset
 );
 
 exports.loginMember = onRequest(
@@ -605,6 +654,119 @@ async function repairMemberAuthLink(uid, data = {}, stats = {}) {
     stats.membersWithoutPasswordHashUids.add(safeUid);
     stats.membersWithoutPasswordHash = stats.membersWithoutPasswordHashUids.size;
   }
+}
+
+function uniqueCleanStrings(values = [], maxLength = 160) {
+  return Array.from(new Set(
+    values.map(value => cleanString(value, maxLength)).filter(Boolean)
+  ));
+}
+
+function credentialHasPassword(credential = {}) {
+  return !!cleanString(credential.password_hash || '', 2000);
+}
+
+async function getCredentialDoc(uid) {
+  const safeUid = cleanString(uid, 160);
+  if (!safeUid) return { exists: false, data: {} };
+  const snap = await db.collection('user_credentials').doc(safeUid).get();
+  return { exists: snap.exists, data: snap.exists ? snap.data() || {} : {} };
+}
+
+async function getUserDoc(uid) {
+  const safeUid = cleanString(uid, 160);
+  if (!safeUid) return { exists: false, data: {} };
+  const snap = await db.collection('users').doc(safeUid).get();
+  return { exists: snap.exists, data: snap.exists ? snap.data() || {} : {} };
+}
+
+async function findMemberUidsByEmail(email) {
+  const normalizedEmail = normalizePublicEmail(email);
+  if (!normalizedEmail) return [];
+
+  const [usersByEmailLower, usersByEmail, credentialsByEmail] = await Promise.all([
+    db.collection('users').where('email_lower', '==', normalizedEmail).limit(10).get(),
+    db.collection('users').where('email', '==', normalizedEmail).limit(10).get(),
+    db.collection('user_credentials').where('email_lower', '==', normalizedEmail).limit(10).get(),
+  ]);
+
+  return uniqueCleanStrings([
+    ...usersByEmailLower.docs.map(doc => doc.id),
+    ...usersByEmail.docs.map(doc => doc.id),
+    ...credentialsByEmail.docs.map(doc => cleanString(doc.data()?.uid || doc.id, 160)),
+  ]);
+}
+
+async function findMemberUidsByPhone(phoneNumber) {
+  const normalizedPhone = normalizeThaiPhoneForMemberIndex(phoneNumber);
+  if (!normalizedPhone) return [];
+
+  const phoneKey = memberPhoneIndexKey(normalizedPhone);
+  const phoneDisplay = displayThaiPhone(normalizedPhone);
+  const [
+    phoneIndexSnap,
+    usersByPhoneNumber,
+    usersByPhoneE164,
+    usersByPhoneDisplay,
+    credentialsByPhone,
+  ] = await Promise.all([
+    db.collection('phone_number_index').doc(phoneKey).get(),
+    db.collection('users').where('phone_number', '==', normalizedPhone).limit(10).get(),
+    db.collection('users').where('phoneE164', '==', normalizedPhone).limit(10).get(),
+    db.collection('users').where('phone', '==', phoneDisplay).limit(10).get(),
+    db.collection('user_credentials').where('phone_number', '==', normalizedPhone).limit(10).get(),
+  ]);
+
+  return uniqueCleanStrings([
+    phoneIndexSnap.exists ? phoneIndexSnap.data()?.uid : '',
+    ...usersByPhoneNumber.docs.map(doc => doc.id),
+    ...usersByPhoneE164.docs.map(doc => doc.id),
+    ...usersByPhoneDisplay.docs.map(doc => doc.id),
+    ...credentialsByPhone.docs.map(doc => cleanString(doc.data()?.uid || doc.id, 160)),
+  ]);
+}
+
+async function summarizeMemberAuthUid(uid, email = '', phoneNumber = '') {
+  const safeUid = cleanString(uid, 160);
+  if (!safeUid) return null;
+
+  const normalizedEmail = normalizePublicEmail(email);
+  const normalizedPhone = normalizeThaiPhoneForMemberIndex(phoneNumber);
+  const phoneKey = normalizedPhone ? memberPhoneIndexKey(normalizedPhone) : '';
+  const [userDoc, credentialDoc, phoneIndexSnap] = await Promise.all([
+    getUserDoc(safeUid),
+    getCredentialDoc(safeUid),
+    phoneKey ? db.collection('phone_number_index').doc(phoneKey).get() : Promise.resolve(null),
+  ]);
+  const user = userDoc.data || {};
+  const credential = credentialDoc.data || {};
+  const userEmail = memberEmailFromData(user);
+  const credentialEmail = normalizePublicEmail(credential.email_lower || '');
+  const userPhone = memberPhoneFromData(user);
+  const credentialPhone = normalizeThaiPhoneForMemberIndex(credential.phone_number || '');
+  const phoneIndex = phoneIndexSnap?.exists ? phoneIndexSnap.data() || {} : {};
+
+  return {
+    uid: safeUid,
+    userExists: userDoc.exists,
+    credentialExists: credentialDoc.exists,
+    hasPasswordHash: credentialHasPassword(credential),
+    passwordLoginEnabled: credentialHasPassword(credential) || user.passwordLoginEnabled === true || user.password_login_enabled === true,
+    emailLowerInUser: normalizedEmail ? userEmail === normalizedEmail : !!userEmail,
+    emailLowerInCredential: normalizedEmail ? credentialEmail === normalizedEmail : !!credentialEmail,
+    phoneInUser: normalizedPhone ? userPhone === normalizedPhone : !!userPhone,
+    phoneInCredential: normalizedPhone ? credentialPhone === normalizedPhone : !!credentialPhone,
+    phoneNumberIndexExists: !!phoneIndexSnap?.exists,
+    phoneNumberIndexUid: cleanString(phoneIndex.uid || '', 160) || null,
+    phoneNumberIndexMatchesUid: !!phoneKey && phoneIndexSnap?.exists && cleanString(phoneIndex.uid || '', 160) === safeUid,
+    authProviders: Array.isArray(user.authProviderIds) ? user.authProviderIds : [],
+    status: cleanString(user.status || '', 40) || null,
+    emailVerified: user.emailVerified === true || user.email_verified === true,
+    masked: {
+      email: userEmail || credentialEmail || normalizedEmail || null,
+      phoneLast4: (userPhone || credentialPhone || normalizedPhone || '').slice(-4) || null,
+    },
+  };
 }
 
 function authUserToMemberDoc(userRecord) {
@@ -1528,6 +1690,131 @@ exports.syncAuthUsersToFirestore = onRequest(
       const status = error.statusCode || 500;
       logger.warn('Auth user sync failed', { message: error.message, status });
       const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to sync members.');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+exports.diagnoseMemberAuthLink = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'diagnoseMemberAuthLink', 60, 15 * 60 * 1000);
+      await requireAdminAccess(req, 'members');
+
+      const body = req.body || {};
+      const email = normalizePublicEmail(body.email || body.emailLower || '');
+      const phoneNumber = normalizeThaiPhoneForMemberIndex(body.phoneNumber || body.phone || '');
+      const requestedUid = cleanString(body.uid || body.userId || '', 160);
+      const shouldRepair = body.repair === true;
+
+      if (!email && !phoneNumber && !requestedUid) {
+        throw publicClientError('Email, phone number, or UID is required.', 400);
+      }
+
+      const [emailUids, phoneUids] = await Promise.all([
+        email ? findMemberUidsByEmail(email) : Promise.resolve([]),
+        phoneNumber ? findMemberUidsByPhone(phoneNumber) : Promise.resolve([]),
+      ]);
+
+      const allCandidateUids = uniqueCleanStrings([
+        requestedUid,
+        ...emailUids,
+        ...phoneUids,
+      ]);
+      const emailPrimaryUid = emailUids[0] || null;
+      const phonePrimaryUid = phoneUids[0] || null;
+      const uidMatches = !!(emailPrimaryUid && phonePrimaryUid && emailPrimaryUid === phonePrimaryUid);
+      const hasUidConflict = allCandidateUids.length > 1
+        && !(requestedUid && allCandidateUids.every(uid => uid === requestedUid));
+      const canonicalUid = requestedUid || (uidMatches ? emailPrimaryUid : '') || (allCandidateUids.length === 1 ? allCandidateUids[0] : '');
+
+      const before = await Promise.all(allCandidateUids.map(uid => summarizeMemberAuthUid(uid, email, phoneNumber)));
+      const repair = {
+        requested: shouldRepair,
+        performed: false,
+        skippedReason: '',
+        stats: {},
+      };
+
+      if (shouldRepair) {
+        if (!canonicalUid) {
+          repair.skippedReason = 'NO_CANONICAL_UID';
+        } else if (hasUidConflict && !requestedUid) {
+          repair.skippedReason = 'UID_CONFLICT_REQUIRES_EXPLICIT_UID';
+        } else if (requestedUid && allCandidateUids.some(uid => uid !== requestedUid)) {
+          repair.skippedReason = 'REQUESTED_UID_CONFLICTS_WITH_EXISTING_INDEX';
+        } else {
+          const userDoc = await getUserDoc(canonicalUid);
+          const repairStats = {};
+          await repairMemberAuthLink(canonicalUid, {
+            ...(userDoc.data || {}),
+            uid: canonicalUid,
+            email: email || memberEmailFromData(userDoc.data || {}),
+            email_lower: email || memberEmailFromData(userDoc.data || {}),
+            phone_number: phoneNumber || memberPhoneFromData(userDoc.data || {}),
+            phoneE164: phoneNumber || memberPhoneFromData(userDoc.data || {}),
+          }, repairStats);
+          repair.performed = true;
+          repair.stats = {
+            credentialLinksRepaired: repairStats.credentialLinksRepaired || 0,
+            phoneIndexesRepaired: repairStats.phoneIndexesRepaired || 0,
+            phoneIndexConflicts: repairStats.phoneIndexConflicts || 0,
+            membersWithoutPasswordHash: repairStats.membersWithoutPasswordHash || 0,
+          };
+        }
+      }
+
+      const afterUids = uniqueCleanStrings([
+        ...allCandidateUids,
+        canonicalUid,
+        ...(email ? await findMemberUidsByEmail(email) : []),
+        ...(phoneNumber ? await findMemberUidsByPhone(phoneNumber) : []),
+      ]);
+      const after = await Promise.all(afterUids.map(uid => summarizeMemberAuthUid(uid, email, phoneNumber)));
+      const selected = canonicalUid
+        ? after.find(item => item?.uid === canonicalUid) || await summarizeMemberAuthUid(canonicalUid, email, phoneNumber)
+        : null;
+      let recommendation = 'REVIEW_REQUIRED';
+      if (hasUidConflict && !requestedUid) recommendation = 'UID_CONFLICT_REVIEW_REQUIRED';
+      else if (!canonicalUid) recommendation = 'MEMBER_NOT_FOUND';
+      else if (!selected?.hasPasswordHash) recommendation = 'SAFE_PASSWORD_SETUP_REQUIRED';
+      else if (email && phoneNumber && !uidMatches && !requestedUid) recommendation = 'UID_CONFLICT_REVIEW_REQUIRED';
+      else if (selected?.phoneNumberIndexExists === false && phoneNumber) recommendation = 'REPAIR_PHONE_INDEX';
+      else recommendation = 'READY_FOR_EMAIL_PHONE_PASSWORD_LOGIN';
+
+      res.json({
+        ok: true,
+        input: {
+          email: email || null,
+          phoneLast4: phoneNumber ? phoneNumber.slice(-4) : null,
+          requestedUid: requestedUid || null,
+        },
+        found: {
+          uidFromEmail: emailPrimaryUid,
+          uidFromPhone: phonePrimaryUid,
+          uidMatches,
+          candidateUids: allCandidateUids,
+          canonicalUid: canonicalUid || null,
+        },
+        selected,
+        before,
+        after,
+        repair,
+        recommendation,
+      });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('Member auth link diagnosis failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to diagnose member auth link.');
       res.status(status).json({ error: publicError.message });
     }
   }
