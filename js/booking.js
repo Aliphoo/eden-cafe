@@ -104,7 +104,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 roomSelect.appendChild(opt);
             });
         } catch (err) {
-            console.error('Error loading rooms:', err);
             roomSelect.innerHTML = '<option value="" disabled selected>Error loading rooms</option>';
         }
     }
@@ -299,7 +298,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 tableRadio.dispatchEvent(new Event('change'));
             }
         } catch (err) {
-            console.error('Booking error:', err);
             if (err?.status === 409) {
                 alert('โต๊ะที่เลือกถูกจองแล้ว กรุณาเลือกโต๊ะอื่น');
                 if (Array.isArray(err.conflictIds) && window.EdenTableMap?.setBookedTableIds) {

@@ -14,9 +14,11 @@ const TEXT_EXTENSIONS = new Set([
   '.yaml'
 ]);
 const IGNORED_DIRS = new Set([
+  '.codex-backup',
   '.firebase',
   '.git',
   'backups',
+  'eden-pos-apk',
   'functions/node_modules',
   'node_modules'
 ]);
@@ -31,6 +33,8 @@ const MOJIBAKE_PATTERNS = [
 
 function isIgnored(relativePath) {
   const normalized = relativePath.replace(/\\/g, '/');
+  const parts = normalized.split('/');
+  if (parts.includes('node_modules')) return true;
   return [...IGNORED_DIRS].some(dir => normalized === dir || normalized.startsWith(dir + '/'));
 }
 

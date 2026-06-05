@@ -37,6 +37,10 @@ export function profileToStoredUser(profile = {}) {
         phoneNumber: profile.phone_number || '',
         memberLevel: profile.member_level || 'Silver',
         points: Number(profile.points || 0),
+        emailVerified: profile.emailVerified === true || profile.email_verified === true,
+        emailVerifiedAt: profile.emailVerifiedAt || profile.email_verified_at || '',
+        passwordLoginEnabled: profile.password_login_enabled === true || profile.passwordLoginEnabled === true,
+        authProviderIds: Array.isArray(profile.auth_provider_ids) ? profile.auth_provider_ids : [],
         isAdmin: false,
         adminRole: ''
     };
@@ -88,6 +92,12 @@ export function requestRegisterOtp(phoneNumber) {
     });
 }
 
+export function checkRegisterPhone(phoneNumber) {
+    return edenAuthRequest('/checkRegisterPhone', {
+        body: { phoneNumber: normalizeThaiPhone(phoneNumber) }
+    });
+}
+
 export function verifyRegisterOtp({ verificationId, phoneNumber, otp }) {
     return edenAuthRequest('/verifyRegisterOtp', {
         body: { verificationId, phoneNumber: normalizeThaiPhone(phoneNumber), otp: cleanString(otp, 6) }
@@ -109,6 +119,36 @@ export function completeRegister({ verificationId, registrationToken, phoneNumbe
 export function loginMember({ identifier, password }) {
     return edenAuthRequest('/loginMember', {
         body: { identifier: cleanString(identifier, 180), password }
+    });
+}
+
+export function requestPasswordResetOtp({ channel, identifier }) {
+    const resetChannel = cleanString(channel, 20).toLowerCase();
+    const resetIdentifier = resetChannel === 'phone'
+        ? normalizeThaiPhone(identifier)
+        : cleanString(identifier, 180).toLowerCase();
+    return edenAuthRequest('/requestPasswordResetOtp', {
+        body: { channel: resetChannel, identifier: resetIdentifier }
+    });
+}
+
+export function completePasswordReset({ verificationId, channel, identifier, otp, password, confirmPassword, firebaseIdToken, idToken }) {
+    const resetChannel = cleanString(channel, 20).toLowerCase();
+    const resetIdentifier = resetChannel === 'phone'
+        ? normalizeThaiPhone(identifier)
+        : cleanString(identifier, 180).toLowerCase();
+    const verifiedFirebaseIdToken = cleanString(firebaseIdToken || idToken, 4000);
+    const body = {
+        channel: resetChannel,
+        identifier: resetIdentifier,
+        password,
+        confirmPassword
+    };
+    if (verifiedFirebaseIdToken) body.firebaseIdToken = verifiedFirebaseIdToken;
+    if (verificationId) body.verificationId = cleanString(verificationId, 160);
+    if (otp) body.otp = cleanString(otp, 6);
+    return edenAuthRequest('/completePasswordReset', {
+        body
     });
 }
 

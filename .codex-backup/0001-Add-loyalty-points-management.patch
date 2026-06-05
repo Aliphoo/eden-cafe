@@ -1,0 +1,2382 @@
+From 39612a6b9be9233cc9fce0125dbd10b509264264 Mon Sep 17 00:00:00 2001
+From: Niran Saelee <phoo1236@gmail.com>
+Date: Tue, 2 Jun 2026 01:14:49 +0700
+Subject: [PATCH] Add loyalty points management
+
+---
+ admin.html         | 466 +++++++++++++++++----
+ firestore.rules    |  65 ++-
+ functions/index.js | 143 ++++++-
+ js/admin.js        | 995 ++++++++++++++++++++++++++++++++++++++++-----
+ js/profile.js      | 180 +++++++-
+ 5 files changed, 1660 insertions(+), 189 deletions(-)
+
+diff --git a/admin.html b/admin.html
+index f370910..ef1fc41 100644
+--- a/admin.html
++++ b/admin.html
+@@ -66,17 +66,27 @@
+ 
+         /* Sidebar */
+         .sidebar {
+-            width: 250px; background: var(--white); height: 100%; padding: 20px 0;
++            width: 250px; background: var(--white); height: 100vh; max-height: 100vh; padding: 20px 0;
+             box-shadow: 2px 0 10px rgba(0,0,0,0.05); display: flex; flex-direction: column;
++            flex: 0 0 250px; overflow: hidden;
+         }
+-        .sidebar-header { padding: 0 20px 20px; border-bottom: 1px solid #eee; text-align: center; }
++        .sidebar-header { padding: 0 20px 20px; border-bottom: 1px solid #eee; text-align: center; flex: 0 0 auto; }
+         .sidebar-header h2 { color: var(--accent-color); font-family: 'Playfair Display', serif; }
+-        .sidebar-menu { list-style: none; margin-top: 20px; flex: 1; }
++        .sidebar-menu {
++            list-style: none; margin-top: 20px; flex: 1 1 auto; min-height: 0;
++            overflow-y: auto; overflow-x: hidden; padding-bottom: 12px;
++            scrollbar-gutter: stable; overscroll-behavior: contain;
++            -webkit-overflow-scrolling: touch;
++        }
++        .sidebar-menu::-webkit-scrollbar { width: 8px; }
++        .sidebar-menu::-webkit-scrollbar-track { background: transparent; }
++        .sidebar-menu::-webkit-scrollbar-thumb { background: #cfe6d3; border-radius: 999px; }
++        .sidebar-menu::-webkit-scrollbar-thumb:hover { background: #9fd0a8; }
+         .sidebar-menu li { padding: 15px 20px; cursor: pointer; border-left: 4px solid transparent; transition: 0.3s; }
+         .sidebar-menu li:hover, .sidebar-menu li.active {
+             background: var(--secondary-color); border-left-color: var(--accent-color); color: var(--accent-color); font-weight: 500;
+         }
+-        .sidebar-footer { padding: 20px; border-top: 1px solid #eee; }
++        .sidebar-footer { padding: 20px; border-top: 1px solid #eee; flex: 0 0 auto; background: var(--white); }
+         .logout-btn { color: var(--danger); cursor: pointer; display: block; text-align: center; padding: 10px; background: #ffebee; border-radius: 5px; }
+ 
+         /* Main Content */
+@@ -85,43 +95,96 @@
+         .admin-profile { display: flex; align-items: center; gap: 10px; }
+         .admin-profile img { width: 40px; height: 40px; border-radius: 50%; }
+ 
+-        /* Dashboard Cards */
+-        .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+-        .card { background: var(--white); padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); }
+-        .card h3 { font-size: 0.9rem; color: #666; margin-bottom: 10px; }
+-        .card .value { font-size: 1.8rem; font-weight: 600; color: var(--primary-color); }
+-        .card .icon { float: right; font-size: 2rem; opacity: 0.2; }
+-        .dashboard-lower-grid { display: grid; grid-template-columns: minmax(0, 800px) minmax(280px, 420px); gap: 20px; align-items: start; }
+-        .dashboard-lower-grid .section-container { margin-bottom: 0; }
+-        .sales-report-card { padding: 0; overflow: hidden; }
+-        .sales-report-title { padding: 18px 20px 8px; font-weight: 700; color: #222; font-size: 1.05rem; }
+-        .sales-report-nav { display: grid; gap: 0; padding: 4px 0 12px; }
++        /* Sales Dashboard */
++        .sales-dashboard-shell { background: #f5f6f6; border-radius: 10px; overflow: hidden; box-shadow: 0 10px 30px rgba(17, 38, 30, 0.08); border: 1px solid #e4e8e5; }
++        .sales-dashboard-topbar { min-height: 56px; background: #43ad4f; color: white; display: flex; align-items: center; gap: 18px; padding: 0 22px; box-shadow: 0 2px 7px rgba(0,0,0,0.18); }
++        .sales-dashboard-menu-btn { width: 34px; height: 34px; border: 0; border-radius: 4px; background: transparent; color: white; font-size: 1.55rem; line-height: 1; cursor: pointer; }
++        .sales-dashboard-topbar h2 { font-size: 1.25rem; font-weight: 700; margin: 0; }
++        .sales-dashboard-body { display: grid; grid-template-columns: 64px minmax(0, 1fr); min-height: 760px; }
++        .sales-dashboard-rail { background: #fff; border-right: 1px solid #e3e7e3; display: grid; align-content: start; justify-items: center; padding-top: 14px; gap: 10px; }
++        .sales-rail-btn { width: 52px; height: 52px; border: 0; border-left: 4px solid transparent; background: transparent; color: #8a9490; font-size: 1.35rem; cursor: default; }
++        .sales-rail-btn.active { border-left-color: #43ad4f; background: #f0f7f1; color: #43ad4f; }
++        .sales-dashboard-main { padding: 22px; overflow: hidden; }
++        .sales-dashboard-toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
++        .sales-filter-btn, .sales-filter-select {
++            min-height: 42px;
++            border: 1px solid #e2e7e2;
++            background: #fff;
++            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
++            color: #333;
++            padding: 0 16px;
++            border-radius: 4px;
++            font: inherit;
++            font-weight: 600;
++        }
++        .sales-filter-btn { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
++        .sales-filter-btn:disabled { opacity: 0.45; cursor: not-allowed; }
++        .sales-filter-select { min-width: 170px; }
++        .sales-dashboard-layout { display: grid; grid-template-columns: 285px minmax(0, 1fr); gap: 0; align-items: start; }
++        .sales-report-card { background: #fff; min-height: 320px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); border: 1px solid #e8ece8; z-index: 1; }
++        .sales-report-title { display: none; }
++        .sales-report-nav { display: grid; gap: 0; padding: 16px 0; }
+         .sales-report-nav button {
+             appearance: none;
+             border: 0;
+             background: transparent;
+             text-align: left;
+-            padding: 11px 20px;
+-            color: #1f2933;
++            padding: 10px 22px;
++            color: #2f3437;
+             font: inherit;
+-            font-weight: 500;
++            font-weight: 600;
+             cursor: pointer;
+             transition: color 0.2s, background 0.2s;
+         }
+-        .sales-report-nav button:hover, .sales-report-nav button.active { color: var(--accent-color); background: #f6fbf7; font-weight: 700; }
+-        .sales-report-preview { border-top: 1px solid #edf1ed; padding: 16px 20px 18px; background: #fbfff8; }
+-        .sales-report-preview-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+-        .sales-report-preview-head span { color: #6b7a72; font-size: 0.84rem; }
+-        .sales-report-preview-head strong { color: var(--primary-color); font-size: 1.2rem; }
+-        .sales-report-table { display: grid; gap: 8px; }
+-        .sales-report-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; border-bottom: 1px solid #e8f0ea; padding-bottom: 8px; }
+-        .sales-report-row:last-child { border-bottom: 0; padding-bottom: 0; }
+-        .sales-report-row strong { color: #263238; font-size: 0.92rem; line-height: 1.35; overflow-wrap: anywhere; }
+-        .sales-report-row small { display: block; color: #77857d; margin-top: 2px; }
+-        .sales-report-row em { color: var(--primary-color); font-style: normal; font-weight: 700; white-space: nowrap; }
+-        .sales-report-empty { color: #7a857f; background: #fff; border: 1px dashed #d9e8dd; border-radius: 12px; padding: 14px; text-align: center; }
+-        @media (max-width: 1100px) {
+-            .dashboard-lower-grid { grid-template-columns: 1fr; }
++        .sales-report-nav button:hover, .sales-report-nav button.active { color: #43ad4f; background: #f8fbf8; font-weight: 800; }
++        .sales-workspace { min-width: 0; display: grid; gap: 16px; }
++        .sales-summary-panel, .sales-table-panel { background: #fff; border: 1px solid #e1e5e1; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
++        .sales-summary-panel { min-height: 455px; }
++        .sales-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); border-bottom: 1px solid #e6e9e6; }
++        .sales-kpi { padding: 18px 28px 16px; min-height: 106px; }
++        .sales-kpi span { display: block; color: #2f3437; font-weight: 700; margin-bottom: 8px; }
++        .sales-kpi strong { display: block; color: #1d2529; font-size: 1.7rem; font-weight: 500; line-height: 1.05; }
++        .sales-kpi small { display: block; margin-top: 7px; color: #41a84b; font-weight: 600; }
++        .sales-kpi small.negative { color: #e8305b; }
++        .sales-chart-filter-row { display: flex; justify-content: flex-end; gap: 28px; padding: 18px 28px 0; }
++        .sales-mini-select { min-width: 140px; border: 0; border-bottom: 1px solid #b9c0bb; background: transparent; padding: 8px 4px; font: inherit; color: #2f3437; outline: none; }
++        .sales-chart-wrap { padding: 14px 28px 26px; height: 315px; }
++        .sales-chart-wrap canvas { width: 100% !important; height: 100% !important; }
++        .sales-table-head { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 18px 28px; border-bottom: 1px solid #e8ece8; }
++        .sales-table-title { color: #43ad4f; font-weight: 800; }
++        .sales-table-actions { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
++        .sales-export-btn, .sales-table-icon-btn { border: 0; background: transparent; color: #43ad4f; font: inherit; font-weight: 700; cursor: pointer; }
++        .sales-export-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 16px; border-radius: 999px; background: #edf8ef; border: 1px solid #ccebd2; box-shadow: 0 4px 12px rgba(67, 173, 79, 0.12); }
++        .sales-export-btn:hover { background: #dcf2e0; }
++        .sales-export-btn:disabled { cursor: not-allowed; opacity: 0.5; }
++        .sales-table-icon-btn { color: #6e7671; font-size: 1.25rem; }
++        .sales-table-scroll { overflow-x: auto; }
++        .sales-summary-table { min-width: 1020px; }
++        .sales-summary-table th { background: #fff; color: #69736d; font-weight: 500; height: 54px; white-space: nowrap; }
++        .sales-summary-table td { height: 58px; color: #1f2933; white-space: nowrap; }
++        .sales-summary-table .sales-date-cell { font-weight: 700; color: #263238; }
++        .sales-table-footer { display: flex; align-items: center; gap: 18px; padding: 14px 28px 18px; border-top: 1px solid #edf0ed; color: #3d4641; flex-wrap: wrap; }
++        .sales-table-page-btn { width: 46px; height: 40px; border: 1px solid #ecefec; background: #fff; color: #66716b; font-size: 1.2rem; cursor: pointer; }
++        .sales-table-page-input { width: 46px; height: 36px; border: 1px solid #e1e6e1; border-radius: 3px; text-align: center; }
++        .sales-report-empty { color: #7a857f; padding: 24px; text-align: center; }
++        .sales-report-mobile-summary { display: none; }
++        @media (max-width: 1180px) {
++            .sales-dashboard-layout { grid-template-columns: 240px minmax(0, 1fr); }
++            .sales-kpi-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
++        }
++        @media (max-width: 880px) {
++            .sales-dashboard-body { grid-template-columns: 1fr; }
++            .sales-dashboard-rail { display: none; }
++            .sales-dashboard-main { padding: 14px; }
++            .sales-dashboard-layout { grid-template-columns: 1fr; gap: 14px; }
++            .sales-chart-filter-row { justify-content: flex-start; flex-wrap: wrap; gap: 12px; }
++            .sales-chart-wrap { height: 280px; padding: 14px; }
++            .sales-kpi { padding: 16px; }
++        }
++        @media (max-width: 560px) {
++            .sales-kpi-grid { grid-template-columns: 1fr; }
++            .sales-dashboard-toolbar { gap: 8px; }
++            .sales-filter-select { width: 100%; }
+         }
+ 
+         /* Charts & Tables Section */
+@@ -384,6 +447,19 @@
+         @media (max-width: 980px) { .discount-admin-layout { grid-template-columns: 1fr; } }
+         @media (max-width: 640px) { .discount-form-grid { grid-template-columns: 1fr; } }
+ 
++        /* Loyalty Manager */
++        .loyalty-admin-layout { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(320px, 0.85fr); gap: 22px; align-items: start; }
++        .loyalty-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
++        .loyalty-form-grid .full { grid-column: 1 / -1; }
++        .loyalty-switch-row { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid #dceee1; border-radius: 14px; background: #fff; font-weight: 800; color: #0b3d2a; }
++        .loyalty-switch-row input { width: 18px; height: 18px; accent-color: var(--accent-color); }
++        .loyalty-ledger-table small { color: #6b7a72; display: block; margin-top: 3px; }
++        .loyalty-points-positive { color: #178f3f; font-weight: 900; }
++        .loyalty-points-negative { color: #c62828; font-weight: 900; }
++        .loyalty-empty { border: 1px dashed #cfe3d4; border-radius: 16px; padding: 18px; text-align: center; color: #667; background: #fbfff8; }
++        @media (max-width: 980px) { .loyalty-admin-layout { grid-template-columns: 1fr; } }
++        @media (max-width: 640px) { .loyalty-form-grid { grid-template-columns: 1fr; } }
++
+         /* Footer Settings */
+         .footer-settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 30px; }
+         .footer-settings-card { background: #fbfff8; border: 1px solid #e0eadc; border-radius: 16px; padding: 22px 24px; }
+@@ -495,9 +571,9 @@
+         </div>
+         <ul class="sidebar-menu">
+             <li class="active" onclick="switchTab('dashboard', this)">📊 ภาพรวม (Dashboard)</li>
+-            <li class="sidebar-external-link" data-permission="pos" onclick="window.location.href='pos.html'">💳 POS หน้าร้าน</li>
+             <li onclick="switchTab('discounts', this)">🏷️ จัดการส่วนลด (Discounts)</li>
+             <li onclick="switchTab('members', this)">👥 จัดการสมาชิก (Members)</li>
++            <li onclick="switchTab('loyalty', this)">🎁 จัดการแต้ม (Loyalty)</li>
+             <li data-owner-only="true" onclick="switchTab('admin-access', this)">🛡️ จัดการผู้จัดการ (Admin Access)</li>
+             <li onclick="switchTab('orders', this)">🛍️ ออเดอร์สินค้า (Orders)</li>
+             <li onclick="switchTab('bookings', this)">📅 คิวจองโต๊ะ (Table Bookings)</li>
+@@ -544,63 +620,152 @@
+ 
+         <!-- Dashboard Section -->
+         <div id="dashboard" class="content-section active">
+-            <div class="cards-grid">
+-                <div class="card">
+-                    <div class="icon">💰</div>
+-                    <h3>ยอดขายวันนี้</h3>
+-                    <div class="value" id="stat-revenue">฿0</div>
+-                </div>
+-                <div class="card">
+-                    <div class="icon">🛍️</div>
+-                    <h3>ออเดอร์วันนี้</h3>
+-                    <div class="value" id="stat-orders">0</div>
+-                </div>
+-                <div class="card">
+-                    <div class="icon">👥</div>
+-                    <h3>ยอดเข้าชมเว็บวันนี้</h3>
+-                    <div class="value" id="stat-views-daily">0</div>
+-                </div>
+-                <div class="card">
+-                    <div class="icon">📅</div>
+-                    <h3>คิวจองโต๊ะวันนี้</h3>
+-                    <div class="value" id="stat-bookings">0</div>
+-                </div>
++            <div class="dashboard-legacy-stats" hidden>
++                <span id="stat-revenue">฿0</span>
++                <span id="stat-orders">0</span>
++                <span id="stat-views-daily">0</span>
++                <span id="stat-bookings">0</span>
+             </div>
+ 
+-            <div class="dashboard-lower-grid">
+-                <div class="section-container">
+-                    <div class="section-header">
+-                        <h2>สถิติยอดผู้เข้าชม 7 วันล่าสุด</h2>
+-                    </div>
+-                    <canvas id="viewsChart" height="100"></canvas>
+-                </div>
+-
+-                <aside class="section-container sales-report-card" aria-label="สรุปยอดขาย">
+-                    <div class="sales-report-title">สรุปยอดขาย</div>
+-                    <nav class="sales-report-nav" aria-label="รายการสรุปยอดขาย">
+-                        <button type="button" class="active" data-sales-report="product">ยอดขายตามสินค้า</button>
+-                        <button type="button" data-sales-report="category">ยอดขาย แยกตาม หมวดหมู่</button>
+-                        <button type="button" data-sales-report="staff">ยอดขาย แยกตาม พนักงาน</button>
+-                        <button type="button" data-sales-report="payment">ยอดขาย แยกตาม ประเภทการชำระเงิน</button>
+-                        <button type="button" data-sales-report="receipts">ใบเสร็จรับเงิน</button>
+-                        <button type="button" data-sales-report="options">ยอดขาย แยกตาม ตัวเลือกเพิ่มเติม</button>
+-                        <button type="button" data-sales-report="discounts">ส่วนลด</button>
+-                        <button type="button" data-sales-report="taxes">ภาษี</button>
+-                    </nav>
+-                    <div class="sales-report-preview">
+-                        <div class="sales-report-preview-head">
+-                            <span id="sales-report-active-label">ยอดขายตามสินค้า</span>
+-                            <strong id="sales-report-active-total">฿0</strong>
++            <section class="sales-dashboard-shell" aria-label="สรุปยอดขาย">
++                <header class="sales-dashboard-topbar">
++                    <button class="sales-dashboard-menu-btn" type="button" aria-label="เปิดเมนู">☰</button>
++                    <h2>สรุปยอดขาย</h2>
++                </header>
++
++                <div class="sales-dashboard-body">
++                    <aside class="sales-dashboard-rail" aria-label="เมนูหลักรายงาน">
++                        <button class="sales-rail-btn" type="button" aria-label="บัญชี">●</button>
++                        <button class="sales-rail-btn active" type="button" aria-label="รายงานยอดขาย">▥</button>
++                        <button class="sales-rail-btn" type="button" aria-label="สินค้า">◆</button>
++                        <button class="sales-rail-btn" type="button" aria-label="ตะกร้า">▱</button>
++                        <button class="sales-rail-btn" type="button" aria-label="พนักงาน">♟</button>
++                        <button class="sales-rail-btn" type="button" aria-label="ตั้งค่า">⚙</button>
++                    </aside>
++
++                    <div class="sales-dashboard-main">
++                        <div class="sales-dashboard-toolbar" aria-label="ตัวกรองรายงานยอดขาย">
++                            <button class="sales-filter-btn" type="button" onclick="shiftSalesReportMonth(-1)" aria-label="เดือนก่อนหน้า">‹</button>
++                            <button class="sales-filter-btn" type="button" disabled>
++                                <span>📅</span>
++                                <span id="sales-report-range-label">-</span>
++                            </button>
++                            <button class="sales-filter-btn" type="button" onclick="shiftSalesReportMonth(1)" aria-label="เดือนถัดไป">›</button>
++                            <select id="sales-report-time-filter" class="sales-filter-select" onchange="setSalesReportTimeFilter(this.value)" aria-label="ช่วงเวลา">
++                                <option value="all">ตลอดทั้งวัน</option>
++                                <option value="morning">06:00 - 12:00</option>
++                                <option value="afternoon">12:00 - 18:00</option>
++                                <option value="evening">18:00 - 24:00</option>
++                            </select>
++                            <select id="sales-report-employee-filter" class="sales-filter-select" onchange="setSalesReportEmployeeFilter(this.value)" aria-label="พนักงาน">
++                                <option value="all">พนักงานทั้งหมด</option>
++                            </select>
+                         </div>
+-                        <div id="sales-report-table" class="sales-report-table">
+-                            <div class="sales-report-empty">ยังไม่มีข้อมูลยอดขาย</div>
++
++                        <div class="sales-dashboard-layout">
++                            <aside class="sales-report-card" aria-label="รายการสรุปยอดขาย">
++                                <nav class="sales-report-nav">
++                                    <button type="button" class="active" data-sales-report="summary" onclick="setSalesReportType('summary', this)">สรุปยอดขาย</button>
++                                    <button type="button" data-sales-report="product" onclick="setSalesReportType('product', this)">ยอดขายตามสินค้า</button>
++                                    <button type="button" data-sales-report="category" onclick="setSalesReportType('category', this)">ยอดขาย แยกตาม หมวดหมู่</button>
++                                    <button type="button" data-sales-report="staff" onclick="setSalesReportType('staff', this)">ยอดขาย แยกตาม พนักงาน</button>
++                                    <button type="button" data-sales-report="payment" onclick="setSalesReportType('payment', this)">ยอดขาย แยกตาม ประเภทการชำระเงิน</button>
++                                    <button type="button" data-sales-report="receipts" onclick="setSalesReportType('receipts', this)">ใบเสร็จรับเงิน</button>
++                                    <button type="button" data-sales-report="options" onclick="setSalesReportType('options', this)">ยอดขาย แยกตาม ตัวเลือกเพิ่มเติม</button>
++                                    <button type="button" data-sales-report="discounts" onclick="setSalesReportType('discounts', this)">ส่วนลด</button>
++                                    <button type="button" data-sales-report="taxes" onclick="setSalesReportType('taxes', this)">ภาษี</button>
++                                </nav>
++                            </aside>
++
++                            <div class="sales-workspace">
++                                <section class="sales-summary-panel">
++                                    <div class="sales-kpi-grid">
++                                        <div class="sales-kpi">
++                                            <span>คืนเงิน</span>
++                                            <strong id="sales-kpi-refunds">฿0</strong>
++                                            <small id="sales-kpi-refunds-note">ไม่มีรายการคืนเงิน</small>
++                                        </div>
++                                        <div class="sales-kpi">
++                                            <span>ส่วนลด</span>
++                                            <strong id="sales-kpi-discounts">฿0</strong>
++                                            <small id="sales-kpi-discounts-note">รวมส่วนลดในช่วงนี้</small>
++                                        </div>
++                                        <div class="sales-kpi">
++                                            <span>ยอดขายสุทธิ</span>
++                                            <strong id="sales-kpi-net">฿0</strong>
++                                            <small id="sales-kpi-net-note">ยอดขายหลังหักส่วนลด</small>
++                                        </div>
++                                        <div class="sales-kpi">
++                                            <span>กำไรรวม</span>
++                                            <strong id="sales-kpi-profit">฿0</strong>
++                                            <small id="sales-kpi-profit-note">คำนวณจากต้นทุนสินค้า</small>
++                                        </div>
++                                    </div>
++
++                                    <div class="sales-chart-filter-row">
++                                        <select id="sales-chart-space-filter" class="sales-mini-select" aria-label="พื้นที่">
++                                            <option value="all">พื้นที่</option>
++                                            <option value="store">หน้าร้าน</option>
++                                        </select>
++                                        <select id="sales-chart-day-filter" class="sales-mini-select" aria-label="วัน">
++                                            <option value="all">วัน</option>
++                                            <option value="weekday">วันธรรมดา</option>
++                                            <option value="weekend">เสาร์-อาทิตย์</option>
++                                        </select>
++                                    </div>
++
++                                    <div class="sales-chart-wrap">
++                                        <canvas id="salesSummaryChart" height="120"></canvas>
++                                    </div>
++                                </section>
++
++                                <section class="sales-table-panel">
++                                    <div class="sales-table-head">
++                                        <span class="sales-table-title">ส่งออกข้อมูลยอดขาย</span>
++                                        <div class="sales-table-actions">
++                                            <button class="sales-export-btn" id="sales-export-xlsx-btn" type="button" onclick="exportSalesReportXLSX()">
++                                                ⬇ ดาวน์โหลด Excel
++                                            </button>
++                                            <button class="sales-table-icon-btn" type="button" aria-label="ตั้งค่าคอลัมน์">▥</button>
++                                        </div>
++                                    </div>
++                                    <div class="sales-table-scroll">
++                                        <table class="sales-summary-table">
++                                            <thead id="sales-summary-table-head">
++                                                <tr>
++                                                    <th>วันที่</th>
++                                                    <th>ยอดขาย</th>
++                                                    <th>คืนเงิน</th>
++                                                    <th>ส่วนลด</th>
++                                                    <th>ยอดขายสุทธิ</th>
++                                                    <th>ต้นทุนของสินค้า</th>
++                                                    <th>กำไรรวม</th>
++                                                    <th>ผลต่าง</th>
++                                                    <th>ภาษี</th>
++                                                </tr>
++                                            </thead>
++                                            <tbody id="sales-summary-table-body">
++                                                <tr><td colspan="9" class="sales-report-empty">ยังไม่มีข้อมูลยอดขาย</td></tr>
++                                            </tbody>
++                                        </table>
++                                    </div>
++                                    <div class="sales-table-footer">
++                                        <button class="sales-table-page-btn" type="button" aria-label="ก่อนหน้า">‹</button>
++                                        <button class="sales-table-page-btn" type="button" aria-label="ถัดไป">›</button>
++                                        <span>หน้าที่:</span>
++                                        <input class="sales-table-page-input" type="text" value="1" readonly aria-label="หน้า">
++                                        <span id="sales-table-page-total">จาก 1</span>
++                                        <span>จำนวนที่แสดง/หน้า 10</span>
++                                    </div>
++                                </section>
++                            </div>
+                         </div>
+                     </div>
+-                </aside>
+-            </div>
++                </div>
++            </section>
+         </div>
+ 
+-        <!-- POS moved to pos.html as a standalone counter page. -->
++        <!-- Web POS was retired. Eden POS now runs from the APK, while Admin keeps only shared setup data. -->
+ 
+         <!-- Members Section -->
+         <div id="members" class="content-section">
+@@ -776,7 +941,7 @@
+                 <div class="section-header">
+                     <div>
+                         <h2>จัดการส่วนลด POS</h2>
+-                        <p style="color:#667; margin-top:4px;">เพิ่ม ลบ เปิด/ปิด ส่วนลด แล้วซิงค์ไปใช้ทั้ง POS เว็บและ Eden POS APK</p>
++                        <p style="color:#667; margin-top:4px;">เพิ่ม ลบ เปิด/ปิด ส่วนลด แล้วซิงค์ไปใช้ใน Eden POS APK</p>
+                     </div>
+                     <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                         <button class="btn-action btn-view" type="button" onclick="seedDefaultDiscounts()">เติมชุดมาตรฐาน</button>
+@@ -848,6 +1013,137 @@
+             </div>
+         </div>
+ 
++        <!-- Loyalty Section -->
++        <div id="loyalty" class="content-section">
++            <div class="section-container">
++                <div class="section-header">
++                    <div>
++                        <h2>จัดการคะแนนสมาชิก (Loyalty)</h2>
++                        <p style="color:#667; margin-top:4px;">ตั้งค่ากติกาแต้ม ดูหนี้แต้มคงค้าง และปรับแต้มสมาชิกแบบมีประวัติตรวจสอบย้อนหลัง</p>
++                    </div>
++                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
++                        <button class="btn-action btn-view" type="button" onclick="exportLoyaltyLiabilityCSV()">Export CSV</button>
++                        <button class="btn-action" type="button" onclick="refreshLoyalty()">รีเฟรชข้อมูล</button>
++                    </div>
++                </div>
++
++                <div class="access-help">
++                    <strong>กติกาแนะนำของ Eden:</strong>
++                    ซื้อครบ 25 บาท = 1 คะแนน, 1 คะแนน = 1 บาท, คิดแต้มจากยอดสุทธิหลังหักส่วนลด, ใช้แต้มได้ไม่เกิน 30% ของยอดบิล, แต้มหมดอายุ 24 เดือน และทุกการเพิ่ม/ลดแต้มต้องมีเหตุผลใน Point Ledger
++                </div>
++
++                <div class="member-summary-grid">
++                    <div class="member-summary-card"><small>แต้มคงค้างทั้งหมด</small><strong id="loyalty-stat-points">0</strong></div>
++                    <div class="member-summary-card"><small>มูลค่าหนี้แต้ม</small><strong id="loyalty-stat-liability">฿0</strong></div>
++                    <div class="member-summary-card"><small>สมาชิกที่มีแต้ม</small><strong id="loyalty-stat-members">0</strong></div>
++                    <div class="member-summary-card"><small>รายการ Ledger</small><strong id="loyalty-stat-ledger">0</strong></div>
++                </div>
++
++                <div class="loyalty-admin-layout">
++                    <div class="discount-admin-card">
++                        <h3>กติกาการสะสมและใช้แต้ม</h3>
++                        <form id="loyalty-config-form">
++                            <div class="loyalty-form-grid">
++                                <label class="loyalty-switch-row full">
++                                    <input type="checkbox" id="loyalty-enabled" checked>
++                                    <span>เปิดใช้งานระบบสะสมแต้ม</span>
++                                </label>
++                                <div class="form-group">
++                                    <label for="loyalty-spend-per-point">กี่บาท = 1 คะแนน</label>
++                                    <input type="number" id="loyalty-spend-per-point" min="1" step="1" value="25">
++                                </div>
++                                <div class="form-group">
++                                    <label for="loyalty-point-value">1 คะแนน = กี่บาท</label>
++                                    <input type="number" id="loyalty-point-value" min="0" step="0.01" value="1">
++                                </div>
++                                <div class="form-group">
++                                    <label for="loyalty-expiry-months">วันหมดอายุแต้ม</label>
++                                    <select id="loyalty-expiry-months">
++                                        <option value="12">12 เดือน</option>
++                                        <option value="24" selected>24 เดือน</option>
++                                        <option value="0">ไม่มีหมดอายุ</option>
++                                    </select>
++                                </div>
++                                <div class="form-group">
++                                    <label for="loyalty-max-redeem-percent">ใช้แต้มได้ไม่เกิน (% ต่อบิล)</label>
++                                    <input type="number" id="loyalty-max-redeem-percent" min="0" max="100" step="1" value="30">
++                                </div>
++                                <div class="form-group">
++                                    <label for="loyalty-min-redeem-points">คะแนนขั้นต่ำก่อนใช้แลก</label>
++                                    <input type="number" id="loyalty-min-redeem-points" min="0" step="1" value="20">
++                                </div>
++                                <div class="form-group">
++                                    <label for="loyalty-gold-multiplier">ตัวคูณแต้ม Gold</label>
++                                    <input type="number" id="loyalty-gold-multiplier" min="1" step="0.05" value="1.25">
++                                </div>
++                                <div class="form-group">
++                                    <label for="loyalty-platinum-multiplier">ตัวคูณแต้ม Platinum</label>
++                                    <input type="number" id="loyalty-platinum-multiplier" min="1" step="0.05" value="1.5">
++                                </div>
++                                <label class="loyalty-switch-row">
++                                    <input type="checkbox" id="loyalty-earn-after-discount" checked>
++                                    <span>คิดแต้มจากยอดสุทธิหลังส่วนลด</span>
++                                </label>
++                                <label class="loyalty-switch-row">
++                                    <input type="checkbox" id="loyalty-earn-on-redeemed">
++                                    <span>ให้แต้มจากส่วนที่ใช้คะแนนจ่าย</span>
++                                </label>
++                                <div class="form-group full">
++                                    <label for="loyalty-excluded-categories">หมวดหมู่ที่ไม่สะสมแต้ม</label>
++                                    <textarea id="loyalty-excluded-categories" rows="3" placeholder="เช่น เครื่องดื่มแอลกอฮอล์, ฝากเงิน, โปรแรง"></textarea>
++                                </div>
++                            </div>
++                            <button type="submit" class="btn-submit" style="margin-top:14px;">บันทึกกติกาแต้ม</button>
++                        </form>
++                    </div>
++
++                    <div class="discount-admin-card">
++                        <h3>เพิ่ม/ลดแต้ม Manual</h3>
++                        <form id="loyalty-adjust-form">
++                            <div class="form-group">
++                                <label for="loyalty-adjust-user">สมาชิก</label>
++                                <select id="loyalty-adjust-user" required>
++                                    <option value="">-- เลือกสมาชิก --</option>
++                                </select>
++                            </div>
++                            <div class="form-group">
++                                <label for="loyalty-adjust-points">จำนวนแต้ม (+ เพิ่ม / - ลด)</label>
++                                <input type="number" id="loyalty-adjust-points" step="1" placeholder="เช่น 50 หรือ -20" required>
++                            </div>
++                            <div class="form-group">
++                                <label for="loyalty-adjust-reason">เหตุผล</label>
++                                <textarea id="loyalty-adjust-reason" rows="4" placeholder="เช่น ชดเชยออเดอร์, คืนเงิน, แก้ไขแต้มผิดพลาด" required></textarea>
++                            </div>
++                            <button type="submit" class="btn-submit">บันทึกการปรับแต้ม</button>
++                            <p class="discount-note">ทุกครั้งที่ปรับแต้ม ระบบจะสร้างรายการใน Point Ledger และอัปเดตยอดแต้มของสมาชิกทันที</p>
++                        </form>
++                    </div>
++                </div>
++
++                <div class="discount-admin-card" style="margin-top:22px;">
++                    <h3>ประวัติแต้มล่าสุด</h3>
++                    <div style="overflow-x:auto;">
++                        <table class="loyalty-ledger-table">
++                            <thead>
++                                <tr>
++                                    <th>เวลา</th>
++                                    <th>สมาชิก</th>
++                                    <th>ประเภท</th>
++                                    <th>แต้ม</th>
++                                    <th>คงเหลือ</th>
++                                    <th>เหตุผล / อ้างอิง</th>
++                                    <th>ผู้ทำรายการ</th>
++                                </tr>
++                            </thead>
++                            <tbody id="loyalty-ledger-body">
++                                <tr><td colspan="7" style="text-align:center;">กำลังโหลดประวัติแต้ม...</td></tr>
++                            </tbody>
++                        </table>
++                    </div>
++                </div>
++            </div>
++        </div>
++
+         <!-- Orders Section -->
+         <div id="orders" class="content-section">
+             <div class="section-container">
+@@ -1901,7 +2197,7 @@
+ 
+     <!-- Firebase Scripts -->
+     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+-    <script type="module" src="js/admin.js?v=48"></script>
++    <script type="module" src="js/admin.js?v=50"></script>
+     <script>
+         function switchTab(tabId, el) {
+             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {
+diff --git a/firestore.rules b/firestore.rules
+index f15f224..f21d1b3 100644
+--- a/firestore.rules
++++ b/firestore.rules
+@@ -34,13 +34,17 @@ service cloud.firestore {
+         && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.status == 'active'
+         && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'head_manager';
+     }
++    function isManager() {
++      return isSignedIn()
++        && exists(/databases/$(database)/documents/admin_users/$(request.auth.uid))
++        && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.status == 'active'
++        && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'manager';
++    }
+     function hasAdminPermission(permission) {
+       return isOwner()
+         || isHeadManager()
+         || (
+-          isSignedIn()
+-          && exists(/databases/$(database)/documents/admin_users/$(request.auth.uid))
+-          && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.status == 'active'
++          isManager()
+           && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.permissions[permission] == true
+         );
+     }
+@@ -53,7 +57,7 @@ service cloud.firestore {
+     }
+     function isValidAdminOrderCreate() {
+       return request.resource.data.keys().hasOnly([
+-          'id', 'date', 'items', 'total', 'totalAmount', 'uid', 'timestamp',
++          'id', 'date', 'businessDate', 'businessDateLabel', 'items', 'total', 'totalAmount', 'uid', 'timestamp',
+            'customerName', 'phone', 'address', 'status',
+            'source', 'orderType', 'receiptNo', 'paymentStatus', 'paymentMethod',
+           'paymentLabel', 'customerUid', 'customerEmail', 'customerLineId',
+@@ -69,6 +73,8 @@ service cloud.firestore {
+         && request.resource.data.uid == request.auth.uid
+         && isShortString(request.resource.data.id, 60)
+         && isShortString(request.resource.data.date, 60)
++        && (!request.resource.data.keys().hasAny(['businessDate']) || (request.resource.data.businessDate is string && request.resource.data.businessDate.matches('^\\d{4}-\\d{2}-\\d{2}$')))
++        && (!request.resource.data.keys().hasAny(['businessDateLabel']) || (request.resource.data.businessDateLabel is string && request.resource.data.businessDateLabel.size() <= 60))
+         && request.resource.data.items is list
+         && request.resource.data.items.size() > 0
+         && request.resource.data.items.size() <= 100
+@@ -120,7 +126,7 @@ service cloud.firestore {
+     function isValidPosOrderCreate() {
+       return (hasAdminPermission('pos') || hasAdminPermission('orders'))
+         && request.resource.data.keys().hasOnly([
+-          'id', 'date', 'items', 'total', 'totalAmount', 'uid', 'timestamp',
++          'id', 'date', 'businessDate', 'businessDateLabel', 'items', 'total', 'totalAmount', 'uid', 'timestamp',
+           'customerName', 'phone', 'address', 'status',
+           'source', 'orderType', 'receiptNo', 'paymentStatus', 'paymentMethod',
+           'paymentLabel', 'customerUid', 'customerEmail', 'customerLineId',
+@@ -141,6 +147,8 @@ service cloud.firestore {
+         && request.resource.data.orderType == 'pos'
+         && isShortString(request.resource.data.id, 80)
+         && isShortString(request.resource.data.date, 80)
++        && (!request.resource.data.keys().hasAny(['businessDate']) || (request.resource.data.businessDate is string && request.resource.data.businessDate.matches('^\\d{4}-\\d{2}-\\d{2}$')))
++        && (!request.resource.data.keys().hasAny(['businessDateLabel']) || (request.resource.data.businessDateLabel is string && request.resource.data.businessDateLabel.size() <= 60))
+         && request.resource.data.items is list
+         && request.resource.data.items.size() > 0
+         && request.resource.data.items.size() <= 200
+@@ -260,7 +268,7 @@ service cloud.firestore {
+         && request.resource.data.orderType == 'pos'
+         && request.resource.data.uid is string
+         && affected.hasOnly([
+-          'id', 'date', 'items', 'total', 'totalAmount', 'uid',
++          'id', 'date', 'businessDate', 'businessDateLabel', 'items', 'total', 'totalAmount', 'uid',
+           'source', 'orderType',
+           'customerName', 'phone', 'address', 'status',
+           'receiptNo', 'paymentStatus', 'paymentMethod', 'paymentLabel',
+@@ -291,6 +299,8 @@ service cloud.firestore {
+         && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'qr', 'card', 'other'])
+         && (!request.resource.data.keys().hasAny(['paymentLabel']) || (request.resource.data.paymentLabel is string && request.resource.data.paymentLabel.size() <= 60))
+         && (!request.resource.data.keys().hasAny(['receiptNo']) || (request.resource.data.receiptNo is string && request.resource.data.receiptNo.size() > 0 && request.resource.data.receiptNo.size() <= 80))
++        && (!request.resource.data.keys().hasAny(['businessDate']) || (request.resource.data.businessDate is string && request.resource.data.businessDate.matches('^\\d{4}-\\d{2}-\\d{2}$')))
++        && (!request.resource.data.keys().hasAny(['businessDateLabel']) || (request.resource.data.businessDateLabel is string && request.resource.data.businessDateLabel.size() <= 60))
+         && (!request.resource.data.keys().hasAny(['customerName']) || (request.resource.data.customerName is string && request.resource.data.customerName.size() <= 120))
+         && (!request.resource.data.keys().hasAny(['phone']) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40))
+         && (!request.resource.data.keys().hasAny(['address']) || (request.resource.data.address is string && request.resource.data.address.size() <= 250))
+@@ -352,7 +362,8 @@ service cloud.firestore {
+       allow read: if true;
+       allow write: if (docId == 'footer' && hasAdminPermission('footer'))
+         || (docId == 'promptpay' && hasAdminPermission('promptpay'))
+-        || (docId == 'marketing' && hasAdminPermission('marketing'));
++        || (docId == 'marketing' && hasAdminPermission('marketing'))
++        || (docId == 'loyalty' && hasAdminPermission('loyalty'));
+     }
+     match /categories/{docId} {
+       allow read: if true;
+@@ -363,6 +374,42 @@ service cloud.firestore {
+       allow create, delete: if hasAdminPermission('products');
+       allow update: if hasAdminPermission('products') || isValidPosProductStockUpdate();
+     }
++    match /pos_discounts/{docId} {
++      allow read: if true;
++      allow create, update: if hasAdminPermission('discounts')
++        && request.resource.data.keys().hasOnly([
++          'id', 'label', 'type', 'value', 'active', 'order',
++          'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
++        ])
++        && (!request.resource.data.keys().hasAny(['id']) || request.resource.data.id is string)
++        && request.resource.data.label is string
++        && request.resource.data.label.size() > 0
++        && request.resource.data.label.size() <= 80
++        && request.resource.data.type in ['percent', 'amount']
++        && request.resource.data.value is number
++        && request.resource.data.value > 0
++        && request.resource.data.value <= 100000
++        && request.resource.data.active is bool
++        && request.resource.data.order is number
++        && (!request.resource.data.keys().hasAny(['createdAt']) || request.resource.data.createdAt is timestamp)
++        && (!request.resource.data.keys().hasAny(['updatedAt']) || request.resource.data.updatedAt is timestamp)
++        && (!request.resource.data.keys().hasAny(['createdBy']) || request.resource.data.createdBy == request.auth.uid)
++        && (!request.resource.data.keys().hasAny(['updatedBy']) || request.resource.data.updatedBy == request.auth.uid);
++      allow delete: if hasAdminPermission('discounts');
++    }
++    match /point_ledger/{docId} {
++      allow read: if hasAdminPermission('loyalty')
++        || hasAdminPermission('members')
++        || (isSignedIn() && resource.data.userId == request.auth.uid);
++      allow create, update, delete: if hasAdminPermission('loyalty');
++    }
++    match /member_summaries/{userId} {
++      allow read: if hasAdminPermission('loyalty')
++        || hasAdminPermission('members')
++        || hasAdminPermission('pos')
++        || (isSignedIn() && request.auth.uid == userId);
++      allow write: if hasAdminPermission('loyalty');
++    }
+     match /google_reviews/{docId} {
+       allow read: if true;
+       allow write: if isOwner();
+@@ -383,13 +430,13 @@ service cloud.firestore {
+         && request.resource.data.email is string
+         && request.resource.data.email.size() > 0
+         && request.resource.data.email.size() <= 180
+-        && request.resource.data.role in ['owner', 'head_manager', 'manager']
++        && request.resource.data.role in ['owner', 'head_manager', 'manager', 'staff']
+         && request.resource.data.status in ['active', 'paused']
+         && request.resource.data.permissions is map;
+       allow delete: if isOwner() && request.auth.uid != userId;
+     }
+     match /users/{userId} {
+-      allow read: if hasAdminPermission('members') || hasAdminPermission('pos') || (isSignedIn() && request.auth.uid == userId);
++      allow read: if hasAdminPermission('members') || hasAdminPermission('loyalty') || hasAdminPermission('pos') || (isSignedIn() && request.auth.uid == userId);
+       allow write: if hasAdminPermission('members');
+       allow create: if isSignedIn()
+         && request.auth.uid == userId
+diff --git a/functions/index.js b/functions/index.js
+index b58856b..edc8a98 100644
+--- a/functions/index.js
++++ b/functions/index.js
+@@ -12,6 +12,7 @@ const db = admin.firestore();
+ const SPACESHIP_FTP_SERVER = defineSecret('SPACESHIP_FTP_SERVER');
+ const SPACESHIP_FTP_USERNAME = defineSecret('SPACESHIP_FTP_USERNAME');
+ const SPACESHIP_FTP_PASSWORD = defineSecret('SPACESHIP_FTP_PASSWORD');
++const GOOGLE_MAPS_SERVER_KEY = defineSecret('GOOGLE_MAPS_SERVER_KEY');
+ 
+ const PLACE_ID = 'ChIJVTN6cGwB1zAR66OQ_OBKRkM';
+ const PLACE_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
+@@ -110,6 +111,11 @@ async function requireAdminAccess(req, permission = '') {
+     throw error;
+   }
+ 
++  if (!['owner', 'head_manager', 'manager'].includes(access.role)) {
++    const error = new Error('Admin permission required');
++    error.statusCode = 403;
++    throw error;
++  }
+   if (access.role === 'owner' || access.role === 'head_manager') return decoded;
+   if (permission && access.permissions && access.permissions[permission] === true) return decoded;
+ 
+@@ -145,6 +151,8 @@ function normalizeAdminPermissions(role, raw = {}) {
+     'dashboard',
+     'members',
+     'pos',
++    'discounts',
++    'loyalty',
+     'orders',
+     'bookings',
+     'tables',
+@@ -204,6 +212,15 @@ function authUserToMemberDoc(userRecord) {
+   return data;
+ }
+ 
++function memberTierFromMetrics(points = 0, totalSpent = 0, visitCount = 0) {
++  const p = Number(points) || 0;
++  const spent = Number(totalSpent) || 0;
++  const visits = Number(visitCount) || 0;
++  if (p >= 5000 || spent >= 50000 || visits >= 50) return 'Platinum';
++  if (p >= 1200 || spent >= 15000 || visits >= 15) return 'Gold';
++  return 'Silver';
++}
++
+ function cleanString(value, maxLength) {
+   return String(value ?? '').trim().slice(0, maxLength);
+ }
+@@ -378,7 +395,7 @@ function normalizeReview(review) {
+ }
+ 
+ async function fetchGoogleReviews() {
+-  const apiKey = process.env.GOOGLE_MAPS_SERVER_KEY;
++  const apiKey = GOOGLE_MAPS_SERVER_KEY.value() || process.env.GOOGLE_MAPS_SERVER_KEY;
+   if (!apiKey) {
+     throw new Error('GOOGLE_MAPS_SERVER_KEY is not configured');
+   }
+@@ -442,6 +459,7 @@ exports.refreshGoogleReviewsDaily = onSchedule(
+     timeZone: 'Asia/Bangkok',
+     region: 'asia-southeast1',
+     retryCount: 3,
++    secrets: [GOOGLE_MAPS_SERVER_KEY],
+   },
+   async () => {
+     try {
+@@ -806,3 +824,126 @@ exports.syncAuthUsersToFirestore = onRequest(
+     }
+   }
+ );
++
++exports.adjustMemberPoints = onRequest(
++  { region: 'asia-southeast1' },
++  async (req, res) => {
++    if (handleOptions(req, res)) return;
++    setCors(req, res);
++
++    if (req.method !== 'POST') {
++      res.status(405).json({ error: 'Method not allowed' });
++      return;
++    }
++
++    try {
++      const decoded = await requireAdminAccess(req, 'loyalty');
++      const body = req.body || {};
++      const userId = cleanString(body.userId, 160);
++      const requestedDelta = Math.trunc(Number(body.pointsDelta || body.delta || 0));
++      const reason = cleanString(body.reason, 240);
++
++      if (!userId) {
++        const error = new Error('Member UID is required');
++        error.statusCode = 400;
++        throw error;
++      }
++      if (!requestedDelta) {
++        const error = new Error('Point adjustment must not be zero');
++        error.statusCode = 400;
++        throw error;
++      }
++      if (Math.abs(requestedDelta) > 100000) {
++        const error = new Error('Point adjustment is too large');
++        error.statusCode = 400;
++        throw error;
++      }
++      if (!reason) {
++        const error = new Error('Adjustment reason is required');
++        error.statusCode = 400;
++        throw error;
++      }
++
++      const userRef = db.collection('users').doc(userId);
++      const summaryRef = db.collection('member_summaries').doc(userId);
++      const ledgerRef = db.collection('point_ledger').doc();
++      let resultPayload = null;
++
++      await db.runTransaction(async transaction => {
++        const userSnap = await transaction.get(userRef);
++        if (!userSnap.exists) {
++          const error = new Error('Member profile was not found');
++          error.statusCode = 404;
++          throw error;
++        }
++
++        const member = userSnap.data() || {};
++        const before = Math.max(0, Math.floor(Number(member.points || 0)));
++        const after = Math.max(0, before + requestedDelta);
++        const actualDelta = after - before;
++        if (!actualDelta) {
++          const error = new Error('Point adjustment has no effect because the member balance is already zero');
++          error.statusCode = 400;
++          throw error;
++        }
++
++        const totalSpent = Number(member.totalSpent || 0);
++        const visitCount = Number(member.visitCount || 0);
++        const tier = memberTierFromMetrics(after, totalSpent, visitCount);
++        const now = admin.firestore.FieldValue.serverTimestamp();
++        const actorEmail = cleanString(decoded.email || '', 180);
++
++        transaction.set(ledgerRef, {
++          userId,
++          memberCode: cleanString(member.memberCode || '', 80),
++          memberName: cleanString(member.displayName || member.name || member.customerName || 'Eden Member', 160),
++          memberEmail: cleanString(member.email || '', 180),
++          type: 'manual_adjustment',
++          pointsDelta: actualDelta,
++          requestedDelta,
++          pointsBefore: before,
++          pointsAfter: after,
++          reason,
++          source: 'admin',
++          createdAt: now,
++          createdBy: decoded.uid || '',
++          createdByEmail: actorEmail,
++        });
++
++        transaction.set(userRef, {
++          points: after,
++          tier,
++          loyaltyUpdatedAt: now,
++          pointsAdjustedAt: now,
++          updatedAt: now,
++        }, { merge: true });
++
++        const summaryPayload = {
++          userId,
++          memberCode: cleanString(member.memberCode || '', 80),
++          memberName: cleanString(member.displayName || member.name || member.customerName || 'Eden Member', 160),
++          memberEmail: cleanString(member.email || '', 180),
++          pointsBalance: after,
++          tier,
++          lastLedgerId: ledgerRef.id,
++          updatedAt: now,
++        };
++        if (actualDelta > 0) {
++          summaryPayload.lifetimePoints = admin.firestore.FieldValue.increment(actualDelta);
++        } else {
++          summaryPayload.totalManualDeducted = admin.firestore.FieldValue.increment(Math.abs(actualDelta));
++        }
++        transaction.set(summaryRef, summaryPayload, { merge: true });
++
++        resultPayload = { ledgerId: ledgerRef.id, userId, pointsBefore: before, pointsAfter: after, pointsDelta: actualDelta, tier };
++      });
++
++      logger.info('Member points adjusted', resultPayload);
++      res.status(201).json({ ok: true, ...resultPayload });
++    } catch (error) {
++      const status = error.statusCode || 500;
++      logger.warn('Member point adjustment failed', { message: error.message, status });
++      res.status(status).json({ error: error.message || 'Member point adjustment failed' });
++    }
++  }
++);
+diff --git a/js/admin.js b/js/admin.js
+index 9941f78..066a4dc 100644
+--- a/js/admin.js
++++ b/js/admin.js
+@@ -125,8 +125,9 @@ const ADMIN_COLLECTION = 'admin_users';
+ const ADMIN_PERMISSION_LABELS = {
+     dashboard: 'ภาพรวมระบบ',
+     members: 'จัดการสมาชิก',
+-    pos: 'POS หน้าร้าน',
++    pos: 'Eden POS APK',
+     discounts: 'จัดการส่วนลด',
++    loyalty: 'จัดการแต้มสมาชิก',
+     orders: 'ออเดอร์สินค้า',
+     bookings: 'คิวจองโต๊ะ/ห้อง',
+     tables: 'จัดการโต๊ะ/โซน',
+@@ -155,6 +156,7 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
+         members: false,
+         pos: true,
+         discounts: false,
++        loyalty: false,
+         orders: true,
+         bookings: true,
+         tables: false,
+@@ -173,6 +175,7 @@ const ADMIN_TAB_PERMISSIONS = {
+     pos: 'pos',
+     discounts: 'discounts',
+     members: 'members',
++    loyalty: 'loyalty',
+     'admin-access': 'adminAccess',
+     orders: 'orders',
+     bookings: 'bookings',
+@@ -220,10 +223,19 @@ let adminAccessFormBound = false;
+ let discountsData = {};
+ let discountsUnsubscribe = null;
+ let discountFormBound = false;
++let loyaltyConfig = {};
++let loyaltyLedgerData = [];
++let loyaltyConfigUnsubscribe = null;
++let loyaltyLedgerUnsubscribe = null;
++let loyaltyFormsBound = false;
+ let dashboardOrdersData = [];
+-let activeSalesReport = 'product';
++let activeSalesReport = 'summary';
+ let salesReportNavBound = false;
++let salesReportMonthOffset = 0;
++let salesReportEmployeeFilter = 'all';
++let salesReportTimeFilter = 'all';
+ const SALES_REPORT_LABELS = {
++    summary: 'สรุปยอดขาย',
+     product: 'ยอดขายตามสินค้า',
+     category: 'ยอดขาย แยกตาม หมวดหมู่',
+     staff: 'ยอดขาย แยกตาม พนักงาน',
+@@ -348,7 +360,7 @@ let shopProductsUnsubscribe = null;
+ let blogsUnsubscribe = null;
+ let faqsUnsubscribe = null;
+ let memberFiltersBound = false;
+-let viewsChart = null;
++let salesSummaryChart = null;
+ 
+ const ADMIN_ACTIVE_TAB_STORAGE_KEY = 'edenAdminActiveTab';
+ 
+@@ -874,6 +886,9 @@ const loginError = document.getElementById('login-error');
+ 
+ // Initialization
+ document.addEventListener('DOMContentLoaded', () => {
++    bindSalesReportNav();
++    renderDashboardSalesReport();
++
+     getRedirectResult(auth).catch((error) => {
+         console.error('Google redirect login failed:', error);
+         if (loginError) {
+@@ -977,6 +992,7 @@ function initializeAdminModules() {
+         fetchStats();
+         bindSalesReportNav();
+         renderDashboardSalesReport();
++        if (!categoriesUnsubscribe) setupRealtimeCategories();
+     }
+     if (canAdmin('orders') || canAdmin('pos')) setupRealtimeOrders();
+     if (canAdmin('bookings')) setupRealtimeBookings();
+@@ -991,8 +1007,9 @@ function initializeAdminModules() {
+         setupRealtimeShopCategories();
+         setupRealtimeShopProducts();
+     }
+-    if (canAdmin('members')) setupRealtimeMembers();
++    if (canAdmin('members') || canAdmin('loyalty')) setupRealtimeMembers();
+     if (canAdmin('discounts')) setupRealtimeDiscounts();
++    if (canAdmin('loyalty')) setupRealtimeLoyalty();
+     if (canAdmin('promptpay') && typeof window.loadPromptPaySettings === 'function') window.loadPromptPaySettings();
+     if (canAdmin('marketing') && typeof window.loadMarketingSettings === 'function') window.loadMarketingSettings();
+     if (isOwnerAccess()) setupRealtimeAdminAccess();
+@@ -1052,9 +1069,6 @@ function restoreAdminActiveTab() {
+     if (firstAllowedMenu) {
+         const tabId = adminTabIdFromMenuItem(firstAllowedMenu);
+         if (tabId) window.switchTab(tabId, firstAllowedMenu);
+-        else if (firstAllowedMenu.dataset.permission === 'pos' && canAdmin('pos')) {
+-            window.location.href = 'pos.html';
+-        }
+     }
+ }
+ 
+@@ -1086,6 +1100,7 @@ window.refreshAdminSection = async (tabId, button = null) => {
+         switch (tabId) {
+             case 'dashboard':
+                 await fetchStats();
++                renderDashboardSalesReport();
+                 break;
+             case 'members':
+                 setupRealtimeMembers();
+@@ -1097,12 +1112,9 @@ window.refreshAdminSection = async (tabId, button = null) => {
+                 setupRealtimeDiscounts();
+                 await refreshDiscountsOnce();
+                 break;
+-            case 'pos':
+-                if (!categoriesUnsubscribe) setupRealtimeCategories();
+-                if (!productsUnsubscribe) setupRealtimeProducts();
+-                await refreshCategoriesOnce();
+-                await refreshProductsOnce();
+-                renderPosScreen();
++            case 'loyalty':
++                setupRealtimeLoyalty();
++                await refreshLoyaltyOnce();
+                 break;
+             case 'orders':
+                 setupRealtimeOrders();
+@@ -1393,6 +1405,281 @@ window.seedDefaultDiscounts = async function seedDefaultDiscounts() {
+ 
+ window.refreshDiscounts = () => window.refreshAdminSection('discounts');
+ 
++const DEFAULT_LOYALTY_CONFIG = Object.freeze({
++    enabled: true,
++    spendPerPoint: 25,
++    pointValue: 1,
++    expiryMonths: 24,
++    maxRedeemPercent: 30,
++    minRedeemPoints: 20,
++    earnAfterDiscount: true,
++    earnOnRedeemedAmount: false,
++    excludedCategories: ['เครื่องดื่มแอลกอฮอล์', 'ฝากเงิน', 'โปรแรง'],
++    tierMultipliers: {
++        Silver: 1,
++        Gold: 1.25,
++        Platinum: 1.5
++    }
++});
++
++function normalizeLoyaltyConfig(raw = {}) {
++    const tierMultipliers = raw.tierMultipliers || {};
++    const excludedCategories = Array.isArray(raw.excludedCategories)
++        ? raw.excludedCategories
++        : String(raw.excludedCategoryText || '').split(',');
++    return {
++        ...DEFAULT_LOYALTY_CONFIG,
++        ...raw,
++        enabled: raw.enabled !== false,
++        spendPerPoint: Math.max(1, Math.floor(safeNumber(raw.spendPerPoint, DEFAULT_LOYALTY_CONFIG.spendPerPoint))),
++        pointValue: Math.max(0, safeNumber(raw.pointValue, DEFAULT_LOYALTY_CONFIG.pointValue)),
++        expiryMonths: Math.max(0, Math.floor(safeNumber(raw.expiryMonths, DEFAULT_LOYALTY_CONFIG.expiryMonths))),
++        maxRedeemPercent: Math.min(100, Math.max(0, safeNumber(raw.maxRedeemPercent, DEFAULT_LOYALTY_CONFIG.maxRedeemPercent))),
++        minRedeemPoints: Math.max(0, Math.floor(safeNumber(raw.minRedeemPoints, DEFAULT_LOYALTY_CONFIG.minRedeemPoints))),
++        earnAfterDiscount: raw.earnAfterDiscount !== false,
++        earnOnRedeemedAmount: raw.earnOnRedeemedAmount === true,
++        excludedCategories: excludedCategories.map(item => String(item || '').trim()).filter(Boolean),
++        tierMultipliers: {
++            Silver: Math.max(1, safeNumber(tierMultipliers.Silver, 1)),
++            Gold: Math.max(1, safeNumber(tierMultipliers.Gold, DEFAULT_LOYALTY_CONFIG.tierMultipliers.Gold)),
++            Platinum: Math.max(1, safeNumber(tierMultipliers.Platinum, DEFAULT_LOYALTY_CONFIG.tierMultipliers.Platinum))
++        }
++    };
++}
++
++function loyaltyCurrency(value) {
++    return '฿' + safeNumber(value).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
++}
++
++function setLoyaltyFormValues(config = loyaltyConfig) {
++    const normalized = normalizeLoyaltyConfig(config);
++    const setValue = (id, value) => {
++        const el = document.getElementById(id);
++        if (el) el.value = String(value);
++    };
++    const setChecked = (id, value) => {
++        const el = document.getElementById(id);
++        if (el) el.checked = !!value;
++    };
++    setChecked('loyalty-enabled', normalized.enabled);
++    setValue('loyalty-spend-per-point', normalized.spendPerPoint);
++    setValue('loyalty-point-value', normalized.pointValue);
++    setValue('loyalty-expiry-months', normalized.expiryMonths);
++    setValue('loyalty-max-redeem-percent', normalized.maxRedeemPercent);
++    setValue('loyalty-min-redeem-points', normalized.minRedeemPoints);
++    setValue('loyalty-gold-multiplier', normalized.tierMultipliers.Gold);
++    setValue('loyalty-platinum-multiplier', normalized.tierMultipliers.Platinum);
++    setChecked('loyalty-earn-after-discount', normalized.earnAfterDiscount);
++    setChecked('loyalty-earn-on-redeemed', normalized.earnOnRedeemedAmount);
++    setValue('loyalty-excluded-categories', normalized.excludedCategories.join(', '));
++}
++
++function readLoyaltyFormPayload() {
++    const categoriesText = String(document.getElementById('loyalty-excluded-categories')?.value || '');
++    return normalizeLoyaltyConfig({
++        enabled: document.getElementById('loyalty-enabled')?.checked !== false,
++        spendPerPoint: safeNumber(document.getElementById('loyalty-spend-per-point')?.value, 25),
++        pointValue: safeNumber(document.getElementById('loyalty-point-value')?.value, 1),
++        expiryMonths: safeNumber(document.getElementById('loyalty-expiry-months')?.value, 24),
++        maxRedeemPercent: safeNumber(document.getElementById('loyalty-max-redeem-percent')?.value, 30),
++        minRedeemPoints: safeNumber(document.getElementById('loyalty-min-redeem-points')?.value, 20),
++        earnAfterDiscount: document.getElementById('loyalty-earn-after-discount')?.checked !== false,
++        earnOnRedeemedAmount: document.getElementById('loyalty-earn-on-redeemed')?.checked === true,
++        excludedCategories: categoriesText.split(',').map(item => item.trim()).filter(Boolean),
++        excludedCategoryText: categoriesText,
++        tierMultipliers: {
++            Silver: 1,
++            Gold: safeNumber(document.getElementById('loyalty-gold-multiplier')?.value, 1.25),
++            Platinum: safeNumber(document.getElementById('loyalty-platinum-multiplier')?.value, 1.5)
++        },
++        updatedAt: serverTimestamp(),
++        updatedBy: auth.currentUser?.uid || ''
++    });
++}
++
++function setupRealtimeLoyalty() {
++    bindLoyaltyForms();
++    if (loyaltyConfigUnsubscribe) loyaltyConfigUnsubscribe();
++    if (loyaltyLedgerUnsubscribe) loyaltyLedgerUnsubscribe();
++
++    loyaltyConfigUnsubscribe = onSnapshot(doc(db, 'site_settings', 'loyalty'), snap => {
++        loyaltyConfig = normalizeLoyaltyConfig(snap.exists() ? snap.data() : DEFAULT_LOYALTY_CONFIG);
++        setLoyaltyFormValues(loyaltyConfig);
++        renderLoyaltySummary();
++    }, error => {
++        console.error('Error listening to loyalty config:', error);
++    });
++
++    loyaltyLedgerUnsubscribe = onSnapshot(query(collection(db, 'point_ledger'), orderBy('createdAt', 'desc')), snapshot => {
++        loyaltyLedgerData = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
++        renderLoyaltyLedgerTable();
++        renderLoyaltySummary();
++    }, error => {
++        console.error('Error listening to point ledger:', error);
++        const body = document.getElementById('loyalty-ledger-body');
++        if (body) body.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#c62828;">โหลดประวัติแต้มไม่สำเร็จ: ${escapeHTML(error.message)}</td></tr>`;
++    });
++
++    renderLoyaltyMemberOptions();
++    renderLoyaltySummary();
++}
++
++async function refreshLoyaltyOnce() {
++    const configSnap = await getDoc(doc(db, 'site_settings', 'loyalty'));
++    loyaltyConfig = normalizeLoyaltyConfig(configSnap.exists() ? configSnap.data() : DEFAULT_LOYALTY_CONFIG);
++    const ledgerSnap = await getDocs(query(collection(db, 'point_ledger'), orderBy('createdAt', 'desc')));
++    loyaltyLedgerData = ledgerSnap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
++    setLoyaltyFormValues(loyaltyConfig);
++    renderLoyaltyMemberOptions();
++    renderLoyaltyLedgerTable();
++    renderLoyaltySummary();
++}
++
++function bindLoyaltyForms() {
++    if (loyaltyFormsBound) return;
++    const configForm = document.getElementById('loyalty-config-form');
++    const adjustForm = document.getElementById('loyalty-adjust-form');
++
++    configForm?.addEventListener('submit', async event => {
++        event.preventDefault();
++        if (!canAdmin('loyalty')) {
++            alert('บัญชีนี้ไม่มีสิทธิ์จัดการแต้มสมาชิก');
++            return;
++        }
++        try {
++            await setDoc(doc(db, 'site_settings', 'loyalty'), readLoyaltyFormPayload(), { merge: true });
++            alert('บันทึกกติกาแต้มเรียบร้อย');
++        } catch (error) {
++            console.error('Unable to save loyalty config:', error);
++            alert('บันทึกกติกาแต้มไม่สำเร็จ: ' + error.message);
++        }
++    });
++
++    adjustForm?.addEventListener('submit', async event => {
++        event.preventDefault();
++        if (!canAdmin('loyalty')) {
++            alert('บัญชีนี้ไม่มีสิทธิ์ปรับแต้มสมาชิก');
++            return;
++        }
++        const userId = String(document.getElementById('loyalty-adjust-user')?.value || '').trim();
++        const pointsDelta = Math.trunc(safeNumber(document.getElementById('loyalty-adjust-points')?.value, 0));
++        const reason = String(document.getElementById('loyalty-adjust-reason')?.value || '').trim();
++        if (!userId) {
++            alert('กรุณาเลือกสมาชิก');
++            return;
++        }
++        if (!pointsDelta) {
++            alert('กรุณาระบุจำนวนแต้มที่ต้องการเพิ่มหรือลด');
++            return;
++        }
++        if (!reason) {
++            alert('กรุณาระบุเหตุผลในการปรับแต้ม');
++            return;
++        }
++        try {
++            await callAdminFunction('adjustMemberPoints', { userId, pointsDelta, reason });
++            adjustForm.reset();
++            alert('บันทึกการปรับแต้มเรียบร้อย');
++        } catch (error) {
++            console.error('Unable to adjust member points:', error);
++            alert('ปรับแต้มไม่สำเร็จ: ' + error.message);
++        }
++    });
++
++    loyaltyFormsBound = true;
++}
++
++function renderLoyaltyMemberOptions() {
++    const select = document.getElementById('loyalty-adjust-user');
++    if (!select) return;
++    const current = select.value;
++    const rows = Object.entries(membersData || {})
++        .map(([uid, member]) => ({ uid, member }))
++        .sort((a, b) => memberDisplayName(a.member).localeCompare(memberDisplayName(b.member), 'th'));
++    select.innerHTML = '<option value="">-- เลือกสมาชิก --</option>' + rows.map(({ uid, member }) => {
++        const points = safeNumber(member.points);
++        return `<option value="${escapeHTML(uid)}">${escapeHTML(memberDisplayName(member))} - ${escapeHTML(member.email || uid)} (${points.toLocaleString('th-TH')} แต้ม)</option>`;
++    }).join('');
++    if (current && rows.some(row => row.uid === current)) select.value = current;
++}
++
++function renderLoyaltySummary() {
++    const config = normalizeLoyaltyConfig(loyaltyConfig);
++    const members = Object.values(membersData || {});
++    const totalPoints = members.reduce((sum, member) => sum + Math.max(0, Math.floor(safeNumber(member.points))), 0);
++    const membersWithPoints = members.filter(member => safeNumber(member.points) > 0).length;
++    const setText = (id, text) => {
++        const el = document.getElementById(id);
++        if (el) el.textContent = text;
++    };
++    setText('loyalty-stat-points', totalPoints.toLocaleString('th-TH'));
++    setText('loyalty-stat-liability', loyaltyCurrency(totalPoints * config.pointValue));
++    setText('loyalty-stat-members', membersWithPoints.toLocaleString('th-TH'));
++    setText('loyalty-stat-ledger', loyaltyLedgerData.length.toLocaleString('th-TH'));
++}
++
++function renderLoyaltyLedgerTable() {
++    const body = document.getElementById('loyalty-ledger-body');
++    if (!body) return;
++    const rows = loyaltyLedgerData.slice(0, 80);
++    if (!rows.length) {
++        body.innerHTML = '<tr><td colspan="7"><div class="loyalty-empty">ยังไม่มีประวัติแต้ม ระบบจะเริ่มบันทึกเมื่อมีการปรับแต้ม หรือเมื่อ POS/Checkout เชื่อมเข้ามา</div></td></tr>';
++        return;
++    }
++    body.innerHTML = rows.map(row => {
++        const delta = Math.trunc(safeNumber(row.pointsDelta));
++        const member = row.userId && membersData[row.userId] ? membersData[row.userId] : null;
++        const memberName = row.memberName || (member ? memberDisplayName(member) : row.userId || '-');
++        const memberEmail = row.memberEmail || member?.email || '';
++        const deltaClass = delta >= 0 ? 'loyalty-points-positive' : 'loyalty-points-negative';
++        const deltaText = `${delta >= 0 ? '+' : ''}${delta.toLocaleString('th-TH')}`;
++        return `
++            <tr>
++                <td>${escapeHTML(formatDate(row.createdAt))}</td>
++                <td><strong>${escapeHTML(memberName)}</strong><small>${escapeHTML(memberEmail)}</small></td>
++                <td>${escapeHTML(row.type || '-')}</td>
++                <td class="${deltaClass}">${escapeHTML(deltaText)}</td>
++                <td>${safeNumber(row.pointsAfter).toLocaleString('th-TH')}</td>
++                <td>${escapeHTML(row.reason || row.orderId || '-')}<small>${escapeHTML(row.source || '')}</small></td>
++                <td>${escapeHTML(row.createdByEmail || row.createdBy || '-')}</td>
++            </tr>
++        `;
++    }).join('');
++}
++
++window.exportLoyaltyLiabilityCSV = function exportLoyaltyLiabilityCSV() {
++    const config = normalizeLoyaltyConfig(loyaltyConfig);
++    const header = ['uid', 'memberCode', 'name', 'email', 'tier', 'pointsBalance', 'pointValue', 'liabilityBaht', 'updatedAt'];
++    const rows = Object.entries(membersData || {})
++        .map(([uid, member]) => {
++            const points = Math.max(0, Math.floor(safeNumber(member.points)));
++            return [
++                uid,
++                member.memberCode || '',
++                memberDisplayName(member),
++                member.email || '',
++                memberTier(member),
++                points,
++                config.pointValue,
++                points * config.pointValue,
++                member.updatedAt ? formatDate(member.updatedAt) : ''
++            ];
++        })
++        .filter(row => safeNumber(row[5]) > 0);
++    const csv = [header, ...rows].map(row => row.map(csvEscape).join(',')).join('\n');
++    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
++    const url = URL.createObjectURL(blob);
++    const a = document.createElement('a');
++    a.href = url;
++    a.download = `eden-loyalty-liability-${new Date().toISOString().slice(0, 10)}.csv`;
++    document.body.appendChild(a);
++    a.click();
++    a.remove();
++    URL.revokeObjectURL(url);
++};
++
++window.refreshLoyalty = () => window.refreshAdminSection('loyalty');
++
+ function hasLoyverseImportMode() {
+     return new URLSearchParams(window.location.search).has('menu-import');
+ }
+@@ -1551,42 +1838,12 @@ async function fetchStats() {
+     try {
+         const statsRef = doc(db, 'stats', 'pageViews');
+         const snap = await getDoc(statsRef);
+-        if (snap.exists()) {
++        const viewsEl = document.getElementById('stat-views-daily');
++        if (snap.exists() && viewsEl) {
+             const data = snap.data();
+-            document.getElementById('stat-views-daily').innerText = (data.dailyViews || 0).toLocaleString();
++            viewsEl.innerText = (data.dailyViews || 0).toLocaleString();
+         }
+-        
+-        // Mock Chart Data for 7 days
+-        const canvas = document.getElementById('viewsChart');
+-        if (!canvas) return;
+-        const chartData = [120, 150, 180, 142, 200, 250, snap.exists() ? snap.data().dailyViews : 142];
+-        if (viewsChart) {
+-            viewsChart.data.datasets[0].data = chartData;
+-            viewsChart.update();
+-            return;
+-        }
+-
+-        const ctx = canvas.getContext('2d');
+-        viewsChart = new Chart(ctx, {
+-            type: 'line',
+-            data: {
+-                labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+-                datasets: [{
+-                    label: 'ยอดผู้เข้าชม (Views)',
+-                    data: chartData,
+-                    borderColor: '#4caf50',
+-                    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+-                    borderWidth: 2,
+-                    fill: true,
+-                    tension: 0.4
+-                }]
+-            },
+-            options: {
+-                responsive: true,
+-                plugins: { legend: { display: false } },
+-                scales: { y: { beginAtZero: true } }
+-            }
+-        });
++        renderDashboardSalesReport();
+     } catch (e) {
+         console.error("Error fetching stats:", e);
+     }
+@@ -1601,6 +1858,89 @@ function adminMoney(value) {
+     });
+ }
+ 
++function localDateKey(date = new Date()) {
++    const safeDate = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
++    const year = safeDate.getFullYear();
++    const month = String(safeDate.getMonth() + 1).padStart(2, '0');
++    const day = String(safeDate.getDate()).padStart(2, '0');
++    return `${year}-${month}-${day}`;
++}
++
++function parseLocalDateKey(key) {
++    const match = String(key || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
++    if (!match) return null;
++    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
++}
++
++function salesReportRange() {
++    const now = new Date();
++    const first = new Date(now.getFullYear(), now.getMonth() + salesReportMonthOffset, 1);
++    const last = new Date(first.getFullYear(), first.getMonth() + 1, 0);
++    const todayKey = localDateKey(now);
++    const end = salesReportMonthOffset === 0 ? now : last;
++    return {
++        start: first,
++        end,
++        startKey: localDateKey(first),
++        endKey: localDateKey(end),
++        todayKey
++    };
++}
++
++function salesReportDateLabel(date = new Date()) {
++    return date.toLocaleDateString('th-TH', {
++        weekday: 'long',
++        year: 'numeric',
++        month: 'short',
++        day: 'numeric'
++    });
++}
++
++function salesReportRangeLabel() {
++    const range = salesReportRange();
++    return `${range.start.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })} - ${range.end.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })}`;
++}
++
++function dashboardReportDateLabel() {
++    return 'ช่วงวันที่ ' + salesReportRangeLabel();
++}
++
++function orderReportDateValue(order = {}) {
++    const raw = order.timestamp || order.createdAt || order.date;
++    if (raw?.toDate) return raw.toDate().getTime();
++    const parsed = new Date(raw).getTime();
++    return Number.isFinite(parsed) ? parsed : 0;
++}
++
++function orderReportDateKey(order = {}) {
++    if (/^\d{4}-\d{2}-\d{2}$/.test(String(order.businessDate || ''))) return order.businessDate;
++    const time = orderReportDateValue(order);
++    return time ? localDateKey(new Date(time)) : '';
++}
++
++function isOrderInSalesReportRange(order = {}) {
++    const key = orderReportDateKey(order);
++    const range = salesReportRange();
++    return !!key && key >= range.startKey && key <= range.endKey;
++}
++
++function isOrderInSalesReportTime(order = {}) {
++    if (salesReportTimeFilter === 'all') return true;
++    const time = orderReportDateValue(order);
++    if (!time) return true;
++    const hour = new Date(time).getHours();
++    if (salesReportTimeFilter === 'morning') return hour >= 6 && hour < 12;
++    if (salesReportTimeFilter === 'afternoon') return hour >= 12 && hour < 18;
++    if (salesReportTimeFilter === 'evening') return hour >= 18 && hour < 24;
++    return true;
++}
++
++function isOrderForSalesReportEmployee(order = {}) {
++    if (salesReportEmployeeFilter === 'all') return true;
++    const key = salesReportEmployeeKey(order);
++    return key === salesReportEmployeeFilter;
++}
++
+ function salesReportPaymentLabel(method, fallback = '') {
+     const labels = {
+         cash: 'เงินสด',
+@@ -1621,15 +1961,42 @@ function isSalesReportOrder(order = {}) {
+     return paymentStatus === 'paid' || status === 'completed';
+ }
+ 
++function isRefundOrder(order = {}) {
++    const status = String(order.status || '').toLowerCase();
++    const paymentStatus = String(order.paymentStatus || '').toLowerCase();
++    return !order.isTestOrder && (status === 'refunded' || paymentStatus === 'refunded');
++}
++
++function dashboardRevenueOrders() {
++    return dashboardOrdersData
++        .filter(isSalesReportOrder)
++        .filter(isOrderInSalesReportRange)
++        .filter(isOrderInSalesReportTime)
++        .filter(isOrderForSalesReportEmployee);
++}
++
++function dashboardRefundOrders() {
++    return dashboardOrdersData
++        .filter(isRefundOrder)
++        .filter(isOrderInSalesReportRange)
++        .filter(isOrderInSalesReportTime)
++        .filter(isOrderForSalesReportEmployee);
++}
++
+ function orderReportTotal(order = {}) {
+     return safeNumber(order.totalAmount ?? order.total ?? order.totals?.total);
+ }
+ 
+-function orderReportDateValue(order = {}) {
+-    const raw = order.timestamp || order.createdAt || order.date;
+-    if (raw?.toDate) return raw.toDate().getTime();
+-    const parsed = new Date(raw).getTime();
+-    return Number.isFinite(parsed) ? parsed : 0;
++function orderReportGross(order = {}) {
++    return safeNumber(order.subtotal ?? order.totals?.subtotal, orderReportTotal(order) + safeNumber(order.discount ?? order.totals?.discount));
++}
++
++function orderReportDiscount(order = {}) {
++    return safeNumber(order.discount ?? order.totals?.discount);
++}
++
++function orderReportTax(order = {}) {
++    return safeNumber(order.taxIncluded ?? order.totals?.taxIncluded);
+ }
+ 
+ function orderReportItems(order = {}) {
+@@ -1641,6 +2008,23 @@ function itemReportAmount(item = {}) {
+     return safeNumber(item.lineTotal, safeNumber(item.price) * quantity);
+ }
+ 
++function itemReportCost(item = {}) {
++    const quantity = Math.max(0, safeNumber(item.quantity, 1));
++    return safeNumber(item.cost) * quantity;
++}
++
++function orderReportCost(order = {}) {
++    return orderReportItems(order).reduce((sum, item) => sum + itemReportCost(item), 0);
++}
++
++function salesReportEmployeeKey(order = {}) {
++    return normalizeEmail(order.cashierEmail) || String(order.cashierUid || order.cashierName || 'unknown');
++}
++
++function salesReportEmployeeName(order = {}) {
++    return order.cashierName || order.cashierEmail || 'ไม่ระบุพนักงาน';
++}
++
+ function pushSalesReportGroup(groups, key, label, amount, quantity = 0) {
+     const safeKey = String(key || label || 'unknown');
+     const current = groups.get(safeKey) || { label: label || 'ไม่ระบุ', amount: 0, quantity: 0 };
+@@ -1654,12 +2038,61 @@ function sortedSalesReportGroups(groups) {
+         .sort((a, b) => (b.amount - a.amount) || (b.quantity - a.quantity) || String(a.label).localeCompare(String(b.label), 'th'));
+ }
+ 
+-function buildDashboardSalesReportRows(type, orders) {
+-    const revenueOrders = orders.filter(isSalesReportOrder);
++function reportSummaryTotals(orders = dashboardRevenueOrders()) {
++    const refunds = dashboardRefundOrders().reduce((sum, order) => sum + orderReportTotal(order), 0);
++    const gross = orders.reduce((sum, order) => sum + orderReportGross(order), 0);
++    const discounts = orders.reduce((sum, order) => sum + orderReportDiscount(order), 0);
++    const net = orders.reduce((sum, order) => sum + orderReportTotal(order), 0);
++    const cost = orders.reduce((sum, order) => sum + orderReportCost(order), 0);
++    const tax = orders.reduce((sum, order) => sum + orderReportTax(order), 0);
++    const profit = net - cost;
++    const margin = net > 0 ? (profit / net) * 100 : 0;
++    return { refunds, gross, discounts, net, cost, tax, profit, margin, count: orders.length };
++}
++
++function buildDailySalesRows() {
++    const range = salesReportRange();
++    const revenueOrders = dashboardRevenueOrders();
++    const refunds = dashboardRefundOrders();
++    const byDate = new Map();
++
++    for (let cursor = new Date(range.start); cursor <= range.end; cursor.setDate(cursor.getDate() + 1)) {
++        const key = localDateKey(cursor);
++        byDate.set(key, { key, date: new Date(cursor), gross: 0, refunds: 0, discounts: 0, net: 0, cost: 0, profit: 0, margin: 0, tax: 0 });
++    }
++
++    revenueOrders.forEach(order => {
++        const key = orderReportDateKey(order);
++        if (!byDate.has(key)) return;
++        const row = byDate.get(key);
++        row.gross += orderReportGross(order);
++        row.discounts += orderReportDiscount(order);
++        row.net += orderReportTotal(order);
++        row.cost += orderReportCost(order);
++        row.tax += orderReportTax(order);
++    });
++
++    refunds.forEach(order => {
++        const key = orderReportDateKey(order);
++        if (!byDate.has(key)) return;
++        byDate.get(key).refunds += orderReportTotal(order);
++    });
++
++    byDate.forEach(row => {
++        row.profit = row.net - row.cost;
++        row.margin = row.net > 0 ? (row.profit / row.net) * 100 : 0;
++    });
++
++    return Array.from(byDate.values()).sort((a, b) => b.key.localeCompare(a.key));
++}
++
++function buildDashboardSalesReportRows(type, orders = dashboardRevenueOrders()) {
+     const groups = new Map();
+ 
++    if (type === 'summary') return buildDailySalesRows();
++
+     if (type === 'receipts') {
+-        return revenueOrders
++        return orders
+             .slice()
+             .sort((a, b) => orderReportDateValue(b) - orderReportDateValue(a))
+             .map(order => ({
+@@ -1670,8 +2103,8 @@ function buildDashboardSalesReportRows(type, orders) {
+     }
+ 
+     if (type === 'discounts') {
+-        revenueOrders.forEach(order => {
+-            const discount = safeNumber(order.discount ?? order.totals?.discount);
++        orders.forEach(order => {
++            const discount = orderReportDiscount(order);
+             if (!discount) return;
+             const label = order.totals?.discountLabel || order.discountLabel || 'ส่วนลดหน้าร้าน';
+             pushSalesReportGroup(groups, label, label, discount, 1);
+@@ -1680,8 +2113,8 @@ function buildDashboardSalesReportRows(type, orders) {
+     }
+ 
+     if (type === 'taxes') {
+-        revenueOrders.forEach(order => {
+-            const tax = safeNumber(order.taxIncluded ?? order.totals?.taxIncluded);
++        orders.forEach(order => {
++            const tax = orderReportTax(order);
+             if (!tax) return;
+             const label = order.receiptNo || order.orderNumber || order.id || 'ภาษีรวมในราคา';
+             pushSalesReportGroup(groups, label, label, tax, 1);
+@@ -1689,10 +2122,10 @@ function buildDashboardSalesReportRows(type, orders) {
+         return sortedSalesReportGroups(groups);
+     }
+ 
+-    revenueOrders.forEach(order => {
++    orders.forEach(order => {
+         if (type === 'staff') {
+-            const label = order.cashierName || order.cashierEmail || 'ไม่ระบุพนักงาน';
+-            pushSalesReportGroup(groups, label, label, orderReportTotal(order), 1);
++            const label = salesReportEmployeeName(order);
++            pushSalesReportGroup(groups, salesReportEmployeeKey(order), label, orderReportTotal(order), 1);
+             return;
+         }
+         if (type === 'payment') {
+@@ -1723,36 +2156,214 @@ function buildDashboardSalesReportRows(type, orders) {
+     return sortedSalesReportGroups(groups);
+ }
+ 
+-function renderSalesReportRows(rows, type) {
+-    if (!rows.length) return '<div class="sales-report-empty">ยังไม่มีข้อมูลยอดขาย</div>';
+-    return rows.slice(0, 5).map(row => {
+-        const quantityText = row.quantity
+-            ? `${safeNumber(row.quantity).toLocaleString('th-TH')} รายการ`
+-            : (row.meta || '');
+-        return `
+-            <div class="sales-report-row">
+-                <div>
+-                    <strong>${escapeHTML(row.label)}</strong>
+-                    <small>${escapeHTML(quantityText || SALES_REPORT_LABELS[type] || '')}</small>
+-                </div>
+-                <em>${adminMoney(row.amount)}</em>
+-            </div>
++function updateSalesReportEmployeeOptions() {
++    const select = document.getElementById('sales-report-employee-filter');
++    if (!select) return;
++    const employees = new Map();
++    dashboardOrdersData.forEach(order => {
++        const key = salesReportEmployeeKey(order);
++        if (!key || key === 'unknown') return;
++        employees.set(key, salesReportEmployeeName(order));
++    });
++    const current = salesReportEmployeeFilter;
++    select.innerHTML = '<option value="all">พนักงานทั้งหมด</option>'
++        + Array.from(employees.entries())
++            .sort((a, b) => a[1].localeCompare(b[1], 'th'))
++            .map(([key, label]) => `<option value="${escapeHTML(key)}">${escapeHTML(label)}</option>`)
++            .join('');
++    select.value = employees.has(current) ? current : 'all';
++    salesReportEmployeeFilter = select.value;
++}
++
++function updateSalesReportToolbar() {
++    const rangeLabel = document.getElementById('sales-report-range-label');
++    if (rangeLabel) rangeLabel.textContent = salesReportRangeLabel();
++    const timeSelect = document.getElementById('sales-report-time-filter');
++    if (timeSelect) timeSelect.value = salesReportTimeFilter;
++    updateSalesReportEmployeeOptions();
++}
++
++function renderSalesReportKpis() {
++    const totals = reportSummaryTotals();
++    const setText = (id, value) => {
++        const el = document.getElementById(id);
++        if (el) el.textContent = value;
++    };
++    setText('sales-kpi-refunds', adminMoney(totals.refunds));
++    setText('sales-kpi-discounts', adminMoney(totals.discounts));
++    setText('sales-kpi-net', adminMoney(totals.net));
++    setText('sales-kpi-profit', adminMoney(totals.profit));
++    setText('sales-kpi-refunds-note', totals.refunds ? 'มีรายการคืนเงินในช่วงนี้' : 'ไม่มีรายการคืนเงิน');
++    setText('sales-kpi-discounts-note', `${totals.count.toLocaleString('th-TH')} ใบเสร็จในช่วงนี้`);
++    setText('sales-kpi-net-note', dashboardReportDateLabel());
++    setText('sales-kpi-profit-note', `ผลต่าง ${totals.margin.toLocaleString('th-TH', { maximumFractionDigits: 2 })}%`);
++
++    const revenueEl = document.getElementById('stat-revenue');
++    const ordersEl = document.getElementById('stat-orders');
++    if (revenueEl) revenueEl.innerText = adminMoney(totals.net);
++    if (ordersEl) ordersEl.innerText = totals.count.toLocaleString('th-TH');
++}
++
++function renderSalesSummaryChart() {
++    const canvas = document.getElementById('salesSummaryChart');
++    if (!canvas || typeof Chart === 'undefined') return;
++
++    const rows = buildDailySalesRows().slice().reverse();
++    const labels = rows.map(row => row.date.toLocaleDateString('th-TH', { day: '2-digit', month: 'short' }));
++    const values = rows.map(row => safeNumber(row.net));
++    const chartType = activeSalesReport === 'summary' ? 'line' : 'bar';
++    const datasetLabel = SALES_REPORT_LABELS[activeSalesReport] || SALES_REPORT_LABELS.summary;
++    const reportRows = activeSalesReport === 'summary' ? [] : buildDashboardSalesReportRows(activeSalesReport).slice(0, 10);
++    const finalLabels = activeSalesReport === 'summary' ? labels : (reportRows.length ? reportRows.map(row => row.label) : ['ยังไม่มีข้อมูล']);
++    const finalValues = activeSalesReport === 'summary' ? values : (reportRows.length ? reportRows.map(row => safeNumber(row.amount)) : [0]);
++    const needsRecreate = !salesSummaryChart || salesSummaryChart.config.type !== chartType;
++
++    if (needsRecreate && salesSummaryChart) {
++        salesSummaryChart.destroy();
++        salesSummaryChart = null;
++    }
++
++    const chartData = {
++        labels: finalLabels,
++        datasets: [{
++            label: datasetLabel,
++            data: finalValues,
++            borderColor: '#79bd3f',
++            backgroundColor: chartType === 'line' ? 'rgba(121, 189, 63, 0.12)' : 'rgba(67, 173, 79, 0.72)',
++            borderWidth: 2,
++            pointRadius: chartType === 'line' ? 3.5 : 0,
++            pointBackgroundColor: '#fff',
++            pointBorderColor: '#79bd3f',
++            pointBorderWidth: 2,
++            fill: chartType === 'line',
++            tension: 0.32,
++            borderRadius: chartType === 'bar' ? 8 : 0,
++            borderSkipped: false
++        }]
++    };
++
++    if (salesSummaryChart) {
++        salesSummaryChart.data = chartData;
++        salesSummaryChart.update();
++        return;
++    }
++
++    salesSummaryChart = new Chart(canvas.getContext('2d'), {
++        type: chartType,
++        data: chartData,
++        options: {
++            responsive: true,
++            maintainAspectRatio: false,
++            plugins: {
++                legend: { display: false },
++                tooltip: {
++                    callbacks: {
++                        label: context => adminMoney(chartType === 'line' ? context.parsed.y : context.parsed.y || 0)
++                    }
++                }
++            },
++            scales: {
++                x: {
++                    grid: { color: 'rgba(0,0,0,0.08)' },
++                    ticks: { maxRotation: 45, minRotation: 45 }
++                },
++                y: {
++                    beginAtZero: true,
++                    grid: { color: 'rgba(0,0,0,0.08)' },
++                    ticks: { callback: value => adminMoney(value) }
++                }
++            }
++        }
++    });
++}
++
++function renderSalesSummaryTable() {
++    const head = document.getElementById('sales-summary-table-head');
++    const body = document.getElementById('sales-summary-table-body');
++    if (!body) return;
++
++    if (activeSalesReport !== 'summary') {
++        const rows = buildDashboardSalesReportRows(activeSalesReport);
++        const totalAmount = rows.reduce((sum, row) => sum + safeNumber(row.amount), 0);
++        const totalQuantity = rows.reduce((sum, row) => sum + safeNumber(row.quantity), 0);
++        if (head) {
++            head.innerHTML = `
++                <tr>
++                    <th>รายการ</th>
++                    <th>จำนวน</th>
++                    <th>ยอดขาย</th>
++                    <th>วันที่ / ช่วงเวลา</th>
++                </tr>
++            `;
++        }
++        const totalLabel = activeSalesReport === 'category' ? 'ยอดขายรวม' : 'รวมทั้งหมด';
++        const totalRow = `
++            <tr>
++                <td class="sales-date-cell">${escapeHTML(totalLabel)}</td>
++                <td>${totalQuantity ? totalQuantity.toLocaleString('th-TH') : rows.length.toLocaleString('th-TH')}</td>
++                <td>${adminMoney(totalAmount)}</td>
++                <td>${escapeHTML(dashboardReportDateLabel())}</td>
++            </tr>
+         `;
+-    }).join('');
++        if (!rows.length) {
++            body.innerHTML = totalRow + `<tr><td colspan="4" class="sales-report-empty">ยังไม่มีข้อมูล ${escapeHTML(SALES_REPORT_LABELS[activeSalesReport] || 'รายงานนี้')}</td></tr>`;
++            return;
++        }
++        body.innerHTML = totalRow + rows.slice(0, 40).map(row => `
++            <tr>
++                <td class="sales-date-cell">${escapeHTML(row.label)}</td>
++                <td>${safeNumber(row.quantity).toLocaleString('th-TH')}</td>
++                <td>${adminMoney(row.amount)}</td>
++                <td>${escapeHTML(row.meta || dashboardReportDateLabel())}</td>
++            </tr>
++        `).join('');
++        const pageTotal = document.getElementById('sales-table-page-total');
++        if (pageTotal) pageTotal.textContent = `จาก ${Math.max(1, Math.ceil(rows.length / 10)).toLocaleString('th-TH')}`;
++        return;
++    }
++
++    if (head) {
++        head.innerHTML = `
++            <tr>
++                <th>วันที่</th>
++                <th>ยอดขาย</th>
++                <th>คืนเงิน</th>
++                <th>ส่วนลด</th>
++                <th>ยอดขายสุทธิ</th>
++                <th>ต้นทุนของสินค้า</th>
++                <th>กำไรรวม</th>
++                <th>ผลต่าง</th>
++                <th>ภาษี</th>
++            </tr>
++        `;
++    }
++    const rows = buildDailySalesRows();
++    if (!rows.length) {
++        body.innerHTML = '<tr><td colspan="9" class="sales-report-empty">ยังไม่มีข้อมูลยอดขาย</td></tr>';
++        return;
++    }
++    body.innerHTML = rows.map(row => `
++        <tr>
++            <td class="sales-date-cell">${escapeHTML(salesReportDateLabel(row.date))}</td>
++            <td>${adminMoney(row.gross)}</td>
++            <td>${adminMoney(row.refunds)}</td>
++            <td>${adminMoney(row.discounts)}</td>
++            <td>${adminMoney(row.net)}</td>
++            <td>${adminMoney(row.cost)}</td>
++            <td>${adminMoney(row.profit)}</td>
++            <td>${row.margin.toLocaleString('th-TH', { maximumFractionDigits: 2 })}%</td>
++            <td>${adminMoney(row.tax)}</td>
++        </tr>
++    `).join('');
++    const pageTotal = document.getElementById('sales-table-page-total');
++    if (pageTotal) pageTotal.textContent = `จาก ${Math.max(1, Math.ceil(rows.length / 10)).toLocaleString('th-TH')}`;
+ }
+ 
+ function renderDashboardSalesReport() {
+-    const title = document.getElementById('sales-report-active-label');
+-    const total = document.getElementById('sales-report-active-total');
+-    const table = document.getElementById('sales-report-table');
+-    if (!title || !total || !table) return;
+-
+-    const reportType = SALES_REPORT_LABELS[activeSalesReport] ? activeSalesReport : 'product';
+-    const rows = buildDashboardSalesReportRows(reportType, dashboardOrdersData);
+-    const amountTotal = rows.reduce((sum, row) => sum + safeNumber(row.amount), 0);
+-    title.textContent = SALES_REPORT_LABELS[reportType];
+-    total.textContent = adminMoney(amountTotal);
+-    table.innerHTML = renderSalesReportRows(rows, reportType);
++    updateSalesReportToolbar();
++    renderSalesReportKpis();
++    renderSalesSummaryChart();
++    renderSalesSummaryTable();
+ }
+ 
+ function bindSalesReportNav() {
+@@ -1762,13 +2373,211 @@ function bindSalesReportNav() {
+     nav.addEventListener('click', event => {
+         const button = event.target.closest('[data-sales-report]');
+         if (!button) return;
+-        activeSalesReport = button.dataset.salesReport || 'product';
+-        nav.querySelectorAll('[data-sales-report]').forEach(item => item.classList.toggle('active', item === button));
+-        renderDashboardSalesReport();
++        window.setSalesReportType(button.dataset.salesReport || 'summary', button);
+     });
+     salesReportNavBound = true;
+ }
+ 
++window.setSalesReportType = (type = 'summary', button = null) => {
++    activeSalesReport = SALES_REPORT_LABELS[type] ? type : 'summary';
++    const nav = document.querySelector('.sales-report-nav');
++    if (nav) {
++        nav.querySelectorAll('[data-sales-report]').forEach(item => {
++            item.classList.toggle('active', item === button || item.dataset.salesReport === activeSalesReport);
++        });
++    }
++    renderDashboardSalesReport();
++};
++
++window.shiftSalesReportMonth = (delta = 0) => {
++    salesReportMonthOffset += safeNumber(delta);
++    renderDashboardSalesReport();
++};
++
++window.setSalesReportTimeFilter = (value = 'all') => {
++    salesReportTimeFilter = ['all', 'morning', 'afternoon', 'evening'].includes(value) ? value : 'all';
++    renderDashboardSalesReport();
++};
++
++window.setSalesReportEmployeeFilter = (value = 'all') => {
++    salesReportEmployeeFilter = value || 'all';
++    renderDashboardSalesReport();
++};
++
++function salesReportSheetName(name) {
++    return String(name || 'sales').replace(/[\\/?*[\]:]/g, '').slice(0, 31) || 'sales';
++}
++
++function salesReportExcelSheet(rows) {
++    const worksheet = worksheetFromData(rows.length ? rows : [{ note: 'ยังไม่มีข้อมูลยอดขายในช่วงที่เลือก' }]);
++    const keys = Object.keys(rows[0] || { note: '' });
++    worksheet['!cols'] = keys.map((key) => {
++        const maxLength = rows.reduce((max, row) => Math.max(max, String(row[key] ?? '').length), String(key).length);
++        return { wch: Math.min(Math.max(maxLength + 3, 12), 42) };
++    });
++    return worksheet;
++}
++
++function salesReportOrderDateText(order = {}) {
++    const value = order.timestamp || order.createdAt || order.date || order.businessDate;
++    if (!value) return '';
++    if (value?.toDate) return value.toDate().toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
++    const date = new Date(value);
++    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
++}
++
++function salesReportReceiptNo(order = {}) {
++    return order.receiptNo || order.orderNumber || order.id || order.firestoreId || '';
++}
++
++function currentSalesReportExportRows(type = activeSalesReport) {
++    if (type === 'summary') {
++        return buildDailySalesRows().map(row => ({
++            'วันที่': salesReportDateLabel(row.date),
++            'ยอดขาย': row.gross,
++            'คืนเงิน': row.refunds,
++            'ส่วนลด': row.discounts,
++            'ยอดขายสุทธิ': row.net,
++            'ต้นทุนของสินค้า': row.cost,
++            'กำไรรวม': row.profit,
++            'ผลต่าง (%)': Number(row.margin.toFixed(2)),
++            'ภาษี': row.tax
++        }));
++    }
++    return buildDashboardSalesReportRows(type).map(row => ({
++        'รายงาน': SALES_REPORT_LABELS[type] || 'รายงานยอดขาย',
++        'รายการ': row.label || '',
++        'จำนวน': safeNumber(row.quantity),
++        'ยอดขาย': safeNumber(row.amount),
++        'วันที่ / ช่วงเวลา': row.meta || dashboardReportDateLabel()
++    }));
++}
++
++function salesReportReceiptRows() {
++    return dashboardRevenueOrders()
++        .slice()
++        .sort((a, b) => orderReportDateValue(b) - orderReportDateValue(a))
++        .map(order => {
++            const total = orderReportTotal(order);
++            const cost = orderReportCost(order);
++            return {
++                'เลขที่ใบเสร็จ': salesReportReceiptNo(order),
++                'วันที่': salesReportOrderDateText(order),
++                'ลูกค้า': order.customerName || 'Walk-in Customer',
++                'เบอร์โทร': order.phone || '',
++                'พนักงาน': salesReportEmployeeName(order),
++                'วิธีชำระเงิน': order.paymentLabel || salesReportPaymentLabel(order.paymentMethod),
++                'สถานะ': order.status || '',
++                'ยอดก่อนส่วนลด': orderReportGross(order),
++                'ส่วนลด': orderReportDiscount(order),
++                'ภาษี': orderReportTax(order),
++                'ยอดสุทธิ': total,
++                'ต้นทุน': cost,
++                'กำไร': total - cost,
++                'หมายเหตุ': order.note || '',
++                'Firestore ID': order.firestoreId || order.id || ''
++            };
++        });
++}
++
++function salesReportItemRows() {
++    const rows = [];
++    dashboardRevenueOrders()
++        .slice()
++        .sort((a, b) => orderReportDateValue(b) - orderReportDateValue(a))
++        .forEach(order => {
++            orderReportItems(order).forEach(item => {
++                const quantity = Math.max(0, safeNumber(item.quantity, 1));
++                const lineTotal = itemReportAmount(item);
++                const cost = itemReportCost(item);
++                rows.push({
++                    'เลขที่ใบเสร็จ': salesReportReceiptNo(order),
++                    'วันที่': salesReportOrderDateText(order),
++                    'สินค้า': item.name || item.productName || 'ไม่ระบุสินค้า',
++                    'ตัวเลือก': item.variantName || item.optionName || '',
++                    'SKU': item.sku || item.variantSku || '',
++                    'หมวดหมู่': item.categoryName || categoriesData[item.category || item.categoryId || '']?.name || item.category || item.categoryId || '',
++                    'จำนวน': quantity,
++                    'ราคาต่อหน่วย': safeNumber(item.unitPrice ?? item.price ?? item.basePrice),
++                    'ส่วนลดรายการ': safeNumber(item.lineDiscount ?? item.discount),
++                    'ยอดรวม': lineTotal,
++                    'ต้นทุนรวม': cost,
++                    'กำไรรวม': lineTotal - cost,
++                    'ลูกค้า': order.customerName || 'Walk-in Customer',
++                    'พนักงาน': salesReportEmployeeName(order)
++                });
++            });
++        });
++    return rows;
++}
++
++function exportSalesWorkbook(type = activeSalesReport) {
++    const XLSX = window.XLSX;
++    if (!XLSX) throw new Error('ไม่พบไลบรารี Excel กรุณารีเฟรชหน้าแล้วลองอีกครั้ง');
++    if (!canAdmin('orders')) throw new Error('บัญชีนี้ไม่มีสิทธิ์ดาวน์โหลดข้อมูลยอดขาย');
++
++    const workbook = XLSX.utils.book_new();
++    const activeLabel = SALES_REPORT_LABELS[type] || 'รายงานยอดขาย';
++    const totals = reportSummaryTotals();
++    const overviewRows = [{
++        'รายงาน': activeLabel,
++        'ช่วงวันที่': salesReportRangeLabel(),
++        'ช่วงเวลา': salesReportTimeFilter === 'all' ? 'ตลอดทั้งวัน' : salesReportTimeFilter,
++        'พนักงาน': salesReportEmployeeFilter === 'all' ? 'พนักงานทั้งหมด' : salesReportEmployeeFilter,
++        'จำนวนใบเสร็จ': totals.count,
++        'ยอดขาย': totals.gross,
++        'คืนเงิน': totals.refunds,
++        'ส่วนลด': totals.discounts,
++        'ยอดขายสุทธิ': totals.net,
++        'ต้นทุนของสินค้า': totals.cost,
++        'กำไรรวม': totals.profit,
++        'ผลต่าง (%)': Number(totals.margin.toFixed(2)),
++        'ภาษี': totals.tax,
++        'ส่งออกเมื่อ': new Date().toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })
++    }];
++
++    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(overviewRows), 'overview');
++    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(currentSalesReportExportRows(type)), salesReportSheetName(activeLabel));
++    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(buildDashboardSalesReportRows('category').map(row => ({
++        'หมวดหมู่': row.label,
++        'จำนวน': safeNumber(row.quantity),
++        'ยอดขาย': safeNumber(row.amount),
++        'ช่วงวันที่': dashboardReportDateLabel()
++    }))), 'categories');
++    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(buildDashboardSalesReportRows('product').map(row => ({
++        'สินค้า': row.label,
++        'จำนวน': safeNumber(row.quantity),
++        'ยอดขาย': safeNumber(row.amount),
++        'ช่วงวันที่': dashboardReportDateLabel()
++    }))), 'products');
++    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(salesReportReceiptRows()), 'receipts');
++    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(salesReportItemRows()), 'items');
++
++    XLSX.writeFile(workbook, `eden-sales-${type}-${salesReportRange().startKey}-to-${salesReportRange().endKey}.xlsx`);
++}
++
++window.exportSalesReportXLSX = () => {
++    const button = document.getElementById('sales-export-xlsx-btn');
++    const originalText = button?.textContent || '';
++    try {
++        if (button) {
++            button.disabled = true;
++            button.textContent = 'กำลังสร้างไฟล์...';
++        }
++        exportSalesWorkbook(activeSalesReport);
++    } catch (error) {
++        console.error('Export sales XLSX failed:', error);
++        alert('ดาวน์โหลดข้อมูลยอดขายไม่สำเร็จ: ' + (error.message || error));
++    } finally {
++        if (button) {
++            button.disabled = false;
++            button.textContent = originalText || '⬇ ดาวน์โหลด Excel';
++        }
++    }
++};
++
++window.exportSalesSummaryCSV = window.exportSalesReportXLSX;
++
+ // Format Date Helper
+ function formatDate(timestamp) {
+     if (!timestamp) return '-';
+@@ -2014,6 +2823,7 @@ function renderCategoriesSnapshot(snapshot) {
+         updateProductCategoryFilterOptions();
+         renderProductsTable();
+         renderPosScreen();
++        renderDashboardSalesReport();
+         return;
+     }
+ 
+@@ -2066,6 +2876,7 @@ function renderCategoriesSnapshot(snapshot) {
+     updateProductCategoryFilterOptions();
+     renderProductsTable();
+     renderPosScreen();
++    renderDashboardSalesReport();
+ }
+ 
+ async function refreshCategoriesOnce() {
+@@ -5377,6 +6188,8 @@ function setupRealtimeMembers() {
+         });
+         renderMembersTable();
+         renderAdminUserOptions();
++        renderLoyaltyMemberOptions();
++        renderLoyaltySummary();
+     }, (error) => {
+         console.error('Error listening to members:', error);
+         const tbody = document.getElementById('members-table-body');
+diff --git a/js/profile.js b/js/profile.js
+index df6f0cc..0d10033 100644
+--- a/js/profile.js
++++ b/js/profile.js
+@@ -1,6 +1,6 @@
+ import { auth, db } from './firebase-config.js';
+ import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+-import { doc, getDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
++import { collection, doc, getDoc, getDocs, query, setDoc, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getTierRules } from './membership.js';
+ 
+ (() => {
+@@ -15,9 +15,27 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
+     let cloudProfileUid = '';
+     let cloudProfileLoading = false;
+     let cloudProfileSaving = false;
++    let loyaltyConfig = null;
++    let loyaltyLedger = [];
++    let loyaltySummary = null;
++    let loyaltyUid = '';
++    let loyaltyLoading = false;
+     let currentAuthUser = null;
+     let selectedPreviewTier = '';
+ 
++    const DEFAULT_LOYALTY_CONFIG = {
++        enabled: true,
++        spendPerPoint: 25,
++        pointValue: 1,
++        expiryMonths: 24,
++        maxRedeemPercent: 30,
++        minRedeemPoints: 20,
++        earnAfterDiscount: true,
++        earnOnRedeemedAmount: false,
++        excludedCategories: ['เครื่องดื่มแอลกอฮอล์', 'ฝากเงิน', 'โปรแรง'],
++        tierMultipliers: { Silver: 1, Gold: 1.25, Platinum: 1.5 }
++    };
++
+     function isEnglishPage() {
+         return location.pathname.includes('-en');
+     }
+@@ -48,6 +66,43 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
+         return '฿' + (Number(value) || 0).toLocaleString('en-US');
+     }
+ 
++    function numberValue(value, fallback = 0) {
++        const number = Number(value);
++        return Number.isFinite(number) ? number : fallback;
++    }
++
++    function normalizeLoyaltyConfig(raw = {}) {
++        const tierMultipliers = raw.tierMultipliers || {};
++        const excludedCategories = Array.isArray(raw.excludedCategories)
++            ? raw.excludedCategories
++            : String(raw.excludedCategories || '')
++                .split(',')
++                .map(item => item.trim())
++                .filter(Boolean);
++        return {
++            ...DEFAULT_LOYALTY_CONFIG,
++            ...raw,
++            enabled: raw.enabled !== false,
++            spendPerPoint: Math.max(1, numberValue(raw.spendPerPoint, DEFAULT_LOYALTY_CONFIG.spendPerPoint)),
++            pointValue: Math.max(0, numberValue(raw.pointValue, DEFAULT_LOYALTY_CONFIG.pointValue)),
++            expiryMonths: Math.max(0, Math.round(numberValue(raw.expiryMonths, DEFAULT_LOYALTY_CONFIG.expiryMonths))),
++            maxRedeemPercent: Math.min(100, Math.max(0, numberValue(raw.maxRedeemPercent, DEFAULT_LOYALTY_CONFIG.maxRedeemPercent))),
++            minRedeemPoints: Math.max(0, Math.round(numberValue(raw.minRedeemPoints, DEFAULT_LOYALTY_CONFIG.minRedeemPoints))),
++            earnAfterDiscount: raw.earnAfterDiscount !== false,
++            earnOnRedeemedAmount: raw.earnOnRedeemedAmount === true,
++            excludedCategories,
++            tierMultipliers: {
++                Silver: numberValue(tierMultipliers.Silver, DEFAULT_LOYALTY_CONFIG.tierMultipliers.Silver),
++                Gold: numberValue(tierMultipliers.Gold, DEFAULT_LOYALTY_CONFIG.tierMultipliers.Gold),
++                Platinum: numberValue(tierMultipliers.Platinum, DEFAULT_LOYALTY_CONFIG.tierMultipliers.Platinum)
++            }
++        };
++    }
++
++    function getLoyaltyConfig() {
++        return normalizeLoyaltyConfig(loyaltyConfig || DEFAULT_LOYALTY_CONFIG);
++    }
++
+     function formatDate(value) {
+         if (!value) return '-';
+         const date = value?.toDate ? value.toDate() : new Date(value);
+@@ -73,6 +128,17 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
+             totalSpent: 'Total Spent',
+             visits: 'Visits',
+             cartItems: 'Cart Items',
++            pointValue: 'Point Value',
++            loyaltyWallet: 'Eden Points Wallet',
++            loyaltyRule: 'Earning & redemption rules',
++            loyaltyHistory: 'Recent point history',
++            loyaltyLoading: 'Loading loyalty information...',
++            noLoyaltyHistory: 'No point movement yet.',
++            pointsAsCash: '{points} points = THB {value} credit',
++            earnRule: 'Earn 1 point for every THB {spend}. Gold x{gold}, Platinum x{platinum}.',
++            redeemRule: 'Redeem from {min} points, up to {percent}% of each bill.',
++            expiryRule: 'Points expire in {months} months.',
++            noExpiryRule: 'Points do not expire.',
+             membership: 'Membership Level',
+             benefits: 'Your Benefits',
+             tierPreview: 'Preview membership tiers',
+@@ -146,6 +212,17 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
+             totalSpent: 'ยอดใช้จ่ายสะสม',
+             visits: 'จำนวนครั้งที่ใช้บริการ',
+             cartItems: 'สินค้าในตะกร้า',
++            pointValue: 'มูลค่าแต้ม',
++            loyaltyWallet: 'กระเป๋าแต้ม Eden',
++            loyaltyRule: 'กติกาสะสมและใช้แต้ม',
++            loyaltyHistory: 'ประวัติแต้มล่าสุด',
++            loyaltyLoading: 'กำลังโหลดข้อมูลแต้ม...',
++            noLoyaltyHistory: 'ยังไม่มีรายการแต้ม',
++            pointsAsCash: '{points} คะแนน = เครดิต {value} บาท',
++            earnRule: 'ซื้อครบ {spend} บาท ได้ 1 คะแนน Gold x{gold}, Platinum x{platinum}',
++            redeemRule: 'ใช้แต้มขั้นต่ำ {min} คะแนน และใช้ได้ไม่เกิน {percent}% ต่อบิล',
++            expiryRule: 'แต้มหมดอายุใน {months} เดือน',
++            noExpiryRule: 'แต้มไม่มีวันหมดอายุ',
+             membership: 'ระดับสมาชิก',
+             benefits: 'สิทธิประโยชน์ของคุณ',
+             tierPreview: 'พรีวิวระดับสมาชิก',
+@@ -269,6 +346,34 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
+         }
+     }
+ 
++    async function refreshLoyaltyData(user) {
++        if (!db || !user?.uid || loyaltyLoading || loyaltyUid === user.uid) return;
++        loyaltyLoading = true;
++        try {
++            const [configSnap, summarySnap, ledgerSnap] = await Promise.all([
++                getDoc(doc(db, 'site_settings', 'loyalty')),
++                getDoc(doc(db, 'member_summaries', user.uid)),
++                getDocs(query(collection(db, 'point_ledger'), where('userId', '==', user.uid)))
++            ]);
++            loyaltyConfig = configSnap.exists() ? normalizeLoyaltyConfig(configSnap.data()) : normalizeLoyaltyConfig();
++            loyaltySummary = summarySnap.exists() ? summarySnap.data() : null;
++            loyaltyLedger = ledgerSnap.docs
++                .map(item => ({ id: item.id, ...item.data() }))
++                .sort((a, b) => {
++                    const left = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
++                    const right = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
++                    return right - left;
++                })
++                .slice(0, 8);
++            loyaltyUid = user.uid;
++            renderProfile();
++        } catch (error) {
++            console.warn('Unable to load loyalty information:', error);
++        } finally {
++            loyaltyLoading = false;
++        }
++    }
++
+     function cartCount() {
+         const cart = readJSON(CART_KEY, []);
+         return Array.isArray(cart) ? cart.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) : 0;
+@@ -309,7 +414,15 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
+         const orderCount = paidLikeOrders.length;
+         const bookingCount = bookings.length;
+         const computedVisitCount = orderCount + bookingCount;
+-        const computedPoints = Math.floor(orderSpent / 10);
++        const config = getLoyaltyConfig();
++        const computedPoints = config.enabled ? Math.floor(orderSpent / config.spendPerPoint) : 0;
++        const summaryPoints = loyaltySummary?.pointsBalance;
++        const savedPoints = profileValue('points', null);
++        const points = summaryPoints != null
++            ? Math.max(0, Number(summaryPoints) || 0)
++            : savedPoints != null
++                ? Math.max(0, Number(savedPoints) || 0)
++                : computedPoints;
+ 
+         return {
+             id: user.uid,
+@@ -317,7 +430,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
+             email: profileValue('email', user.email || ''),
+             avatarUrl: profileValue('photoURL', user.avatar || ''),
+             memberCode: profileValue('memberCode', memberId(user)),
+-            points: Math.max(Number(profileValue('points', 0)) || 0, computedPoints),
++            points,
+             totalSpent: Math.max(Number(profileValue('totalSpent', 0)) || 0, orderSpent),
+             visitCount: Math.max(Number(profileValue('visitCount', 0)) || 0, computedVisitCount),
+             orderCount: Math.max(Number(profileValue('orderCount', 0)) || 0, orderCount),
+@@ -392,6 +505,57 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
+         `;
+     }
+ 
++    function renderLoyaltyWallet(membershipUser, labels) {
++        const config = getLoyaltyConfig();
++        const pointCashValue = Math.floor((Number(membershipUser.points) || 0) * config.pointValue);
++        const earnRule = labels.earnRule
++            .replace('{spend}', formatBaht(config.spendPerPoint))
++            .replace('{gold}', config.tierMultipliers.Gold)
++            .replace('{platinum}', config.tierMultipliers.Platinum);
++        const redeemRule = labels.redeemRule
++            .replace('{min}', formatNumber(config.minRedeemPoints))
++            .replace('{percent}', formatNumber(config.maxRedeemPercent));
++        const expiryRule = config.expiryMonths
++            ? labels.expiryRule.replace('{months}', formatNumber(config.expiryMonths))
++            : labels.noExpiryRule;
++        const walletValue = labels.pointsAsCash
++            .replace('{points}', formatNumber(membershipUser.points))
++            .replace('{value}', formatBaht(pointCashValue));
++        const historyRows = loyaltyLedger.map(row => {
++            const delta = Number(row.pointsDelta) || 0;
++            const prefix = delta > 0 ? '+' : '';
++            const reason = row.reason || row.type || '-';
++            return `
++                <div class="membership-rule-row">
++                    <span>${escapeHTML(formatDate(row.createdAt))}</span>
++                    <strong style="color:${delta < 0 ? '#b42318' : 'var(--primary-color)'};">${escapeHTML(prefix + formatNumber(delta))}</strong>
++                    <em>${escapeHTML(reason)}</em>
++                </div>
++            `;
++        }).join('');
++
++        return `
++            <div class="membership-panel" id="profile-loyalty-wallet">
++                <h2>${escapeHTML(labels.loyaltyWallet)}</h2>
++                <div class="stats-grid">
++                    <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.points)}</div><div class="stat-label">${escapeHTML(labels.points)}</div></div>
++                    <div class="stat-box"><div class="stat-value">฿${formatBaht(pointCashValue)}</div><div class="stat-label">${escapeHTML(labels.pointValue)}</div></div>
++                </div>
++                <p class="membership-rule-lead">${escapeHTML(walletValue)}</p>
++                <div class="benefit-grid">
++                    <div class="benefit-pill">${escapeHTML(earnRule)}</div>
++                    <div class="benefit-pill">${escapeHTML(redeemRule)}</div>
++                    <div class="benefit-pill">${escapeHTML(expiryRule)}</div>
++                </div>
++                <h3 style="margin:24px 0 10px;">${escapeHTML(labels.loyaltyHistory)}</h3>
++                ${loyaltyLoading ? `<p class="membership-rule-lead">${escapeHTML(labels.loyaltyLoading)}</p>` : ''}
++                <div class="membership-rule-list">
++                    ${historyRows || `<p class="membership-rule-lead">${escapeHTML(labels.noLoyaltyHistory)}</p>`}
++                </div>
++            </div>
++        `;
++    }
++
+     function renderBenefits(tier, labels) {
+         const benefits = getTierBenefits(tier, isEnglishPage() ? 'en' : 'th');
+         return `
+@@ -619,6 +783,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
+                     </div>
+ 
+                     ${renderMemberCard(user, labels, membershipUser)}
++                    ${renderLoyaltyWallet(membershipUser, labels)}
+                     ${renderTierPreview(tier, labels)}
+ 
+                     <div class="stats-grid">
+@@ -653,6 +818,7 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
+                 </section>
+             </div>
+         `;
++        refreshLoyaltyData(user);
+         refreshCloudProfile(user);
+         refreshCloudHistory(user);
+     }
+@@ -762,6 +928,10 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
+                 cloudHistoryUid = '';
+                 cloudProfile = null;
+                 cloudProfileUid = '';
++                loyaltyConfig = null;
++                loyaltyLedger = [];
++                loyaltySummary = null;
++                loyaltyUid = '';
+                 renderProfile();
+             });
+         }
+@@ -774,6 +944,10 @@ import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getT
+         cloudHistoryUid = '';
+         cloudProfile = null;
+         cloudProfileUid = '';
++        loyaltyConfig = null;
++        loyaltyLedger = [];
++        loyaltySummary = null;
++        loyaltyUid = '';
+         renderProfile();
+     });
+ })();
+-- 
+2.54.0.windows.1
+

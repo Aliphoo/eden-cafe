@@ -1,75 +1,133 @@
-import { db } from './firebase-config.js';
-import { doc, getDoc, setDoc, updateDoc, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+const COUNTER_API_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net/trackVisitorCounter';
+const COUNTER_CLIENT_KEY = 'eden_counter_client_id';
+const COUNTER_LOADING_LABEL = '\u0e01\u0e33\u0e25\u0e31\u0e07\u0e2d\u0e31\u0e1b\u0e40\u0e14\u0e15\u0e2a\u0e16\u0e34\u0e15\u0e34';
+const COUNTER_ERROR_LABEL = '\u0e01\u0e33\u0e25\u0e31\u0e07\u0e2d\u0e31\u0e1b\u0e40\u0e14\u0e15\u0e2a\u0e16\u0e34\u0e15\u0e34';
+
+function isDevMode() {
+    const host = window.location.hostname;
+    return host === 'localhost'
+        || host === '127.0.0.1'
+        || host === ''
+        || window.location.search.includes('debugCounter=1');
+}
+
+function logCounterError(error) {
+    if (isDevMode()) {
+        console.error('[Eden visitor counter]', error);
+    }
+}
+
+function getBangkokDateKey() {
+    return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Bangkok',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).format(new Date());
+}
+
+function storageGet(storage, key) {
+    try {
+        return storage.getItem(key);
+    } catch (_) {
+        return '';
+    }
+}
+
+function storageSet(storage, key, value) {
+    try {
+        storage.setItem(key, value);
+    } catch (_) {
+        // Storage can be blocked in private mode; server-side throttling still protects the counter.
+    }
+}
+
+function getOrCreateClientId() {
+    const existing = storageGet(localStorage, COUNTER_CLIENT_KEY);
+    if (existing) return existing;
+
+    const generated = window.crypto && typeof window.crypto.randomUUID === 'function'
+        ? window.crypto.randomUUID()
+        : `eden-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    storageSet(localStorage, COUNTER_CLIENT_KEY, generated);
+    return generated;
+}
+
+function formatCounterValue(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number < 0) return COUNTER_ERROR_LABEL;
+    return Math.floor(number).toLocaleString('en-US');
+}
+
+function setCounterText(dailyEl, totalEl, dailyText, totalText = dailyText) {
+    if (dailyEl) dailyEl.innerText = dailyText;
+    if (totalEl) totalEl.innerText = totalText;
+}
+
+function updateCounterUI(dailyEl, totalEl, stats) {
+    if (!stats || stats.ok !== true) {
+        setCounterText(dailyEl, totalEl, COUNTER_ERROR_LABEL);
+        return;
+    }
+    setCounterText(
+        dailyEl,
+        totalEl,
+        formatCounterValue(stats.dailyViews),
+        formatCounterValue(stats.totalViews)
+    );
+}
+
+async function fetchCounterStats(shouldCountVisit) {
+    const response = await fetch(COUNTER_API_URL, {
+        method: shouldCountVisit ? 'POST' : 'GET',
+        headers: shouldCountVisit ? { 'Content-Type': 'application/json' } : {},
+        body: shouldCountVisit
+            ? JSON.stringify({ count: true, visitorId: getOrCreateClientId() })
+            : undefined,
+        cache: 'no-store',
+        credentials: 'omit'
+    });
+
+    let payload = null;
+    try {
+        payload = await response.json();
+    } catch (_) {
+        payload = null;
+    }
+
+    if (!response.ok || !payload || payload.ok !== true) {
+        const message = payload && payload.error ? payload.error : `Counter API failed (${response.status})`;
+        throw new Error(message);
+    }
+
+    return payload;
+}
 
 async function trackVisit() {
-    // Get current date in YYYY-MM-DD format based on local timezone
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const today = `${year}-${month}-${day}`; 
-
-    const statsRef = doc(db, 'stats', 'pageViews');
-
     const dailyEl = document.getElementById('daily-views');
     const totalEl = document.getElementById('total-views');
-    
-    // For manual resetting purpose. Remove this block after deployment.
-    // await setDoc(statsRef, { totalViews: 0, dailyViews: 0, lastUpdateDate: today });
-    
+    if (!dailyEl && !totalEl) return;
+
+    const today = getBangkokDateKey();
+    const localVisitKey = `eden_counter_counted_${today}`;
+    const sessionVisitKey = `eden_counter_session_counted_${today}`;
+    const hasLocalCount = storageGet(localStorage, localVisitKey) === 'true';
+    const hasSessionCount = storageGet(sessionStorage, sessionVisitKey) === 'true';
+    const shouldCountVisit = !hasLocalCount && !hasSessionCount;
+
+    setCounterText(dailyEl, totalEl, COUNTER_LOADING_LABEL);
+
     try {
-        const docSnap = await getDoc(statsRef);
-        let data = docSnap.exists() ? docSnap.data() : null;
-        
-        // Use sessionStorage so we don't count reloads as new visits
-        const hasVisited = sessionStorage.getItem('eden_visited');
-        
-        if (data && data.totalViews > 60000) { data.totalViews = 0; data.dailyViews = 0; data.lastUpdateDate = today; await setDoc(statsRef, data); }
-        if (!data) {
-            // Initialize with the hardcoded starting numbers
-            data = {
-                totalViews: 0,
-                dailyViews: 0,
-                lastUpdateDate: today
-            };
-            await setDoc(statsRef, data);
+        const stats = await fetchCounterStats(shouldCountVisit);
+        if (shouldCountVisit) {
+            storageSet(localStorage, localVisitKey, 'true');
+            storageSet(sessionStorage, sessionVisitKey, 'true');
         }
-
-        if (!hasVisited) {
-            // New visit!
-            sessionStorage.setItem('eden_visited', 'true');
-            
-            if (data.lastUpdateDate !== today) {
-                // New day! Reset daily counter
-                data.dailyViews = 1;
-                data.totalViews += 1;
-                data.lastUpdateDate = today;
-                await setDoc(statsRef, data); 
-            } else {
-                // Same day, use atomic increment
-                data.dailyViews += 1;
-                data.totalViews += 1;
-                await updateDoc(statsRef, {
-                    dailyViews: increment(1),
-                    totalViews: increment(1)
-                });
-            }
-        } else {
-            // Has visited already in this session
-            // Just display the current numbers. If the day changed but nobody else visited, show 0.
-            if (data.lastUpdateDate !== today) {
-                data.dailyViews = 0;
-            }
-        }
-        
-        // Update the UI
-        if (dailyEl) dailyEl.innerText = data.dailyViews.toLocaleString('en-US');
-        if (totalEl) totalEl.innerText = data.totalViews.toLocaleString('en-US');
-
-    } catch (e) {
-        console.error("Failed to load counter:", e);
+        updateCounterUI(dailyEl, totalEl, stats);
+    } catch (error) {
+        logCounterError(error);
+        setCounterText(dailyEl, totalEl, COUNTER_ERROR_LABEL);
     }
 }
 
 document.addEventListener('DOMContentLoaded', trackVisit);
-

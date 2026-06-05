@@ -332,8 +332,7 @@
             const firestoreId = await saveOrder(orderData);
             localStorage.setItem('eden_pending_order', JSON.stringify({ ...orderData, firestoreId }));
             location.href = '/feelfreepay?amount=' + encodeURIComponent(latestTotal) + '&order=' + encodeURIComponent(orderId) + '&lang=' + (isEnglishPage() ? 'en' : 'th');
-        } catch (error) {
-            console.error('Order create failed:', error);
+        } catch (_) {
             alert(t('ไม่สามารถสร้างคำสั่งซื้อได้ กรุณาลองใหม่', 'Could not create order. Please try again.'));
             if (button) {
                 button.disabled = false;

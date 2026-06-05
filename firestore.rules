@@ -577,6 +577,9 @@ service cloud.firestore {
     match /user_credentials/{userId} {
       allow read, write: if false;
     }
+    match /email_verification_codes/{docId} {
+      allow read, write: if false;
+    }
     match /otp_verifications/{docId} {
       allow read, write: if false;
     }

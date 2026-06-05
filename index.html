@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="th">
 
 <head>
@@ -17,7 +17,7 @@
         content="สัมผัสประสบการณ์กาแฟพิเศษ (Specialty Coffee) ที่ Eden Cafe ประเทศไทย บรรยากาศร่มรื่นสไตล์มินิมอล พร้อมเมล็ดกาแฟคั่วสดใหม่จากยอดดอย">
     <meta name="keywords" content="Eden Cafe, Specialty Coffee Thailand, ร้านกาแฟ, คาเฟ่กรุงเทพ, กาแฟพิเศษ, กาแฟไทย">
 
-    <link rel="stylesheet" href="style.css?v=3">
+    <link rel="stylesheet" href="style.css?v=auth-phone-1">
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -35,12 +35,12 @@
       "image": "https://edencafe.co/Images/Logo.webp",
       "@id": "https://edencafe.co",
       "url": "https://edencafe.co",
-      "telephone": "+66-2-000-0000",
+      "telephone": "+66980080383",
       "address": {
         "@type": "PostalAddress",
-        "streetAddress": "123 Sukhumvit Road",
-        "addressLocality": "Bangkok",
-        "postalCode": "10110",
+        "streetAddress": "306 Moo 7, Nang Lae",
+        "addressLocality": "Mueang Chiang Rai",
+        "postalCode": "57100",
         "addressCountry": "TH"
       },
       "geo": {
@@ -83,29 +83,7 @@
     }
     </script>
 
-    <!-- AEO (Answer Engine Optimization): FAQ Schema Markup -->
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "FAQPage",
-      "mainEntity": [{
-        "@type": "Question",
-        "name": "Eden Cafe มีเมนูแนะนำอะไรบ้าง?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "เมนูแนะนำของเราคือ Signature Thai Specialty Coffee ที่ใช้เมล็ดกาแฟสายพันธุ์อาราบิก้าแท้จากภาคเหนือของประเทศไทย และชาเขียวมัทฉะพรีเมียม"
-        }
-      }, {
-        "@type": "Question",
-        "name": "ร้าน Eden Cafe เหมาะสำหรับนั่งทำงาน (Remote Work) หรือไม่?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "เหมาะมากครับ เรามีบริการ Wi-Fi ความเร็วสูงฟรี พร้อมปลั๊กไฟบริการหลายจุด ในบรรยากาศที่เงียบสงบสไตล์มินิมอล"
-        }
-      }]
-    }
-    </script>
-    <!-- Open Graph / Social Media Meta Tags -->
+<!-- Open Graph / Social Media Meta Tags -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://edencafe.co/">
     <meta property="og:title" content="Eden Cafe | กาแฟพิเศษและคาเฟ่บรรยากาศดีในไทย">
@@ -135,7 +113,7 @@
                     <li><a href="/shop">ร้านค้า</a></li>
                     <li><a href="/booking">ระบบจอง</a></li>
                     <li><a href="/blog">บทความ (Blog)</a></li>
-                    <li><a href="#faq">คำถามที่พบบ่อย</a></li>
+                    <li><a href="/faq">คำถามที่พบบ่อย</a></li>
                 </ul>
             </nav>
             <div class="nav-actions">
@@ -308,8 +286,25 @@
         <section id="faq" class="faq">
             <div class="container">
                 <h2>คำถามที่พบบ่อย (FAQ)</h2>
-                <div class="faq-grid" id="faq-container">
-                    <p style="text-align:center; width:100%;">กำลังโหลดคำถามที่พบบ่อย...</p>
+                <div class="faq-grid" id="faq-container" data-faq-page="home">
+                    <article class="faq-card faq-static-fallback">
+                        <details open>
+                            <summary><span>Eden Cafe คืออะไร อยู่ที่ไหน</span></summary>
+                            <p>Eden Cafe คือคาเฟ่และพื้นที่พักผ่อนในเชียงราย ตั้งอยู่ที่ 306 หมู่ 7 ตำบลนางแล อำเภอเมืองเชียงราย จังหวัดเชียงราย 57100</p>
+                        </details>
+                    </article>
+                    <article class="faq-card faq-static-fallback">
+                        <details>
+                            <summary><span>ติดต่อ Eden Cafe ได้ทางไหน?</span></summary>
+                            <p>ติดต่อร้านได้ทางอีเมล edencafe.2565@gmail.com หรือโทร 098-008-0383</p>
+                        </details>
+                    </article>
+                    <article class="faq-card faq-static-fallback">
+                        <details>
+                            <summary><span>จองโต๊ะหรือห้องรับรองได้ไหม?</span></summary>
+                            <p>สามารถจองผ่านหน้า “ระบบจอง” ได้ โดยเลือกวัน เวลา จำนวนคน และโซนหรือโต๊ะที่ต้องการ</p>
+                        </details>
+                    </article>
                 </div>
             </div>
         </section>
@@ -348,7 +343,7 @@
                                 <div style="color: #FFD700; font-size: 0.75rem; margin-top: 3px;">Updating...</div>
                             </div>
                         </div>
-                        <p style="font-size: 0.9rem; margin: 0; font-style: italic; opacity: 0.9;">"Real Google Maps reviews will appear after the cache refreshes."</p>
+                        <p style="font-size: 0.9rem; margin: 0; font-style: italic; opacity: 0.9;">"รีวิวจากลูกค้าจริงบน Google Maps ของ Eden Cafe"</p>
                     </div>
                 </div>
             </div>
@@ -359,9 +354,9 @@
                 </div>
                 <div>
                     <h4>ติดต่อและสถานที่ตั้ง</h4>
-                    <p>123 ถนนสุขุมวิท กรุงเทพมหานคร 10110</p>
-                    <p>อีเมล: hello@edencafe.co</p>
-                    <p>โทร: +66-2-000-0000</p>
+                    <p>306 หมู่ 7 ตำบลนางแล อำเภอเมืองเชียงราย จังหวัดเชียงราย 57100</p>
+                    <p>อีเมล: edencafe.2565@gmail.com</p>
+                    <p>โทร: 098-008-0383</p>
                 </div>
                 <div>
                     <h4>ติดตามเรา</h4>
@@ -396,9 +391,9 @@
                 <p class="copyright">© 2026 Eden Cafe Thailand. สงวนลิขสิทธิ์ | Optimized for AEO & GEO</p>
                 <div class="visitor-stats-mini"
                     style="display: flex; gap: 20px; font-size: 0.85rem; color: rgba(255,255,255,0.9); background: rgba(255, 255, 255, 0.1); padding: 10px 20px; border-radius: 50px; border: 1px solid rgba(255, 255, 255, 0.2); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1); backdrop-filter: blur(5px);">
-                    <span>👁️ เข้าชมวันนี้: <strong id="daily-views" style="color: #fff;">0</strong></span>
+                    <span>👁️ เข้าชมวันนี้: <strong id="daily-views" style="color: #fff;">&#3585;&#3635;&#3621;&#3633;&#3591;&#3629;&#3633;&#3611;&#3648;&#3604;&#3605;&#3626;&#3606;&#3636;&#3605;&#3636;</strong></span>
                     <span>|</span>
-                    <span>📈 เข้าชมสะสม: <strong id="total-views" style="color: #fff;">0</strong></span>
+                    <span>📈 เข้าชมสะสม: <strong id="total-views" style="color: #fff;">&#3585;&#3635;&#3621;&#3633;&#3591;&#3629;&#3633;&#3611;&#3648;&#3604;&#3605;&#3626;&#3606;&#3636;&#3605;&#3636;</strong></span>
                 </div>
             </div>
         </div>
@@ -427,7 +422,8 @@
             });
         }
     </script>
-    <script type="module" src="js/auth.js?v=11"></script>
+    <script type="module" src="js/faq.js?v=1"></script>
+    <script type="module" src="js/auth.js?v=12"></script>
     <script type="module" src="js/home-featured-products.js?v=2"></script>
     <!-- Cookie Consent Banner -->
     <div id="cookie-consent"
@@ -464,11 +460,10 @@
 <script src="js/cart.js?v=1"></script>
     <script type="module" src="js/footer-settings.js?v=2"></script>
     <script src="js/reviews.js?v=6"></script>
-<script type="module" src="js/counter.js?v=3"></script>
+<script type="module" src="js/counter.js?v=5"></script>
 </body>
 
 </html>
-
 
 
 

@@ -1,0 +1,396 @@
+﻿<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>à¸”à¸²à¸§à¸™à¹Œà¹‚à¸«à¸¥à¸” Eden Cafe POS APK</title>
+  <style>
+    :root {
+      --eden-green: #159447;
+      --eden-dark: #0f6f35;
+      --ink: #20302a;
+      --muted: #68776f;
+      --line: rgba(22, 112, 58, 0.16);
+      --danger: #b94a48;
+      --danger-bg: #fff4f2;
+      --surface: #ffffff;
+      --canvas: #f3f7f4;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      align-items: center;
+      background:
+        radial-gradient(circle at top left, rgba(21, 148, 71, 0.14), transparent 34rem),
+        linear-gradient(135deg, #fbfdfb 0%, #eef5f0 100%);
+      color: var(--ink);
+      display: flex;
+      font-family: "Noto Sans Thai", "Segoe UI", system-ui, -apple-system, sans-serif;
+      justify-content: center;
+      margin: 0;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    main {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 22px 70px rgba(19, 114, 52, 0.14);
+      display: grid;
+      gap: 22px;
+      max-width: 640px;
+      padding: 32px;
+      width: min(100%, 640px);
+    }
+
+    .brand {
+      align-items: center;
+      display: flex;
+      gap: 16px;
+    }
+
+    .brand img {
+      background: #edf5ef;
+      border-radius: 14px;
+      height: 72px;
+      object-fit: contain;
+      padding: 10px;
+      width: 130px;
+    }
+
+    h1 {
+      font-size: clamp(1.55rem, 5vw, 2.15rem);
+      line-height: 1.15;
+      margin: 0 0 6px;
+    }
+
+    p {
+      color: var(--muted);
+      line-height: 1.65;
+      margin: 0;
+    }
+
+    .panel {
+      background: var(--canvas);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      display: grid;
+      gap: 14px;
+      padding: 18px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    label {
+      color: var(--muted);
+      display: grid;
+      font-size: 0.95rem;
+      font-weight: 800;
+      gap: 7px;
+    }
+
+    input {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--ink);
+      font: inherit;
+      font-weight: 800;
+      min-height: 50px;
+      padding: 0 14px;
+      width: 100%;
+    }
+
+    input:focus {
+      border-color: var(--eden-green);
+      box-shadow: 0 0 0 3px rgba(21, 148, 71, 0.14);
+      outline: none;
+    }
+
+    .actions {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    button {
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      cursor: pointer;
+      display: inline-flex;
+      font: inherit;
+      font-weight: 900;
+      justify-content: center;
+      min-height: 54px;
+      padding: 0 18px;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .primary {
+      background: var(--eden-green);
+      border-color: var(--eden-green);
+      color: #fff;
+    }
+
+    .primary:active {
+      background: var(--eden-dark);
+    }
+
+    .secondary {
+      background: #fff;
+      color: var(--eden-dark);
+    }
+
+    .google {
+      grid-column: 1 / -1;
+    }
+
+    .status {
+      border-radius: 10px;
+      color: var(--muted);
+      font-weight: 800;
+      line-height: 1.55;
+      min-height: 24px;
+    }
+
+    .status.error {
+      background: var(--danger-bg);
+      border: 1px solid rgba(185, 74, 72, 0.2);
+      color: var(--danger);
+      padding: 10px 12px;
+    }
+
+    .account {
+      align-items: center;
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+    }
+
+    .account strong {
+      color: var(--eden-dark);
+      overflow-wrap: anywhere;
+    }
+
+    .note {
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.94rem;
+      padding-top: 18px;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    @media (max-width: 620px) {
+      body {
+        padding: 16px;
+      }
+
+      main {
+        border-radius: 14px;
+        padding: 22px;
+      }
+
+      .brand {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .grid,
+      .actions {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="brand" aria-label="Eden Cafe POS">
+      <img src="/Images/Logo.webp" alt="Eden Cafe">
+      <div>
+        <h1>à¸”à¸²à¸§à¸™à¹Œà¹‚à¸«à¸¥à¸” Eden Cafe POS</h1>
+        <p>à¸•à¹‰à¸­à¸‡à¹€à¸‚à¹‰à¸²à¸ªà¸¹à¹ˆà¸£à¸°à¸šà¸šà¸”à¹‰à¸§à¸¢à¸šà¸±à¸à¸Šà¸µà¹à¸­à¸”à¸¡à¸´à¸™à¸—à¸µà¹ˆà¸¡à¸µà¸ªà¸´à¸—à¸˜à¸´ POS à¸à¹ˆà¸­à¸™à¸”à¸²à¸§à¸™à¹Œà¹‚à¸«à¸¥à¸” APK à¹€à¸žà¸·à¹ˆà¸­à¸›à¹‰à¸­à¸‡à¸à¸±à¸™à¸„à¸™à¸—à¸µà¹ˆà¸¡à¸µà¸¥à¸´à¸‡à¸à¹Œà¹‚à¸«à¸¥à¸”à¹„à¸Ÿà¸¥à¹Œà¹‚à¸”à¸¢à¸•à¸£à¸‡</p>
+      </div>
+    </section>
+
+    <section id="login-panel" class="panel" aria-label="à¹€à¸‚à¹‰à¸²à¸ªà¸¹à¹ˆà¸£à¸°à¸šà¸š">
+      <div class="grid">
+        <label>
+          à¸­à¸µà¹€à¸¡à¸¥à¹à¸­à¸”à¸¡à¸´à¸™
+          <input id="email" type="email" autocomplete="email" placeholder="admin@email.com">
+        </label>
+        <label>
+          à¸£à¸«à¸±à¸ªà¸œà¹ˆà¸²à¸™
+          <input id="password" type="password" autocomplete="current-password" placeholder="à¸£à¸«à¸±à¸ªà¸œà¹ˆà¸²à¸™">
+        </label>
+      </div>
+      <div class="actions">
+        <button id="email-login" class="primary" type="button">à¹€à¸‚à¹‰à¸²à¸ªà¸¹à¹ˆà¸£à¸°à¸šà¸š</button>
+        <button id="google-login" class="secondary google" type="button">à¹€à¸‚à¹‰à¸²à¸ªà¸¹à¹ˆà¸£à¸°à¸šà¸šà¸”à¹‰à¸§à¸¢ Google</button>
+      </div>
+    </section>
+
+    <section id="download-panel" class="panel hidden" aria-label="à¸”à¸²à¸§à¸™à¹Œà¹‚à¸«à¸¥à¸” APK">
+      <div class="account">
+        <p>à¹€à¸‚à¹‰à¸²à¸ªà¸¹à¹ˆà¸£à¸°à¸šà¸šà¹à¸¥à¹‰à¸§: <strong id="account-email"></strong></p>
+        <button id="logout" class="secondary" type="button">à¸­à¸­à¸à¸ˆà¸²à¸à¸£à¸°à¸šà¸š</button>
+      </div>
+      <button id="download-apk" class="primary" type="button">à¸”à¸²à¸§à¸™à¹Œà¹‚à¸«à¸¥à¸” APK à¸¥à¹ˆà¸²à¸ªà¸¸à¸”</button>
+    </section>
+
+    <div id="status" class="status" role="status">à¸à¸³à¸¥à¸±à¸‡à¸•à¸£à¸§à¸ˆà¸ªà¸­à¸šà¸šà¸±à¸à¸Šà¸µ...</div>
+
+    <p class="note">
+      à¸£à¸°à¸šà¸šà¸ˆà¸°à¸ªà¹ˆà¸‡à¹„à¸Ÿà¸¥à¹Œà¸œà¹ˆà¸²à¸™ Cloud Function à¸—à¸µà¹ˆà¸•à¸£à¸§à¸ˆ Firebase ID token à¹à¸¥à¸°à¸ªà¸´à¸—à¸˜à¸´à¹à¸­à¸”à¸¡à¸´à¸™ POS à¸—à¸¸à¸à¸„à¸£à¸±à¹‰à¸‡
+      à¸¥à¸´à¸‡à¸à¹Œà¹„à¸Ÿà¸¥à¹Œ APK à¸•à¸£à¸‡à¸ˆà¸°à¹„à¸¡à¹ˆà¸–à¸¹à¸à¹€à¸œà¸¢à¹à¸žà¸£à¹ˆà¸šà¸™ Firebase Hosting à¹à¸¥à¹‰à¸§
+    </p>
+  </main>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyAbNysIXcBwGKZe6nHJUivqyZxS2PwnCfg",
+      authDomain: "edencafe-d9095.firebaseapp.com",
+      projectId: "edencafe-d9095",
+      storageBucket: "edencafe-d9095.firebasestorage.app",
+      messagingSenderId: "962163014966",
+      appId: "1:962163014966:web:f22614bfa594c7fd1cc797",
+      measurementId: "G-QXGQVWB8LH"
+    };
+
+    const downloadUrl = "https://asia-southeast1-edencafe-d9095.cloudfunctions.net/downloadPosApk";
+    const app = firebase.apps.length ? firebase.app() : firebase.initializeApp(firebaseConfig);
+    const auth = app.auth();
+    const provider = new firebase.auth.GoogleAuthProvider();
+
+    const loginPanel = document.getElementById("login-panel");
+    const downloadPanel = document.getElementById("download-panel");
+    const accountEmail = document.getElementById("account-email");
+    const statusBox = document.getElementById("status");
+    const emailInput = document.getElementById("email");
+    const passwordInput = document.getElementById("password");
+    const emailLoginButton = document.getElementById("email-login");
+    const googleLoginButton = document.getElementById("google-login");
+    const downloadButton = document.getElementById("download-apk");
+    const logoutButton = document.getElementById("logout");
+
+    function setStatus(message, isError = false) {
+      statusBox.textContent = message;
+      statusBox.classList.toggle("error", isError);
+    }
+
+    function setBusy(isBusy) {
+      emailLoginButton.disabled = isBusy;
+      googleLoginButton.disabled = isBusy;
+      downloadButton.disabled = isBusy;
+      logoutButton.disabled = isBusy;
+    }
+
+    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(error => {
+      setStatus(`à¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸² session à¹„à¸¡à¹ˆà¸ªà¸³à¹€à¸£à¹‡à¸ˆ: ${error.message}`, true);
+    });
+
+    auth.onAuthStateChanged(user => {
+      const signedIn = Boolean(user);
+      loginPanel.classList.toggle("hidden", signedIn);
+      downloadPanel.classList.toggle("hidden", !signedIn);
+      accountEmail.textContent = user?.email || "";
+      setBusy(false);
+      setStatus(signedIn
+        ? "à¸žà¸£à¹‰à¸­à¸¡à¸”à¸²à¸§à¸™à¹Œà¹‚à¸«à¸¥à¸” à¸£à¸°à¸šà¸šà¸ˆà¸°à¸•à¸£à¸§à¸ˆà¸ªà¸´à¸—à¸˜à¸´ POS à¸•à¸­à¸™à¸à¸”à¸”à¸²à¸§à¸™à¹Œà¹‚à¸«à¸¥à¸”"
+        : "à¸à¸£à¸¸à¸“à¸²à¹€à¸‚à¹‰à¸²à¸ªà¸¹à¹ˆà¸£à¸°à¸šà¸šà¸”à¹‰à¸§à¸¢à¸šà¸±à¸à¸Šà¸µà¹à¸­à¸”à¸¡à¸´à¸™ POS");
+    });
+
+    emailLoginButton.addEventListener("click", async () => {
+      try {
+        setBusy(true);
+        setStatus("à¸à¸³à¸¥à¸±à¸‡à¹€à¸‚à¹‰à¸²à¸ªà¸¹à¹ˆà¸£à¸°à¸šà¸š...");
+        await auth.signInWithEmailAndPassword(emailInput.value.trim(), passwordInput.value);
+      } catch (error) {
+        setStatus(`à¹€à¸‚à¹‰à¸²à¸ªà¸¹à¹ˆà¸£à¸°à¸šà¸šà¹„à¸¡à¹ˆà¸ªà¸³à¹€à¸£à¹‡à¸ˆ: ${error.message}`, true);
+        setBusy(false);
+      }
+    });
+
+    googleLoginButton.addEventListener("click", async () => {
+      try {
+        setBusy(true);
+        setStatus("à¸à¸³à¸¥à¸±à¸‡à¹€à¸‚à¹‰à¸²à¸ªà¸¹à¹ˆà¸£à¸°à¸šà¸šà¸”à¹‰à¸§à¸¢ Google...");
+        await auth.signInWithPopup(provider);
+      } catch (error) {
+        if (error.code === "auth/popup-blocked" || error.code === "auth/operation-not-supported-in-this-environment") {
+          await auth.signInWithRedirect(provider);
+          return;
+        }
+        setStatus(`à¹€à¸‚à¹‰à¸²à¸ªà¸¹à¹ˆà¸£à¸°à¸šà¸š Google à¹„à¸¡à¹ˆà¸ªà¸³à¹€à¸£à¹‡à¸ˆ: ${error.message}`, true);
+        setBusy(false);
+      }
+    });
+
+    logoutButton.addEventListener("click", async () => {
+      await auth.signOut();
+    });
+
+    downloadButton.addEventListener("click", async () => {
+      try {
+        const user = auth.currentUser;
+        if (!user) {
+          setStatus("à¸à¸£à¸¸à¸“à¸²à¹€à¸‚à¹‰à¸²à¸ªà¸¹à¹ˆà¸£à¸°à¸šà¸šà¸à¹ˆà¸­à¸™à¸”à¸²à¸§à¸™à¹Œà¹‚à¸«à¸¥à¸”", true);
+          return;
+        }
+
+        setBusy(true);
+        setStatus("à¸à¸³à¸¥à¸±à¸‡à¸•à¸£à¸§à¸ˆà¸ªà¸´à¸—à¸˜à¸´à¹à¸¥à¸°à¹€à¸•à¸£à¸µà¸¢à¸¡à¹„à¸Ÿà¸¥à¹Œ APK...");
+        const token = await user.getIdToken(true);
+        const response = await fetch(downloadUrl, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        });
+
+        if (!response.ok) {
+          let message = `à¸”à¸²à¸§à¸™à¹Œà¹‚à¸«à¸¥à¸”à¹„à¸¡à¹ˆà¸ªà¸³à¹€à¸£à¹‡à¸ˆ (${response.status})`;
+          try {
+            const payload = await response.json();
+            if (payload?.error) message = payload.error;
+          } catch (_) {}
+          throw new Error(message);
+        }
+
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = "EdenCafePOS-release.apk";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(objectUrl);
+        setStatus("à¸”à¸²à¸§à¸™à¹Œà¹‚à¸«à¸¥à¸”à¹€à¸£à¸´à¹ˆà¸¡à¹à¸¥à¹‰à¸§à¸„à¸£à¸±à¸š");
+      } catch (error) {
+        setStatus(`à¸”à¸²à¸§à¸™à¹Œà¹‚à¸«à¸¥à¸”à¹„à¸¡à¹ˆà¹„à¸”à¹‰: ${error.message}`, true);
+      } finally {
+        setBusy(false);
+      }
+    });
+  </script>
+</body>
+</html>
