@@ -68,7 +68,16 @@
                     <li><a href="/en#about">About Us</a></li>
                     <li><a href="/menu-en">Menu</a></li>
                     <li><a href="/shop-en">Shop</a></li>
-                    <li><a href="/booking-en">Booking</a></li>
+                    <li class="nav-dropdown">
+                        <a class="nav-dropdown-toggle" href="/booking-en" aria-haspopup="true">
+                            Booking <span class="nav-dropdown-caret" aria-hidden="true"></span>
+                        </a>
+                        <ul class="nav-dropdown-menu" aria-label="Booking options">
+                            <li><a href="/booking-en?type=room">Meeting Room</a></li>
+                            <li><a href="/booking-en?type=table">Table</a></li>
+                            <li><a href="/archery/booking">Archery</a></li>
+                        </ul>
+                    </li>
                     <li><a href="/blog">Blog</a></li>
                     <li><a href="/en#faq">FAQ</a></li>
                 </ul>
@@ -210,8 +219,8 @@
             });
         }
     </script>
-    <script type="module" src="js/profile.js?v=member-auth-reset-20260605"></script>
-    <script type="module" src="js/auth.js?v=12"></script>
+    <script type="module" src="js/profile.js?v=archery-mvp-1"></script>
+    <script type="module" src="js/auth.js?v=archery-mvp-1"></script>
     <!-- Cookie Consent Banner -->
     <div id="cookie-consent"
         style="display: none; position: fixed; bottom: 20px; left: 20px; right: 20px; max-width: 600px; margin: 0 auto; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); padding: 20px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); z-index: 9999; border: 1px solid rgba(0,0,0,0.05); text-align: left;">
@@ -250,9 +259,6 @@
 <script type="module" src="js/counter.js?v=5"></script>
 </body>
 </html>
-
-
-
 
 
 
