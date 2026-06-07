@@ -115,6 +115,10 @@ p { margin-bottom: 1rem; color: #555; }
     gap: 32px;
 }
 
+.nav-links li {
+    position: relative;
+}
+
 .nav-links a {
     text-decoration: none;
     color: var(--text-color);
@@ -123,8 +127,78 @@ p { margin-bottom: 1rem; color: #555; }
     transition: var(--transition);
 }
 
-.nav-links a:hover {
+.nav-links a:hover,
+.nav-links a.active {
     color: var(--accent-color);
+}
+
+.nav-links a.active {
+    font-weight: 700;
+}
+
+.nav-dropdown-toggle {
+    align-items: center;
+    display: inline-flex;
+    gap: 7px;
+}
+
+.nav-dropdown-caret {
+    border-bottom: 1.5px solid currentColor;
+    border-right: 1.5px solid currentColor;
+    height: 7px;
+    margin-top: -4px;
+    transform: rotate(45deg);
+    transition: transform 0.2s ease;
+    width: 7px;
+}
+
+.nav-dropdown-menu {
+    background: var(--white);
+    border: 1px solid rgba(76, 175, 80, 0.16);
+    border-radius: 8px;
+    box-shadow: 0 16px 40px rgba(46, 64, 55, 0.14);
+    display: grid;
+    gap: 4px;
+    left: 50%;
+    list-style: none;
+    margin: 0;
+    min-width: 188px;
+    opacity: 0;
+    padding: 8px;
+    pointer-events: none;
+    position: absolute;
+    top: calc(100% + 14px);
+    transform: translate(-50%, 8px);
+    transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
+    visibility: hidden;
+    z-index: 1002;
+}
+
+.nav-dropdown:hover .nav-dropdown-menu,
+.nav-dropdown:focus-within .nav-dropdown-menu {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, 0);
+    visibility: visible;
+}
+
+.nav-dropdown:hover .nav-dropdown-caret,
+.nav-dropdown:focus-within .nav-dropdown-caret {
+    transform: rotate(225deg);
+}
+
+.nav-dropdown-menu a {
+    border-radius: 6px;
+    display: block;
+    padding: 10px 12px;
+    white-space: nowrap;
+}
+
+.nav-dropdown-menu a:hover,
+.nav-dropdown-menu a:focus {
+    background: #f2f9f5;
+    color: var(--primary-color);
+    outline: none;
 }
 
 .nav-actions {
@@ -2396,6 +2470,40 @@ footer p {
     }
     .nav-links a {
         font-size: 1.1rem; /* Larger touch targets */
+    }
+    .nav-dropdown {
+        display: grid;
+        justify-items: center;
+        width: 100%;
+    }
+    .nav-dropdown-toggle {
+        justify-content: center;
+    }
+    .nav-dropdown-menu {
+        background: #f8fbf8;
+        border-color: rgba(76, 175, 80, 0.16);
+        box-shadow: none;
+        left: auto;
+        margin-top: 10px;
+        max-width: 280px;
+        min-width: 0;
+        opacity: 1;
+        padding: 8px;
+        pointer-events: auto;
+        position: static;
+        top: auto;
+        transform: none;
+        visibility: visible;
+        width: min(100%, 280px);
+    }
+    .nav-dropdown:hover .nav-dropdown-menu,
+    .nav-dropdown:focus-within .nav-dropdown-menu {
+        transform: none;
+    }
+    .nav-dropdown-menu a {
+        font-size: 1rem;
+        text-align: center;
+        white-space: normal;
     }
     .nav-actions {
         display: flex;

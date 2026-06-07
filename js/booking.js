@@ -41,6 +41,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         return checked ? checked.value : 'table';
     }
 
+    function applyInitialBookingTypeFromUrl() {
+        const params = new URLSearchParams(window.location.search);
+        const requestedType = String(params.get('type') || '').toLowerCase();
+        if (!['room', 'table'].includes(requestedType)) return;
+
+        const radio = document.querySelector(`input[name="booking-type-radio"][value="${requestedType}"]`);
+        if (radio) radio.checked = true;
+    }
+
     function getMaxTablesAllowed(guests) {
         if (guests >= 1 && guests <= 4) return 1;
         if (guests >= 5 && guests <= 8) return 2;
@@ -170,6 +179,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
+    applyInitialBookingTypeFromUrl();
+    handleBookingTypeChange();
     await loadRooms();
     handleBookingTypeChange();
     const dateInput = document.getElementById('date');

@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>โปรไฟล์ของฉัน | Eden Cafe</title>
-    <link rel="icon" type="image/webp" href="Images/Logo.webp">
-    <link rel="stylesheet" href="style.css?v=member-auth-reset-20260605">
+    <link rel="icon" type="image/webp" href="/Images/Logo.webp">
+    <link rel="stylesheet" href="/style.css?v=member-auth-reset-20260605">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
         .profile-container {
@@ -60,7 +60,7 @@
     <header class="navbar" style="background-color: #fff;">
         <div class="container">
             <a href="/" class="logo">
-                <img src="Images/Logo.webp" alt="Eden Cafe Logo" class="logo-img">
+                <img src="/Images/Logo.webp" alt="Eden Cafe Logo" class="logo-img">
             </a>
             <nav>
                 <ul class="nav-links">
@@ -68,7 +68,16 @@
                     <li><a href="/#about">เกี่ยวกับเรา</a></li>
                     <li><a href="/menu">เมนู</a></li>
                     <li><a href="/shop">ร้านค้า</a></li>
-                    <li><a href="/booking">ระบบจอง</a></li>
+                    <li class="nav-dropdown">
+                        <a class="nav-dropdown-toggle" href="/booking" aria-haspopup="true">
+                            ระบบจอง <span class="nav-dropdown-caret" aria-hidden="true"></span>
+                        </a>
+                        <ul class="nav-dropdown-menu" aria-label="ตัวเลือกระบบจอง">
+                            <li><a href="/booking?type=room">ห้องประชุม</a></li>
+                            <li><a href="/booking?type=table">โต๊ะ</a></li>
+                            <li><a href="/archery/booking">ยิงธนู</a></li>
+                        </ul>
+                    </li>
                     <li><a href="/blog">บทความ (Blog)</a></li>
                     <li><a href="/faq">คำถามที่พบบ่อย</a></li>
                 </ul>
@@ -210,8 +219,8 @@
             });
         }
     </script>
-    <script type="module" src="js/profile.js?v=member-auth-reset-20260605"></script>
-    <script type="module" src="js/auth.js?v=auth-loop-fix-2-20260604"></script>
+    <script type="module" src="/js/profile.js?v=archery-customer-1"></script>
+    <script type="module" src="/js/auth.js?v=archery-customer-1"></script>
     <!-- Cookie Consent Banner -->
     <div id="cookie-consent"
         style="display: none; position: fixed; bottom: 20px; left: 20px; right: 20px; max-width: 600px; margin: 0 auto; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); padding: 20px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); z-index: 9999; border: 1px solid rgba(0,0,0,0.05); text-align: left;">
@@ -243,16 +252,12 @@
             });
         });
     </script>
-    <script type="module" src="js/marketing-consent.js?v=1"></script>
-<script src="js/cart.js?v=1"></script>
-    <script type="module" src="js/footer-settings.js?v=2"></script>
-    <script src="js/reviews.js?v=6"></script>
-<script type="module" src="js/counter.js?v=5"></script>
+    <script type="module" src="/js/marketing-consent.js?v=1"></script>
+<script src="/js/cart.js?v=1"></script>
+    <script type="module" src="/js/footer-settings.js?v=2"></script>
+    <script src="/js/reviews.js?v=6"></script>
+<script type="module" src="/js/counter.js?v=5"></script>
 </body>
 </html>
-
-
-
-
 
 
