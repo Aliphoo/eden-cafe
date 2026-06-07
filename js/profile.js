@@ -405,7 +405,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             cloudProfile = {
                 ...profile,
                 displayName: profile.display_name || 'สมาชิก Eden',
-                photoURL: profile.avatar_url || 'Images/Logo.webp',
+                photoURL: profile.avatar_url || '/Images/Logo.webp',
                 phone: profile.phone_display || '',
                 phoneE164: profile.phone_number || '',
                 tier: profile.member_level || 'Silver',
@@ -737,7 +737,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
     function renderSignedOut(container, labels) {
         container.innerHTML = `
             <div class="profile-container" style="text-align:center;">
-                <img src="Images/Logo.webp" alt="Eden Cafe" style="width:84px;height:84px;border-radius:50%;object-fit:cover;margin-bottom:18px;">
+                <img src="/Images/Logo.webp" alt="Eden Cafe" style="width:84px;height:84px;border-radius:50%;object-fit:cover;margin-bottom:18px;">
                 <h1 style="margin-bottom:10px;">${escapeHTML(labels.profile)}</h1>
                 <p style="color:#666;">${escapeHTML(labels.signInPrompt)}</p>
                 <a class="btn btn-outline" href="/login" style="margin-top:15px;">${escapeHTML(labels.signIn)}</a>
@@ -764,15 +764,107 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         }).join('');
     }
 
+    function bookingServiceLabel(booking) {
+        const serviceType = String(booking.service_type || booking.serviceType || '').toUpperCase();
+        if (serviceType === 'ARCHERY') return 'Eden Archery';
+        const bookingType = String(booking.bookingType || '').toLowerCase();
+        if (bookingType === 'room') return isEnglishPage() ? 'Private room' : 'ห้องรับรอง';
+        if (bookingType === 'table') return isEnglishPage() ? 'Table booking' : 'จองโต๊ะ';
+        return isEnglishPage() ? 'Booking' : 'การจอง';
+    }
+
+    function bookingStatusLabel(booking) {
+        const serviceType = String(booking.service_type || booking.serviceType || '').toUpperCase();
+        if (serviceType === 'ARCHERY') {
+            const status = String(booking.booking_status || booking.status || '').toUpperCase();
+            const payment = String(booking.payment_status || booking.paymentStatus || '').toUpperCase();
+            if (payment === 'REFUNDED') return 'Refunded';
+            if (status === 'CONFIRMED') return 'Confirmed';
+            if (status === 'CHECKED_IN') return 'Checked-in';
+            if (status === 'COMPLETED') return 'Completed';
+            if (status === 'CANCELLED') return 'Cancelled';
+            if (status === 'NO_SHOW') return 'No Show';
+            if (payment === 'PAID_ONLINE') return 'Paid Online';
+            if (payment === 'PAID_COUNTER') return 'Paid Counter';
+            if (status === 'HELD') return 'Held';
+            return 'Pending';
+        }
+        return booking.status || 'confirmed';
+    }
+
+    function bookingDetailLine(booking) {
+        const serviceType = String(booking.service_type || booking.serviceType || '').toUpperCase();
+        if (serviceType === 'ARCHERY') {
+            const duration = booking.duration_minutes || booking.package_minutes || String(booking.package_code || '').replace(/\D/g, '');
+            return [
+                booking.booking_date || booking.date,
+                [booking.startTime || booking.start_time, booking.endTime || booking.end_time].filter(Boolean).join('-'),
+                duration ? duration + ' min' : '',
+                booking.paymentLabel || booking.payment_status || ''
+            ].filter(Boolean).join(' | ');
+        }
+        return [booking.date, booking.time || booking.arrivalTime || booking.startTime, booking.tableIds || booking.table || booking.zone || booking.tableZone].filter(Boolean).join(' | ');
+    }
+
+    function isArcheryBooking(booking) {
+        return String(booking.service_type || booking.serviceType || '').toUpperCase() === 'ARCHERY';
+    }
+
+    function archeryBookingMillis(booking) {
+        const date = booking.booking_date || booking.date || '';
+        const time = booking.start_time || booking.startTime || '00:00';
+        const parsed = new Date(`${date}T${time}:00+07:00`).getTime();
+        return Number.isFinite(parsed) ? parsed : itemTimestampMillis(booking);
+    }
+
+    function archeryBookingGroups(bookings) {
+        const archeryBookings = bookings.filter(isArcheryBooking);
+        const now = Date.now();
+        const closedStatuses = new Set(['COMPLETED', 'CANCELLED', 'NO_SHOW', 'EXPIRED']);
+        const upcoming = archeryBookings
+            .filter(booking => !closedStatuses.has(String(booking.booking_status || booking.status || '').toUpperCase()))
+            .filter(booking => archeryBookingMillis(booking) >= now)
+            .sort((a, b) => archeryBookingMillis(a) - archeryBookingMillis(b));
+        const history = archeryBookings
+            .filter(booking => !upcoming.some(item => item.id === booking.id))
+            .sort((a, b) => archeryBookingMillis(b) - archeryBookingMillis(a));
+        return { upcoming, history };
+    }
+
+    function renderArcheryBookingCard(booking) {
+        const detail = bookingDetailLine(booking);
+        return `
+            <div class="order-card">
+                <div class="order-card-header">
+                    <strong>Eden Archery #${escapeHTML(booking.id || booking.booking_id || '-')}</strong>
+                    <span style="color:var(--primary-color);font-weight:600;">${escapeHTML(bookingStatusLabel(booking))}</span>
+                </div>
+                <p style="margin:0;color:#666;">${escapeHTML(detail)}</p>
+            </div>
+        `;
+    }
+
+    function renderArcheryBookingSections(bookings) {
+        const { upcoming, history } = archeryBookingGroups(bookings);
+        return `
+            <div class="order-history" id="profile-archery-bookings">
+                <h2>Upcoming Archery Booking</h2>
+                ${upcoming.length ? upcoming.map(renderArcheryBookingCard).join('') : '<p style="color:#777;">ยังไม่มีรายการยิงธนูที่กำลังจะมาถึง</p>'}
+                <h2 style="margin-top:28px;">Archery Booking History</h2>
+                ${history.length ? history.map(renderArcheryBookingCard).join('') : '<p style="color:#777;">ยังไม่มีประวัติการจองยิงธนู</p>'}
+            </div>
+        `;
+    }
+
     function renderBookingList(bookings, labels) {
         if (!bookings.length) return `<p style="color:#777;">${escapeHTML(labels.noBookings)}</p>`;
         return bookings.map(booking => `
             <div class="order-card">
                 <div class="order-card-header">
-                    <strong>${escapeHTML(booking.id || booking.date || '-')}</strong>
-                    <span style="color:var(--primary-color);font-weight:600;">${escapeHTML(booking.status || 'confirmed')}</span>
+                    <strong>${escapeHTML(bookingServiceLabel(booking))} #${escapeHTML(booking.id || booking.date || '-')}</strong>
+                    <span style="color:var(--primary-color);font-weight:600;">${escapeHTML(bookingStatusLabel(booking))}</span>
                 </div>
-                <p style="margin:0;color:#666;">${escapeHTML([booking.date, booking.time || booking.arrivalTime || booking.startTime, booking.tableIds || booking.table || booking.zone || booking.tableZone].filter(Boolean).join(' | '))}</p>
+                <p style="margin:0;color:#666;">${escapeHTML(bookingDetailLine(booking))}</p>
             </div>
         `).join('');
     }
@@ -782,7 +874,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         const displayName = profileValue('displayName', profileValue('display_name', user.name || labels.member)) || labels.member;
         const phone = profileValue('phone', profileValue('phone_display', user.phone || user.phoneNumber || ''));
         const email = profileValue('email', user.email || '');
-        const avatar = profileValue('photoURL', profileValue('avatar_url', user.avatar || 'Images/Logo.webp')) || 'Images/Logo.webp';
+        const avatar = profileValue('photoURL', profileValue('avatar_url', user.avatar || '/Images/Logo.webp')) || '/Images/Logo.webp';
         const memberLevel = profileValue('member_level', profileValue('tier', 'Silver')) || 'Silver';
         const points = Number(profileValue('points', user.points || 0)) || 0;
         const createdAt = profileValue('created_at', profileValue('createdAt', ''));
@@ -823,7 +915,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         const lineId = profileValue('lineId', '');
         const displayName = profileValue('displayName', user.name || labels.member);
         const email = profileValue('email', publicEmail(user.email || ''));
-        const avatar = profileValue('photoURL', user.avatar || user.photoURL || 'Images/Logo.webp');
+        const avatar = profileValue('photoURL', user.avatar || user.photoURL || '/Images/Logo.webp');
         const loadingText = cloudProfileLoading ? `<p class="profile-save-message">${escapeHTML(labels.loadingProfile)}</p>` : '';
         const emailVerified = !!email && cloudProfile?.emailVerified === true && cleanString(cloudProfile?.email, 180).toLowerCase() === cleanString(email, 180).toLowerCase();
         const emailStatusClass = emailVerified ? 'is-verified' : 'is-unverified';
@@ -897,6 +989,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
     function renderSignedIn(container, user, labels) {
         const orders = cloudOrders || readOrders();
         const bookings = cloudBookings || readBookings();
+        const nonArcheryBookings = bookings.filter(booking => !isArcheryBooking(booking));
         const membershipUser = buildMembershipUser(user, orders, bookings);
         const tier = getMemberTier(membershipUser);
         const avatar = profileValue('photoURL', user.avatar || user.photoURL || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user.name || labels.member) + '&background=4caf50&color=fff');
@@ -939,6 +1032,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:30px;">
                         <a class="btn" href="${isEnglishPage() ? '/shop-en' : '/shop'}">${escapeHTML(labels.shopNow)}</a>
                         <a class="btn btn-outline" href="${isEnglishPage() ? '/booking-en' : '/booking'}">${escapeHTML(labels.bookTable)}</a>
+                        <a class="btn btn-outline" href="/archery/booking">Eden Archery</a>
                     </div>
 
                     <div class="order-history" id="profile-account">
@@ -951,9 +1045,11 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                         ${renderOrderList(orders, labels)}
                     </div>
 
+                    ${renderArcheryBookingSections(bookings)}
+
                     <div class="order-history" id="profile-bookings">
                         <h2>${escapeHTML(labels.bookings)}</h2>
-                        ${renderBookingList(bookings, labels)}
+                        ${renderBookingList(nonArcheryBookings, labels)}
                     </div>
                 </section>
             </div>

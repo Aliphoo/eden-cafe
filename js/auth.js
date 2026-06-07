@@ -37,6 +37,8 @@ async function edenApiRequest(path, { method = 'GET', query: queryParams = {}, b
 
     if (!response.ok) {
         const error = new Error(data.error || 'Eden API request failed');
+        error.code = data.code || data.error || '';
+        error.details = data.details || null;
         error.status = response.status;
         error.conflictIds = Array.isArray(data.conflictIds) ? data.conflictIds : [];
         throw error;
@@ -52,6 +54,18 @@ window.EdenApi = {
     },
     tableAvailability({ date, time }) {
         return edenApiRequest('/getTableAvailability', { query: { date, time } });
+    },
+    getArcheryAvailability(params = {}) {
+        return edenApiRequest('/getArcheryAvailability', { method: 'POST', body: params });
+    },
+    createArcheryHold(bookingData) {
+        return edenApiRequest('/createArcheryHold', { method: 'POST', body: bookingData });
+    },
+    createBeamArcheryPayment(paymentData) {
+        return edenApiRequest('/createBeamArcheryPayment', { method: 'POST', body: paymentData });
+    },
+    getArcheryPaymentStatus(params = {}) {
+        return edenApiRequest('/getArcheryPaymentStatus', { method: 'POST', body: params });
     }
 };
 
@@ -380,24 +394,56 @@ async function fetchTableAvailability({ date, time }) {
     }
 }
 
+function itemTimestampMillis(item = {}) {
+    const value = item.closedAt || item.updatedAt || item.createdAt || item.timestamp || item.date;
+    if (value?.toDate) return value.toDate().getTime();
+    const parsed = new Date(value || 0).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function sortByTimestampDesc(items) {
     return items.sort((a, b) => {
-        const at = a.timestamp?.toDate ? a.timestamp.toDate().getTime() : new Date(a.date || a.createdAt || 0).getTime();
-        const bt = b.timestamp?.toDate ? b.timestamp.toDate().getTime() : new Date(b.date || b.createdAt || 0).getTime();
+        const at = itemTimestampMillis(a);
+        const bt = itemTimestampMillis(b);
         return (bt || 0) - (at || 0);
     });
 }
 
 async function fetchUserOrdersFromCloud(uid) {
     if (!db || !uid) return [];
-    const snap = await getDocs(query(collection(db, 'orders'), where('uid', '==', uid)));
-    return sortByTimestampDesc(snap.docs.map(docSnap => ({ id: docSnap.data().id || docSnap.id, ...docSnap.data() }))).slice(0, 10);
+    const [legacySnap, posCustomerSnap] = await Promise.all([
+        getDocs(query(collection(db, 'orders'), where('uid', '==', uid))).catch(() => ({ docs: [] })),
+        getDocs(query(collection(db, 'orders'), where('customerUid', '==', uid))).catch(() => ({ docs: [] }))
+    ]);
+    const ordersByDocId = new Map();
+    [...legacySnap.docs, ...posCustomerSnap.docs].forEach(docSnap => {
+        const data = docSnap.data() || {};
+        const customerUid = String(data.customerUid || '').trim();
+        const orderUid = String(data.uid || '').trim();
+        const source = String(data.source || '').toLowerCase();
+        if (data.isTestOrder === true) return;
+        if (customerUid ? customerUid !== uid : (orderUid !== uid || source === 'pos')) return;
+        ordersByDocId.set(docSnap.id, {
+            firestoreId: docSnap.id,
+            id: data.id || docSnap.id,
+            ...data
+        });
+    });
+    return sortByTimestampDesc(Array.from(ordersByDocId.values())).slice(0, 10);
 }
 
 async function fetchUserBookingsFromCloud(uid) {
     if (!db || !uid) return [];
-    const snap = await getDocs(query(collection(db, 'bookings'), where('uid', '==', uid)));
-    return sortByTimestampDesc(snap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))).slice(0, 10);
+    const [uidSnap, customerSnap, memberSnap] = await Promise.all([
+        getDocs(query(collection(db, 'bookings'), where('uid', '==', uid))).catch(() => ({ docs: [] })),
+        getDocs(query(collection(db, 'bookings'), where('customerUid', '==', uid))).catch(() => ({ docs: [] })),
+        getDocs(query(collection(db, 'bookings'), where('member_id', '==', uid))).catch(() => ({ docs: [] }))
+    ]);
+    const bookingsByDocId = new Map();
+    [...uidSnap.docs, ...customerSnap.docs, ...memberSnap.docs].forEach(docSnap => {
+        bookingsByDocId.set(docSnap.id, { id: docSnap.id, ...docSnap.data() });
+    });
+    return sortByTimestampDesc(Array.from(bookingsByDocId.values())).slice(0, 20);
 }
 
 async function fetchRoomsFromCloud() {

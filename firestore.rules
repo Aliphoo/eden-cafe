@@ -18,9 +18,13 @@ service cloud.firestore {
     }
     function isOwner() {
       return isSignedIn()
-        && request.auth.token.email is string
         && (
-          request.auth.token.email.matches('(?i)^(admin@edencafe\\.com|phoo1236@gmail\\.com|sonsawan\\.1231@gmail\\.com)$')
+          (request.auth.token.keys().hasAny(['role']) && request.auth.token.role == 'OWNER')
+          || (request.auth.token.keys().hasAny(['is_owner']) && request.auth.token.is_owner == true)
+          || (
+            request.auth.token.email is string
+            && request.auth.token.email.matches('(?i)^(admin@edencafe\\.com|phoo1236@gmail\\.com|sonsawan\\.1231@gmail\\.com)$')
+          )
           || (
             exists(/databases/$(database)/documents/admin_users/$(request.auth.uid))
             && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.status == 'active'
@@ -79,7 +83,7 @@ service cloud.firestore {
           'note', 'cashierUid', 'cashierName', 'cashierEmail',
           'isTestOrder', 'softLaunch', 'stockAdjusted', 'stockAdjustments',
           'stockMode', 'billStatus', 'isOpenBill', 'orderMode',
-          'openedAt', 'updatedAt', 'updatedBy',
+          'openedAt', 'paidAt', 'updatedAt', 'updatedBy',
           'closedAt', 'closedBy', 'closedByName', 'createdAt'
         ])
         && request.resource.data.keys().hasAll(['id', 'date', 'items', 'totalAmount', 'uid', 'timestamp', 'status'])
@@ -129,6 +133,7 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['isOpenBill']) || request.resource.data.isOpenBill is bool)
         && (!request.resource.data.keys().hasAny(['orderMode']) || request.resource.data.orderMode in ['pay_now', 'open_bill'])
         && (!request.resource.data.keys().hasAny(['openedAt']) || request.resource.data.openedAt == request.time)
+        && (!request.resource.data.keys().hasAny(['paidAt']) || request.resource.data.paidAt == request.time)
         && (!request.resource.data.keys().hasAny(['updatedAt']) || request.resource.data.updatedAt == request.time)
         && (!request.resource.data.keys().hasAny(['updatedBy']) || request.resource.data.updatedBy == request.auth.uid)
         && (!request.resource.data.keys().hasAny(['closedAt']) || request.resource.data.closedAt == request.time)
@@ -153,7 +158,7 @@ service cloud.firestore {
           'note', 'cashierUid', 'cashierName', 'cashierEmail',
           'isTestOrder', 'softLaunch', 'stockAdjusted', 'stockAdjustments',
           'stockMode', 'billStatus', 'isOpenBill', 'orderMode',
-          'openedAt', 'updatedAt', 'updatedBy',
+          'openedAt', 'paidAt', 'updatedAt', 'updatedBy',
           'closedAt', 'closedBy', 'closedByName', 'createdAt'
         ])
         && request.resource.data.keys().hasAll([
@@ -209,6 +214,7 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['timestamp']) || request.resource.data.timestamp is timestamp)
         && (!request.resource.data.keys().hasAny(['createdAt']) || request.resource.data.createdAt is timestamp)
         && (!request.resource.data.keys().hasAny(['openedAt']) || request.resource.data.openedAt is timestamp)
+        && (!request.resource.data.keys().hasAny(['paidAt']) || request.resource.data.paidAt is timestamp)
         && (!request.resource.data.keys().hasAny(['updatedAt']) || request.resource.data.updatedAt is timestamp)
         && (!request.resource.data.keys().hasAny(['updatedBy']) || request.resource.data.updatedBy == request.auth.uid)
         && (!request.resource.data.keys().hasAny(['closedAt']) || request.resource.data.closedAt is timestamp)
@@ -301,7 +307,7 @@ service cloud.firestore {
           'note', 'cashierUid', 'cashierName', 'cashierEmail',
           'isTestOrder', 'softLaunch', 'stockAdjusted', 'stockAdjustments',
           'stockMode', 'billStatus', 'isOpenBill', 'orderMode',
-          'openedAt', 'timestamp', 'createdAt',
+          'openedAt', 'paidAt', 'timestamp', 'createdAt',
           'updatedAt', 'updatedBy', 'closedAt', 'closedBy', 'closedByName'
         ])
         && request.resource.data.items is list
@@ -346,15 +352,182 @@ service cloud.firestore {
         && (!affected.hasAny(['updatedAt']) || request.resource.data.updatedAt is timestamp)
         && (!affected.hasAny(['updatedBy']) || request.resource.data.updatedBy == request.auth.uid)
         && (!affected.hasAny(['openedAt']) || request.resource.data.openedAt is timestamp)
+        && (!affected.hasAny(['paidAt']) || request.resource.data.paidAt is timestamp)
         && (!affected.hasAny(['timestamp']) || request.resource.data.timestamp is timestamp)
         && (!affected.hasAny(['createdAt']) || request.resource.data.createdAt is timestamp)
         && (!affected.hasAny(['closedAt']) || request.resource.data.closedAt is timestamp)
         && (!affected.hasAny(['closedBy']) || request.resource.data.closedBy == request.auth.uid)
         && (!request.resource.data.keys().hasAny(['closedByName']) || (request.resource.data.closedByName is string && request.resource.data.closedByName.size() <= 120));
-    }    function ownsResource() {
+    }
+    function ownsResource() {
       return isSignedIn()
-        && resource.data.keys().hasAny(['uid'])
-        && resource.data.uid == request.auth.uid;
+        && (
+          (resource.data.keys().hasAny(['uid']) && resource.data.uid == request.auth.uid)
+          || (resource.data.keys().hasAny(['customerUid']) && resource.data.customerUid == request.auth.uid)
+          || (resource.data.keys().hasAny(['customer_uid']) && resource.data.customer_uid == request.auth.uid)
+          || (resource.data.keys().hasAny(['member_id']) && resource.data.member_id == request.auth.uid)
+          || (resource.data.keys().hasAny(['memberUid']) && resource.data.memberUid == request.auth.uid)
+          || (resource.data.keys().hasAny(['userId']) && resource.data.userId == request.auth.uid)
+          || (resource.data.keys().hasAny(['owner_id']) && resource.data.owner_id == request.auth.uid)
+          || (resource.data.keys().hasAny(['recipient_id']) && resource.data.recipient_id == request.auth.uid)
+        );
+    }
+    function isArcheryBooking() {
+      return resource.data.keys().hasAny(['service_type'])
+        && resource.data.service_type == 'ARCHERY';
+    }
+    function signedIn() {
+      return isSignedIn();
+    }
+    function hasRole(role) {
+      return isSignedIn()
+        && (
+          (role == 'OWNER' && isOwner())
+          || (
+            request.auth.token.keys().hasAny(['role'])
+            && request.auth.token.role == role
+          )
+          || (
+            role == 'MANAGER'
+            && (isHeadManager() || isManager())
+          )
+        );
+    }
+    function hasAnyRole(roles) {
+      return isSignedIn()
+        && (
+          ('OWNER' in roles && isOwner())
+          || (
+            request.auth.token.keys().hasAny(['role'])
+            && request.auth.token.role in roles
+          )
+          || (
+            'MANAGER' in roles
+            && (isHeadManager() || isManager())
+          )
+        );
+    }
+    function hasBranch(branchId) {
+      return isOwner()
+        || (
+          isSignedIn()
+          && request.auth.token.keys().hasAny(['branch_ids'])
+          && request.auth.token.branch_ids is list
+          && branchId in request.auth.token.branch_ids
+        );
+    }
+    function isStaff() {
+      return isSignedIn()
+        && (
+          (request.auth.token.keys().hasAny(['is_staff']) && request.auth.token.is_staff == true)
+          || hasAnyRole(['OWNER', 'MANAGER', 'ARCHERY_STAFF', 'CASHIER'])
+          || isAdmin()
+        );
+    }
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+    function isCustomerOwner(memberId) {
+      return isSignedIn() && memberId == request.auth.uid;
+    }
+    function isOwnDocument(userId) {
+      return isSelf(userId);
+    }
+    function sameBranch() {
+      return resource.data.keys().hasAny(['branch_id'])
+        && request.resource.data.keys().hasAny(['branch_id'])
+        && request.resource.data.branch_id == resource.data.branch_id;
+    }
+    function denyWrite() {
+      return false;
+    }
+    function noDelete() {
+      return false;
+    }
+    function immutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+    function userProfileCreateFields() {
+      return [
+        'uid', 'displayName', 'email', 'photoURL', 'phone', 'phoneE164',
+        'id', 'phone_number', 'phone_display', 'email_lower', 'display_name',
+        'avatar_url', 'firstName', 'lastName', 'loginUsername',
+        'phoneAuthEmail', 'shippingAddress', 'birthDate', 'allergies',
+        'healthNote', 'lineId', 'authProviderIds', 'registrationSource',
+        'marketingConsent', 'privacyConsent', 'phoneVerifiedAt',
+        'passwordLoginEnabled', 'profileCompleted', 'onboardingCompletedAt',
+        'created_at', 'updated_at', 'last_login_at', 'createdAt', 'updatedAt'
+      ];
+    }
+    function safeUserProfileUpdateFields() {
+      return [
+        'displayName', 'photoURL', 'phone', 'phoneE164',
+        'phone_number', 'phone_display', 'display_name', 'avatar_url',
+        'firstName', 'lastName', 'loginUsername', 'phoneAuthEmail',
+        'shippingAddress', 'birthDate', 'allergies', 'healthNote',
+        'lineId', 'authProviderIds', 'registrationSource',
+        'marketingConsent', 'privacyConsent', 'phoneVerifiedAt',
+        'passwordLoginEnabled', 'profileCompleted', 'onboardingCompletedAt',
+        'last_login_at', 'updated_at', 'lastLoginAt', 'updatedAt'
+      ];
+    }
+    function backendOnlyUserFields() {
+      return [
+        'role', 'is_staff', 'is_owner', 'branch_ids', 'branch_roles',
+        'primary_branch_id', 'token_version', 'permissions', 'staff_status',
+        'member_level', 'memberCode', 'tier', 'points', 'totalSpent',
+        'visitCount', 'orderCount', 'bookingCount', 'cartItemCount',
+        'status', 'adminNote', 'adminTags', 'authDisabled',
+        'emailVerified', 'emailVerifiedAt', 'authCreatedAt'
+      ];
+    }
+    function onlySafeUserProfileUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(safeUserProfileUpdateFields())
+        && immutableFieldsUnchanged(backendOnlyUserFields());
+    }
+    function onlySafeUserProfileCreate(userId) {
+      return isOwnDocument(userId)
+        && request.resource.data.keys().hasOnly(userProfileCreateFields())
+        && request.resource.data.keys().hasAll(['uid'])
+        && request.resource.data.uid == request.auth.uid;
+    }
+    function onlyNotificationReadUpdate() {
+      return ownsResource()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read_at', 'dismissed_at'])
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['read_at']) || request.resource.data.read_at is timestamp || request.resource.data.read_at == null)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['dismissed_at']) || request.resource.data.dismissed_at is timestamp || request.resource.data.dismissed_at == null);
+    }
+    function canReadStaffBranch(branchId) {
+      return isStaff()
+        && hasAnyRole(['OWNER', 'MANAGER', 'ARCHERY_STAFF', 'CASHIER'])
+        && hasBranch(branchId);
+    }
+    function canReadOwnerManagerBranch(branchId) {
+      return hasAnyRole(['OWNER', 'MANAGER']) && hasBranch(branchId);
+    }
+    function canReadOwnerManagerCashierBranch(branchId) {
+      return hasAnyRole(['OWNER', 'MANAGER', 'CASHIER']) && hasBranch(branchId);
+    }
+    function canReadResourceBranchAsStaff() {
+      return isOwner()
+        || (
+          resource.data.keys().hasAny(['branch_id'])
+          && canReadStaffBranch(resource.data.branch_id)
+        );
+    }
+    function canReadResourceBranchAsOwnerManager() {
+      return isOwner()
+        || (
+          resource.data.keys().hasAny(['branch_id'])
+          && canReadOwnerManagerBranch(resource.data.branch_id)
+        );
+    }
+    function canReadResourceBranchAsOwnerManagerCashier() {
+      return isOwner()
+        || (
+          resource.data.keys().hasAny(['branch_id'])
+          && canReadOwnerManagerCashierBranch(resource.data.branch_id)
+        );
     }
 
     // Publicly readable collections (content)
@@ -425,18 +598,57 @@ service cloud.firestore {
       allow read: if hasAdminPermission('loyalty')
         || hasAdminPermission('members')
         || (isSignedIn() && resource.data.userId == request.auth.uid);
-      allow create, update, delete: if hasAdminPermission('loyalty');
+      allow create, update, delete: if denyWrite();
     }
     match /member_summaries/{userId} {
-      allow read: if hasAdminPermission('loyalty')
-        || hasAdminPermission('members')
-        || hasAdminPermission('pos')
-        || (isSignedIn() && request.auth.uid == userId);
-      allow write: if hasAdminPermission('loyalty');
+      allow read: if isOwnDocument(userId)
+        || (resource.data.keys().hasAny(['member_id']) && isCustomerOwner(resource.data.member_id))
+        || canReadResourceBranchAsOwnerManagerCashier();
+      allow create, update, delete: if denyWrite();
     }
     match /google_reviews/{docId} {
       allow read: if true;
       allow write: if isOwner();
+    }
+    match /pos_apk_releases/{releaseId} {
+      allow read: if hasAdminPermission('pos');
+      allow create, update: if hasAdminPermission('pos')
+        && request.resource.data.keys().hasOnly([
+          'appId', 'versionName', 'versionCode', 'channel', 'status',
+          'sha256', 'size', 'storagePath', 'functionAsset', 'assetReference',
+          'releaseNotes', 'minSupportedVersionCode', 'forceUpdate',
+          'createdBy', 'createdAt', 'updatedBy', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'appId', 'versionName', 'versionCode', 'channel', 'status', 'sha256'
+        ])
+        && request.resource.data.appId == 'com.personal.pos'
+        && request.resource.data.versionName is string
+        && request.resource.data.versionName.size() > 0
+        && request.resource.data.versionName.size() <= 40
+        && request.resource.data.versionCode is number
+        && request.resource.data.versionCode > 0
+        && request.resource.data.versionCode <= 1000000
+        && request.resource.data.channel in ['test', 'pilot', 'production']
+        && request.resource.data.status in ['draft', 'active', 'revoked']
+        && request.resource.data.sha256 is string
+        && request.resource.data.sha256.matches('(?i)^[a-f0-9]{64}$')
+        && (!request.resource.data.keys().hasAny(['size']) || (request.resource.data.size is number && request.resource.data.size >= 0))
+        && (!request.resource.data.keys().hasAny(['storagePath']) || (request.resource.data.storagePath is string && request.resource.data.storagePath.size() <= 300))
+        && (!request.resource.data.keys().hasAny(['functionAsset']) || (request.resource.data.functionAsset is string && request.resource.data.functionAsset.size() <= 180))
+        && (!request.resource.data.keys().hasAny(['assetReference']) || (request.resource.data.assetReference is string && request.resource.data.assetReference.size() <= 180))
+        && (!request.resource.data.keys().hasAny(['releaseNotes']) || (request.resource.data.releaseNotes is string && request.resource.data.releaseNotes.size() <= 4000))
+        && (!request.resource.data.keys().hasAny(['minSupportedVersionCode']) || (request.resource.data.minSupportedVersionCode is number && request.resource.data.minSupportedVersionCode >= 0))
+        && (!request.resource.data.keys().hasAny(['forceUpdate']) || request.resource.data.forceUpdate is bool);
+      allow delete: if isOwner();
+    }
+    match /pos_update_events/{eventId} {
+      allow read: if hasAdminPermission('pos');
+      allow write: if false;
+    }
+    match /pos_devices/{deviceId} {
+      allow read: if hasAdminPermission('pos');
+      allow write: if false;
     }
     match /admin_users/{userId} {
       allow read: if isOwner()
@@ -460,119 +672,23 @@ service cloud.firestore {
       allow delete: if isOwner() && request.auth.uid != userId;
     }
     match /users/{userId} {
-      allow read: if hasAdminPermission('members') || hasAdminPermission('loyalty') || hasAdminPermission('pos') || (isSignedIn() && request.auth.uid == userId);
-      allow write: if hasAdminPermission('members');
-      allow create: if isSignedIn()
-        && request.auth.uid == userId
-        && request.resource.data.keys().hasOnly([
-          'uid', 'displayName', 'email', 'photoURL', 'phone', 'phoneE164',
-          'id', 'phone_number', 'phone_display', 'email_lower', 'display_name',
-          'avatar_url', 'member_level',
-          'firstName', 'lastName', 'loginUsername', 'phoneAuthEmail',
-          'shippingAddress', 'birthDate', 'allergies', 'healthNote',
-          'lineId', 'authProviderIds', 'registrationSource',
-          'marketingConsent', 'privacyConsent', 'phoneVerifiedAt',
-          'passwordLoginEnabled', 'profileCompleted', 'onboardingCompletedAt',
-          'created_at', 'updated_at', 'last_login_at',
-          'updatedAt'
-        ])
-        && request.resource.data.keys().hasAll(['uid', 'displayName', 'email', 'updatedAt'])
-        && request.resource.data.uid == request.auth.uid
-        && isShortString(request.resource.data.displayName, 120)
-        && request.resource.data.email is string
-        && request.resource.data.email.size() <= 180
-        && (!request.resource.data.keys().hasAny(['id']) || (request.resource.data.id is string && request.resource.data.id.size() <= 160))
-        && (!request.resource.data.keys().hasAny(['phone_number']) || (request.resource.data.phone_number is string && request.resource.data.phone_number.size() <= 40))
-        && (!request.resource.data.keys().hasAny(['phone_display']) || (request.resource.data.phone_display is string && request.resource.data.phone_display.size() <= 40))
-        && (!request.resource.data.keys().hasAny(['email_lower']) || (request.resource.data.email_lower is string && request.resource.data.email_lower.size() <= 180))
-        && (!request.resource.data.keys().hasAny(['display_name']) || (request.resource.data.display_name is string && request.resource.data.display_name.size() <= 120))
-        && (!request.resource.data.keys().hasAny(['avatar_url']) || (request.resource.data.avatar_url is string && request.resource.data.avatar_url.size() <= 500))
-        && (!request.resource.data.keys().hasAny(['member_level']) || request.resource.data.member_level in ['Silver', 'Gold', 'Platinum'])
-        && (!request.resource.data.keys().hasAny(['photoURL']) || (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 500))
-        && (!request.resource.data.keys().hasAny(['phone']) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40))
-        && (!request.resource.data.keys().hasAny(['phoneE164']) || (request.resource.data.phoneE164 is string && request.resource.data.phoneE164.size() <= 40))
-        && (!request.resource.data.keys().hasAny(['firstName']) || (request.resource.data.firstName is string && request.resource.data.firstName.size() <= 80))
-        && (!request.resource.data.keys().hasAny(['lastName']) || (request.resource.data.lastName is string && request.resource.data.lastName.size() <= 80))
-        && (!request.resource.data.keys().hasAny(['loginUsername']) || (request.resource.data.loginUsername is string && request.resource.data.loginUsername.size() <= 40))
-        && (!request.resource.data.keys().hasAny(['phoneAuthEmail']) || (request.resource.data.phoneAuthEmail is string && request.resource.data.phoneAuthEmail.size() <= 180))
-        && (!request.resource.data.keys().hasAny(['shippingAddress']) || (request.resource.data.shippingAddress is string && request.resource.data.shippingAddress.size() <= 500))
-        && (!request.resource.data.keys().hasAny(['birthDate']) || (request.resource.data.birthDate is string && request.resource.data.birthDate.size() <= 20))
-        && (!request.resource.data.keys().hasAny(['allergies']) || (request.resource.data.allergies is string && request.resource.data.allergies.size() <= 200))
-        && (!request.resource.data.keys().hasAny(['healthNote']) || (request.resource.data.healthNote is string && request.resource.data.healthNote.size() <= 500))
-        && (!request.resource.data.keys().hasAny(['lineId']) || (request.resource.data.lineId is string && request.resource.data.lineId.size() <= 80))
-        && (!request.resource.data.keys().hasAny(['authProviderIds']) || request.resource.data.authProviderIds is list)
-        && (!request.resource.data.keys().hasAny(['registrationSource']) || (request.resource.data.registrationSource is string && request.resource.data.registrationSource.size() <= 40))
-        && (!request.resource.data.keys().hasAny(['marketingConsent']) || request.resource.data.marketingConsent is bool)
-        && (!request.resource.data.keys().hasAny(['privacyConsent']) || request.resource.data.privacyConsent is bool)
-        && (!request.resource.data.keys().hasAny(['phoneVerifiedAt']) || request.resource.data.phoneVerifiedAt == request.time)
-        && (!request.resource.data.keys().hasAny(['passwordLoginEnabled']) || request.resource.data.passwordLoginEnabled is bool)
-        && (!request.resource.data.keys().hasAny(['profileCompleted']) || request.resource.data.profileCompleted is bool)
-        && (!request.resource.data.keys().hasAny(['onboardingCompletedAt']) || request.resource.data.onboardingCompletedAt == request.time)
-        && request.resource.data.updatedAt == request.time;
-      allow update: if isSignedIn()
-        && request.auth.uid == userId
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'displayName', 'email', 'photoURL', 'phone', 'phoneE164',
-          'firstName', 'lastName', 'loginUsername', 'phoneAuthEmail',
-          'shippingAddress', 'birthDate', 'allergies', 'healthNote',
-          'lineId', 'authProviderIds', 'registrationSource',
-          'marketingConsent', 'privacyConsent', 'phoneVerifiedAt',
-          'passwordLoginEnabled', 'profileCompleted', 'onboardingCompletedAt',
-          'emailVerified', 'emailVerifiedAt',
-          'updatedAt'
-        ])
-        && request.resource.data.keys().hasOnly([
-          'uid', 'displayName', 'email', 'photoURL', 'phone', 'phoneE164',
-          'id', 'phone_number', 'phone_display', 'email_lower', 'display_name',
-          'avatar_url', 'member_level',
-          'firstName', 'lastName', 'loginUsername', 'phoneAuthEmail',
-          'shippingAddress', 'birthDate', 'allergies', 'healthNote',
-          'lineId', 'authProviderIds', 'registrationSource',
-          'marketingConsent', 'privacyConsent', 'phoneVerifiedAt',
-          'memberCode', 'tier', 'points', 'totalSpent',
-          'visitCount', 'orderCount', 'bookingCount', 'cartItemCount',
-          'status', 'adminNote', 'adminTags',
-          'authDisabled', 'emailVerified', 'emailVerifiedAt',
-          'passwordLoginEnabled', 'profileCompleted', 'onboardingCompletedAt',
-          'authCreatedAt', 'lastLoginAt',
-          'created_at', 'updated_at', 'last_login_at',
-          'createdAt', 'updatedAt'
-        ])
-        && request.resource.data.uid == request.auth.uid
-        && isShortString(request.resource.data.displayName, 120)
-        && request.resource.data.email is string
-        && request.resource.data.email.size() <= 180
-        && (!request.resource.data.keys().hasAny(['id']) || (request.resource.data.id is string && request.resource.data.id.size() <= 160))
-        && (!request.resource.data.keys().hasAny(['phone_number']) || (request.resource.data.phone_number is string && request.resource.data.phone_number.size() <= 40))
-        && (!request.resource.data.keys().hasAny(['phone_display']) || (request.resource.data.phone_display is string && request.resource.data.phone_display.size() <= 40))
-        && (!request.resource.data.keys().hasAny(['email_lower']) || (request.resource.data.email_lower is string && request.resource.data.email_lower.size() <= 180))
-        && (!request.resource.data.keys().hasAny(['display_name']) || (request.resource.data.display_name is string && request.resource.data.display_name.size() <= 120))
-        && (!request.resource.data.keys().hasAny(['avatar_url']) || (request.resource.data.avatar_url is string && request.resource.data.avatar_url.size() <= 500))
-        && (!request.resource.data.keys().hasAny(['member_level']) || request.resource.data.member_level in ['Silver', 'Gold', 'Platinum'])
-        && (!request.resource.data.keys().hasAny(['photoURL']) || (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 500))
-        && (!request.resource.data.keys().hasAny(['phone']) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40))
-        && (!request.resource.data.keys().hasAny(['phoneE164']) || (request.resource.data.phoneE164 is string && request.resource.data.phoneE164.size() <= 40))
-        && (!request.resource.data.keys().hasAny(['firstName']) || (request.resource.data.firstName is string && request.resource.data.firstName.size() <= 80))
-        && (!request.resource.data.keys().hasAny(['lastName']) || (request.resource.data.lastName is string && request.resource.data.lastName.size() <= 80))
-        && (!request.resource.data.keys().hasAny(['loginUsername']) || (request.resource.data.loginUsername is string && request.resource.data.loginUsername.size() <= 40))
-        && (!request.resource.data.keys().hasAny(['phoneAuthEmail']) || (request.resource.data.phoneAuthEmail is string && request.resource.data.phoneAuthEmail.size() <= 180))
-        && (!request.resource.data.keys().hasAny(['shippingAddress']) || (request.resource.data.shippingAddress is string && request.resource.data.shippingAddress.size() <= 500))
-        && (!request.resource.data.keys().hasAny(['birthDate']) || (request.resource.data.birthDate is string && request.resource.data.birthDate.size() <= 20))
-        && (!request.resource.data.keys().hasAny(['allergies']) || (request.resource.data.allergies is string && request.resource.data.allergies.size() <= 200))
-        && (!request.resource.data.keys().hasAny(['healthNote']) || (request.resource.data.healthNote is string && request.resource.data.healthNote.size() <= 500))
-        && (!request.resource.data.keys().hasAny(['lineId']) || (request.resource.data.lineId is string && request.resource.data.lineId.size() <= 80))
-        && (!request.resource.data.keys().hasAny(['authProviderIds']) || request.resource.data.authProviderIds is list)
-        && (!request.resource.data.keys().hasAny(['registrationSource']) || (request.resource.data.registrationSource is string && request.resource.data.registrationSource.size() <= 40))
-        && (!request.resource.data.keys().hasAny(['marketingConsent']) || request.resource.data.marketingConsent is bool)
-        && (!request.resource.data.keys().hasAny(['privacyConsent']) || request.resource.data.privacyConsent is bool)
-        && (!request.resource.data.keys().hasAny(['phoneVerifiedAt']) || request.resource.data.phoneVerifiedAt is timestamp)
-        && (!request.resource.data.keys().hasAny(['passwordLoginEnabled']) || request.resource.data.passwordLoginEnabled is bool)
-        && (!request.resource.data.keys().hasAny(['profileCompleted']) || request.resource.data.profileCompleted is bool)
-        && (!request.resource.data.keys().hasAny(['onboardingCompletedAt']) || request.resource.data.onboardingCompletedAt is timestamp)
-        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['emailVerified']) || request.resource.data.emailVerified == false)
-        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['emailVerifiedAt']) || request.resource.data.emailVerifiedAt == null)
-        && request.resource.data.updatedAt == request.time;
-      allow delete: if isAdmin();
+      allow read: if isOwner()
+        || isOwnDocument(userId)
+        || (
+          isStaff()
+          && resource.data.keys().hasAny(['branch_ids'])
+          && request.auth.token.keys().hasAny(['branch_ids'])
+          && request.auth.token.branch_ids.hasAny(resource.data.branch_ids)
+        )
+        || (
+          isStaff()
+          && resource.data.keys().hasAny(['primary_branch_id'])
+          && hasBranch(resource.data.primary_branch_id)
+        );
+      allow create: if onlySafeUserProfileCreate(userId);
+      allow update: if isOwnDocument(userId)
+        && onlySafeUserProfileUpdate();
+      allow delete: if noDelete();
     }
     match /user_credentials/{userId} {
       allow read, write: if false;
@@ -624,40 +740,97 @@ service cloud.firestore {
       allow delete: if hasAdminPermission('orders');
     }
     match /bookings/{docId} {
-      allow create: if isSignedIn()
-        && request.resource.data.keys().hasOnly([
-          'bookingType', 'name', 'phone', 'guests', 'date', 'roomType',
-          'tableZone', 'tableNo', 'tableIds', 'arrivalTime', 'startTime',
-          'endTime', 'hours', 'price', 'addons', 'note', 'status',
-          'uid', 'timestamp'
-        ])
-        && request.resource.data.keys().hasAll(['bookingType', 'name', 'phone', 'date', 'uid', 'timestamp'])
-        && request.resource.data.uid == request.auth.uid
-        && request.resource.data.bookingType in ['table', 'room']
-        && isShortString(request.resource.data.name, 120)
-        && isShortString(request.resource.data.phone, 40)
-        && isShortString(request.resource.data.date, 40)
-        && (!request.resource.data.keys().hasAny(['status']) || request.resource.data.status == 'pending')
-        && (!request.resource.data.keys().hasAny(['note']) || (request.resource.data.note is string && request.resource.data.note.size() <= 300))
-        && (!request.resource.data.keys().hasAny(['guests']) || (request.resource.data.guests is number && request.resource.data.guests >= 1 && request.resource.data.guests <= 99))
-        && (!request.resource.data.keys().hasAny(['arrivalTime']) || (request.resource.data.arrivalTime is string && request.resource.data.arrivalTime.size() <= 10))
-        && (!request.resource.data.keys().hasAny(['startTime']) || (request.resource.data.startTime is string && request.resource.data.startTime.size() <= 10))
-        && (!request.resource.data.keys().hasAny(['endTime']) || (request.resource.data.endTime is string && request.resource.data.endTime.size() <= 10))
-        && (!request.resource.data.keys().hasAny(['tableNo']) || isShortString(request.resource.data.tableNo, 80))
-        && (!request.resource.data.keys().hasAny(['tableZone']) || isShortString(request.resource.data.tableZone, 120))
-        && (
-          request.resource.data.bookingType != 'table'
-          || (
-            request.resource.data.keys().hasAny(['tableIds'])
-            && request.resource.data.tableIds is list
-            && request.resource.data.tableIds.size() > 0
-            && request.resource.data.tableIds.size() <= 3
-          )
+      allow read: if ownsResource() || canReadResourceBranchAsStaff();
+      allow create, update, delete: if denyWrite();
+    }
+    match /booking_items/{docId} {
+      allow read: if ownsResource() || canReadResourceBranchAsStaff();
+      allow create, update, delete: if denyWrite();
+    }
+    match /resource_types/{docId} {
+      allow read: if canReadResourceBranchAsStaff();
+      allow create, update, delete: if denyWrite();
+    }
+    match /resources/{docId} {
+      allow read: if canReadResourceBranchAsStaff();
+      allow create, update, delete: if denyWrite();
+    }
+    match /resource_locks/{docId} {
+      allow read: if canReadResourceBranchAsStaff();
+      allow create, update, delete: if denyWrite();
+    }
+    match /lane_sessions/{docId} {
+      allow read: if canReadResourceBranchAsStaff();
+      allow create, update, delete: if denyWrite();
+    }
+    match /payments/{docId} {
+      allow read: if ownsResource() || canReadResourceBranchAsOwnerManagerCashier();
+      allow create, update, delete: if denyWrite();
+    }
+    match /payment_webhook_events/{docId} {
+      allow read: if canReadResourceBranchAsOwnerManager();
+      allow create, update, delete: if denyWrite();
+    }
+    match /payment_reconciliation_queue/{docId} {
+      allow read: if canReadResourceBranchAsOwnerManager();
+      allow create, update, delete: if denyWrite();
+    }
+    match /reward_points/{docId} {
+      allow read: if ownsResource() || canReadResourceBranchAsOwnerManager();
+      allow create, update, delete: if denyWrite();
+    }
+    match /audit_logs/{docId} {
+      allow read: if canReadResourceBranchAsOwnerManager();
+      allow create, update, delete: if denyWrite();
+    }
+    match /staff_sessions/{docId} {
+      allow read: if (
+          isStaff()
+          && resource.data.keys().hasAny(['staff_id'])
+          && resource.data.staff_id == request.auth.uid
         )
-        && (!request.resource.data.keys().hasAny(['addons']) || (request.resource.data.addons is list && request.resource.data.addons.size() <= 20))
-        && request.resource.data.timestamp == request.time;
-      allow read: if hasAdminPermission('bookings') || ownsResource();
-      allow update, delete: if hasAdminPermission('bookings');
+        || canReadResourceBranchAsOwnerManager();
+      allow create, update, delete: if denyWrite();
+    }
+    match /pos_orders/{docId} {
+      allow read: if ownsResource() || canReadResourceBranchAsStaff();
+      allow create, update, delete: if denyWrite();
+    }
+    match /pos_order_items/{docId} {
+      allow read: if ownsResource() || canReadResourceBranchAsStaff();
+      allow create, update, delete: if denyWrite();
+    }
+    match /payment_allocations/{docId} {
+      allow read: if ownsResource() || canReadResourceBranchAsOwnerManagerCashier();
+      allow create, update, delete: if denyWrite();
+    }
+    match /notifications/{docId} {
+      allow read: if ownsResource() || canReadResourceBranchAsOwnerManager();
+      allow create: if denyWrite();
+      allow update: if onlyNotificationReadUpdate();
+      allow delete: if noDelete();
+    }
+    match /notification_templates/{docId} {
+      allow read: if canReadResourceBranchAsOwnerManager();
+      allow create, update, delete: if denyWrite();
+    }
+    match /uploads/{docId} {
+      allow read: if ownsResource() || canReadResourceBranchAsStaff();
+      allow create, update, delete: if denyWrite();
+    }
+    match /idempotency_keys/{docId} {
+      allow read, write: if false;
+    }
+    match /system_configs/{docId} {
+      allow read: if isOwner()
+        || (
+          hasRole('MANAGER')
+          && (
+            !resource.data.keys().hasAny(['branch_id'])
+            || hasBranch(resource.data.branch_id)
+          )
+        );
+      allow create, update, delete: if denyWrite();
     }
     match /table_availability/{docId} {
       allow read: if true;
