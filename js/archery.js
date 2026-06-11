@@ -73,6 +73,14 @@ function timeLabel(minutes) {
     return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
 }
 
+function displayTime(value) {
+    return String(value || '').replace(':', '.');
+}
+
+function displayTimeRange(start, end) {
+    return [start, end].filter(Boolean).map(displayTime).join('-');
+}
+
 function minutesFromTime(time) {
     const [h, m] = String(time || '00:00').split(':').map(Number);
     return (h * 60) + (m || 0);
@@ -338,10 +346,10 @@ function fillTimeOptions() {
     const duration = packageMinutes();
     const lastStart = (20 * 60) - duration;
     select.innerHTML = '';
-    for (let minute = 10 * 60; minute <= lastStart; minute += 15) {
+    for (let minute = 10 * 60; minute <= lastStart; minute += 60) {
         const opt = document.createElement('option');
         opt.value = timeLabel(minute);
-        opt.textContent = timeLabel(minute);
+        opt.textContent = displayTime(timeLabel(minute));
         select.appendChild(opt);
     }
     if (selected && Array.from(select.options).some(opt => opt.value === selected)) {
@@ -374,7 +382,7 @@ function renderDraftSummaryLegacy() {
     const duration = packageMinutes();
     el.innerHTML = summaryRows([
         ['วันที่', selectedDate()],
-        ['เวลา', selectedStartTime() + '-' + selectedEndTime()],
+        ['เวลา', displayTimeRange(selectedStartTime(), selectedEndTime())],
         ['แพ็กเกจ', duration + ' นาที'],
         ['ยอดรวม', money(PACKAGE_PRICES[duration])]
     ]);
@@ -387,7 +395,7 @@ function renderDraftSummary() {
     const pricing = calculateDraftPricing();
     el.innerHTML = summaryRows([
         ['Date', selectedDate()],
-        ['Time', selectedStartTime() + '-' + selectedEndTime()],
+        ['Time', displayTimeRange(selectedStartTime(), selectedEndTime())],
         ['Package', duration + ' min'],
         ['People', String(pricing.partySize)],
         ['Lanes needed', String(pricing.requiredLaneCount)],
@@ -408,7 +416,7 @@ function renderSuggestions(times = []) {
     el.innerHTML = `
         <p>เวลาที่แนะนำ</p>
         <div class="archery-suggestion-row">
-            ${times.map(time => `<button type="button" data-start-time="${escapeHTML(time)}">${escapeHTML(time)}</button>`).join('')}
+            ${times.map(time => `<button type="button" data-start-time="${escapeHTML(time)}">${escapeHTML(displayTime(time))}</button>`).join('')}
         </div>
     `;
     el.querySelectorAll('button[data-start-time]').forEach(button => {
@@ -717,7 +725,7 @@ function renderHoldSummaryLegacy(hold) {
     el.innerHTML = summaryRows([
         ['Booking ID', hold.booking_id],
         ['วันที่', hold.booking_date],
-        ['เวลา', hold.start_time + '-' + (hold.end_time || timeLabel(minutesFromTime(hold.start_time) + duration))],
+        ['เวลา', displayTimeRange(hold.start_time, hold.end_time || timeLabel(minutesFromTime(hold.start_time) + duration))],
         ['แพ็กเกจ', duration + ' นาที'],
         ['ยอดรวม', money(hold.amount_total || PACKAGE_PRICES[duration])],
         ['Payment', hold.payment_status || 'UNPAID']
@@ -738,7 +746,7 @@ function renderHoldSummary(hold) {
     el.innerHTML = summaryRows([
         ['Booking ID', hold.booking_id],
         ['Date', hold.booking_date],
-        ['Time', hold.start_time + '-' + (hold.end_time || timeLabel(minutesFromTime(hold.start_time) + duration))],
+        ['Time', displayTimeRange(hold.start_time, hold.end_time || timeLabel(minutesFromTime(hold.start_time) + duration))],
         ['Package', duration + ' min'],
         ['People', String(hold.party_size || 1)],
         ['Lanes needed', String(hold.required_lane_count || hold.party_size || 1)],
@@ -979,7 +987,7 @@ function renderConfirmPageBooking(booking) {
         summary.innerHTML = summaryRows([
             ['Booking ID', bookingId],
             ['วันที่', bookingDate],
-            ['เวลา', [startTime, endTime].filter(Boolean).join('-')],
+            ['เวลา', displayTimeRange(startTime, endTime)],
             ['แพ็กเกจ', duration + ' นาที'],
             ['People', String(party)],
             ['Lanes', laneNumbers || '-'],

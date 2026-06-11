@@ -3580,6 +3580,10 @@ function adminTimeFromMinutes(value) {
     return String(Math.floor(minutes / 60)).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0');
 }
 
+function adminDisplayArcheryTime(value) {
+    return String(value || '').replace(':', '.');
+}
+
 function adminFillArcheryTimeOptions() {
     const startSelect = document.getElementById('archery-admin-start');
     if (!startSelect) return;
@@ -3587,10 +3591,10 @@ function adminFillArcheryTimeOptions() {
     const duration = Number(document.getElementById('archery-admin-package')?.value || 60) || 60;
     const lastStart = (20 * 60) - duration;
     startSelect.innerHTML = '';
-    for (let minute = 10 * 60; minute <= lastStart; minute += 15) {
+    for (let minute = 10 * 60; minute <= lastStart; minute += 60) {
         const opt = document.createElement('option');
         opt.value = adminTimeFromMinutes(minute);
-        opt.textContent = adminTimeFromMinutes(minute);
+        opt.textContent = adminDisplayArcheryTime(adminTimeFromMinutes(minute));
         startSelect.appendChild(opt);
     }
     if (selected && Array.from(startSelect.options).some(opt => opt.value === selected)) startSelect.value = selected;

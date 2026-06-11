@@ -47,9 +47,9 @@ function normalizeDate(value) {
 }
 
 function normalizeTime(value) {
-  const time = cleanString(value, 10);
+  const time = cleanString(value, 10).replace('.', ':');
   if (!/^\d{2}:\d{2}$/.test(time)) {
-    throw apiError('INVALID_TIME_FORMAT', 400, 'start_time must be HH:mm');
+    throw apiError('INVALID_TIME_FORMAT', 400, 'start_time must be HH:mm or HH.mm');
   }
   const [hours, minutes] = time.split(':').map(Number);
   if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
@@ -102,10 +102,10 @@ function normalizeTiming(raw = {}) {
   if (
     startMinutes < OPEN_MINUTES
     || endMinutes > CLOSE_MINUTES
-    || startMinutes % SLOT_MINUTES !== 0
+    || startMinutes % 60 !== 0
     || endMinutes % SLOT_MINUTES !== 0
   ) {
-    throw apiError('OUTSIDE_OPERATING_HOURS', 400, 'Archery booking must be within 10:00-20:00 and 15-minute slots');
+    throw apiError('OUTSIDE_OPERATING_HOURS', 400, 'Archery start time must be 10.00-19.00 on the hour and finish by 20.00');
   }
   return {
     booking_date: bookingDate,

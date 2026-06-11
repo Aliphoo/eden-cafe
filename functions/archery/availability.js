@@ -5,7 +5,6 @@ const {
   SERVICE_TYPE,
   OPEN_MINUTES,
   CLOSE_MINUTES,
-  SLOT_MINUTES,
   normalizeBranchId,
   normalizeTiming,
   normalizeDate,
@@ -34,7 +33,7 @@ async function countAvailableLanes(db, branchId, slotKeys) {
 
 async function suggestedTimes(db, branchId, bookingDate, durationMinutes, requestedStartTime = '', requiredCount = 1) {
   const suggestions = [];
-  for (let minute = OPEN_MINUTES; minute + durationMinutes <= CLOSE_MINUTES; minute += SLOT_MINUTES) {
+  for (let minute = OPEN_MINUTES; minute + durationMinutes <= CLOSE_MINUTES; minute += 60) {
     const startTime = timeFromMinutes(minute);
     if (requestedStartTime && startTime === requestedStartTime) continue;
     const timing = normalizeTiming({
