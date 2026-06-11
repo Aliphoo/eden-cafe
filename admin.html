@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Eden Cafe - Admin Dashboard</title>
     <link rel="icon" href="Images/Logo.webp" type="image/webp">
+    <link rel="stylesheet" href="archery.css?v=archery-admin-ux-1">
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
     <!-- Chart.js -->
@@ -94,6 +95,82 @@
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
         .admin-profile { display: flex; align-items: center; gap: 10px; }
         .admin-profile img { width: 40px; height: 40px; border-radius: 50%; }
+
+        /* Manager Dashboard */
+        .manager-dashboard { display: grid; gap: 18px; }
+        .dashboard-titlebar { display: flex; justify-content: space-between; align-items: flex-end; gap: 18px; flex-wrap: wrap; }
+        .dashboard-titlebar h2 { color: #17231d; font-size: 1.65rem; line-height: 1.2; margin: 0; }
+        .dashboard-titlebar p { color: #65746c; margin-top: 5px; }
+        .dashboard-filter-summary { color: #4f5c55; font-weight: 700; background: #fff; border: 1px solid #dfe7e1; border-radius: 6px; padding: 10px 12px; }
+        .dashboard-control-band { background: #fff; border: 1px solid #dce7df; border-radius: 8px; padding: 16px; display: grid; gap: 14px; box-shadow: 0 8px 22px rgba(25, 42, 32, 0.06); }
+        .dashboard-control-grid { display: grid; grid-template-columns: minmax(280px, 1.4fr) minmax(220px, 1fr) minmax(220px, 0.9fr) minmax(220px, 0.9fr); gap: 14px; align-items: end; }
+        .dashboard-control-group { min-width: 0; display: grid; gap: 8px; }
+        .dashboard-control-group > label, .dashboard-control-label { color: #32453a; font-size: 0.78rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0; }
+        .dashboard-segmented { display: flex; flex-wrap: wrap; gap: 6px; }
+        .dashboard-segmented button { min-height: 36px; border: 1px solid #d6e1da; background: #f8fbf9; color: #33433a; padding: 0 11px; border-radius: 6px; font: inherit; font-weight: 700; cursor: pointer; }
+        .dashboard-segmented button.active { background: #17452f; color: #fff; border-color: #17452f; }
+        .dashboard-field-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        .dashboard-field-row input, .dashboard-control-group select { min-height: 38px; border: 1px solid #d6e1da; border-radius: 6px; background: #fff; padding: 0 10px; font: inherit; color: #1f2f27; min-width: 0; }
+        .dashboard-field-row input[type="date"] { flex: 1 1 138px; }
+        .dashboard-field-row input[type="time"] { flex: 1 1 104px; }
+        .dashboard-custom-fields { display: none; }
+        .dashboard-custom-fields.active { display: flex; }
+        .dashboard-section { display: grid; gap: 12px; }
+        .dashboard-section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .dashboard-section-head h3 { color: #17231d; font-size: 1.05rem; margin: 0; }
+        .dashboard-section-head small { color: #6a776f; font-weight: 600; }
+        .dashboard-kpi-grid { display: grid; grid-template-columns: repeat(6, minmax(150px, 1fr)); gap: 10px; }
+        .dashboard-kpi-card, .dashboard-queue-item, .dashboard-health-card, .dashboard-mini-card { background: #fff; border: 1px solid #dfe8e2; border-radius: 8px; padding: 14px; box-shadow: 0 6px 18px rgba(25, 42, 32, 0.05); min-width: 0; }
+        .dashboard-kpi-card { min-height: 132px; display: grid; align-content: space-between; gap: 8px; border-top: 4px solid #2f6f4e; }
+        .dashboard-kpi-card.sales { border-top-color: #2368a2; }
+        .dashboard-kpi-card.profit { border-top-color: #2f7d53; }
+        .dashboard-kpi-card.discount { border-top-color: #b7791f; }
+        .dashboard-kpi-card.risk { border-top-color: #bf4342; }
+        .dashboard-kpi-card small, .dashboard-mini-card small, .dashboard-health-card small { color: #68776f; font-weight: 700; }
+        .dashboard-kpi-card strong { color: #15241b; font-size: 1.38rem; line-height: 1.1; overflow-wrap: anywhere; }
+        .dashboard-kpi-card span { color: #64736b; font-size: 0.85rem; }
+        .dashboard-link-btn { border: 0; background: transparent; color: #2368a2; font: inherit; font-weight: 800; padding: 0; cursor: pointer; text-align: left; }
+        .dashboard-queue-grid { display: grid; grid-template-columns: repeat(5, minmax(160px, 1fr)); gap: 10px; }
+        .dashboard-queue-item { text-align: left; cursor: pointer; min-height: 110px; border-left: 4px solid #b7791f; }
+        .dashboard-queue-item strong { display: block; color: #15241b; font-size: 1.45rem; margin: 4px 0; }
+        .dashboard-queue-item span { color: #66746d; font-size: 0.86rem; }
+        .dashboard-analytics-grid { display: grid; grid-template-columns: minmax(260px, 0.85fr) minmax(260px, 0.85fr) minmax(280px, 1.15fr); gap: 12px; align-items: stretch; }
+        .dashboard-chart-panel, .dashboard-list-panel { background: #fff; border: 1px solid #dfe8e2; border-radius: 8px; padding: 14px; box-shadow: 0 6px 18px rgba(25, 42, 32, 0.05); min-width: 0; }
+        .dashboard-chart-panel h4, .dashboard-list-panel h4 { color: #25352d; margin-bottom: 10px; font-size: 0.98rem; }
+        .dashboard-chart-wrap { height: 220px; }
+        .dashboard-chart-wrap canvas { width: 100% !important; height: 100% !important; }
+        .dashboard-list-stack { display: grid; gap: 12px; }
+        .dashboard-data-list { display: grid; gap: 7px; }
+        .dashboard-data-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; color: #2f4037; font-weight: 700; }
+        .dashboard-data-row small { color: #718078; font-weight: 600; display: block; margin-top: 2px; }
+        .dashboard-bar { height: 6px; background: #edf3ef; border-radius: 999px; overflow: hidden; margin-top: 5px; }
+        .dashboard-bar span { display: block; height: 100%; background: #2368a2; border-radius: inherit; }
+        .dashboard-detail-grid { display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 10px; }
+        .dashboard-mini-card { display: grid; gap: 7px; min-height: 110px; }
+        .dashboard-mini-card strong { color: #18271f; font-size: 1.25rem; }
+        .dashboard-inventory-grid { display: grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap: 12px; }
+        .dashboard-health-grid { display: grid; grid-template-columns: repeat(5, minmax(170px, 1fr)); gap: 10px; }
+        .dashboard-health-card { display: grid; gap: 7px; min-height: 118px; border-top: 4px solid #2368a2; }
+        .dashboard-health-card.ok { border-top-color: #2f7d53; }
+        .dashboard-health-card.warn { border-top-color: #b7791f; }
+        .dashboard-health-card.risk { border-top-color: #bf4342; }
+        .dashboard-health-card strong { color: #17231d; font-size: 1.1rem; }
+        .dashboard-empty { color: #6f7c75; border: 1px dashed #d2ddd6; border-radius: 8px; padding: 12px; background: #fbfdfb; }
+        @media (max-width: 1320px) {
+            .dashboard-control-grid { grid-template-columns: repeat(2, minmax(240px, 1fr)); }
+            .dashboard-kpi-grid { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
+            .dashboard-queue-grid, .dashboard-health-grid { grid-template-columns: repeat(3, minmax(160px, 1fr)); }
+            .dashboard-analytics-grid { grid-template-columns: 1fr 1fr; }
+            .dashboard-list-panel { grid-column: 1 / -1; }
+        }
+        @media (max-width: 860px) {
+            .dashboard-control-grid, .dashboard-analytics-grid, .dashboard-detail-grid, .dashboard-inventory-grid { grid-template-columns: 1fr; }
+            .dashboard-kpi-grid, .dashboard-queue-grid, .dashboard-health-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+        }
+        @media (max-width: 560px) {
+            .dashboard-kpi-grid, .dashboard-queue-grid, .dashboard-health-grid { grid-template-columns: 1fr; }
+            .dashboard-segmented button { flex: 1 1 auto; }
+        }
 
         /* Sales Dashboard */
         .sales-dashboard-shell { background: #f5f6f6; border-radius: 10px; overflow: hidden; box-shadow: 0 10px 30px rgba(17, 38, 30, 0.08); border: 1px solid #e4e8e5; }
@@ -392,7 +469,7 @@
         .member-auth-check-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
         .member-auth-check-head h3 { color: var(--primary-color); margin: 0 0 4px; }
         .member-auth-check-head p, .member-auth-hint { color: #62736a; line-height: 1.55; margin: 0; }
-        .member-auth-check-form { display: grid; grid-template-columns: minmax(190px, 1fr) minmax(160px, 0.8fr) minmax(170px, 0.9fr) auto auto; gap: 10px; align-items: center; margin: 14px 0; }
+        .member-auth-check-form { display: grid; grid-template-columns: minmax(190px, 1fr) minmax(160px, 0.8fr) minmax(170px, 0.9fr) auto auto auto; gap: 10px; align-items: center; margin: 14px 0; }
         .member-auth-check-form input { width: 100%; padding: 11px 12px; border: 1px solid #dbe8df; border-radius: 12px; background: #fff; font-size: 0.92rem; }
         .member-auth-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 6px 11px; font-size: 0.8rem; font-weight: 700; border: 1px solid #dfe8df; background: #f8fbf8; color: #52645a; }
         .member-auth-chip.ok { background: #eaf7ec; border-color: #b9dfc0; color: #1b5e20; }
@@ -603,6 +680,26 @@
         .promptpay-preview-meta { display: grid; gap: 8px; }
         .promptpay-preview-meta strong { display: block; font-size: 1.05rem; margin-top: 2px; }
         .promptpay-preview-note { border-top: 1px solid rgba(255,255,255,0.18); margin-top: 16px; padding-top: 14px; color: rgba(255,255,255,0.78); font-size: 0.9rem; line-height: 1.6; }
+        .apk-admin-grid { display: grid; grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.25fr); gap: 22px; align-items: start; }
+        .apk-admin-card { background: #fbfff8; border: 1px solid #e0eadc; border-radius: 16px; padding: 20px; box-shadow: 0 10px 24px rgba(26, 147, 69, 0.06); }
+        .apk-admin-card h3 { color: #123528; margin: 0 0 14px; }
+        .apk-admin-form { display: grid; gap: 12px; }
+        .apk-admin-form label { display: grid; gap: 6px; color: #34443b; font-weight: 700; }
+        .apk-admin-form input, .apk-admin-form select, .apk-admin-form textarea { border: 1px solid #dfe8df; border-radius: 8px; padding: 10px 12px; font: inherit; width: 100%; background: #fff; }
+        .apk-admin-form textarea { min-height: 92px; resize: vertical; }
+        .apk-admin-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+        .apk-admin-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .apk-admin-status { min-height: 22px; color: #607568; font-weight: 700; }
+        .apk-admin-status.error { color: #c62828; }
+        .apk-admin-status.success { color: #0f8a4c; }
+        .apk-admin-table-wrap { overflow: auto; border: 1px solid #edf1ed; border-radius: 12px; background: #fff; margin-bottom: 18px; }
+        .apk-admin-table { min-width: 940px; }
+        .apk-admin-table th { background: #f8faf8; position: sticky; top: 0; z-index: 1; }
+        .apk-pill { border-radius: 999px; display: inline-flex; padding: 4px 9px; background: #eef6f0; color: #2e7d32; font-size: 0.78rem; font-weight: 800; }
+        .apk-pill.revoked { background: #fff3f1; color: #b3261e; }
+        .apk-pill.draft { background: #f3f4f6; color: #4b5563; }
+        .apk-admin-note { color: #667; line-height: 1.55; margin-top: 8px; }
+        @media (max-width: 980px) { .apk-admin-grid { grid-template-columns: 1fr; } }
         @media (max-width: 980px) { .promptpay-admin-grid { grid-template-columns: 1fr; } }
         @media (max-width: 640px) { .promptpay-admin-header, .promptpay-admin-grid { padding-left: 18px; padding-right: 18px; } .promptpay-form-row { grid-template-columns: 1fr; } }
 
@@ -649,6 +746,7 @@
             <h2>Eden Admin</h2>
         </div>
         <ul class="sidebar-menu">
+            <li onclick="switchTab('pos-apk-updates', this)">POS APK Updates</li>
             <li class="active" onclick="switchTab('dashboard', this)">📊 ภาพรวม (Dashboard)</li>
             <li onclick="switchTab('discounts', this)">🏷️ จัดการส่วนลด (Discounts)</li>
             <li onclick="switchTab('members', this)">👥 จัดการสมาชิก (Members)</li>
@@ -657,6 +755,8 @@
             <li onclick="switchTab('orders', this)">🛍️ ออเดอร์สินค้า (Orders)</li>
             <li onclick="switchTab('bookings', this)">📅 คิวจองโต๊ะ (Table Bookings)</li>
             <li onclick="switchTab('room-bookings', this)">📅 คิวจองห้องรับรอง (Room Bookings)</li>
+            <li onclick="switchTab('archery', this)">🏹 Eden Archery</li>
+            <li onclick="switchTab('all-bookings', this)">📚 All Bookings</li>
             <li onclick="switchTab('tables', this)">🪑 จัดการโต๊ะ (Tables)</li>
             <li onclick="switchTab('rooms', this)">🛋️ จัดการห้องรับรอง (Rooms)</li>
             <li onclick="switchTab('products', this)">🍽️ จัดการเมนู (Menu)</li>
@@ -706,10 +806,245 @@
                 <span id="stat-bookings">0</span>
             </div>
 
-            <section class="sales-dashboard-shell" aria-label="สรุปยอดขาย">
+            <section class="manager-dashboard" aria-label="Eden Manager Dashboard">
+                <header class="dashboard-titlebar">
+                    <div>
+                        <h2>Dashboard ผู้จัดการร้าน</h2>
+                        <p>ภาพรวม Website, POS/APK, Online, Booking, Members, Loyalty, Inventory และ System Health</p>
+                    </div>
+                    <div class="dashboard-filter-summary" id="dashboard-filter-summary">กำลังโหลดข้อมูล...</div>
+                </header>
+
+                <div class="dashboard-control-band" aria-label="ตัวกรองกลาง Dashboard">
+                    <div class="dashboard-control-grid">
+                        <div class="dashboard-control-group">
+                            <span class="dashboard-control-label">ช่วงวันที่</span>
+                            <div class="dashboard-segmented" id="dashboard-date-presets">
+                                <button type="button" class="active" data-dashboard-date-preset="today">วันนี้</button>
+                                <button type="button" data-dashboard-date-preset="yesterday">เมื่อวาน</button>
+                                <button type="button" data-dashboard-date-preset="week">1 สัปดาห์</button>
+                                <button type="button" data-dashboard-date-preset="eleven_weeks">11 สัปดาห์</button>
+                                <button type="button" data-dashboard-date-preset="month">1 เดือน</button>
+                                <button type="button" data-dashboard-date-preset="custom">กำหนดเอง</button>
+                            </div>
+                            <div class="dashboard-field-row dashboard-custom-fields" id="dashboard-custom-date-fields">
+                                <input id="dashboard-start-date" type="date" aria-label="วันเริ่มต้น">
+                                <input id="dashboard-end-date" type="date" aria-label="วันสิ้นสุด">
+                            </div>
+                        </div>
+
+                        <div class="dashboard-control-group">
+                            <span class="dashboard-control-label">ช่วงเวลา</span>
+                            <div class="dashboard-segmented" id="dashboard-time-presets">
+                                <button type="button" class="active" data-dashboard-time-preset="all">ทั้งวัน</button>
+                                <button type="button" data-dashboard-time-preset="morning">เช้า</button>
+                                <button type="button" data-dashboard-time-preset="afternoon">บ่าย</button>
+                                <button type="button" data-dashboard-time-preset="evening">เย็น</button>
+                                <button type="button" data-dashboard-time-preset="custom">กำหนดเวลาเอง</button>
+                            </div>
+                            <div class="dashboard-field-row dashboard-custom-fields" id="dashboard-custom-time-fields">
+                                <input id="dashboard-time-start" type="time" value="06:00" aria-label="เวลาเริ่มต้น">
+                                <input id="dashboard-time-end" type="time" value="18:00" aria-label="เวลาสิ้นสุด">
+                            </div>
+                        </div>
+
+                        <div class="dashboard-control-group">
+                            <span class="dashboard-control-label">แหล่งข้อมูล</span>
+                            <div class="dashboard-segmented" id="dashboard-source-presets">
+                                <button type="button" class="active" data-dashboard-source="all">ทั้งหมด</button>
+                                <button type="button" data-dashboard-source="pos">POS</button>
+                                <button type="button" data-dashboard-source="online">Online</button>
+                                <button type="button" data-dashboard-source="booking">Booking</button>
+                            </div>
+                        </div>
+
+                        <div class="dashboard-control-group">
+                            <label for="dashboard-employee-filter">พนักงาน/แคชเชียร์</label>
+                            <select id="dashboard-employee-filter" aria-label="พนักงาน/แคชเชียร์">
+                                <option value="all">ทั้งหมด</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <section class="dashboard-section" aria-label="Executive KPI">
+                    <div class="dashboard-section-head">
+                        <h3>Executive KPI</h3>
+                        <small id="dashboard-exec-note">ใช้ตัวกรองกลาง</small>
+                    </div>
+                    <div class="dashboard-kpi-grid">
+                        <article class="dashboard-kpi-card sales">
+                            <small>ยอดขายสุทธิ</small>
+                            <strong id="dashboard-kpi-net-sales">฿0</strong>
+                            <span id="dashboard-kpi-net-sales-note">POS + Online ที่ชำระแล้ว</span>
+                            <button class="dashboard-link-btn" type="button" onclick="openDashboardTab('orders')">ดู Orders</button>
+                        </article>
+                        <article class="dashboard-kpi-card">
+                            <small>จำนวนบิล</small>
+                            <strong id="dashboard-kpi-receipts">0</strong>
+                            <span id="dashboard-kpi-receipts-note">ใบเสร็จ/ออเดอร์ที่เข้าเงื่อนไข</span>
+                            <button class="dashboard-link-btn" type="button" onclick="openDashboardTab('orders')">ดูรายละเอียด</button>
+                        </article>
+                        <article class="dashboard-kpi-card profit">
+                            <small>กำไร</small>
+                            <strong id="dashboard-kpi-profit">฿0</strong>
+                            <span id="dashboard-kpi-profit-note">คำนวณจาก cost ใน items</span>
+                            <button class="dashboard-link-btn" type="button" onclick="setSalesReportType('product')">ดูสินค้า</button>
+                        </article>
+                        <article class="dashboard-kpi-card discount">
+                            <small>ส่วนลด</small>
+                            <strong id="dashboard-kpi-discount">฿0</strong>
+                            <span id="dashboard-kpi-discount-note">รวม normal/loyalty discount</span>
+                            <button class="dashboard-link-btn" type="button" onclick="openDashboardTab('discounts')">ดูส่วนลด</button>
+                        </article>
+                        <article class="dashboard-kpi-card risk">
+                            <small>Refund / Void</small>
+                            <strong id="dashboard-kpi-refund-void">฿0</strong>
+                            <span id="dashboard-kpi-refund-void-note">รายการคืนเงินหรือยกเลิก</span>
+                            <button class="dashboard-link-btn" type="button" onclick="openDashboardTab('orders')">ตรวจสอบ</button>
+                        </article>
+                        <article class="dashboard-kpi-card">
+                            <small>Open Bills</small>
+                            <strong id="dashboard-kpi-open-bills">0</strong>
+                            <span id="dashboard-kpi-open-bills-note">บิล POS ยังไม่ปิดยอด</span>
+                            <button class="dashboard-link-btn" type="button" onclick="openDashboardTab('orders')">ไป Orders</button>
+                        </article>
+                    </div>
+                </section>
+
+                <section class="dashboard-section" aria-label="Operations Queue">
+                    <div class="dashboard-section-head">
+                        <h3>Operations Queue</h3>
+                        <small>รายการที่ต้องจัดการ</small>
+                    </div>
+                    <div class="dashboard-queue-grid">
+                        <button class="dashboard-queue-item" type="button" onclick="openDashboardTab('orders')">
+                            <small>Online Pending</small>
+                            <strong id="dashboard-queue-online-pending">0</strong>
+                            <span>ออเดอร์ออนไลน์รอดำเนินการ</span>
+                        </button>
+                        <button class="dashboard-queue-item" type="button" onclick="openDashboardTab('orders')">
+                            <small>POS Open Bills</small>
+                            <strong id="dashboard-queue-pos-open">0</strong>
+                            <span>บิลหน้าร้านที่เปิดค้าง</span>
+                        </button>
+                        <button class="dashboard-queue-item" type="button" onclick="openDashboardTab('bookings')">
+                            <small>Booking Pending</small>
+                            <strong id="dashboard-queue-booking-pending">0</strong>
+                            <span>คิวจองรอยืนยัน</span>
+                        </button>
+                        <button class="dashboard-queue-item" type="button" onclick="openDashboardTab('loyalty')">
+                            <small>Loyalty Pending/Failed</small>
+                            <strong id="dashboard-queue-loyalty-issues">0</strong>
+                            <span>รายการแต้มที่ต้อง sync/retry</span>
+                        </button>
+                        <button class="dashboard-queue-item" type="button" onclick="openDashboardTab('products')">
+                            <small>Low / Out Stock</small>
+                            <strong id="dashboard-queue-stock-alerts">0</strong>
+                            <span>สินค้าและตัวเลือกใกล้หมด</span>
+                        </button>
+                    </div>
+                </section>
+
+                <section class="dashboard-section" aria-label="Sales Analytics">
+                    <div class="dashboard-section-head">
+                        <h3>Sales Analytics</h3>
+                        <small>POS vs Online, Payment, Product, Category, Cashier</small>
+                    </div>
+                    <div class="dashboard-analytics-grid">
+                        <article class="dashboard-chart-panel">
+                            <h4>POS vs Online</h4>
+                            <div class="dashboard-chart-wrap"><canvas id="dashboard-source-chart"></canvas></div>
+                        </article>
+                        <article class="dashboard-chart-panel">
+                            <h4>Payment Method</h4>
+                            <div class="dashboard-chart-wrap"><canvas id="dashboard-payment-chart"></canvas></div>
+                        </article>
+                        <article class="dashboard-list-panel">
+                            <div class="dashboard-list-stack">
+                                <div>
+                                    <h4>Top Products</h4>
+                                    <div class="dashboard-data-list" id="dashboard-top-products"></div>
+                                </div>
+                                <div>
+                                    <h4>Top Categories</h4>
+                                    <div class="dashboard-data-list" id="dashboard-top-categories"></div>
+                                </div>
+                                <div>
+                                    <h4>Top Cashiers</h4>
+                                    <div class="dashboard-data-list" id="dashboard-top-cashiers"></div>
+                                </div>
+                            </div>
+                        </article>
+                    </div>
+                </section>
+
+                <section class="dashboard-section" aria-label="Booking Overview">
+                    <div class="dashboard-section-head">
+                        <h3>Booking Overview</h3>
+                        <small>โต๊ะและห้องรับรอง</small>
+                    </div>
+                    <div class="dashboard-detail-grid">
+                        <article class="dashboard-mini-card"><small>วันนี้</small><strong id="dashboard-booking-today">0</strong><span>รายการจองของวันนี้</span></article>
+                        <article class="dashboard-mini-card"><small>Pending</small><strong id="dashboard-booking-pending">0</strong><span>รอยืนยันในช่วงที่เลือก</span></article>
+                        <article class="dashboard-mini-card"><small>Confirmed</small><strong id="dashboard-booking-confirmed">0</strong><span>ยืนยันแล้ว</span></article>
+                        <article class="dashboard-mini-card"><small>Room / Table / Archery</small><strong id="dashboard-booking-split">0 / 0 / 0</strong><span>แยกห้องรับรอง โต๊ะ และ Archery</span></article>
+                    </div>
+                </section>
+
+                <section class="dashboard-section" aria-label="Member and Loyalty">
+                    <div class="dashboard-section-head">
+                        <h3>Member & Loyalty</h3>
+                        <small>สมาชิกและภาระหนี้แต้ม</small>
+                    </div>
+                    <div class="dashboard-detail-grid">
+                        <article class="dashboard-mini-card"><small>สมาชิกใหม่</small><strong id="dashboard-member-new">0</strong><span>ตามช่วงวันที่</span></article>
+                        <article class="dashboard-mini-card"><small>Active Members</small><strong id="dashboard-member-active">0</strong><span>มี activity ตามตัวกรอง</span></article>
+                        <article class="dashboard-mini-card"><small>Points Balance</small><strong id="dashboard-loyalty-points">0</strong><span>แต้มคงค้างทั้งหมด</span></article>
+                        <article class="dashboard-mini-card"><small>Points Liability</small><strong id="dashboard-loyalty-liability">฿0</strong><span>มูลค่าความรับผิดชอบแต้ม</span></article>
+                    </div>
+                </section>
+
+                <section class="dashboard-section" aria-label="Inventory and Menu">
+                    <div class="dashboard-section-head">
+                        <h3>Inventory & Menu</h3>
+                        <small>stock, margin และ variant alert</small>
+                    </div>
+                    <div class="dashboard-inventory-grid">
+                        <article class="dashboard-list-panel">
+                            <h4>Stock Alert</h4>
+                            <div class="dashboard-data-list" id="dashboard-stock-alert-list"></div>
+                        </article>
+                        <article class="dashboard-list-panel">
+                            <h4>Out of Stock</h4>
+                            <div class="dashboard-data-list" id="dashboard-out-stock-list"></div>
+                        </article>
+                        <article class="dashboard-list-panel">
+                            <h4>Low Margin / Variants</h4>
+                            <div class="dashboard-data-list" id="dashboard-margin-variant-list"></div>
+                        </article>
+                    </div>
+                </section>
+
+                <section class="dashboard-section" aria-label="System Health">
+                    <div class="dashboard-section-head">
+                        <h3>System Health</h3>
+                        <small>เท่าที่ข้อมูลปัจจุบันรองรับ</small>
+                    </div>
+                    <div class="dashboard-health-grid">
+                        <article class="dashboard-health-card" id="dashboard-health-visitors"><small>Website Traffic</small><strong id="dashboard-visitor-stat">0 วันนี้</strong><span id="dashboard-visitor-note">stats/pageViews</span></article>
+                        <article class="dashboard-health-card" id="dashboard-health-promptpay"><small>PromptPay</small><strong id="dashboard-promptpay-status">กำลังตรวจ</strong><span id="dashboard-promptpay-note">site_settings/promptpay</span></article>
+                        <article class="dashboard-health-card" id="dashboard-health-discounts"><small>POS Discounts</small><strong id="dashboard-discount-status">0 active</strong><span id="dashboard-discount-note">pos_discounts</span></article>
+                        <article class="dashboard-health-card warn" id="dashboard-health-printer"><small>Print Bridge</small><strong id="dashboard-print-status">ต้องตรวจที่เครื่อง POS</strong><span>ไม่มี health doc กลางใน Firestore</span></article>
+                        <article class="dashboard-health-card" id="dashboard-health-apk"><small>POS/APK</small><strong id="dashboard-apk-status">อ่าน orders ได้</strong><span id="dashboard-apk-note">อิงจาก POS orders/open bills</span></article>
+                    </div>
+                </section>
+            </section>
+
+            <section class="sales-dashboard-shell" aria-label="รายงานยอดขายเชิงลึก">
                 <header class="sales-dashboard-topbar">
-                    <button class="sales-dashboard-menu-btn" type="button" aria-label="เปิดเมนู">☰</button>
-                    <h2>สรุปยอดขาย</h2>
+                    <button class="sales-dashboard-menu-btn" type="button" aria-label="รายงาน">▦</button>
+                    <h2>รายงานยอดขายเชิงลึก</h2>
                 </header>
 
                 <div class="sales-dashboard-body">
@@ -724,21 +1059,12 @@
 
                     <div class="sales-dashboard-main">
                         <div class="sales-dashboard-toolbar" aria-label="ตัวกรองรายงานยอดขาย">
-                            <button class="sales-filter-btn" type="button" onclick="shiftSalesReportMonth(-1)" aria-label="เดือนก่อนหน้า">‹</button>
                             <button class="sales-filter-btn" type="button" disabled>
-                                <span>📅</span>
+                                <span>ช่วงข้อมูล</span>
                                 <span id="sales-report-range-label">-</span>
                             </button>
-                            <button class="sales-filter-btn" type="button" onclick="shiftSalesReportMonth(1)" aria-label="เดือนถัดไป">›</button>
-                            <select id="sales-report-time-filter" class="sales-filter-select" onchange="setSalesReportTimeFilter(this.value)" aria-label="ช่วงเวลา">
-                                <option value="all">ตลอดทั้งวัน</option>
-                                <option value="morning">06:00 - 12:00</option>
-                                <option value="afternoon">12:00 - 18:00</option>
-                                <option value="evening">18:00 - 24:00</option>
-                            </select>
-                            <select id="sales-report-employee-filter" class="sales-filter-select" onchange="setSalesReportEmployeeFilter(this.value)" aria-label="พนักงาน">
-                                <option value="all">พนักงานทั้งหมด</option>
-                            </select>
+                            <button class="sales-filter-btn" type="button" onclick="openDashboardTab('orders')">เปิด Orders</button>
+                            <button class="sales-filter-btn" type="button" onclick="openDashboardTab('products')">เปิด Products</button>
                         </div>
 
                         <div class="sales-dashboard-layout">
@@ -846,6 +1172,154 @@
 
         <!-- Web POS was retired. Eden POS now runs from the APK, while Admin keeps only shared setup data. -->
 
+        <div id="pos-apk-updates" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <div>
+                        <h2>POS APK Protected Updates</h2>
+                        <p style="color:#667; margin-top:4px;">Register protected APK release metadata, control release channel/status, and review device update events.</p>
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button class="btn-action btn-view" type="button" onclick="refreshPosApkUpdates()">Refresh</button>
+                    </div>
+                </div>
+
+                <div class="apk-admin-grid">
+                    <form id="pos-apk-release-form" class="apk-admin-card apk-admin-form">
+                        <h3>Register release metadata</h3>
+                        <input id="pos-apk-release-id" type="hidden">
+                        <label>
+                            App ID
+                            <input id="pos-apk-app-id" value="com.personal.pos" readonly>
+                        </label>
+                        <div class="apk-admin-row">
+                            <label>
+                                Version name
+                                <input id="pos-apk-version-name" placeholder="1.23" required>
+                            </label>
+                            <label>
+                                Version code
+                                <input id="pos-apk-version-code" min="1" step="1" type="number" placeholder="24" required>
+                            </label>
+                        </div>
+                        <div class="apk-admin-row">
+                            <label>
+                                Channel
+                                <select id="pos-apk-channel">
+                                    <option value="test">test</option>
+                                    <option value="pilot">pilot</option>
+                                    <option value="production">production</option>
+                                </select>
+                            </label>
+                            <label>
+                                Status
+                                <select id="pos-apk-status">
+                                    <option value="draft">draft</option>
+                                    <option value="active">active</option>
+                                    <option value="revoked">revoked</option>
+                                </select>
+                            </label>
+                        </div>
+                        <label>
+                            SHA256
+                            <input id="pos-apk-sha256" maxlength="64" placeholder="64 hex chars" required>
+                        </label>
+                        <div class="apk-admin-row">
+                            <label>
+                                Size bytes
+                                <input id="pos-apk-size" min="0" step="1" type="number" placeholder="6184379">
+                            </label>
+                            <label>
+                                Min supported versionCode
+                                <input id="pos-apk-min-supported" min="0" step="1" type="number" value="0">
+                            </label>
+                        </div>
+                        <label>
+                            Function asset
+                            <input id="pos-apk-function-asset" placeholder="Leave blank when using Spaceship URL">
+                        </label>
+                        <label>
+                            Storage path / Spaceship URL
+                            <input id="pos-apk-storage-path" placeholder="https://www.edencafe.co/pos-apk/releases/eden-pos-1.23-v24-test.apk">
+                        </label>
+                        <label>
+                            <span><input id="pos-apk-force-update" type="checkbox"> Force update</span>
+                        </label>
+                        <label>
+                            Release notes
+                            <textarea id="pos-apk-release-notes" placeholder="What changed in this release"></textarea>
+                        </label>
+                        <div class="apk-admin-actions">
+                            <button class="btn-action" type="submit">Save release</button>
+                            <button class="btn-action btn-view" type="button" onclick="resetPosApkReleaseForm()">Clear</button>
+                        </div>
+                        <p id="pos-apk-form-status" class="apk-admin-status"></p>
+                        <p class="apk-admin-note">For Spaceship-hosted APKs, paste the HTTPS origin URL here, but keep POS clients and manual downloads using Firebase Cloud Functions only. Protect the Spaceship folder with Basic Auth if the raw URL must not be downloadable.</p>
+                    </form>
+
+                    <div class="apk-admin-card">
+                        <h3>Releases</h3>
+                        <div class="apk-admin-table-wrap">
+                            <table class="apk-admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>Release</th>
+                                        <th>Channel</th>
+                                        <th>Status</th>
+                                        <th>SHA256</th>
+                                        <th>Size</th>
+                                        <th>Updated</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pos-apk-release-table-body">
+                                    <tr><td colspan="7">No releases loaded</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <h3>Device status</h3>
+                        <div class="apk-admin-table-wrap">
+                            <table class="apk-admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>Device</th>
+                                        <th>Channel</th>
+                                        <th>Current</th>
+                                        <th>Target</th>
+                                        <th>Last event</th>
+                                        <th>Updated</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pos-apk-device-table-body">
+                                    <tr><td colspan="6">No devices loaded</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <h3>Recent update events</h3>
+                        <div class="apk-admin-table-wrap">
+                            <table class="apk-admin-table">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Event</th>
+                                        <th>Device</th>
+                                        <th>Release</th>
+                                        <th>Version</th>
+                                        <th>Message</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pos-apk-event-table-body">
+                                    <tr><td colspan="6">No events loaded</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Members Section -->
         <div id="members" class="content-section">
             <div class="section-container">
@@ -883,6 +1357,7 @@
                         <input type="text" id="member-auth-uid" placeholder="UID ถ้ามี (ไม่บังคับ)" autocomplete="off">
                         <button type="submit" class="btn-action">ตรวจ Login</button>
                         <button type="button" id="member-auth-repair-btn" class="btn-action btn-edit" disabled>ซ่อม Index</button>
+                        <button type="button" id="member-auth-merge-btn" class="btn-action btn-delete" disabled>รวมสมาชิก</button>
                     </form>
                     <p id="member-auth-check-status" class="member-auth-hint">ระบบจะซ่อมเฉพาะ email_lower และ phone_number_index ที่ขาดเท่านั้น หากไม่มี password_hash ต้องให้สมาชิกตั้งรหัสใหม่เองอย่างปลอดภัย</p>
                     <div id="member-auth-check-result" class="member-auth-result" hidden></div>
@@ -1321,6 +1796,294 @@
                         </thead>
                         <tbody id="room-bookings-table-body">
                             <tr><td colspan="8" style="text-align: center;">กำลังโหลดข้อมูล...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Eden Archery Section -->
+        <div id="archery" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <div>
+                        <h2>Eden Archery</h2>
+                        <p style="color:#667; margin-top:4px;">Walk-in booking, lane board, payment, and pricing settings</p>
+                    </div>
+                    <button class="btn-action" onclick="refreshArcheryAdmin()">Refresh</button>
+                </div>
+
+                <div class="archery-admin-grid">
+                    <form id="archery-walkin-form" class="archery-panel">
+                        <div class="archery-panel-title">
+                            <span class="archery-step-badge">1</span>
+                            <div>
+                                <h3>Create Walk-in Booking</h3>
+                                <p>Search a member, choose time, then review the total before creating.</p>
+                            </div>
+                        </div>
+                        <div class="archery-form-grid">
+                            <label class="archery-field full">
+                                Search member
+                                <input type="text" id="archery-admin-member-search" list="archery-admin-member-options" maxlength="160" autocomplete="off">
+                                <datalist id="archery-admin-member-options"></datalist>
+                            </label>
+                            <label class="archery-field full">
+                                Eden member UID
+                                <input type="text" id="archery-admin-member-id" maxlength="160" required>
+                            </label>
+                            <label class="archery-field">
+                                Customer name
+                                <input type="text" id="archery-admin-customer-name" maxlength="120">
+                            </label>
+                            <label class="archery-field">
+                                Phone
+                                <input type="tel" id="archery-admin-customer-phone" maxlength="40">
+                            </label>
+                            <label class="archery-field">
+                                Date
+                                <input type="date" id="archery-admin-date" required>
+                            </label>
+                            <label class="archery-field">
+                                Start
+                                <select id="archery-admin-start" required></select>
+                            </label>
+                            <label class="archery-field">
+                                Package
+                                <select id="archery-admin-package" required>
+                                    <option value="60">60 min</option>
+                                    <option value="120">120 min</option>
+                                    <option value="180">180 min</option>
+                                </select>
+                            </label>
+                            <label class="archery-field">
+                                People
+                                <select id="archery-admin-party-size" required>
+                                    <option value="1" selected>1 person</option>
+                                    <option value="2">2 people</option>
+                                    <option value="3">3 people</option>
+                                    <option value="4">4 people</option>
+                                    <option value="5">5 people</option>
+                                    <option value="6">6 people</option>
+                                    <option value="7">7 people</option>
+                                    <option value="8">8 people</option>
+                                    <option value="9">9 people</option>
+                                    <option value="10">10 people</option>
+                                </select>
+                            </label>
+                            <div class="archery-field full">
+                                <span>Experience level</span>
+                                <div class="archery-choice-grid" id="archery-admin-ability-options"></div>
+                            </div>
+                            <div class="archery-field full">
+                                <span>Equipment</span>
+                                <div class="archery-choice-grid" id="archery-admin-equipment-options"></div>
+                            </div>
+                            <div class="archery-price-card full">
+                                <div>
+                                    <span>Price preview</span>
+                                    <strong id="archery-admin-price-total">-</strong>
+                                </div>
+                                <ul class="archery-summary-list" id="archery-admin-price-preview"></ul>
+                            </div>
+                            <label class="archery-field full">
+                                Note
+                                <textarea id="archery-admin-note" maxlength="500"></textarea>
+                            </label>
+                        </div>
+                        <p class="archery-status" id="archery-admin-form-status"></p>
+                        <button class="btn-action" type="submit">Create Walk-in Booking</button>
+                    </form>
+
+                    <form id="archery-page-settings-form" class="archery-panel">
+                        <div class="archery-panel-title">
+                            <span class="archery-step-badge">2</span>
+                            <div>
+                                <h3>Page & Pricing Settings</h3>
+                                <p>Update public page content and the prices used by both online and walk-in bookings.</p>
+                            </div>
+                        </div>
+                        <div class="archery-form-grid">
+                            <label class="archery-field full">
+                                Hero image URL
+                                <input type="text" id="archery-page-hero-url" maxlength="500" placeholder="/Images/archery/archery-hero.png">
+                            </label>
+                            <label class="archery-field full">
+                                Upload new hero image
+                                <input type="file" id="archery-page-hero-file" accept="image/*">
+                            </label>
+                            <div class="archery-page-hero-preview full">
+                                <img id="archery-page-hero-preview" src="/Images/archery/archery-hero.png" alt="Archery hero preview">
+                            </div>
+                            <label class="archery-field full">
+                                Package lead text
+                                <textarea id="archery-page-package-lead" maxlength="300" rows="2"></textarea>
+                            </label>
+                        </div>
+                        <div class="archery-page-settings-head">
+                            <h4>Public package cards</h4>
+                            <button class="btn-action btn-view" id="archery-page-add-package" type="button">Add package</button>
+                        </div>
+                        <div id="archery-page-package-list" class="archery-page-package-list"></div>
+                        <div class="archery-page-settings-head">
+                            <h4>Pricing & Options</h4>
+                            <small>Server uses these values for real totals.</small>
+                        </div>
+                        <div class="archery-form-grid">
+                            <div class="archery-field full">
+                                <span>Package prices</span>
+                                <div id="archery-pricing-package-list" class="archery-page-package-list"></div>
+                            </div>
+                            <div class="archery-field full">
+                                <span>Ability / coach options</span>
+                                <div id="archery-pricing-ability-list" class="archery-page-package-list"></div>
+                            </div>
+                            <div class="archery-field full">
+                                <span>Equipment options</span>
+                                <div id="archery-pricing-equipment-list" class="archery-page-package-list"></div>
+                            </div>
+                        </div>
+                        <p class="archery-status" id="archery-page-settings-status"></p>
+                        <button class="btn-action" type="submit">Save Archery Page</button>
+                    </form>
+
+                    <div>
+                        <div class="archery-admin-toolbar">
+                            <input type="date" id="archery-admin-board-date">
+                            <select id="archery-admin-board-status">
+                                <option value="active">Active</option>
+                                <option value="all">All statuses</option>
+                                <option value="HELD">Held</option>
+                                <option value="CONFIRMED">Confirmed</option>
+                                <option value="CHECKED_IN">Checked-in</option>
+                                <option value="COMPLETED">Completed</option>
+                                <option value="NO_SHOW">No-show</option>
+                                <option value="CANCEL_REQUESTED">Cancel requested</option>
+                                <option value="CANCELLED">Cancelled</option>
+                            </select>
+                            <select id="archery-admin-board-source">
+                                <option value="all">Online + Walk-in</option>
+                                <option value="online">Online booking</option>
+                                <option value="walk_in">Walk-in booking</option>
+                            </select>
+                            <select id="archery-admin-board-payment">
+                                <option value="all">All payments</option>
+                                <option value="UNPAID">Unpaid</option>
+                                <option value="PAID_ONLINE">Paid Online</option>
+                                <option value="PAID_COUNTER">Paid Counter</option>
+                                <option value="REFUNDED">Refunded</option>
+                            </select>
+                            <input type="text" id="archery-admin-board-member" placeholder="Member / phone / email">
+                            <select id="archery-admin-board-lane">
+                                <option value="all">All lanes</option>
+                                <option value="1">Lane 1</option>
+                                <option value="2">Lane 2</option>
+                                <option value="3">Lane 3</option>
+                                <option value="4">Lane 4</option>
+                                <option value="5">Lane 5</option>
+                                <option value="6">Lane 6</option>
+                                <option value="7">Lane 7</option>
+                                <option value="8">Lane 8</option>
+                                <option value="9">Lane 9</option>
+                                <option value="10">Lane 10</option>
+                            </select>
+                            <select id="archery-admin-board-package">
+                                <option value="all">All packages</option>
+                                <option value="60">60 min</option>
+                                <option value="120">120 min</option>
+                                <option value="180">180 min</option>
+                            </select>
+                            <button class="btn-action" id="archery-admin-today" type="button">Today</button>
+                            <button class="btn-action btn-view" onclick="refreshArcheryAdmin()" type="button">Refresh</button>
+                        </div>
+                        <div class="archery-schedule-wrap">
+                            <table class="archery-schedule" id="archery-schedule-table"></table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="archery-table-wrap" style="margin-top:18px;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Booking</th>
+                                <th>Member</th>
+                                <th>Lane / Time</th>
+                                <th>Source</th>
+                                <th>Payment</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="archery-bookings-table-body">
+                            <tr><td colspan="7" style="text-align:center;">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="archery-admin-grid archery-admin-panels">
+                    <section class="archery-panel">
+                        <h3>Payment Panel</h3>
+                        <div id="archery-payment-panel"></div>
+                    </section>
+                    <section class="archery-panel" id="archery-audit-panel">
+                        <h3>Audit Trail</h3>
+                        <div id="archery-audit-trail"></div>
+                    </section>
+                </div>
+            </div>
+        </div>
+
+        <!-- All Bookings Section -->
+        <div id="all-bookings" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <div>
+                        <h2>All Service Bookings</h2>
+                        <p style="color:#667; margin-top:4px;">Shared booking list for ARCHERY, table, room, and future Eden OS services.</p>
+                    </div>
+                    <button class="btn-action" onclick="fetchBookings()">Refresh</button>
+                </div>
+                <div class="archery-admin-toolbar">
+                    <input type="date" id="all-bookings-date-filter">
+                    <select id="all-bookings-service-filter">
+                        <option value="all">All services</option>
+                        <option value="ARCHERY">ARCHERY</option>
+                        <option value="table">Table</option>
+                        <option value="room">Room</option>
+                        <option value="ICE_BATH">ICE_BATH</option>
+                        <option value="SAUNA">SAUNA</option>
+                        <option value="YOGA">YOGA</option>
+                        <option value="EVENT">EVENT</option>
+                        <option value="WORKSHOP">WORKSHOP</option>
+                    </select>
+                    <select id="all-bookings-status-filter">
+                        <option value="all">All statuses</option>
+                        <option value="pending">Pending</option>
+                        <option value="confirmed">Confirmed</option>
+                        <option value="paid">Paid</option>
+                        <option value="checked_in">Checked-in</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                        <option value="no_show">No Show</option>
+                    </select>
+                    <button class="btn-action btn-view" onclick="fetchBookings()" type="button">Refresh</button>
+                </div>
+                <div class="archery-table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Booking</th>
+                                <th>Service</th>
+                                <th>Member</th>
+                                <th>Date / Time</th>
+                                <th>Resource</th>
+                                <th>Payment</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="all-bookings-table-body">
+                            <tr><td colspan="7" style="text-align:center;">Loading...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -2393,7 +3156,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=51"></script>
+    <script type="module" src="js/admin.js?v=archery-hourly-start-1"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {

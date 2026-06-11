@@ -2,7 +2,7 @@ import { auth, provider, db } from './firebase-config.js';
 import { getMemberTier, getTierBenefits } from './membership.js';
 import { BLOG_POSTS, SITE, getBlogUrl } from './blog-data.mjs';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp, writeBatch, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp, writeBatch, runTransaction, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const ADMIN_IMAGE_MAX_FILE_SIZE = 8 * 1024 * 1024;
 const ADMIN_IMAGE_MAX_EDGE = 1800;
@@ -30,6 +30,30 @@ function safeNumber(value, fallback = 0) {
 
 function safeAdminError(action = 'ดำเนินการไม่สำเร็จ') {
     return `${action} กรุณาตรวจสอบสิทธิ์หรือข้อมูลที่จำเป็น แล้วลองใหม่อีกครั้ง`;
+}
+
+function adminFunctionErrorMessage(result = {}) {
+    const code = String(result.code || result.error || '').toUpperCase();
+    const map = {
+        NO_LANE_AVAILABLE: 'เวลานี้ช่องยิงเต็มแล้ว กรุณาเลือกเวลาอื่น',
+        CONFLICT: 'เวลานี้ช่องยิงเต็มแล้ว กรุณาเลือกเวลาอื่น',
+        PAYMENT_ALREADY_RECORDED: 'รายการนี้มีการชำระเงินแล้ว',
+        STAFF_SESSION_REQUIRED: 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่',
+        AUTH_REQUIRED: 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่',
+        STAFF_PERMISSION_REQUIRED: 'บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้',
+        PERMISSION_DENIED: 'บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้',
+        'PERMISSION-DENIED': 'บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้',
+        IDEMPOTENCY_KEY_REQUIRED: 'ระบบยังไม่พร้อมทำรายการ กรุณาลองใหม่อีกครั้ง',
+        IDEMPOTENCY_PAYLOAD_MISMATCH: 'รายการนี้ถูกส่งซ้ำด้วยข้อมูลไม่ตรงกัน กรุณารีเฟรชแล้วลองใหม่',
+        INVALID_DURATION: 'แพ็กเกจต้องเป็น 60 / 120 / 180 นาที',
+        OUTSIDE_OPERATING_HOURS: 'เวลาจองต้องอยู่ในช่วง 10:00-20:00',
+        MEMBER_NOT_FOUND: 'ไม่พบสมาชิก Eden ที่ระบุ',
+        BOOKING_NOT_FOUND: 'ไม่พบรายการจองนี้',
+        BOOKING_STATE_DOES_NOT_ALLOW_ACTION: 'สถานะรายการจองไม่รองรับคำสั่งนี้',
+        REASON_REQUIRED: 'กรุณาระบุเหตุผล',
+        PAYMENT_REQUIRED: 'ไม่พบข้อมูลการชำระเงินของรายการนี้'
+    };
+    return map[code] || result.message || result.error || 'Request failed';
 }
 
 function escapeJSString(str) {
@@ -108,17 +132,25 @@ async function uploadAdminImage(blob, folder, fileName) {
 async function callAdminFunction(functionName, payload = {}) {
     const token = await auth.currentUser?.getIdToken(true);
     if (!token) throw new Error('Please sign in as admin again before continuing');
+    const requestId = payload.idempotency_key || payload.idempotencyKey || `admin-${functionName}-${Date.now()}`;
 
     const response = await fetch(FUNCTIONS_BASE_URL + '/' + functionName, {
         method: 'POST',
         headers: {
             'Authorization': 'Bearer ' + token,
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'X-Request-Id': requestId
         },
         body: JSON.stringify(payload)
     });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(result.error || 'Request failed');
+    if (!response.ok) {
+        const error = new Error(adminFunctionErrorMessage(result));
+        error.code = result.code || result.error || '';
+        error.status = response.status;
+        error.details = result.details;
+        throw error;
+    }
     return result;
 }
 
@@ -180,6 +212,7 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
 const ADMIN_TAB_PERMISSIONS = {
     dashboard: 'dashboard',
     pos: 'pos',
+    'pos-apk-updates': 'pos',
     discounts: 'discounts',
     members: 'members',
     loyalty: 'loyalty',
@@ -187,6 +220,8 @@ const ADMIN_TAB_PERMISSIONS = {
     orders: 'orders',
     bookings: 'bookings',
     'room-bookings': 'bookings',
+    archery: 'bookings',
+    'all-bookings': 'bookings',
     tables: 'tables',
     rooms: 'rooms',
     products: 'products',
@@ -236,6 +271,13 @@ let loyaltyConfigUnsubscribe = null;
 let loyaltyLedgerUnsubscribe = null;
 let loyaltyFormsBound = false;
 let dashboardOrdersData = [];
+let dashboardBookingsData = [];
+let dashboardStatsData = {};
+let dashboardPromptPaySettings = null;
+let dashboardFilters = null;
+let dashboardFiltersBound = false;
+let dashboardSourceChart = null;
+let dashboardPaymentChart = null;
 let activeSalesReport = 'summary';
 let salesReportNavBound = false;
 let salesReportMonthOffset = 0;
@@ -261,6 +303,9 @@ function buildBootstrapOwnerAccess(user) {
         role: 'owner',
         status: 'active',
         permissions: adminRoleDefaults('owner'),
+        branch_ids: ['BKK_MAIN'],
+        primary_branch_id: 'BKK_MAIN',
+        archery_role: 'OWNER',
         source: 'bootstrap'
     };
 }
@@ -297,6 +342,10 @@ async function loadAdminAccess(user) {
         role,
         status: data.status,
         permissions: { ...adminRoleDefaults(role), ...(data.permissions || {}) },
+        branch_ids: Array.isArray(data.branch_ids) ? data.branch_ids.map(String) : [],
+        primary_branch_id: data.primary_branch_id || data.branch_id || '',
+        archery_role: data.archery_role || data.archeryRole || data.role || '',
+        staff_session_id: data.staff_session_id || data.staffSessionId || '',
         source: 'firestore'
     };
 }
@@ -339,14 +388,16 @@ window.canAccessAdminTab = (tabId) => {
 // Global Data (for editing)
 let productsData = {};
 let productRows = [];
-let posSelectedCategory = 'all';
-let posSearchTerm = '';
-let posCart = [];
-let posLastReceipt = null;
-let posControlsBound = false;
 let productCurrentPage = 1;
 let productPageSize = 10;
 let productControlsBound = false;
+let posApkReleasesData = {};
+let posApkDevicesData = {};
+let posApkEventsData = [];
+let posApkReleasesUnsubscribe = null;
+let posApkDevicesUnsubscribe = null;
+let posApkEventsUnsubscribe = null;
+let posApkFormBound = false;
 const selectedProductIds = new Set();
 const expandedProductIds = new Set();
 let categoriesData = {};
@@ -369,6 +420,15 @@ let memberOrdersMetricsUnsubscribe = null;
 let memberBookingsMetricsUnsubscribe = null;
 let ordersUnsubscribe = null;
 let bookingsUnsubscribe = null;
+let archeryBookingsUnsubscribe = null;
+let archeryAuditUnsubscribe = null;
+let archeryBookingsData = [];
+let archeryAuditLogsData = [];
+let archeryPageSettingsData = null;
+const archeryActionLoading = new Set();
+let archeryAdminControlsBound = false;
+let archeryPageSettingsBound = false;
+let allBookingsControlsBound = false;
 let categoriesUnsubscribe = null;
 let productsUnsubscribe = null;
 let tablesUnsubscribe = null;
@@ -380,6 +440,7 @@ let faqsUnsubscribe = null;
 let memberFiltersBound = false;
 let memberAuthDiagnosticsBound = false;
 let lastMemberAuthDiagnosis = null;
+let lastMemberAuthMergeResult = null;
 let salesSummaryChart = null;
 
 const ADMIN_ACTIVE_TAB_STORAGE_KEY = 'edenAdminActiveTab';
@@ -1009,13 +1070,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function initializeAdminModules() {
     if (canAdmin('dashboard')) {
+        bindDashboardFilters();
         fetchStats();
         bindSalesReportNav();
         renderDashboardSalesReport();
         if (!categoriesUnsubscribe) setupRealtimeCategories();
     }
     if (canAdmin('orders') || canAdmin('pos')) setupRealtimeOrders();
-    if (canAdmin('bookings')) setupRealtimeBookings();
+    if (canAdmin('bookings')) {
+        bindArcheryAdminControls();
+        bindAllBookingsControls();
+        setupRealtimeBookings();
+        setupRealtimeArcheryAdminData();
+    }
     if (canAdmin('products')) {
         setupRealtimeCategories();
         setupRealtimeProducts();
@@ -1030,6 +1097,7 @@ function initializeAdminModules() {
     if (canAdmin('members') || canAdmin('loyalty')) setupRealtimeMembers();
     if (canAdmin('discounts')) setupRealtimeDiscounts();
     if (canAdmin('loyalty')) setupRealtimeLoyalty();
+    if (canAdmin('pos')) setupRealtimePosApkUpdates();
     if (canAdmin('promptpay') && typeof window.loadPromptPaySettings === 'function') window.loadPromptPaySettings();
     if (canAdmin('marketing') && typeof window.loadMarketingSettings === 'function') window.loadMarketingSettings();
     if (isOwnerAccess()) setupRealtimeAdminAccess();
@@ -1051,6 +1119,8 @@ function adminMenuItemForTab(tabId) {
 
 function getPreferredAdminTabId() {
     if (hasLoyverseImportMode()) return 'dashboard';
+
+    if (String(window.location.pathname || '').replace(/\/+$/, '') === '/admin/archery') return 'archery';
 
     const hash = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).replace(/^tab=/, '');
     if (hash && document.getElementById(hash)) return hash;
@@ -1122,6 +1192,9 @@ window.refreshAdminSection = async (tabId, button = null) => {
                 await fetchStats();
                 renderDashboardSalesReport();
                 break;
+            case 'pos-apk-updates':
+                setupRealtimePosApkUpdates();
+                break;
             case 'members':
                 setupRealtimeMembers();
                 break;
@@ -1141,7 +1214,11 @@ window.refreshAdminSection = async (tabId, button = null) => {
                 break;
             case 'bookings':
             case 'room-bookings':
+            case 'all-bookings':
                 setupRealtimeBookings();
+                break;
+            case 'archery':
+                setupRealtimeArcheryAdminData();
                 break;
             case 'tables':
                 setupRealtimeTables();
@@ -1254,6 +1331,7 @@ async function refreshDiscountsOnce() {
         discountsData[docSnap.id] = normalizeDiscountOption(docSnap.id, docSnap.data() || {});
     });
     renderDiscountsTable();
+    renderDashboardSalesReport();
 }
 
 function setupRealtimeDiscounts() {
@@ -1265,6 +1343,7 @@ function setupRealtimeDiscounts() {
             discountsData[docSnap.id] = normalizeDiscountOption(docSnap.id, docSnap.data() || {});
         });
         renderDiscountsTable();
+        renderDashboardSalesReport();
     }, error => {
         console.error('Error listening to POS discounts:', error);
         const body = document.getElementById('discount-table-body');
@@ -1636,6 +1715,7 @@ function renderLoyaltySummary() {
     setText('loyalty-stat-liability', loyaltyCurrency(totalPoints * config.pointValue));
     setText('loyalty-stat-members', membersWithPoints.toLocaleString('th-TH'));
     setText('loyalty-stat-ledger', loyaltyLedgerData.length.toLocaleString('th-TH'));
+    renderDashboardSalesReport();
 }
 
 function renderLoyaltyLedgerTable() {
@@ -1857,11 +1937,35 @@ function applyAdminAccessUI() {
 async function fetchStats() {
     try {
         const statsRef = doc(db, 'stats', 'pageViews');
-        const snap = await getDoc(statsRef);
+        const [snap, promptPaySnap, discountsSnap] = await Promise.all([
+            getDoc(statsRef),
+            getDoc(doc(db, 'site_settings', 'promptpay')).catch(error => {
+                console.warn('Unable to load PromptPay status for dashboard:', error);
+                return null;
+            }),
+            getDocs(query(collection(db, 'pos_discounts'))).catch(error => {
+                console.warn('Unable to load POS discounts for dashboard:', error);
+                return null;
+            })
+        ]);
         const viewsEl = document.getElementById('stat-views-daily');
         if (snap.exists() && viewsEl) {
             const data = snap.data();
+            dashboardStatsData = data || {};
             viewsEl.innerText = (data.dailyViews || 0).toLocaleString();
+        } else {
+            dashboardStatsData = {};
+        }
+        if (promptPaySnap?.exists()) {
+            dashboardPromptPaySettings = normalizePromptPaySettings(promptPaySnap.data());
+        } else if (promptPaySnap) {
+            dashboardPromptPaySettings = defaultPromptPaySettings();
+        }
+        if (discountsSnap?.docs && !discountsUnsubscribe) {
+            discountsData = {};
+            discountsSnap.forEach(docSnap => {
+                discountsData[docSnap.id] = normalizeDiscountOption(docSnap.id, docSnap.data() || {});
+            });
         }
         renderDashboardSalesReport();
     } catch (e) {
@@ -1892,18 +1996,364 @@ function parseLocalDateKey(key) {
     return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
 }
 
-function salesReportRange() {
-    const now = new Date();
-    const first = new Date(now.getFullYear(), now.getMonth() + salesReportMonthOffset, 1);
-    const last = new Date(first.getFullYear(), first.getMonth() + 1, 0);
-    const todayKey = localDateKey(now);
-    const end = salesReportMonthOffset === 0 ? now : last;
+function addLocalDays(date, days) {
+    const next = new Date(date);
+    next.setDate(next.getDate() + Number(days || 0));
+    return next;
+}
+
+function dashboardPresetRange(preset = 'today') {
+    const today = new Date();
+    const todayKey = localDateKey(today);
+    if (preset === 'yesterday') {
+        const yesterday = addLocalDays(today, -1);
+        return { startKey: localDateKey(yesterday), endKey: localDateKey(yesterday) };
+    }
+    if (preset === 'week') {
+        return { startKey: localDateKey(addLocalDays(today, -6)), endKey: todayKey };
+    }
+    if (preset === 'eleven_weeks') {
+        return { startKey: localDateKey(addLocalDays(today, -76)), endKey: todayKey };
+    }
+    if (preset === 'month') {
+        return { startKey: localDateKey(addLocalDays(today, -29)), endKey: todayKey };
+    }
+    return { startKey: todayKey, endKey: todayKey };
+}
+
+function defaultDashboardFilters() {
+    const range = dashboardPresetRange('today');
     return {
-        start: first,
-        end,
-        startKey: localDateKey(first),
-        endKey: localDateKey(end),
-        todayKey
+        datePreset: 'today',
+        startKey: range.startKey,
+        endKey: range.endKey,
+        timePreset: 'all',
+        timeStart: '06:00',
+        timeEnd: '18:00',
+        source: 'all',
+        employee: 'all'
+    };
+}
+
+function ensureDashboardFilters() {
+    if (!dashboardFilters) dashboardFilters = defaultDashboardFilters();
+    if (!dashboardFilters.startKey || !dashboardFilters.endKey) {
+        const range = dashboardPresetRange(dashboardFilters.datePreset || 'today');
+        dashboardFilters.startKey = range.startKey;
+        dashboardFilters.endKey = range.endKey;
+    }
+    if (dashboardFilters.startKey > dashboardFilters.endKey) {
+        const startKey = dashboardFilters.endKey;
+        dashboardFilters.endKey = dashboardFilters.startKey;
+        dashboardFilters.startKey = startKey;
+    }
+    return dashboardFilters;
+}
+
+function dashboardDateRange() {
+    const filters = ensureDashboardFilters();
+    return {
+        startKey: filters.startKey,
+        endKey: filters.endKey,
+        start: parseLocalDateKey(filters.startKey) || new Date(),
+        end: parseLocalDateKey(filters.endKey) || new Date(),
+        todayKey: localDateKey(new Date())
+    };
+}
+
+function dashboardDatePresetLabel(value = ensureDashboardFilters().datePreset) {
+    return {
+        today: 'วันนี้',
+        yesterday: 'เมื่อวาน',
+        week: '1 สัปดาห์',
+        eleven_weeks: '11 สัปดาห์',
+        month: '1 เดือน',
+        custom: 'กำหนดเอง'
+    }[value] || 'วันนี้';
+}
+
+function dashboardTimeLabel(value = ensureDashboardFilters().timePreset) {
+    const filters = ensureDashboardFilters();
+    if (value === 'morning') return 'เช้า 06:00-12:00';
+    if (value === 'afternoon') return 'บ่าย 12:00-18:00';
+    if (value === 'evening') return 'เย็น 18:00-24:00';
+    if (value === 'custom') return `${filters.timeStart || '00:00'}-${filters.timeEnd || '23:59'}`;
+    return 'ทั้งวัน';
+}
+
+function dashboardSourceLabel(value = ensureDashboardFilters().source) {
+    return { all: 'ทั้งหมด', pos: 'POS', online: 'Online', booking: 'Booking' }[value] || 'ทั้งหมด';
+}
+
+function timeTextToMinutes(value, fallback = null) {
+    const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return fallback;
+    const hour = Math.max(0, Math.min(24, Number(match[1])));
+    const minute = Math.max(0, Math.min(59, Number(match[2])));
+    return Math.min(24 * 60, (hour * 60) + minute);
+}
+
+function dashboardTimeWindow() {
+    const filters = ensureDashboardFilters();
+    if (filters.timePreset === 'morning') return { start: 6 * 60, end: 12 * 60 };
+    if (filters.timePreset === 'afternoon') return { start: 12 * 60, end: 18 * 60 };
+    if (filters.timePreset === 'evening') return { start: 18 * 60, end: 24 * 60 };
+    if (filters.timePreset === 'custom') {
+        return {
+            start: timeTextToMinutes(filters.timeStart, 0),
+            end: timeTextToMinutes(filters.timeEnd, 24 * 60)
+        };
+    }
+    return null;
+}
+
+function isMinuteInDashboardWindow(minute) {
+    const windowRange = dashboardTimeWindow();
+    if (!windowRange) return true;
+    if (!Number.isFinite(minute)) return true;
+    if (windowRange.start <= windowRange.end) return minute >= windowRange.start && minute < windowRange.end;
+    return minute >= windowRange.start || minute < windowRange.end;
+}
+
+function timestampToMillis(value) {
+    if (!value) return 0;
+    if (typeof value.toMillis === 'function') return value.toMillis();
+    if (typeof value.toDate === 'function') return value.toDate().getTime();
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function dashboardMinutesFromMillis(value) {
+    if (!value) return NaN;
+    const date = new Date(value);
+    return (date.getHours() * 60) + date.getMinutes();
+}
+
+function dashboardBookingDateKey(booking = {}) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(booking.date || ''))) return booking.date;
+    const time = timestampToMillis(booking.timestamp || booking.createdAt);
+    return time ? localDateKey(new Date(time)) : '';
+}
+
+function dashboardBookingTimeMinutes(booking = {}) {
+    const textTime = booking.startTime || booking.arrivalTime || booking.time || '';
+    const fromText = timeTextToMinutes(textTime, null);
+    if (fromText !== null) return fromText;
+    return dashboardMinutesFromMillis(timestampToMillis(booking.timestamp || booking.createdAt));
+}
+
+function dashboardSourceMatchesOrder(order = {}) {
+    const source = String(order.source || order.orderType || '').toLowerCase();
+    const orderType = String(order.orderType || '').toLowerCase();
+    const filter = ensureDashboardFilters().source;
+    if (filter === 'all') return true;
+    if (filter === 'booking') return false;
+    if (filter === 'pos') return source === 'pos' || orderType === 'pos';
+    if (filter === 'online') return source === 'online' || orderType === 'online' || orderType === 'shop' || !source;
+    return true;
+}
+
+function dashboardSourceMatchesBooking() {
+    const filter = ensureDashboardFilters().source;
+    return filter === 'all' || filter === 'booking';
+}
+
+function dashboardOrderSourceLabel(order = {}) {
+    return String(order.source || order.orderType || '').toLowerCase() === 'pos' ? 'POS' : 'Online';
+}
+
+function dashboardBookingMatchesRange(booking = {}) {
+    const key = dashboardBookingDateKey(booking);
+    const range = dashboardDateRange();
+    return !!key && key >= range.startKey && key <= range.endKey;
+}
+
+function dashboardBookingMatchesTime(booking = {}) {
+    return isMinuteInDashboardWindow(dashboardBookingTimeMinutes(booking));
+}
+
+function dashboardBookingMatchesEmployee(booking = {}) {
+    const employee = ensureDashboardFilters().employee;
+    if (employee === 'all') return true;
+    const key = normalizeEmail(booking.cashierEmail || booking.staffEmail || booking.assignedToEmail)
+        || String(booking.cashierUid || booking.staffUid || booking.assignedTo || booking.staffName || '');
+    return key && key === employee;
+}
+
+function dashboardFilteredBookings() {
+    return dashboardBookingsData
+        .filter(dashboardBookingMatchesRange)
+        .filter(dashboardBookingMatchesTime)
+        .filter(dashboardSourceMatchesBooking)
+        .filter(dashboardBookingMatchesEmployee);
+}
+
+function dashboardOperationalOrders() {
+    return dashboardOrdersData
+        .filter(order => !order.isTestOrder && !order.softLaunch)
+        .filter(isOrderInSalesReportRange)
+        .filter(isOrderInSalesReportTime)
+        .filter(isOrderForSalesReportEmployee)
+        .filter(dashboardSourceMatchesOrder);
+}
+
+function isOpenBillOrder(order = {}) {
+    const billStatus = String(order.billStatus || '').toLowerCase();
+    const paymentStatus = String(order.paymentStatus || '').toLowerCase();
+    const status = String(order.status || '').toLowerCase();
+    return String(order.source || '').toLowerCase() === 'pos'
+        && (billStatus === 'open' || order.isOpenBill === true)
+        && paymentStatus !== 'paid'
+        && paymentStatus !== 'refunded'
+        && status !== 'cancelled';
+}
+
+function setDashboardText(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+}
+
+function setDashboardHealthState(id, state = '') {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('ok', 'warn', 'risk');
+    if (state) el.classList.add(state);
+}
+
+function dashboardFilterLabel() {
+    const range = dashboardDateRange();
+    return `${dashboardDatePresetLabel()} · ${range.startKey} ถึง ${range.endKey} · ${dashboardTimeLabel()} · ${dashboardSourceLabel()}`;
+}
+
+function syncDashboardFilterControls() {
+    const filters = ensureDashboardFilters();
+    document.querySelectorAll('[data-dashboard-date-preset]').forEach(button => {
+        button.classList.toggle('active', button.dataset.dashboardDatePreset === filters.datePreset);
+    });
+    document.querySelectorAll('[data-dashboard-time-preset]').forEach(button => {
+        button.classList.toggle('active', button.dataset.dashboardTimePreset === filters.timePreset);
+    });
+    document.querySelectorAll('[data-dashboard-source]').forEach(button => {
+        button.classList.toggle('active', button.dataset.dashboardSource === filters.source);
+    });
+
+    const dateFields = document.getElementById('dashboard-custom-date-fields');
+    const timeFields = document.getElementById('dashboard-custom-time-fields');
+    dateFields?.classList.toggle('active', filters.datePreset === 'custom');
+    timeFields?.classList.toggle('active', filters.timePreset === 'custom');
+
+    const startDate = document.getElementById('dashboard-start-date');
+    const endDate = document.getElementById('dashboard-end-date');
+    const startTime = document.getElementById('dashboard-time-start');
+    const endTime = document.getElementById('dashboard-time-end');
+    const employee = document.getElementById('dashboard-employee-filter');
+    if (startDate && startDate.value !== filters.startKey) startDate.value = filters.startKey;
+    if (endDate && endDate.value !== filters.endKey) endDate.value = filters.endKey;
+    if (startTime && startTime.value !== filters.timeStart) startTime.value = filters.timeStart;
+    if (endTime && endTime.value !== filters.timeEnd) endTime.value = filters.timeEnd;
+    if (employee && employee.value !== filters.employee) employee.value = filters.employee;
+
+    salesReportTimeFilter = filters.timePreset;
+    salesReportEmployeeFilter = filters.employee;
+    setDashboardText('dashboard-filter-summary', dashboardFilterLabel());
+    setDashboardText('dashboard-exec-note', dashboardFilterLabel());
+}
+
+function renderDashboardAfterFilterChange() {
+    syncDashboardFilterControls();
+    renderDashboardSalesReport();
+}
+
+function setDashboardDatePreset(preset = 'today') {
+    const filters = ensureDashboardFilters();
+    const safePreset = ['today', 'yesterday', 'week', 'eleven_weeks', 'month', 'custom'].includes(preset) ? preset : 'today';
+    filters.datePreset = safePreset;
+    if (safePreset !== 'custom') {
+        const range = dashboardPresetRange(safePreset);
+        filters.startKey = range.startKey;
+        filters.endKey = range.endKey;
+    }
+    renderDashboardAfterFilterChange();
+}
+
+function setDashboardTimePreset(preset = 'all') {
+    const filters = ensureDashboardFilters();
+    filters.timePreset = ['all', 'morning', 'afternoon', 'evening', 'custom'].includes(preset) ? preset : 'all';
+    renderDashboardAfterFilterChange();
+}
+
+function setDashboardSource(source = 'all') {
+    const filters = ensureDashboardFilters();
+    filters.source = ['all', 'pos', 'online', 'booking'].includes(source) ? source : 'all';
+    renderDashboardAfterFilterChange();
+}
+
+function bindDashboardFilters() {
+    ensureDashboardFilters();
+    if (dashboardFiltersBound) {
+        syncDashboardFilterControls();
+        return;
+    }
+    document.getElementById('dashboard-date-presets')?.addEventListener('click', event => {
+        const button = event.target.closest('[data-dashboard-date-preset]');
+        if (button) setDashboardDatePreset(button.dataset.dashboardDatePreset);
+    });
+    document.getElementById('dashboard-time-presets')?.addEventListener('click', event => {
+        const button = event.target.closest('[data-dashboard-time-preset]');
+        if (button) setDashboardTimePreset(button.dataset.dashboardTimePreset);
+    });
+    document.getElementById('dashboard-source-presets')?.addEventListener('click', event => {
+        const button = event.target.closest('[data-dashboard-source]');
+        if (button) setDashboardSource(button.dataset.dashboardSource);
+    });
+    document.getElementById('dashboard-start-date')?.addEventListener('change', event => {
+        const filters = ensureDashboardFilters();
+        filters.datePreset = 'custom';
+        filters.startKey = event.target.value || filters.startKey;
+        if (filters.startKey > filters.endKey) filters.endKey = filters.startKey;
+        renderDashboardAfterFilterChange();
+    });
+    document.getElementById('dashboard-end-date')?.addEventListener('change', event => {
+        const filters = ensureDashboardFilters();
+        filters.datePreset = 'custom';
+        filters.endKey = event.target.value || filters.endKey;
+        if (filters.startKey > filters.endKey) filters.startKey = filters.endKey;
+        renderDashboardAfterFilterChange();
+    });
+    document.getElementById('dashboard-time-start')?.addEventListener('change', event => {
+        const filters = ensureDashboardFilters();
+        filters.timePreset = 'custom';
+        filters.timeStart = event.target.value || filters.timeStart;
+        renderDashboardAfterFilterChange();
+    });
+    document.getElementById('dashboard-time-end')?.addEventListener('change', event => {
+        const filters = ensureDashboardFilters();
+        filters.timePreset = 'custom';
+        filters.timeEnd = event.target.value || filters.timeEnd;
+        renderDashboardAfterFilterChange();
+    });
+    document.getElementById('dashboard-employee-filter')?.addEventListener('change', event => {
+        ensureDashboardFilters().employee = event.target.value || 'all';
+        renderDashboardAfterFilterChange();
+    });
+    dashboardFiltersBound = true;
+    syncDashboardFilterControls();
+}
+
+function openDashboardTab(tabId) {
+    const menu = adminMenuItemForTab(tabId);
+    if (menu && typeof window.switchTab === 'function') window.switchTab(tabId, menu);
+}
+window.openDashboardTab = openDashboardTab;
+
+function salesReportRange() {
+    const range = dashboardDateRange();
+    return {
+        start: range.start,
+        end: range.end,
+        startKey: range.startKey,
+        endKey: range.endKey,
+        todayKey: range.todayKey
     };
 }
 
@@ -1925,15 +2375,31 @@ function dashboardReportDateLabel() {
     return 'ช่วงวันที่ ' + salesReportRangeLabel();
 }
 
+function isPaidOrderForReportDate(order = {}) {
+    const status = String(order.status || '').toLowerCase();
+    const paymentStatus = String(order.paymentStatus || '').toLowerCase();
+    return paymentStatus === 'paid' || status === 'completed';
+}
+
 function orderReportDateValue(order = {}) {
-    const raw = order.timestamp || order.createdAt || order.date;
-    if (raw?.toDate) return raw.toDate().getTime();
-    const parsed = new Date(raw).getTime();
-    return Number.isFinite(parsed) ? parsed : 0;
+    const paid = isPaidOrderForReportDate(order);
+    const raw = paid
+        ? (order.paidAt || order.closedAt || order.businessDate || order.timestamp || order.createdAt || order.date)
+        : (order.openedAt || order.businessDate || order.createdAt || order.timestamp || order.date);
+    return timestampToMillis(raw);
 }
 
 function orderReportDateKey(order = {}) {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(String(order.businessDate || ''))) return order.businessDate;
+    const paid = isPaidOrderForReportDate(order);
+    if (paid) {
+        const paidTime = timestampToMillis(order.paidAt || order.closedAt);
+        if (paidTime) return localDateKey(new Date(paidTime));
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(order.businessDate || ''))) return order.businessDate;
+    } else {
+        const openedTime = timestampToMillis(order.openedAt || order.createdAt || order.timestamp || order.date);
+        if (openedTime) return localDateKey(new Date(openedTime));
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(order.businessDate || ''))) return order.businessDate;
+    }
     const time = orderReportDateValue(order);
     return time ? localDateKey(new Date(time)) : '';
 }
@@ -1945,14 +2411,8 @@ function isOrderInSalesReportRange(order = {}) {
 }
 
 function isOrderInSalesReportTime(order = {}) {
-    if (salesReportTimeFilter === 'all') return true;
     const time = orderReportDateValue(order);
-    if (!time) return true;
-    const hour = new Date(time).getHours();
-    if (salesReportTimeFilter === 'morning') return hour >= 6 && hour < 12;
-    if (salesReportTimeFilter === 'afternoon') return hour >= 12 && hour < 18;
-    if (salesReportTimeFilter === 'evening') return hour >= 18 && hour < 24;
-    return true;
+    return isMinuteInDashboardWindow(dashboardMinutesFromMillis(time));
 }
 
 function isOrderForSalesReportEmployee(order = {}) {
@@ -1992,7 +2452,8 @@ function dashboardRevenueOrders() {
         .filter(isSalesReportOrder)
         .filter(isOrderInSalesReportRange)
         .filter(isOrderInSalesReportTime)
-        .filter(isOrderForSalesReportEmployee);
+        .filter(isOrderForSalesReportEmployee)
+        .filter(dashboardSourceMatchesOrder);
 }
 
 function dashboardRefundOrders() {
@@ -2000,7 +2461,8 @@ function dashboardRefundOrders() {
         .filter(isRefundOrder)
         .filter(isOrderInSalesReportRange)
         .filter(isOrderInSalesReportTime)
-        .filter(isOrderForSalesReportEmployee);
+        .filter(isOrderForSalesReportEmployee)
+        .filter(dashboardSourceMatchesOrder);
 }
 
 function orderReportTotal(order = {}) {
@@ -2118,7 +2580,7 @@ function buildDashboardSalesReportRows(type, orders = dashboardRevenueOrders()) 
             .map(order => ({
                 label: order.receiptNo || order.orderNumber || order.id || order.firestoreId || 'ใบเสร็จ',
                 amount: orderReportTotal(order),
-                meta: [formatDate(order.timestamp || order.createdAt), order.cashierName || order.customerName || ''].filter(Boolean).join(' · ')
+                meta: [salesReportOrderDateText(order), order.cashierName || order.customerName || ''].filter(Boolean).join(' · ')
             }));
     }
 
@@ -2177,7 +2639,7 @@ function buildDashboardSalesReportRows(type, orders = dashboardRevenueOrders()) 
 }
 
 function updateSalesReportEmployeeOptions() {
-    const select = document.getElementById('sales-report-employee-filter');
+    const select = document.getElementById('dashboard-employee-filter') || document.getElementById('sales-report-employee-filter');
     if (!select) return;
     const employees = new Map();
     dashboardOrdersData.forEach(order => {
@@ -2185,17 +2647,20 @@ function updateSalesReportEmployeeOptions() {
         if (!key || key === 'unknown') return;
         employees.set(key, salesReportEmployeeName(order));
     });
-    const current = salesReportEmployeeFilter;
-    select.innerHTML = '<option value="all">พนักงานทั้งหมด</option>'
+    const current = ensureDashboardFilters().employee || salesReportEmployeeFilter;
+    select.innerHTML = '<option value="all">ทั้งหมด</option>'
         + Array.from(employees.entries())
             .sort((a, b) => a[1].localeCompare(b[1], 'th'))
             .map(([key, label]) => `<option value="${escapeHTML(key)}">${escapeHTML(label)}</option>`)
             .join('');
     select.value = employees.has(current) ? current : 'all';
+    ensureDashboardFilters().employee = select.value;
     salesReportEmployeeFilter = select.value;
 }
 
 function updateSalesReportToolbar() {
+    bindDashboardFilters();
+    syncDashboardFilterControls();
     const rangeLabel = document.getElementById('sales-report-range-label');
     if (rangeLabel) rangeLabel.textContent = salesReportRangeLabel();
     const timeSelect = document.getElementById('sales-report-time-filter');
@@ -2379,8 +2844,348 @@ function renderSalesSummaryTable() {
     if (pageTotal) pageTotal.textContent = `จาก ${Math.max(1, Math.ceil(rows.length / 10)).toLocaleString('th-TH')}`;
 }
 
+function dashboardOrderGroupsBySource(orders = dashboardRevenueOrders()) {
+    const groups = new Map([
+        ['POS', { label: 'POS', amount: 0, quantity: 0 }],
+        ['Online', { label: 'Online', amount: 0, quantity: 0 }]
+    ]);
+    orders.forEach(order => {
+        const label = dashboardOrderSourceLabel(order);
+        const current = groups.get(label) || { label, amount: 0, quantity: 0 };
+        current.amount += orderReportTotal(order);
+        current.quantity += 1;
+        groups.set(label, current);
+    });
+    return Array.from(groups.values()).filter(row => row.amount || row.quantity);
+}
+
+function renderDashboardChart(chart, canvasId, labels = [], values = [], colors = []) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || typeof Chart === 'undefined') return chart;
+    const hasData = values.some(value => safeNumber(value) > 0);
+    const chartLabels = hasData ? labels : ['ไม่มีข้อมูล'];
+    const chartValues = hasData ? values : [1];
+    const chartColors = hasData ? colors : ['#dce5df'];
+    const data = {
+        labels: chartLabels,
+        datasets: [{
+            data: chartValues,
+            backgroundColor: chartColors,
+            borderColor: '#ffffff',
+            borderWidth: 3,
+            hoverOffset: 3
+        }]
+    };
+    if (chart) {
+        chart.data = data;
+        chart.update();
+        return chart;
+    }
+    return new Chart(canvas.getContext('2d'), {
+        type: 'doughnut',
+        data,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '64%',
+            plugins: {
+                legend: { position: 'bottom', labels: { boxWidth: 10, usePointStyle: true } },
+                tooltip: {
+                    callbacks: {
+                        label: context => {
+                            if (!hasData) return 'ไม่มีข้อมูล';
+                            const label = context.label || '';
+                            const value = safeNumber(context.parsed);
+                            return `${label}: ${adminMoney(value)}`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function renderDashboardDataList(containerId, rows = [], options = {}) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const limit = options.limit || 5;
+    const valueFormat = options.valueFormat || (value => adminMoney(value));
+    const emptyText = options.emptyText || 'ยังไม่มีข้อมูลในช่วงนี้';
+    const shown = rows.slice(0, limit);
+    const maxValue = Math.max(1, ...shown.map(row => safeNumber(row.amount ?? row.value ?? row.quantity)));
+    if (!shown.length) {
+        container.innerHTML = `<div class="dashboard-empty">${escapeHTML(emptyText)}</div>`;
+        return;
+    }
+    container.innerHTML = shown.map(row => {
+        const value = safeNumber(row.amount ?? row.value ?? row.quantity);
+        const width = Math.max(4, Math.min(100, (value / maxValue) * 100));
+        const meta = row.meta ? `<small>${escapeHTML(row.meta)}</small>` : '';
+        return `
+            <div class="dashboard-data-row">
+                <div>
+                    <span>${escapeHTML(row.label || '-')}</span>
+                    ${meta}
+                    <div class="dashboard-bar"><span style="width:${width.toFixed(2)}%;"></span></div>
+                </div>
+                <strong>${escapeHTML(valueFormat(value, row))}</strong>
+            </div>
+        `;
+    }).join('');
+}
+
+function dashboardStatusCount(rows = [], status) {
+    return rows.filter(row => String(row.status || '').toLowerCase() === status).length;
+}
+
+function dashboardMemberDateKey(member = {}) {
+    const raw = member.createdAt || member.created_at || member.registeredAt || member.joinedAt || member.updatedAt;
+    const time = timestampToMillis(raw);
+    return time ? localDateKey(new Date(time)) : '';
+}
+
+function dashboardMemberInRange(member = {}) {
+    const key = dashboardMemberDateKey(member);
+    const range = dashboardDateRange();
+    return !!key && key >= range.startKey && key <= range.endKey;
+}
+
+function dashboardActivityMemberIds(orders = dashboardRevenueOrders(), bookings = dashboardFilteredBookings()) {
+    const ids = new Set();
+    orders.forEach(order => {
+        const uid = order.customerUid || order.uid || order.userId || order.memberUid;
+        if (uid) ids.add(uid);
+    });
+    bookings.forEach(booking => {
+        const uid = booking.member_id || booking.uid || booking.customerUid || booking.userId || booking.memberUid;
+        if (uid) ids.add(uid);
+    });
+    return ids;
+}
+
+function dashboardScopedMembers(activeIds = dashboardActivityMemberIds()) {
+    const entries = Object.entries(membersData || {});
+    if (!activeIds.size) return [];
+    return entries.filter(([uid]) => activeIds.has(uid)).map(([uid, member]) => ({ uid, member }));
+}
+
+function dashboardProductAlertRows() {
+    const rows = [];
+    Object.entries(productsData || {}).forEach(([id, product]) => {
+        const baseLabel = product.name || product.nameEn || id;
+        const lowStock = safeNumber(product.lowStock);
+        const stock = safeNumber(product.stock);
+        if (product.trackStock && stock <= Math.max(0, lowStock)) {
+            rows.push({
+                label: baseLabel,
+                meta: `${categoryNameForProduct(product)} · stock ${stock.toLocaleString('th-TH')} / low ${lowStock.toLocaleString('th-TH')}`,
+                quantity: stock,
+                out: stock <= 0,
+                low: stock > 0
+            });
+        }
+        productVariantsForDisplay(product).forEach(variant => {
+            const variantStock = safeNumber(variant.stock);
+            const variantLow = safeNumber(variant.lowStock);
+            if (variantLow > 0 && variantStock <= variantLow) {
+                rows.push({
+                    label: `${baseLabel} / ${variant.name || variant.id}`,
+                    meta: `variant · stock ${variantStock.toLocaleString('th-TH')} / low ${variantLow.toLocaleString('th-TH')}`,
+                    quantity: variantStock,
+                    out: variantStock <= 0,
+                    low: variantStock > 0
+                });
+            }
+        });
+    });
+    return rows.sort((a, b) => safeNumber(a.quantity) - safeNumber(b.quantity));
+}
+
+function dashboardLowMarginRows() {
+    return Object.entries(productsData || {})
+        .map(([id, product]) => {
+            const price = safeNumber(product.price);
+            const cost = safeNumber(product.cost);
+            if (!price || !cost) return null;
+            const margin = ((price - cost) / price) * 100;
+            if (margin >= 35) return null;
+            return {
+                label: product.name || product.nameEn || id,
+                meta: `${categoryNameForProduct(product)} · margin ${margin.toLocaleString('th-TH', { maximumFractionDigits: 1 })}%`,
+                value: margin
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => safeNumber(a.value) - safeNumber(b.value));
+}
+
+function renderDashboardExecutive(totals, revenueOrders, operationalOrders) {
+    const openBills = operationalOrders.filter(isOpenBillOrder);
+    setDashboardText('dashboard-kpi-net-sales', adminMoney(totals.net));
+    setDashboardText('dashboard-kpi-receipts', totals.count.toLocaleString('th-TH'));
+    setDashboardText('dashboard-kpi-profit', adminMoney(totals.profit));
+    setDashboardText('dashboard-kpi-discount', adminMoney(totals.discounts));
+    setDashboardText('dashboard-kpi-refund-void', adminMoney(totals.refunds));
+    setDashboardText('dashboard-kpi-open-bills', openBills.length.toLocaleString('th-TH'));
+    setDashboardText('dashboard-kpi-net-sales-note', `${revenueOrders.filter(order => dashboardOrderSourceLabel(order) === 'POS').length.toLocaleString('th-TH')} POS · ${revenueOrders.filter(order => dashboardOrderSourceLabel(order) === 'Online').length.toLocaleString('th-TH')} Online`);
+    setDashboardText('dashboard-kpi-receipts-note', `${dashboardSourceLabel()} · ${dashboardTimeLabel()}`);
+    setDashboardText('dashboard-kpi-profit-note', `Margin ${totals.margin.toLocaleString('th-TH', { maximumFractionDigits: 2 })}%`);
+    setDashboardText('dashboard-kpi-discount-note', `${totals.count.toLocaleString('th-TH')} บิลในช่วงนี้`);
+    setDashboardText('dashboard-kpi-refund-void-note', `${dashboardRefundOrders().length.toLocaleString('th-TH')} รายการ`);
+    setDashboardText('dashboard-kpi-open-bills-note', `ยอดค้าง ${adminMoney(openBills.reduce((sum, order) => sum + orderReportTotal(order), 0))}`);
+}
+
+function renderDashboardOperations(operationalOrders, bookings) {
+    const onlinePending = operationalOrders.filter(order => {
+        const source = dashboardOrderSourceLabel(order);
+        const status = String(order.status || '').toLowerCase();
+        const paymentStatus = String(order.paymentStatus || '').toLowerCase();
+        return source === 'Online' && (status === 'pending' || status === 'processing' || paymentStatus === 'pending');
+    });
+    const openBills = operationalOrders.filter(isOpenBillOrder);
+    const bookingPending = bookings.filter(booking => String(booking.status || 'pending').toLowerCase() === 'pending');
+    const loyaltyIssues = operationalOrders.filter(order => {
+        const status = posLoyaltySyncStatus(order);
+        return status === 'pending' || status === 'failed' || status === 'syncing';
+    });
+    const stockAlerts = dashboardProductAlertRows();
+    setDashboardText('dashboard-queue-online-pending', onlinePending.length.toLocaleString('th-TH'));
+    setDashboardText('dashboard-queue-pos-open', openBills.length.toLocaleString('th-TH'));
+    setDashboardText('dashboard-queue-booking-pending', bookingPending.length.toLocaleString('th-TH'));
+    setDashboardText('dashboard-queue-loyalty-issues', loyaltyIssues.length.toLocaleString('th-TH'));
+    setDashboardText('dashboard-queue-stock-alerts', stockAlerts.length.toLocaleString('th-TH'));
+}
+
+function renderDashboardSalesAnalytics(revenueOrders) {
+    const sourceRows = dashboardOrderGroupsBySource(revenueOrders);
+    dashboardSourceChart = renderDashboardChart(
+        dashboardSourceChart,
+        'dashboard-source-chart',
+        sourceRows.map(row => row.label),
+        sourceRows.map(row => row.amount),
+        ['#2368a2', '#2f7d53']
+    );
+
+    const paymentRows = buildDashboardSalesReportRows('payment', revenueOrders).slice(0, 6);
+    dashboardPaymentChart = renderDashboardChart(
+        dashboardPaymentChart,
+        'dashboard-payment-chart',
+        paymentRows.map(row => row.label),
+        paymentRows.map(row => row.amount),
+        ['#17452f', '#2368a2', '#b7791f', '#8f5b2f', '#bf4342', '#6b7c86']
+    );
+
+    renderDashboardDataList('dashboard-top-products', buildDashboardSalesReportRows('product', revenueOrders), {
+        emptyText: 'ยังไม่มีสินค้าขายในช่วงนี้'
+    });
+    renderDashboardDataList('dashboard-top-categories', buildDashboardSalesReportRows('category', revenueOrders), {
+        emptyText: 'ยังไม่มีหมวดหมู่ขายในช่วงนี้'
+    });
+    renderDashboardDataList('dashboard-top-cashiers', buildDashboardSalesReportRows('staff', revenueOrders), {
+        emptyText: 'ยังไม่มีข้อมูลแคชเชียร์ในช่วงนี้'
+    });
+}
+
+function renderDashboardBookings(bookings) {
+    const todayKey = localDateKey(new Date());
+    const todayCount = bookings.filter(booking => dashboardBookingDateKey(booking) === todayKey).length;
+    const pending = dashboardStatusCount(bookings, 'pending');
+    const confirmed = dashboardStatusCount(bookings, 'confirmed');
+    const archery = bookings.filter(isArcheryBooking).length;
+    const nonArchery = bookings.filter(booking => !isArcheryBooking(booking));
+    const room = nonArchery.filter(booking => String(booking.bookingType || '').toLowerCase() === 'room').length;
+    const table = nonArchery.length - room;
+    setDashboardText('dashboard-booking-today', todayCount.toLocaleString('th-TH'));
+    setDashboardText('dashboard-booking-pending', pending.toLocaleString('th-TH'));
+    setDashboardText('dashboard-booking-confirmed', confirmed.toLocaleString('th-TH'));
+    setDashboardText('dashboard-booking-split', `${room.toLocaleString('th-TH')} / ${table.toLocaleString('th-TH')} / ${archery.toLocaleString('th-TH')}`);
+    const statBookings = document.getElementById('stat-bookings');
+    if (statBookings) statBookings.textContent = bookings.length.toLocaleString('th-TH');
+}
+
+function renderDashboardMembersAndLoyalty(revenueOrders, bookings) {
+    const activeIds = dashboardActivityMemberIds(revenueOrders, bookings);
+    const scopedMembers = dashboardScopedMembers(activeIds);
+    const newMembers = Object.values(membersData || {}).filter(dashboardMemberInRange);
+    const config = normalizeLoyaltyConfig(loyaltyConfig);
+    const pointSource = scopedMembers.length
+        ? scopedMembers.map(row => row.member)
+        : (activeIds.size ? [] : Object.values(membersData || {}).filter(dashboardMemberInRange));
+    const totalPoints = pointSource.reduce((sum, member) => sum + Math.max(0, Math.floor(safeNumber(member.points ?? member.pointsBalance ?? member._memberSummary?.pointsBalance))), 0);
+    const loyaltyIssues = dashboardOperationalOrders().filter(order => {
+        const status = posLoyaltySyncStatus(order);
+        return status === 'pending' || status === 'failed' || status === 'syncing';
+    }).length;
+    setDashboardText('dashboard-member-new', newMembers.length.toLocaleString('th-TH'));
+    setDashboardText('dashboard-member-active', activeIds.size.toLocaleString('th-TH'));
+    setDashboardText('dashboard-loyalty-points', totalPoints.toLocaleString('th-TH'));
+    setDashboardText('dashboard-loyalty-liability', adminMoney(totalPoints * config.pointValue));
+    setDashboardText('dashboard-queue-loyalty-issues', loyaltyIssues.toLocaleString('th-TH'));
+}
+
+function renderDashboardInventory() {
+    const alerts = dashboardProductAlertRows();
+    const outRows = alerts.filter(row => row.out);
+    const lowRows = alerts.filter(row => row.low);
+    const marginRows = dashboardLowMarginRows();
+    renderDashboardDataList('dashboard-stock-alert-list', lowRows, {
+        emptyText: 'ไม่มีสินค้าใกล้หมด',
+        valueFormat: value => value.toLocaleString('th-TH')
+    });
+    renderDashboardDataList('dashboard-out-stock-list', outRows, {
+        emptyText: 'ไม่มีสินค้าหมด',
+        valueFormat: value => value.toLocaleString('th-TH')
+    });
+    renderDashboardDataList('dashboard-margin-variant-list', marginRows, {
+        emptyText: 'ยังไม่พบ margin ต่ำกว่า 35%',
+        valueFormat: value => `${value.toLocaleString('th-TH', { maximumFractionDigits: 1 })}%`
+    });
+}
+
+function renderDashboardSystemHealth(operationalOrders) {
+    const dailyViews = safeNumber(dashboardStatsData.dailyViews);
+    const totalViews = safeNumber(dashboardStatsData.totalViews);
+    setDashboardText('dashboard-visitor-stat', `${dailyViews.toLocaleString('th-TH')} วันนี้`);
+    setDashboardText('dashboard-visitor-note', `รวม ${totalViews.toLocaleString('th-TH')} views`);
+    setDashboardHealthState('dashboard-health-visitors', dailyViews > 0 ? 'ok' : 'warn');
+
+    const prompt = normalizePromptPaySettings(dashboardPromptPaySettings || promptPaySettingsState || defaultPromptPaySettings());
+    const promptAccount = activePromptPayAccount(prompt);
+    setDashboardText('dashboard-promptpay-status', prompt.enabled ? 'พร้อมใช้งาน' : 'ปิดใช้งาน');
+    setDashboardText('dashboard-promptpay-note', prompt.enabled ? `${promptAccount.label} · ${promptAccount.promptPayId}` : 'ปิดจาก site_settings/promptpay');
+    setDashboardHealthState('dashboard-health-promptpay', prompt.enabled ? 'ok' : 'warn');
+
+    const discountRows = Object.values(discountsData || {});
+    const activeDiscounts = discountRows.filter(discount => discount.active !== false).length;
+    setDashboardText('dashboard-discount-status', `${activeDiscounts.toLocaleString('th-TH')} active`);
+    setDashboardText('dashboard-discount-note', `${discountRows.length.toLocaleString('th-TH')} rules`);
+    setDashboardHealthState('dashboard-health-discounts', activeDiscounts ? 'ok' : 'warn');
+
+    const posOrders = operationalOrders.filter(order => String(order.source || '').toLowerCase() === 'pos');
+    const openBills = posOrders.filter(isOpenBillOrder);
+    setDashboardText('dashboard-apk-status', posOrders.length ? 'มีข้อมูล POS' : 'รอข้อมูล POS');
+    setDashboardText('dashboard-apk-note', `${posOrders.length.toLocaleString('th-TH')} orders · ${openBills.length.toLocaleString('th-TH')} open bills`);
+    setDashboardHealthState('dashboard-health-apk', posOrders.length ? 'ok' : 'warn');
+}
+
+function renderManagerDashboard() {
+    bindDashboardFilters();
+    const revenueOrders = dashboardRevenueOrders();
+    const operationalOrders = dashboardOperationalOrders();
+    const bookings = dashboardFilteredBookings();
+    const totals = reportSummaryTotals(revenueOrders);
+    renderDashboardExecutive(totals, revenueOrders, operationalOrders);
+    renderDashboardOperations(operationalOrders, bookings);
+    renderDashboardSalesAnalytics(revenueOrders);
+    renderDashboardBookings(bookings);
+    renderDashboardMembersAndLoyalty(revenueOrders, bookings);
+    renderDashboardInventory();
+    renderDashboardSystemHealth(operationalOrders);
+}
+
 function renderDashboardSalesReport() {
     updateSalesReportToolbar();
+    renderManagerDashboard();
     renderSalesReportKpis();
     renderSalesSummaryChart();
     renderSalesSummaryTable();
@@ -2411,17 +3216,23 @@ window.setSalesReportType = (type = 'summary', button = null) => {
 
 window.shiftSalesReportMonth = (delta = 0) => {
     salesReportMonthOffset += safeNumber(delta);
-    renderDashboardSalesReport();
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth() + salesReportMonthOffset, 1);
+    const last = new Date(first.getFullYear(), first.getMonth() + 1, 0);
+    const filters = ensureDashboardFilters();
+    filters.datePreset = 'custom';
+    filters.startKey = localDateKey(first);
+    filters.endKey = localDateKey(last);
+    renderDashboardAfterFilterChange();
 };
 
 window.setSalesReportTimeFilter = (value = 'all') => {
-    salesReportTimeFilter = ['all', 'morning', 'afternoon', 'evening'].includes(value) ? value : 'all';
-    renderDashboardSalesReport();
+    setDashboardTimePreset(value);
 };
 
 window.setSalesReportEmployeeFilter = (value = 'all') => {
-    salesReportEmployeeFilter = value || 'all';
-    renderDashboardSalesReport();
+    ensureDashboardFilters().employee = value || 'all';
+    renderDashboardAfterFilterChange();
 };
 
 function salesReportSheetName(name) {
@@ -2439,7 +3250,9 @@ function salesReportExcelSheet(rows) {
 }
 
 function salesReportOrderDateText(order = {}) {
-    const value = order.timestamp || order.createdAt || order.date || order.businessDate;
+    const value = isPaidOrderForReportDate(order)
+        ? (order.paidAt || order.closedAt || order.businessDate || order.timestamp || order.createdAt || order.date)
+        : (order.openedAt || order.businessDate || order.createdAt || order.timestamp || order.date);
     if (!value) return '';
     if (value?.toDate) return value.toDate().toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
     const date = new Date(value);
@@ -2605,6 +3418,73 @@ function formatDate(timestamp) {
     return date.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+function posLoyaltySyncStatus(order = {}) {
+    return String(order.loyaltySyncStatus || '').trim().toLowerCase();
+}
+
+function posLoyaltyRetryActionHTML(order = {}, orderId = '') {
+    if (String(order.source || '').toLowerCase() !== 'pos') return '';
+    const status = posLoyaltySyncStatus(order) || 'not_synced';
+    const error = String(order.loyaltyError || '').trim();
+    const retryable = status === 'pending' || status === 'failed';
+    const receiptNo = order.receiptNo || order.orderNumber || order.id || orderId;
+    const color = status === 'synced'
+        ? '#2e7d32'
+        : status === 'failed'
+            ? '#c62828'
+            : status === 'skipped'
+                ? '#6d6d6d'
+                : '#8a5a00';
+    const retryButton = retryable
+        ? `<button class="btn-action btn-view" type="button" style="margin-left:6px;" onclick="retryPosLoyaltySale('${escapeJSString(orderId)}', '${escapeJSString(receiptNo)}', this)">Retry loyalty</button>`
+        : '';
+    const errorText = error ? `<br><small style="color:#c62828;">${escapeHTML(error)}</small>` : '';
+    return `
+        <div style="margin-top:6px;">
+            <small style="color:${color};">Loyalty: ${escapeHTML(status)}</small>
+            ${retryButton}
+            <small id="pos-loyalty-retry-${escapeHTML(orderId)}" style="display:block; margin-top:4px;"></small>
+            ${errorText}
+        </div>
+    `;
+}
+
+function setPosLoyaltyRetryMessage(orderId, message, color = '#2e7d32') {
+    const statusEl = document.getElementById(`pos-loyalty-retry-${orderId}`);
+    if (statusEl) {
+        statusEl.textContent = message;
+        statusEl.style.color = color;
+    }
+}
+
+window.retryPosLoyaltySale = async (orderId, receiptNo = '', button = null) => {
+    if (!canAdmin('pos')) {
+        alert('POS admin permission is required');
+        return;
+    }
+    const originalText = button?.textContent || 'Retry loyalty';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'Retrying...';
+        }
+        setPosLoyaltyRetryMessage(orderId, 'Retrying loyalty sync...', '#607d8b');
+        const result = await callAdminFunction('adminRetryPosLoyaltySale', { orderId });
+        const status = result.status || 'synced';
+        setPosLoyaltyRetryMessage(orderId, `Loyalty ${status}`, '#2e7d32');
+        if (button) button.textContent = status === 'skipped' ? 'Skipped' : 'Synced';
+        if (typeof setupRealtimeOrders === 'function') setupRealtimeOrders();
+    } catch (error) {
+        console.error('POS loyalty retry failed:', error);
+        setPosLoyaltyRetryMessage(orderId, error.message || 'Retry failed', '#c62828');
+        alert(safeAdminError(`POS loyalty retry failed${receiptNo ? ` (${receiptNo})` : ''}`));
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+    }
+};
+
 // Real-time Orders Listener
 function setupRealtimeOrders() {
     if (ordersUnsubscribe) {
@@ -2616,7 +3496,7 @@ function setupRealtimeOrders() {
         const tbody = document.getElementById('orders-table-body');
         if (!tbody) return;
         tbody.innerHTML = '';
-        
+
         let todayOrders = 0;
         let todayRevenue = 0;
         const reportOrders = [];
@@ -2656,7 +3536,7 @@ function setupRealtimeOrders() {
                 <td>${escapeHTML(order.customerName || 'Customer')}<br><small style="color:#888;">${escapeHTML([order.phone || '', sourceLabel].filter(Boolean).join(' | '))}</small></td>
                 <td style="font-weight: 500;">฿${safeNumber(order.totalAmount || order.total).toLocaleString()}</td>
                 <td>${getPaymentStatusBadgeHTML(paymentStatus)}<br><small style="color:#888;">${escapeHTML(paymentLabel)}</small></td>
-                <td>${formatDate(order.timestamp)}</td>
+                <td>${formatDate(order.paidAt || order.closedAt || order.timestamp)}</td>
                 <td>${getStatusBadgeHTML(status, 'order')}</td>
                 <td>
                     <select onchange="updateOrderStatus('${escapeJSString(id)}', this.value)" style="padding: 5px; border-radius: 5px; border: 1px solid #ddd;">
@@ -2666,6 +3546,7 @@ function setupRealtimeOrders() {
                         <option value="cancelled" ${status === 'cancelled' ? 'selected' : ''}>ยกเลิก</option>
                     </select>
                     ${canVoidPos ? `<button class="btn-action btn-delete" type="button" style="margin-left:6px;" onclick="voidPosOrder('${escapeJSString(id)}')">Void</button>` : ''}
+                    ${posLoyaltyRetryActionHTML(order, id)}
                 </td>
             `;
             tbody.appendChild(tr);
@@ -2683,6 +3564,1415 @@ function setupRealtimeOrders() {
     });
 }
 
+function adminTodayISO() {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    return now.toISOString().slice(0, 10);
+}
+
+function adminMinutesFromTime(value = '') {
+    const [hours, minutes] = String(value || '00:00').split(':').map(Number);
+    return (Number(hours) || 0) * 60 + (Number(minutes) || 0);
+}
+
+function adminTimeFromMinutes(value) {
+    const minutes = Math.max(0, Math.floor(Number(value) || 0));
+    return String(Math.floor(minutes / 60)).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0');
+}
+
+function adminDisplayArcheryTime(value) {
+    return String(value || '').replace(':', '.');
+}
+
+function adminFillArcheryTimeOptions() {
+    const startSelect = document.getElementById('archery-admin-start');
+    if (!startSelect) return;
+    const selected = startSelect.value;
+    const duration = Number(document.getElementById('archery-admin-package')?.value || 60) || 60;
+    const lastStart = (20 * 60) - duration;
+    startSelect.innerHTML = '';
+    for (let minute = 10 * 60; minute <= lastStart; minute += 60) {
+        const opt = document.createElement('option');
+        opt.value = adminTimeFromMinutes(minute);
+        opt.textContent = adminDisplayArcheryTime(adminTimeFromMinutes(minute));
+        startSelect.appendChild(opt);
+    }
+    if (selected && Array.from(startSelect.options).some(opt => opt.value === selected)) startSelect.value = selected;
+}
+
+const ARCHERY_BRANCH_FALLBACK = 'BKK_MAIN';
+const ARCHERY_PAID_STATUSES = new Set(['PAID_ONLINE', 'PAID_COUNTER', 'PAID', 'REFUNDED']);
+const ARCHERY_CLOSED_STATUSES = new Set(['CANCELLED', 'COMPLETED', 'NO_SHOW', 'EXPIRED']);
+const ARCHERY_AUDIT_ACTIONS = new Set([
+    'createWalkInArcheryBooking',
+    'adminCheckInBooking',
+    'adminCompleteBooking',
+    'adminMoveBookingLane',
+    'adminExtendBooking',
+    'requestCancelBooking',
+    'approveCancelBooking',
+    'adminMarkNoShow',
+    'recordCounterPayment',
+    'refundPayment',
+    'overrideResourceLock'
+]);
+const ARCHERY_PAGE_SETTINGS_REF = () => doc(db, 'site_settings', 'archery');
+const DEFAULT_ARCHERY_PAGE_SETTINGS = {
+    heroImageUrl: '/Images/archery/archery-hero.png',
+    packageLead: 'Open daily 10:00-20:00. Choose 60 / 120 / 180 minute packages.',
+    packages: [
+        {
+            durationMinutes: 60,
+            price: 350,
+            title: '60 min',
+            description: 'Short round for a quick trial or cafe visit.',
+            conditions: ['Best for first-time guests', 'Includes lane time and basic equipment']
+        },
+        {
+            durationMinutes: 120,
+            price: 600,
+            title: '120 min',
+            description: 'Standard session for practice or visiting with friends.',
+            conditions: ['Recommended for small groups', 'Includes lane time and basic equipment']
+        },
+        {
+            durationMinutes: 180,
+            price: 800,
+            title: '180 min',
+            description: 'Long session for group activities or workshops.',
+            conditions: ['Suitable for longer practice', 'Includes lane time and basic equipment']
+        }
+    ]
+};
+const DEFAULT_ARCHERY_PRICING = {
+    version: '2026-06-default',
+    packages: [
+        { durationMinutes: 60, price: 350, title: '60 min', active: true },
+        { durationMinutes: 120, price: 600, title: '120 min', active: true },
+        { durationMinutes: 180, price: 800, title: '180 min', active: true }
+    ],
+    abilityOptions: [
+        { id: 'first_time_with_coach', label: 'First time, coach required', ratePerHour: 50, coachRequired: true, active: true },
+        { id: 'experienced_with_coach', label: 'Experienced, coach requested', ratePerHour: 50, coachRequired: true, active: true },
+        { id: 'experienced_no_coach', label: 'Experienced, no coach', ratePerHour: 0, coachRequired: false, active: true }
+    ],
+    equipmentOptions: [
+        { id: 'rent_full_set', label: 'Rent full equipment set', ratePerHour: 100, active: true },
+        { id: 'bring_own', label: 'Bring own equipment', ratePerHour: 0, active: true }
+    ]
+};
+
+function normalizeArcheryPagePackage(item = {}, index = 0) {
+    const duration = Number(item.durationMinutes || item.duration_minutes || item.duration || 0) || [60, 120, 180][index] || 60;
+    const price = Number(item.price || item.amount || item.amountTotal || item.amount_total || 0) || 0;
+    const conditions = Array.isArray(item.conditions)
+        ? item.conditions.map(value => String(value || '').trim()).filter(Boolean).slice(0, 12)
+        : String(item.conditionsText || item.conditions || '').split(/\r?\n/).map(value => value.trim()).filter(Boolean).slice(0, 12);
+    return {
+        durationMinutes: duration,
+        price,
+        title: String(item.title || `${duration} min`).trim().slice(0, 80),
+        description: String(item.description || '').trim().slice(0, 260),
+        conditions
+    };
+}
+
+function normalizeArcheryPageSettings(data = {}) {
+    const fallback = DEFAULT_ARCHERY_PAGE_SETTINGS;
+    const packages = Array.isArray(data.packages) && data.packages.length
+        ? data.packages.map(normalizeArcheryPagePackage).filter(item => item.durationMinutes > 0)
+        : fallback.packages.map(normalizeArcheryPagePackage);
+    return {
+        heroImageUrl: safeImageURL(data.heroImageUrl || data.hero_image_url || data.heroUrl || fallback.heroImageUrl, fallback.heroImageUrl),
+        packageLead: String(data.packageLead || data.package_lead || fallback.packageLead).trim().slice(0, 300),
+        packages
+    };
+}
+
+function normalizeArcheryPricing(data = {}) {
+    const source = data.pricing || data.bookingOptions || data.booking_options || {};
+    const packagesSource = Array.isArray(source.packages) && source.packages.length ? source.packages : DEFAULT_ARCHERY_PRICING.packages;
+    const abilitySource = Array.isArray(source.abilityOptions || source.ability_options) && (source.abilityOptions || source.ability_options).length
+        ? (source.abilityOptions || source.ability_options)
+        : DEFAULT_ARCHERY_PRICING.abilityOptions;
+    const equipmentSource = Array.isArray(source.equipmentOptions || source.equipment_options) && (source.equipmentOptions || source.equipment_options).length
+        ? (source.equipmentOptions || source.equipment_options)
+        : DEFAULT_ARCHERY_PRICING.equipmentOptions;
+    return {
+        version: String(source.version || source.pricingVersion || source.pricing_version || DEFAULT_ARCHERY_PRICING.version).trim(),
+        packages: packagesSource.map((item, index) => ({
+            durationMinutes: Number(item.durationMinutes || item.duration_minutes || item.duration || DEFAULT_ARCHERY_PRICING.packages[index]?.durationMinutes || 60) || 60,
+            price: Number(item.price || item.amount || item.amountTotal || item.amount_total || DEFAULT_ARCHERY_PRICING.packages[index]?.price || 0) || 0,
+            title: String(item.title || DEFAULT_ARCHERY_PRICING.packages[index]?.title || '').trim().slice(0, 80),
+            active: item.active !== false
+        })),
+        abilityOptions: abilitySource.map((item, index) => ({
+            id: String(item.id || item.option_id || DEFAULT_ARCHERY_PRICING.abilityOptions[index]?.id || '').trim().slice(0, 80),
+            label: String(item.label || DEFAULT_ARCHERY_PRICING.abilityOptions[index]?.label || '').trim().slice(0, 120),
+            ratePerHour: Number(item.ratePerHour || item.rate_per_hour || item.rate || 0) || 0,
+            coachRequired: item.coachRequired === true || item.coach_required === true,
+            active: item.active !== false
+        })).filter(item => item.id),
+        equipmentOptions: equipmentSource.map((item, index) => ({
+            id: String(item.id || item.option_id || DEFAULT_ARCHERY_PRICING.equipmentOptions[index]?.id || '').trim().slice(0, 80),
+            label: String(item.label || DEFAULT_ARCHERY_PRICING.equipmentOptions[index]?.label || '').trim().slice(0, 120),
+            ratePerHour: Number(item.ratePerHour || item.rate_per_hour || item.rate || 0) || 0,
+            active: item.active !== false
+        })).filter(item => item.id)
+    };
+}
+
+function archeryPricingConfig() {
+    return normalizeArcheryPricing(archeryPageSettingsData || {});
+}
+
+function activeArcheryItems(items = []) {
+    return (Array.isArray(items) ? items : []).filter(item => item && item.active !== false);
+}
+
+function archeryMoney(value) {
+    return Math.round(Number(value) || 0).toLocaleString('th-TH') + ' THB';
+}
+
+function archeryPageSettingsStatus(message, tone = '') {
+    const status = document.getElementById('archery-page-settings-status');
+    if (!status) return;
+    status.textContent = message || '';
+    status.className = 'archery-status' + (tone ? ' ' + tone : '');
+}
+
+function renderArcheryPagePackageRows(packages = []) {
+    const list = document.getElementById('archery-page-package-list');
+    if (!list) return;
+    const rows = packages.length ? packages : DEFAULT_ARCHERY_PAGE_SETTINGS.packages;
+    list.innerHTML = rows.map((item, index) => {
+        const normalized = normalizeArcheryPagePackage(item, index);
+        return `
+            <div class="archery-page-package-row" data-package-index="${index}">
+                <label class="archery-field">
+                    Minutes
+                    <input type="number" min="15" step="15" data-page-package-field="durationMinutes" value="${escapeHTML(normalized.durationMinutes)}">
+                </label>
+                <label class="archery-field">
+                    Price
+                    <input type="number" min="0" step="1" data-page-package-field="price" value="${escapeHTML(normalized.price)}">
+                </label>
+                <label class="archery-field">
+                    Title
+                    <input type="text" maxlength="80" data-page-package-field="title" value="${escapeHTML(normalized.title)}">
+                </label>
+                <button class="remove-package" type="button" data-page-package-remove="${index}">Remove</button>
+                <label class="archery-field full">
+                    Description
+                    <textarea maxlength="260" data-page-package-field="description">${escapeHTML(normalized.description)}</textarea>
+                </label>
+                <label class="archery-field full">
+                    Conditions (one line each)
+                    <textarea maxlength="800" data-page-package-field="conditions">${escapeHTML(normalized.conditions.join('\n'))}</textarea>
+                </label>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderArcheryPricingPackageRows(packages = []) {
+    const list = document.getElementById('archery-pricing-package-list');
+    if (!list) return;
+    const rows = packages.length ? packages : DEFAULT_ARCHERY_PRICING.packages;
+    list.innerHTML = rows.map((item, index) => `
+        <div class="archery-page-package-row" data-pricing-package-index="${index}">
+            <label class="archery-field">
+                Minutes
+                <input type="number" min="15" step="15" data-pricing-package-field="durationMinutes" value="${escapeHTML(item.durationMinutes)}">
+            </label>
+            <label class="archery-field">
+                Price
+                <input type="number" min="0" step="1" data-pricing-package-field="price" value="${escapeHTML(item.price)}">
+            </label>
+            <label class="archery-field">
+                Title
+                <input type="text" maxlength="80" data-pricing-package-field="title" value="${escapeHTML(item.title || item.durationMinutes + ' min')}">
+            </label>
+            <label class="archery-field">
+                Active
+                <input type="checkbox" data-pricing-package-field="active" ${item.active !== false ? 'checked' : ''}>
+            </label>
+        </div>
+    `).join('');
+}
+
+function renderArcheryPricingOptionRows(listId, kind, options = []) {
+    const list = document.getElementById(listId);
+    if (!list) return;
+    list.innerHTML = options.map((item, index) => `
+        <div class="archery-page-package-row" data-pricing-option-kind="${kind}" data-pricing-option-index="${index}">
+            <label class="archery-field">
+                ID
+                <input type="text" maxlength="80" data-pricing-option-field="id" value="${escapeHTML(item.id)}">
+            </label>
+            <label class="archery-field">
+                Label
+                <input type="text" maxlength="120" data-pricing-option-field="label" value="${escapeHTML(item.label)}">
+            </label>
+            <label class="archery-field">
+                Rate / hour
+                <input type="number" min="0" step="1" data-pricing-option-field="ratePerHour" value="${escapeHTML(item.ratePerHour)}">
+            </label>
+            ${kind === 'ability' ? `
+                <label class="archery-field">
+                    Coach required
+                    <input type="checkbox" data-pricing-option-field="coachRequired" ${item.coachRequired ? 'checked' : ''}>
+                </label>
+            ` : ''}
+            <label class="archery-field">
+                Active
+                <input type="checkbox" data-pricing-option-field="active" ${item.active !== false ? 'checked' : ''}>
+            </label>
+        </div>
+    `).join('');
+}
+
+function renderArcheryPricingEditor(pricing = DEFAULT_ARCHERY_PRICING) {
+    const normalized = normalizeArcheryPricing({ pricing });
+    renderArcheryPricingPackageRows(normalized.packages);
+    renderArcheryPricingOptionRows('archery-pricing-ability-list', 'ability', normalized.abilityOptions);
+    renderArcheryPricingOptionRows('archery-pricing-equipment-list', 'equipment', normalized.equipmentOptions);
+}
+
+function readArcheryPagePackageRows() {
+    return Array.from(document.querySelectorAll('.archery-page-package-row')).map((row, index) => {
+        const value = field => row.querySelector(`[data-page-package-field="${field}"]`)?.value || '';
+        return normalizeArcheryPagePackage({
+            durationMinutes: value('durationMinutes'),
+            price: value('price'),
+            title: value('title'),
+            description: value('description'),
+            conditionsText: value('conditions')
+        }, index);
+    }).filter(item => item.durationMinutes > 0);
+}
+
+function readArcheryPricingPackageRows() {
+    return Array.from(document.querySelectorAll('[data-pricing-package-index]')).map((row, index) => ({
+        durationMinutes: Number(row.querySelector('[data-pricing-package-field="durationMinutes"]')?.value || 0) || [60, 120, 180][index] || 60,
+        price: Number(row.querySelector('[data-pricing-package-field="price"]')?.value || 0) || 0,
+        title: String(row.querySelector('[data-pricing-package-field="title"]')?.value || '').trim().slice(0, 80),
+        active: row.querySelector('[data-pricing-package-field="active"]')?.checked !== false
+    })).filter(item => item.durationMinutes > 0);
+}
+
+function readArcheryPricingOptionRows(kind) {
+    return Array.from(document.querySelectorAll(`[data-pricing-option-kind="${kind}"]`)).map(row => ({
+        id: String(row.querySelector('[data-pricing-option-field="id"]')?.value || '').trim().slice(0, 80),
+        label: String(row.querySelector('[data-pricing-option-field="label"]')?.value || '').trim().slice(0, 120),
+        ratePerHour: Number(row.querySelector('[data-pricing-option-field="ratePerHour"]')?.value || 0) || 0,
+        coachRequired: row.querySelector('[data-pricing-option-field="coachRequired"]')?.checked === true,
+        active: row.querySelector('[data-pricing-option-field="active"]')?.checked !== false
+    })).filter(item => item.id && item.label);
+}
+
+function readArcheryPricingEditor() {
+    return normalizeArcheryPricing({
+        pricing: {
+            version: archeryPricingConfig().version || DEFAULT_ARCHERY_PRICING.version,
+            packages: readArcheryPricingPackageRows(),
+            abilityOptions: readArcheryPricingOptionRows('ability'),
+            equipmentOptions: readArcheryPricingOptionRows('equipment')
+        }
+    });
+}
+
+function fillArcheryPageSettingsForm(settings = DEFAULT_ARCHERY_PAGE_SETTINGS) {
+    const normalized = normalizeArcheryPageSettings(settings);
+    const pricing = normalizeArcheryPricing(settings);
+    const heroUrl = document.getElementById('archery-page-hero-url');
+    const lead = document.getElementById('archery-page-package-lead');
+    const preview = document.getElementById('archery-page-hero-preview');
+    if (heroUrl) heroUrl.value = normalized.heroImageUrl;
+    if (lead) lead.value = normalized.packageLead;
+    if (preview) preview.src = normalized.heroImageUrl;
+    renderArcheryPagePackageRows(normalized.packages);
+    renderArcheryPricingEditor(pricing);
+    renderAdminWalkinPricingOptions();
+}
+
+function bindArcheryPageSettingsControls() {
+    if (archeryPageSettingsBound) return;
+    archeryPageSettingsBound = true;
+    document.getElementById('archery-page-hero-url')?.addEventListener('input', event => {
+        const preview = document.getElementById('archery-page-hero-preview');
+        if (preview) preview.src = safeImageURL(event.target.value, DEFAULT_ARCHERY_PAGE_SETTINGS.heroImageUrl);
+    });
+    document.getElementById('archery-page-add-package')?.addEventListener('click', () => {
+        const packages = readArcheryPagePackageRows();
+        packages.push(normalizeArcheryPagePackage({ durationMinutes: 60, price: 0, title: 'New package', conditions: [] }, packages.length));
+        renderArcheryPagePackageRows(packages);
+    });
+    document.getElementById('archery-page-package-list')?.addEventListener('click', event => {
+        const button = event.target.closest('[data-page-package-remove]');
+        if (!button) return;
+        const index = Number(button.dataset.pagePackageRemove);
+        const packages = readArcheryPagePackageRows().filter((_, rowIndex) => rowIndex !== index);
+        renderArcheryPagePackageRows(packages);
+    });
+    document.getElementById('archery-page-settings-form')?.addEventListener('submit', saveArcheryPageSettings);
+}
+
+async function loadArcheryPageSettings() {
+    bindArcheryPageSettingsControls();
+    if (!canAdmin('bookings')) return;
+    archeryPageSettingsStatus('Loading page settings...');
+    try {
+        const snap = await getDoc(ARCHERY_PAGE_SETTINGS_REF());
+        const raw = snap.exists() ? snap.data() : DEFAULT_ARCHERY_PAGE_SETTINGS;
+        archeryPageSettingsData = {
+            ...normalizeArcheryPageSettings(raw),
+            pricing: normalizeArcheryPricing(raw)
+        };
+        fillArcheryPageSettingsForm(archeryPageSettingsData);
+        archeryPageSettingsStatus(snap.exists() ? 'Page settings loaded.' : 'Using default page settings.', 'success');
+    } catch (error) {
+        console.error('Unable to load archery page settings:', error);
+        archeryPageSettingsData = {
+            ...normalizeArcheryPageSettings(DEFAULT_ARCHERY_PAGE_SETTINGS),
+            pricing: normalizeArcheryPricing(DEFAULT_ARCHERY_PRICING)
+        };
+        fillArcheryPageSettingsForm(archeryPageSettingsData);
+        archeryPageSettingsStatus(error.message || safeAdminError('Load archery page settings failed'), 'error');
+    }
+}
+
+async function saveArcheryPageSettings(event) {
+    event.preventDefault();
+    if (!canAdmin('bookings')) {
+        archeryPageSettingsStatus('This admin account cannot edit Archery page settings.', 'error');
+        return;
+    }
+    const submit = event.submitter || event.target.querySelector('button[type="submit"]');
+    if (submit) submit.disabled = true;
+    archeryPageSettingsStatus('Saving Archery page settings...');
+    try {
+        const file = document.getElementById('archery-page-hero-file')?.files?.[0] || null;
+        let heroImageUrl = document.getElementById('archery-page-hero-url')?.value.trim() || DEFAULT_ARCHERY_PAGE_SETTINGS.heroImageUrl;
+        if (file) {
+            archeryPageSettingsStatus('Uploading hero image...');
+            const blob = await compressToWebP(file, 0.84);
+            heroImageUrl = await uploadAdminImage(blob, 'archery', `archery-hero-${Date.now()}.webp`);
+            const heroInput = document.getElementById('archery-page-hero-url');
+            const preview = document.getElementById('archery-page-hero-preview');
+            if (heroInput) heroInput.value = heroImageUrl;
+            if (preview) preview.src = heroImageUrl;
+        }
+        const payload = normalizeArcheryPageSettings({
+            heroImageUrl,
+            packageLead: document.getElementById('archery-page-package-lead')?.value || '',
+            packages: readArcheryPagePackageRows()
+        });
+        const pricing = readArcheryPricingEditor();
+        await setDoc(ARCHERY_PAGE_SETTINGS_REF(), {
+            ...payload,
+            pricing,
+            updatedAt: serverTimestamp(),
+            updatedBy: auth.currentUser?.uid || '',
+            updatedByEmail: auth.currentUser?.email || ''
+        }, { merge: true });
+        archeryPageSettingsData = { ...payload, pricing };
+        renderAdminWalkinPricingOptions();
+        const fileInput = document.getElementById('archery-page-hero-file');
+        if (fileInput) fileInput.value = '';
+        archeryPageSettingsStatus('Archery page settings saved.', 'success');
+    } catch (error) {
+        console.error('Unable to save archery page settings:', error);
+        archeryPageSettingsStatus(error.message || safeAdminError('Save archery page settings failed'), 'error');
+    } finally {
+        if (submit) submit.disabled = false;
+    }
+}
+
+function archeryBranchId() {
+    const access = currentAdminAccess || {};
+    if (access.primary_branch_id) return String(access.primary_branch_id);
+    if (access.branch_id) return String(access.branch_id);
+    if (Array.isArray(access.branch_ids) && access.branch_ids.length) return String(access.branch_ids[0]);
+    return ARCHERY_BRANCH_FALLBACK;
+}
+
+function archeryAdminRole() {
+    const access = currentAdminAccess || {};
+    const raw = String(access.archery_role || access.archeryRole || access.role || '').trim();
+    const upper = raw.toUpperCase();
+    if (['OWNER', 'MANAGER', 'ARCHERY_STAFF', 'CASHIER', 'CUSTOMER'].includes(upper)) return upper;
+    const legacy = raw.toLowerCase();
+    if (legacy === 'owner') return 'OWNER';
+    if (legacy === 'head_manager' || legacy === 'manager') return 'MANAGER';
+    if (legacy === 'cashier') return 'CASHIER';
+    if (legacy === 'staff') return 'ARCHERY_STAFF';
+    return canAdmin('bookings') ? 'ARCHERY_STAFF' : 'CUSTOMER';
+}
+
+function archeryCan(action) {
+    const role = archeryAdminRole();
+    if (role === 'OWNER') return true;
+    if (action === 'viewLaneBoard' || action === 'viewBookings' || action === 'viewPaymentStatus') {
+        return ['MANAGER', 'ARCHERY_STAFF', 'CASHIER'].includes(role);
+    }
+    if (action === 'createWalkIn') return ['MANAGER', 'ARCHERY_STAFF'].includes(role);
+    if (['checkIn', 'complete', 'moveLane', 'extendTime', 'markNoShow'].includes(action)) {
+        return ['MANAGER', 'ARCHERY_STAFF'].includes(role);
+    }
+    if (action === 'requestCancel') return ['MANAGER', 'ARCHERY_STAFF', 'CASHIER'].includes(role);
+    if (action === 'approveCancel' || action === 'refund' || action === 'viewAuditTrail') return role === 'MANAGER';
+    if (action === 'recordCounterPayment') return ['MANAGER', 'CASHIER'].includes(role);
+    return false;
+}
+
+function archerySetStatus(message, tone = '') {
+    const status = document.getElementById('archery-admin-form-status');
+    if (!status) return;
+    status.textContent = message || '';
+    status.className = 'archery-status' + (tone ? ' ' + tone : '');
+}
+
+function archeryStaffSessionId() {
+    const access = currentAdminAccess || {};
+    const keys = ['eden_archery_staff_session_id', 'eden_staff_session_id'];
+    for (const key of keys) {
+        try {
+            const value = sessionStorage.getItem(key) || localStorage.getItem(key);
+            if (value) return value;
+        } catch (error) {
+            console.warn('Unable to read staff session storage:', error);
+        }
+    }
+    return access.staff_session_id || access.staffSessionId || '';
+}
+
+function archeryIdempotencyKey(action, bookingId = '') {
+    const random = Math.random().toString(36).slice(2, 10);
+    return `admin-${action}-${bookingId || 'new'}-${Date.now()}-${random}`;
+}
+
+function archeryMutationPayload(action, bookingId = '', extra = {}) {
+    const staffSessionId = archeryStaffSessionId();
+    if (!staffSessionId) {
+        const error = new Error('Session หมดอายุ กรุณาเข้าสู่ระบบใหม่');
+        error.code = 'STAFF_SESSION_REQUIRED';
+        throw error;
+    }
+    return {
+        branch_id: archeryBranchId(),
+        staff_session_id: staffSessionId,
+        idempotency_key: archeryIdempotencyKey(action, bookingId),
+        ...(bookingId ? { booking_id: bookingId } : {}),
+        ...extra
+    };
+}
+
+function archeryResourceIdFromLaneNumber(value) {
+    const lane = Number(value);
+    if (!Number.isInteger(lane) || lane < 1 || lane > 10) return '';
+    return `${archeryBranchId()}_ARCHERY_LANE_${String(lane).padStart(2, '0')}`;
+}
+
+function archeryResourceLabel(resourceId = '') {
+    const lane = String(resourceId || '').match(/(\d{2})$/);
+    return lane ? `Lane ${Number(lane[1])}` : (resourceId || '-');
+}
+
+function archeryPartySizeFromBooking(booking = {}) {
+    const value = Number(booking.party_size || booking.partySize || booking.required_lane_count || booking.requiredLaneCount || 1);
+    return Number.isInteger(value) && value >= 1 ? value : 1;
+}
+
+function archeryLaneNumbersFromBooking(booking = {}) {
+    const directNumbers = Array.isArray(booking.assigned_lane_numbers)
+        ? booking.assigned_lane_numbers
+        : Array.isArray(booking.assignedLaneNumbers)
+            ? booking.assignedLaneNumbers
+            : [];
+    const fromIds = (Array.isArray(booking.assigned_resource_ids)
+        ? booking.assigned_resource_ids
+        : Array.isArray(booking.assignedResourceIds)
+            ? booking.assignedResourceIds
+            : [])
+        .concat([booking.assigned_resource_id, booking.resource_id, booking.lane_id, booking.laneId])
+        .map(value => String(value || '').match(/(\d{2})$/)?.[1])
+        .filter(Boolean)
+        .map(Number);
+    const numbers = directNumbers.concat(fromIds)
+        .map(Number)
+        .filter(number => Number.isInteger(number) && number >= 1 && number <= 10);
+    return Array.from(new Set(numbers));
+}
+
+function archeryLanesLabel(booking = {}) {
+    const lanes = archeryLaneNumbersFromBooking(booking);
+    return lanes.length ? lanes.map(number => `Lane ${number}`).join(', ') : archeryResourceLabel(booking.assigned_resource_id || booking.resource_id);
+}
+
+function adminSelectedArcheryOption(name, options = []) {
+    const checked = document.querySelector(`input[name="${name}"]:checked`);
+    return activeArcheryItems(options).find(item => item.id === checked?.value) || activeArcheryItems(options)[0] || null;
+}
+
+function adminArcheryOptionLabel(option = {}) {
+    const labels = {
+        first_time_with_coach: 'First time + coach',
+        experienced_with_coach: 'Experienced + coach',
+        experienced_no_coach: 'Experienced, no coach',
+        rent_full_set: 'Rent equipment',
+        bring_own: 'Bring own equipment'
+    };
+    return labels[option.id || option.option_id] || option.label || '-';
+}
+
+function adminArcheryPricePreview() {
+    const pricing = archeryPricingConfig();
+    const duration = Number(document.getElementById('archery-admin-package')?.value || 60) || 60;
+    const hours = duration / 60;
+    const packageRow = activeArcheryItems(pricing.packages).find(item => item.durationMinutes === duration) || pricing.packages[0] || {};
+    const ability = adminSelectedArcheryOption('archery-admin-ability', pricing.abilityOptions);
+    const equipment = adminSelectedArcheryOption('archery-admin-equipment', pricing.equipmentOptions);
+    const partySize = Math.max(1, Math.min(10, Math.floor(Number(document.getElementById('archery-admin-party-size')?.value || 1) || 1)));
+    const packageAmount = Number(packageRow.price || 0) || 0;
+    const coachAmount = Math.round(Number(ability?.ratePerHour || 0) * hours);
+    const equipmentAmount = Math.round(Number(equipment?.ratePerHour || 0) * hours);
+    const perPersonTotal = packageAmount + coachAmount + equipmentAmount;
+    return {
+        duration,
+        partySize,
+        requiredLaneCount: partySize,
+        packageAmount,
+        coachAmount,
+        equipmentAmount,
+        amountTotal: perPersonTotal * partySize,
+        ability,
+        equipment
+    };
+}
+
+function renderAdminPricePreview() {
+    const el = document.getElementById('archery-admin-price-preview');
+    if (!el) return;
+    const preview = adminArcheryPricePreview();
+    const total = document.getElementById('archery-admin-price-total');
+    if (total) total.textContent = archeryMoney(preview.amountTotal);
+    el.innerHTML = [
+        ['People', String(preview.partySize)],
+        ['Lanes needed', String(preview.requiredLaneCount)],
+        ['Package / person', archeryMoney(preview.packageAmount)],
+        ['Coach / person', `${adminArcheryOptionLabel(preview.ability)} / ${archeryMoney(preview.coachAmount)}`],
+        ['Equipment / person', `${adminArcheryOptionLabel(preview.equipment)} / ${archeryMoney(preview.equipmentAmount)}`]
+    ].map(([label, value]) => `<li><span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong></li>`).join('');
+}
+
+function renderAdminOptionCards(containerId, inputName, options = [], formatter = () => '') {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = activeArcheryItems(options).map((option, index) => `
+        <label class="archery-choice-card">
+            <input type="radio" name="${escapeHTML(inputName)}" value="${escapeHTML(option.id)}" ${index === 0 ? 'checked' : ''} required>
+            <strong>${escapeHTML(adminArcheryOptionLabel(option))}</strong>
+            <small>${escapeHTML(formatter(option))}</small>
+        </label>
+    `).join('');
+    el.querySelectorAll('input[type="radio"]').forEach(input => input.addEventListener('change', renderAdminPricePreview));
+}
+
+function renderAdminWalkinPricingOptions() {
+    const pricing = archeryPricingConfig();
+    const packageSelect = document.getElementById('archery-admin-package');
+    if (packageSelect) {
+        const selected = packageSelect.value;
+        packageSelect.innerHTML = activeArcheryItems(pricing.packages).map(item => (
+            `<option value="${escapeHTML(item.durationMinutes)}">${escapeHTML(item.title || item.durationMinutes + ' min')} - ${escapeHTML(archeryMoney(item.price))}</option>`
+        )).join('');
+        if (selected && Array.from(packageSelect.options).some(option => option.value === selected)) packageSelect.value = selected;
+    }
+    renderAdminOptionCards('archery-admin-ability-options', 'archery-admin-ability', pricing.abilityOptions, option => (
+        `${option.coachRequired ? 'Coach included · ' : ''}${option.ratePerHour ? archeryMoney(option.ratePerHour) + ' / hour' : 'No extra charge'}`
+    ));
+    renderAdminOptionCards('archery-admin-equipment-options', 'archery-admin-equipment', pricing.equipmentOptions, option => (
+        option.ratePerHour ? archeryMoney(option.ratePerHour) + ' / hour' : 'No extra charge'
+    ));
+    adminFillArcheryTimeOptions();
+    renderAdminPricePreview();
+}
+
+function updateArcheryRoleVisibility() {
+    const form = document.getElementById('archery-walkin-form');
+    if (form) form.hidden = !archeryCan('createWalkIn');
+    const auditPanel = document.getElementById('archery-audit-panel');
+    if (auditPanel) auditPanel.hidden = !archeryCan('viewAuditTrail');
+}
+
+function bindArcheryAdminControls() {
+    if (archeryAdminControlsBound) return;
+    archeryAdminControlsBound = true;
+    const date = adminTodayISO();
+    ['archery-admin-date', 'archery-admin-board-date'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && !el.value) el.value = date;
+    });
+    adminFillArcheryTimeOptions();
+    renderAdminWalkinPricingOptions();
+    document.getElementById('archery-admin-package')?.addEventListener('change', () => {
+        adminFillArcheryTimeOptions();
+        renderAdminPricePreview();
+    });
+    document.getElementById('archery-admin-party-size')?.addEventListener('change', renderAdminPricePreview);
+    [
+        'archery-admin-board-date',
+        'archery-admin-board-status',
+        'archery-admin-board-source',
+        'archery-admin-board-payment',
+        'archery-admin-board-lane',
+        'archery-admin-board-package'
+    ].forEach(id => document.getElementById(id)?.addEventListener('change', () => renderArcheryAdmin(archeryBookingsData)));
+    document.getElementById('archery-admin-board-member')?.addEventListener('input', () => renderArcheryAdmin(archeryBookingsData));
+    document.getElementById('archery-admin-member-search')?.addEventListener('change', applyArcheryMemberSearch);
+    document.getElementById('archery-admin-today')?.addEventListener('click', () => {
+        const boardDate = document.getElementById('archery-admin-board-date');
+        if (boardDate) boardDate.value = adminTodayISO();
+        renderArcheryAdmin(archeryBookingsData);
+    });
+    document.getElementById('archery-walkin-form')?.addEventListener('submit', createArcheryWalkInFromAdmin);
+    renderArcheryMemberOptions();
+    updateArcheryRoleVisibility();
+}
+
+function bindAllBookingsControls() {
+    if (allBookingsControlsBound) return;
+    allBookingsControlsBound = true;
+    ['all-bookings-date-filter', 'all-bookings-service-filter', 'all-bookings-status-filter'].forEach(id => {
+        document.getElementById(id)?.addEventListener('change', () => renderAllBookings(dashboardBookingsData));
+    });
+}
+
+function isArcheryBooking(booking = {}) {
+    return String(booking.service_type || booking.serviceType || '').toUpperCase() === 'ARCHERY';
+}
+
+function archeryBookingDate(booking = {}) {
+    return String(booking.booking_date || booking.date || '').slice(0, 10);
+}
+
+function archeryBookingStartTime(booking = {}) {
+    return String(booking.start_time || booking.startTime || booking.time || '').slice(0, 5);
+}
+
+function archeryBookingEndTime(booking = {}) {
+    const explicit = String(booking.end_time || booking.endTime || '').slice(0, 5);
+    if (explicit) return explicit;
+    const start = archeryBookingStartTime(booking);
+    const duration = archeryPackageMinutes(booking);
+    if (!start || !duration) return '';
+    return adminTimeFromMinutes(adminMinutesFromTime(start) + duration);
+}
+
+function archeryBookingStatus(booking = {}) {
+    if (booking.cancel_requested === true && String(booking.cancel_request_status || '').toUpperCase() === 'PENDING') {
+        return 'CANCEL_REQUESTED';
+    }
+    return String(booking.booking_status || booking.status || '').toUpperCase() || 'PENDING';
+}
+
+function archeryPackageMinutes(booking = {}) {
+    const duration = Number(booking.duration_minutes || booking.durationMinutes || booking.package_minutes || booking.packageMinutes || 0);
+    if (duration) return duration;
+    const packageMatch = String(booking.package_code || booking.packageCode || '').match(/(\d{2,3})/);
+    if (packageMatch) return Number(packageMatch[1]);
+    const start = archeryBookingStartTime(booking);
+    const end = String(booking.end_time || booking.endTime || '').slice(0, 5);
+    if (start && end) return Math.max(0, adminMinutesFromTime(end) - adminMinutesFromTime(start));
+    return 0;
+}
+
+function archeryLaneNumberFromBooking(booking = {}) {
+    const lanes = archeryLaneNumbersFromBooking(booking);
+    if (lanes.length) return lanes[0];
+    const direct = Number(booking.lane_number || 0);
+    if (direct) return direct;
+    const match = String(booking.assigned_resource_id || booking.resource_id || booking.lane_id || booking.laneId || '').match(/(\d{2})$/);
+    return match ? Number(match[1]) : 0;
+}
+
+function archeryPaymentLabel(booking = {}) {
+    const payment = String(booking.payment_status || booking.paymentStatus || '').toUpperCase();
+    if (payment === 'PAID_ONLINE') return 'Paid Online';
+    if (payment === 'PAID_COUNTER') return 'Paid Counter';
+    if (payment === 'UNPAID') return 'Unpaid';
+    if (payment === 'REFUNDED') return 'Refunded';
+    if (payment === 'PAID') return 'Paid';
+    return payment || 'Unpaid';
+}
+
+function archeryStatusLabel(booking = {}) {
+    const status = archeryBookingStatus(booking);
+    if (status === 'CANCEL_REQUESTED') return 'Cancel requested';
+    if (status === 'CHECKED_IN') return 'Checked-in';
+    if (status === 'COMPLETED') return 'Completed';
+    if (status === 'CANCELLED') return 'Cancelled';
+    if (status === 'NO_SHOW') return 'No Show';
+    if (status === 'HELD') return 'Held';
+    if (status === 'CONFIRMED') return 'Confirmed';
+    if (status === 'EXPIRED') return 'Expired';
+    return status || 'Pending';
+}
+
+function archeryBookingIsActive(booking = {}) {
+    return !ARCHERY_CLOSED_STATUSES.has(archeryBookingStatus(booking));
+}
+
+function archeryBookingMatchesBoardFilters(booking = {}) {
+    const statusFilter = document.getElementById('archery-admin-board-status')?.value || 'active';
+    const sourceFilter = document.getElementById('archery-admin-board-source')?.value || 'all';
+    const paymentFilter = document.getElementById('archery-admin-board-payment')?.value || 'all';
+    const memberFilter = String(document.getElementById('archery-admin-board-member')?.value || '').trim().toLowerCase();
+    const laneFilter = document.getElementById('archery-admin-board-lane')?.value || 'all';
+    const packageFilter = document.getElementById('archery-admin-board-package')?.value || 'all';
+    const payment = String(booking.payment_status || booking.paymentStatus || '').toUpperCase();
+    const source = String(booking.source || '').toUpperCase();
+    const status = archeryBookingStatus(booking);
+    if (sourceFilter !== 'all' && source !== sourceFilter.toUpperCase()) return false;
+    if (paymentFilter !== 'all' && payment !== paymentFilter) return false;
+    if (laneFilter !== 'all' && !archeryLaneNumbersFromBooking(booking).includes(Number(laneFilter))) return false;
+    if (packageFilter !== 'all' && archeryPackageMinutes(booking) !== Number(packageFilter)) return false;
+    if (memberFilter) {
+        const haystack = [
+            booking.member_id,
+            booking.memberId,
+            booking.uid,
+            booking.customerName,
+            booking.customer_name,
+            booking.name,
+            booking.customerPhone,
+            booking.customer_phone,
+            booking.phone,
+            booking.customerEmail,
+            booking.customer_email,
+            booking.email
+        ].map(value => String(value || '').toLowerCase()).join(' ');
+        if (!haystack.includes(memberFilter)) return false;
+    }
+    if (statusFilter === 'active') return archeryBookingIsActive(booking);
+    if (statusFilter === 'paid') return payment === 'PAID_ONLINE' || payment === 'PAID_COUNTER' || payment === 'PAID';
+    if (statusFilter === 'pending') return !(payment === 'PAID_ONLINE' || payment === 'PAID_COUNTER' || payment === 'PAID');
+    if (statusFilter !== 'all') return status === statusFilter;
+    return true;
+}
+
+function archeryBookingAtSlot(bookings, laneNumber, minute) {
+    return bookings.find(booking => {
+        if (!archeryLaneNumbersFromBooking(booking).includes(laneNumber)) return false;
+        const start = adminMinutesFromTime(archeryBookingStartTime(booking));
+        const end = adminMinutesFromTime(archeryBookingEndTime(booking));
+        return start <= minute && minute < end;
+    });
+}
+
+function archerySlotClass(booking = {}) {
+    const status = archeryBookingStatus(booking);
+    if (status === 'HELD') return 'held';
+    if (status === 'CHECKED_IN') return 'checked-in';
+    if (status === 'NO_SHOW') return 'no-show closed';
+    if (status === 'CANCEL_REQUESTED') return 'cancel-requested';
+    if (ARCHERY_CLOSED_STATUSES.has(status)) return 'closed';
+    return 'busy';
+}
+
+function renderArcherySchedule(bookings = []) {
+    const table = document.getElementById('archery-schedule-table');
+    if (!table) return;
+    const lanes = Array.from({ length: 10 }, (_, index) => index + 1);
+    const rows = [];
+    rows.push(`<thead><tr><th>Time</th>${lanes.map(lane => `<th>Lane ${lane}</th>`).join('')}</tr></thead>`);
+    rows.push('<tbody>');
+    for (let minute = 10 * 60; minute < 20 * 60; minute += 15) {
+        rows.push(`<tr><th>${adminTimeFromMinutes(minute)}</th>`);
+        lanes.forEach(lane => {
+            const booking = archeryBookingAtSlot(bookings, lane, minute);
+            if (!booking) {
+                rows.push('<td><span class="archery-slot-chip">Available</span></td>');
+                return;
+            }
+            rows.push(`
+                <td>
+                    <span class="archery-slot-chip ${archerySlotClass(booking)}">
+                        <strong>${escapeHTML(booking.customerName || booking.customer_name || booking.name || booking.member_id || 'Member')}</strong>
+                        <small>${escapeHTML(archeryPartySizeFromBooking(booking))} people / ${escapeHTML(archeryLanesLabel(booking))}</small>
+                        <small>${escapeHTML(archeryPaymentLabel(booking))} / ${escapeHTML(archeryStatusLabel(booking))}</small>
+                    </span>
+                </td>
+            `);
+        });
+        rows.push('</tr>');
+    }
+    rows.push('</tbody>');
+    table.innerHTML = rows.join('');
+}
+
+function archeryBookingById(bookingId) {
+    return (archeryBookingsData || []).find(booking => String(booking.id || booking.firestoreId || '') === String(bookingId)) || {};
+}
+
+function archeryActionButton(label, handler, bookingId, permission, options = {}) {
+    if (!archeryCan(permission)) return '';
+    const loadingKey = `${handler}:${bookingId}`;
+    const disabled = archeryActionLoading.has(loadingKey) ? ' disabled' : '';
+    const danger = options.danger ? ' class="danger"' : '';
+    return `<button${danger} type="button"${disabled} onclick="${handler}('${escapeJSString(bookingId)}')">${escapeHTML(label)}</button>`;
+}
+
+function archeryActionButtons(booking = {}) {
+    const id = String(booking.id || booking.firestoreId || '');
+    const safeId = escapeJSString(id);
+    const status = archeryBookingStatus(booking);
+    const payment = String(booking.payment_status || booking.paymentStatus || '').toUpperCase();
+    const closed = ARCHERY_CLOSED_STATUSES.has(status);
+    const paid = ARCHERY_PAID_STATUSES.has(payment);
+    const hasCancelRequest = booking.cancel_requested === true && String(booking.cancel_request_status || '').toUpperCase() === 'PENDING';
+    const paymentId = booking.payment_id || booking.paymentId || '';
+    const buttons = [];
+    if (!closed && status === 'CONFIRMED' && archeryCan('checkIn')) buttons.push(`<button type="button" onclick="archeryAdminAction('adminCheckInBooking','${safeId}')">Check-in</button>`);
+    if (!closed && ['CONFIRMED', 'CHECKED_IN'].includes(status) && archeryCan('extendTime')) buttons.push(archeryActionButton('Extend', 'archeryAdminExtend', id, 'extendTime'));
+    if (!closed && ['CONFIRMED', 'CHECKED_IN'].includes(status) && archeryCan('moveLane')) buttons.push(archeryActionButton('Move', 'archeryAdminMove', id, 'moveLane'));
+    if (!closed && !paid && archeryCan('recordCounterPayment')) buttons.push(archeryActionButton('Paid Counter', 'archeryAdminPayment', id, 'recordCounterPayment'));
+    if (!closed && ['CONFIRMED', 'CHECKED_IN'].includes(status) && archeryCan('complete')) buttons.push(`<button type="button" onclick="archeryAdminAction('adminCompleteBooking','${safeId}')">Complete</button>`);
+    if (!closed && status === 'CONFIRMED' && archeryCan('markNoShow')) buttons.push(`<button class="danger" type="button" onclick="archeryAdminAction('adminMarkNoShow','${safeId}')">No Show</button>`);
+    if (!closed && !hasCancelRequest && archeryCan('requestCancel')) buttons.push(archeryActionButton('Request Cancel', 'archeryAdminCancel', id, 'requestCancel', { danger: true }));
+    if (!closed && hasCancelRequest && archeryCan('approveCancel')) buttons.push(archeryActionButton('Approve Cancel', 'archeryApproveCancel', id, 'approveCancel', { danger: true }));
+    if (paid && payment !== 'REFUNDED' && paymentId && archeryCan('refund')) buttons.push(archeryActionButton('Refund', 'archeryAdminRefund', id, 'refund', { danger: true }));
+    return `<div class="archery-action-buttons">${buttons.join('') || '-'}</div>`;
+}
+
+function archeryOptionSummary(booking = {}) {
+    return [
+        booking.ability_label || booking.abilityLabel || '',
+        booking.equipment_label || booking.equipmentLabel || ''
+    ].filter(Boolean).join(' / ');
+}
+
+function archeryAmountLabel(booking = {}) {
+    const amount = Number(booking.amount_total || booking.amountTotal || booking.total_price || booking.amount || 0) || 0;
+    return amount ? archeryMoney(amount) : '-';
+}
+
+function renderArcheryAdmin(bookings = []) {
+    bindArcheryAdminControls();
+    updateArcheryRoleVisibility();
+    const boardDateEl = document.getElementById('archery-admin-board-date');
+    if (boardDateEl && !boardDateEl.value) boardDateEl.value = adminTodayISO();
+    const boardDate = boardDateEl?.value || adminTodayISO();
+    const archeryBookings = (bookings || [])
+        .filter(isArcheryBooking)
+        .filter(booking => archeryBookingDate(booking) === boardDate)
+        .filter(archeryBookingMatchesBoardFilters)
+        .sort((a, b) => archeryBookingStartTime(a).localeCompare(archeryBookingStartTime(b)));
+    renderArcherySchedule(archeryBookings);
+    renderArcheryPaymentPanel(archeryBookings);
+    renderArcheryAuditTrail();
+
+    const tbody = document.getElementById('archery-bookings-table-body');
+    if (!tbody) return;
+    if (!archeryBookings.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No archery bookings for this filter.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = archeryBookings.map(booking => `
+        <tr>
+            <td><strong>${escapeHTML(booking.id || booking.firestoreId || '-')}</strong><br><small>${escapeHTML(archeryBookingDate(booking))}</small></td>
+            <td>${escapeHTML(booking.customerName || booking.customer_name || booking.name || 'Member')}<br><small>${escapeHTML(booking.member_id || booking.uid || '')}</small></td>
+            <td>${escapeHTML(archeryPartySizeFromBooking(booking))} people / ${escapeHTML(archeryLanesLabel(booking))}<br><small>${escapeHTML(archeryBookingStartTime(booking) || '-')} - ${escapeHTML(archeryBookingEndTime(booking) || '-')}</small></td>
+            <td>${escapeHTML(String(booking.source || 'ONLINE').replace('_', ' '))}</td>
+            <td>${escapeHTML(archeryPaymentLabel(booking))}<br><small>${escapeHTML(archeryAmountLabel(booking))}${archeryOptionSummary(booking) ? ' / ' + escapeHTML(archeryOptionSummary(booking)) : ''}</small></td>
+            <td>${escapeHTML(archeryStatusLabel(booking))}</td>
+            <td>${archeryActionButtons(booking)}</td>
+        </tr>
+    `).join('');
+}
+
+function renderArcheryPaymentPanel(bookings = []) {
+    const panel = document.getElementById('archery-payment-panel');
+    if (!panel) return;
+    if (!archeryCan('viewPaymentStatus')) {
+        panel.innerHTML = '<p class="archery-status error">บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้</p>';
+        return;
+    }
+    const rows = bookings
+        .filter(booking => archeryBookingIsActive(booking))
+        .sort((a, b) => archeryBookingStartTime(a).localeCompare(archeryBookingStartTime(b)))
+        .slice(0, 12);
+    if (!rows.length) {
+        panel.innerHTML = '<p class="archery-status">No active payment items.</p>';
+        return;
+    }
+    panel.innerHTML = `<div class="archery-panel-list">${rows.map(booking => {
+        const id = String(booking.id || booking.firestoreId || '');
+        const payment = String(booking.payment_status || booking.paymentStatus || '').toUpperCase();
+        const paid = ARCHERY_PAID_STATUSES.has(payment);
+        const canRecord = archeryCan('recordCounterPayment') && !paid;
+        return `
+            <div class="archery-panel-row">
+                <div>
+                    <strong>${escapeHTML(booking.customerName || booking.customer_name || booking.name || booking.member_id || 'Member')}</strong>
+                    <small>${escapeHTML(archeryBookingStartTime(booking))} / ${escapeHTML(archeryPartySizeFromBooking(booking))} people / ${escapeHTML(archeryLanesLabel(booking))} / ${escapeHTML(archeryPaymentLabel(booking))} / ${escapeHTML(archeryAmountLabel(booking))} / ${escapeHTML(booking.id || booking.firestoreId || '')}</small>
+                    ${archeryOptionSummary(booking) ? `<small>${escapeHTML(archeryOptionSummary(booking))}</small>` : ''}
+                </div>
+                <div class="archery-action-buttons">
+                    ${canRecord ? archeryActionButton('Paid Counter', 'archeryAdminPayment', id, 'recordCounterPayment') : '<span>-</span>'}
+                </div>
+            </div>
+        `;
+    }).join('')}</div>`;
+}
+
+function adminTimestampMillis(value) {
+    if (!value) return 0;
+    if (typeof value.toMillis === 'function') return value.toMillis();
+    if (typeof value.toDate === 'function') return value.toDate().getTime();
+    if (value.seconds) return Number(value.seconds) * 1000;
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function adminTimestampText(value) {
+    const millis = adminTimestampMillis(value);
+    if (!millis) return '-';
+    return new Date(millis).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function renderArcheryAuditTrail() {
+    const panel = document.getElementById('archery-audit-panel');
+    const trail = document.getElementById('archery-audit-trail');
+    if (!panel || !trail) return;
+    panel.hidden = !archeryCan('viewAuditTrail');
+    if (panel.hidden) return;
+    const rows = (archeryAuditLogsData || [])
+        .filter(row => ARCHERY_AUDIT_ACTIONS.has(String(row.action || '')))
+        .sort((a, b) => adminTimestampMillis(b.created_at || b.createdAt) - adminTimestampMillis(a.created_at || a.createdAt))
+        .slice(0, 30);
+    if (!rows.length) {
+        trail.innerHTML = '<p class="archery-status">No audit records.</p>';
+        return;
+    }
+    trail.innerHTML = `<div class="archery-panel-list">${rows.map(row => `
+        <div class="archery-panel-row">
+            <div>
+                <strong>${escapeHTML(row.action || '-')}</strong>
+                <small>${escapeHTML(row.actor_role || '-')} / ${escapeHTML(row.actor_id || '-')} / ${escapeHTML(row.target_id || '-')}</small>
+                ${row.reason ? `<small>${escapeHTML(row.reason)}</small>` : ''}
+            </div>
+            <small>${escapeHTML(adminTimestampText(row.created_at || row.createdAt))}</small>
+        </div>
+    `).join('')}</div>`;
+}
+
+function archeryMemberOptionRows() {
+    return Object.entries(membersData || {}).map(([uid, member]) => {
+        const summary = memberSummariesData[uid] || {};
+        return {
+            uid,
+            member,
+            label: [
+                memberDisplayName(member),
+                member.email || summary.email || '',
+                member.phone || summary.phone || '',
+                uid
+            ].filter(Boolean).join(' | ')
+        };
+    }).sort((a, b) => a.label.localeCompare(b.label, 'th'));
+}
+
+function renderArcheryMemberOptions() {
+    const datalist = document.getElementById('archery-admin-member-options');
+    if (!datalist) return;
+    datalist.innerHTML = archeryMemberOptionRows().slice(0, 300)
+        .map(row => `<option value="${escapeHTML(row.label)}"></option>`)
+        .join('');
+}
+
+function applyArcheryMemberSearch() {
+    const input = document.getElementById('archery-admin-member-search');
+    if (!input) return;
+    const search = String(input.value || '').trim().toLowerCase();
+    if (!search) return;
+    const row = archeryMemberOptionRows().find(item => {
+        const member = item.member || {};
+        return item.uid.toLowerCase() === search
+            || item.label.toLowerCase() === search
+            || item.label.toLowerCase().includes(search)
+            || String(member.email || '').toLowerCase() === search
+            || String(member.phone || '').toLowerCase() === search;
+    });
+    if (!row) return;
+    const memberId = document.getElementById('archery-admin-member-id');
+    const name = document.getElementById('archery-admin-customer-name');
+    const phone = document.getElementById('archery-admin-customer-phone');
+    if (memberId) memberId.value = row.uid;
+    if (name && !name.value) name.value = memberDisplayName(row.member);
+    if (phone && !phone.value) phone.value = row.member.phone || '';
+}
+
+function allBookingServiceLabel(booking = {}) {
+    if (isArcheryBooking(booking)) return 'ARCHERY';
+    const bookingType = String(booking.bookingType || '').toLowerCase();
+    if (bookingType === 'room') return 'room';
+    if (bookingType === 'table') return 'table';
+    return String(booking.service_type || booking.serviceType || bookingType || 'booking');
+}
+
+function allBookingStatusKey(booking = {}) {
+    const payment = String(booking.payment_status || booking.paymentStatus || '').toUpperCase();
+    const status = String(isArcheryBooking(booking) ? archeryBookingStatus(booking) : (booking.status || '')).toLowerCase();
+    if (payment === 'PAID_ONLINE' || payment === 'PAID_COUNTER' || payment === 'PAID' || payment === 'paid') return 'paid';
+    if (status === 'checked_in') return 'checked_in';
+    if (String(booking.status || '').toUpperCase() === 'CHECKED_IN') return 'checked_in';
+    if (String(booking.status || '').toUpperCase() === 'NO_SHOW') return 'no_show';
+    return status || 'pending';
+}
+
+function renderAllBookings(bookings = []) {
+    bindAllBookingsControls();
+    const tbody = document.getElementById('all-bookings-table-body');
+    if (!tbody) return;
+    const dateFilter = document.getElementById('all-bookings-date-filter')?.value || '';
+    const serviceFilter = document.getElementById('all-bookings-service-filter')?.value || 'all';
+    const statusFilter = document.getElementById('all-bookings-status-filter')?.value || 'all';
+    const filtered = (bookings || [])
+        .filter(booking => !dateFilter || (isArcheryBooking(booking) ? archeryBookingDate(booking) : booking.date) === dateFilter)
+        .filter(booking => serviceFilter === 'all' || allBookingServiceLabel(booking).toUpperCase() === serviceFilter.toUpperCase())
+        .filter(booking => statusFilter === 'all' || allBookingStatusKey(booking) === statusFilter)
+        .slice()
+        .sort((a, b) => {
+            const left = `${isArcheryBooking(b) ? archeryBookingDate(b) : (b.date || '')} ${isArcheryBooking(b) ? archeryBookingStartTime(b) : (b.startTime || b.start_time || b.arrivalTime || '')}`;
+            const right = `${isArcheryBooking(a) ? archeryBookingDate(a) : (a.date || '')} ${isArcheryBooking(a) ? archeryBookingStartTime(a) : (a.startTime || a.start_time || a.arrivalTime || '')}`;
+            return left.localeCompare(right);
+        });
+    if (!filtered.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No bookings for this filter.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = filtered.map(booking => `
+        <tr>
+            <td><strong>${escapeHTML(booking.id || booking.firestoreId || '-')}</strong></td>
+            <td>${escapeHTML(allBookingServiceLabel(booking))}</td>
+            <td>${escapeHTML(booking.customerName || booking.customer_name || booking.name || 'Member')}<br><small>${escapeHTML(booking.member_id || booking.uid || booking.customerUid || '')}</small></td>
+            <td>${escapeHTML(isArcheryBooking(booking) ? archeryBookingDate(booking) : (booking.date || '-'))}<br><small>${escapeHTML(isArcheryBooking(booking) ? archeryBookingStartTime(booking) : (booking.startTime || booking.start_time || booking.arrivalTime || '-'))} ${isArcheryBooking(booking) ? '- ' + escapeHTML(archeryBookingEndTime(booking)) : (booking.endTime || booking.end_time ? '- ' + escapeHTML(booking.endTime || booking.end_time) : '')}</small></td>
+            <td>${escapeHTML(isArcheryBooking(booking) ? `${archeryPartySizeFromBooking(booking)} people / ${archeryLanesLabel(booking)}` : (booking.laneLabel || booking.tableNo || booking.tableZone || booking.roomType || '-'))}</td>
+            <td>${escapeHTML(isArcheryBooking(booking) ? archeryPaymentLabel(booking) : (booking.paymentStatus || booking.payment_status || '-'))}</td>
+            <td>${escapeHTML(isArcheryBooking(booking) ? archeryStatusLabel(booking) : (booking.status || '-'))}</td>
+        </tr>
+    `).join('');
+}
+
+async function createArcheryWalkInFromAdmin(event) {
+    event.preventDefault();
+    const submit = event.submitter || event.target.querySelector('button[type="submit"]');
+    if (!archeryCan('createWalkIn')) {
+        archerySetStatus('บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้', 'error');
+        return;
+    }
+    archerySetStatus('Creating walk-in booking...');
+    if (submit) submit.disabled = true;
+    try {
+        const duration = Number(document.getElementById('archery-admin-package')?.value || 60) || 60;
+        const preview = adminArcheryPricePreview();
+        const result = await callAdminFunction('createWalkInArcheryBooking', archeryMutationPayload('createWalkInArcheryBooking', '', {
+            member_id: document.getElementById('archery-admin-member-id')?.value.trim() || '',
+            customer_name: document.getElementById('archery-admin-customer-name')?.value.trim() || '',
+            customer_phone: document.getElementById('archery-admin-customer-phone')?.value.trim() || '',
+            booking_date: document.getElementById('archery-admin-date')?.value || adminTodayISO(),
+            start_time: document.getElementById('archery-admin-start')?.value || '10:00',
+            duration_minutes: duration,
+            package_code: `ARCHERY_${duration}`,
+            party_size: preview.partySize,
+            ability_option_id: preview.ability?.id || '',
+            equipment_option_id: preview.equipment?.id || '',
+            payment_status: 'UNPAID',
+            note: document.getElementById('archery-admin-note')?.value.trim() || ''
+        }));
+        archerySetStatus('Created booking ' + (result.booking_id || '') + ' / ' + (result.assigned_lane_numbers?.length ? result.assigned_lane_numbers.map(number => `Lane ${number}`).join(', ') : archeryResourceLabel(result.assigned_resource_id)), 'success');
+        event.target.reset();
+        document.getElementById('archery-admin-date').value = adminTodayISO();
+        adminFillArcheryTimeOptions();
+        renderAdminWalkinPricingOptions();
+        refreshArcheryAdmin();
+    } catch (error) {
+        archerySetStatus(error.message || safeAdminError('Create walk-in failed'), 'error');
+    } finally {
+        if (submit) submit.disabled = false;
+    }
+}
+
+window.archeryAdminAction = async (functionName, bookingId) => {
+    if (!bookingId) return;
+    if (!confirm('Confirm action for booking ' + bookingId + '?')) return;
+    const actionPermission = {
+        adminCheckInBooking: 'checkIn',
+        adminCompleteBooking: 'complete',
+        adminMarkNoShow: 'markNoShow'
+    }[functionName];
+    if (actionPermission && !archeryCan(actionPermission)) {
+        alert('บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้');
+        return;
+    }
+    const extra = {};
+    if (functionName === 'adminMarkNoShow') {
+        const reason = prompt('No-show reason');
+        if (!reason) return;
+        extra.reason = reason;
+    }
+    const loadingKey = `${functionName}:${bookingId}`;
+    if (archeryActionLoading.has(loadingKey)) return;
+    archeryActionLoading.add(loadingKey);
+    renderArcheryAdmin(archeryBookingsData);
+    try {
+        await callAdminFunction(functionName, archeryMutationPayload(functionName, bookingId, extra));
+        refreshArcheryAdmin();
+    } catch (error) {
+        alert(error.message || safeAdminError('Archery action failed'));
+    } finally {
+        archeryActionLoading.delete(loadingKey);
+        renderArcheryAdmin(archeryBookingsData);
+    }
+};
+
+window.archeryAdminExtend = async (bookingId) => {
+    const newEndTime = prompt('New end time (HH:mm), e.g. 14:30');
+    if (!newEndTime) return;
+    if (!archeryCan('extendTime')) {
+        alert('บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้');
+        return;
+    }
+    const loadingKey = `archeryAdminExtend:${bookingId}`;
+    if (archeryActionLoading.has(loadingKey)) return;
+    archeryActionLoading.add(loadingKey);
+    renderArcheryAdmin(archeryBookingsData);
+    try {
+        await callAdminFunction('adminExtendBooking', archeryMutationPayload('adminExtendBooking', bookingId, { new_end_time: newEndTime }));
+        refreshArcheryAdmin();
+    } catch (error) {
+        alert(error.message || safeAdminError('Extend failed'));
+    } finally {
+        archeryActionLoading.delete(loadingKey);
+        renderArcheryAdmin(archeryBookingsData);
+    }
+};
+
+window.archeryAdminMove = async (bookingId) => {
+    const booking = archeryBookingById(bookingId);
+    if (archeryPartySizeFromBooking(booking) > 1 || archeryLaneNumbersFromBooking(booking).length > 1) {
+        alert('Move lane is not supported for bookings that use multiple lanes.');
+        return;
+    }
+    const lane = prompt('New lane number 1-10');
+    if (!lane) return;
+    if (!archeryCan('moveLane')) {
+        alert('บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้');
+        return;
+    }
+    const targetResourceId = archeryResourceIdFromLaneNumber(lane);
+    if (!targetResourceId) {
+        alert('Lane must be 1-10');
+        return;
+    }
+    const loadingKey = `archeryAdminMove:${bookingId}`;
+    if (archeryActionLoading.has(loadingKey)) return;
+    archeryActionLoading.add(loadingKey);
+    renderArcheryAdmin(archeryBookingsData);
+    try {
+        await callAdminFunction('adminMoveBookingLane', archeryMutationPayload('adminMoveBookingLane', bookingId, { target_resource_id: targetResourceId }));
+        refreshArcheryAdmin();
+    } catch (error) {
+        alert(error.message || safeAdminError('Move lane failed'));
+    } finally {
+        archeryActionLoading.delete(loadingKey);
+        renderArcheryAdmin(archeryBookingsData);
+    }
+};
+
+window.archeryAdminCancel = async (bookingId) => {
+    const reason = prompt('Cancel reason');
+    if (!reason) return;
+    if (!archeryCan('requestCancel')) {
+        alert('บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้');
+        return;
+    }
+    const loadingKey = `archeryAdminCancel:${bookingId}`;
+    if (archeryActionLoading.has(loadingKey)) return;
+    archeryActionLoading.add(loadingKey);
+    renderArcheryAdmin(archeryBookingsData);
+    try {
+        await callAdminFunction('requestCancelBooking', archeryMutationPayload('requestCancelBooking', bookingId, { reason }));
+        refreshArcheryAdmin();
+    } catch (error) {
+        alert(error.message || safeAdminError('Cancel failed'));
+    } finally {
+        archeryActionLoading.delete(loadingKey);
+        renderArcheryAdmin(archeryBookingsData);
+    }
+};
+
+window.archeryAdminPayment = async (bookingId) => {
+    const booking = archeryBookingById(bookingId);
+    const payment = String(booking.payment_status || booking.paymentStatus || '').toUpperCase();
+    if (ARCHERY_PAID_STATUSES.has(payment)) {
+        alert('รายการนี้มีการชำระเงินแล้ว');
+        return;
+    }
+    if (!archeryCan('recordCounterPayment')) {
+        alert('บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้');
+        return;
+    }
+    const receiptRef = prompt('Payment reference / receipt id', 'counter-' + bookingId + '-' + Date.now());
+    if (!receiptRef) return;
+    const amountInput = prompt('Amount (THB)', String(booking.amount_total || booking.amount || 0));
+    if (amountInput === null) return;
+    const loadingKey = `archeryAdminPayment:${bookingId}`;
+    if (archeryActionLoading.has(loadingKey)) return;
+    archeryActionLoading.add(loadingKey);
+    renderArcheryAdmin(archeryBookingsData);
+    try {
+        await callAdminFunction('recordCounterPayment', archeryMutationPayload('recordCounterPayment', bookingId, {
+            idempotency_key: `counter-${bookingId}-${receiptRef}`,
+            amount: Number(amountInput || 0) || 0,
+            method: 'COUNTER'
+        }));
+        refreshArcheryAdmin();
+    } catch (error) {
+        alert(error.message || safeAdminError('Payment failed'));
+    } finally {
+        archeryActionLoading.delete(loadingKey);
+        renderArcheryAdmin(archeryBookingsData);
+    }
+};
+
+window.archeryApproveCancel = async (bookingId) => {
+    const reason = prompt('Approve cancel reason');
+    if (!reason) return;
+    if (!archeryCan('approveCancel')) {
+        alert('บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้');
+        return;
+    }
+    const loadingKey = `archeryApproveCancel:${bookingId}`;
+    if (archeryActionLoading.has(loadingKey)) return;
+    archeryActionLoading.add(loadingKey);
+    renderArcheryAdmin(archeryBookingsData);
+    try {
+        await callAdminFunction('approveCancelBooking', archeryMutationPayload('approveCancelBooking', bookingId, { reason }));
+        refreshArcheryAdmin();
+    } catch (error) {
+        alert(error.message || safeAdminError('Approve cancel failed'));
+    } finally {
+        archeryActionLoading.delete(loadingKey);
+        renderArcheryAdmin(archeryBookingsData);
+    }
+};
+
+window.archeryAdminRefund = async (bookingId) => {
+    const booking = archeryBookingById(bookingId);
+    const paymentId = booking.payment_id || booking.paymentId || '';
+    if (!paymentId) {
+        alert('ไม่พบข้อมูลการชำระเงินของรายการนี้');
+        return;
+    }
+    const reason = prompt('Refund reason');
+    if (!reason) return;
+    if (!archeryCan('refund')) {
+        alert('บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้');
+        return;
+    }
+    const amountInput = prompt('Refund amount (THB)', String(booking.amount_total || booking.amount || 0));
+    if (amountInput === null) return;
+    const loadingKey = `archeryAdminRefund:${bookingId}`;
+    if (archeryActionLoading.has(loadingKey)) return;
+    archeryActionLoading.add(loadingKey);
+    renderArcheryAdmin(archeryBookingsData);
+    try {
+        await callAdminFunction('refundPayment', archeryMutationPayload('refundPayment', bookingId, {
+            payment_id: paymentId,
+            amount: Number(amountInput || 0) || 0,
+            reason
+        }));
+        refreshArcheryAdmin();
+    } catch (error) {
+        alert(error.message || safeAdminError('Refund failed'));
+    } finally {
+        archeryActionLoading.delete(loadingKey);
+        renderArcheryAdmin(archeryBookingsData);
+    }
+};
+
+function setupRealtimeArcheryBookings() {
+    bindArcheryAdminControls();
+    if (archeryBookingsUnsubscribe) {
+        archeryBookingsUnsubscribe();
+        archeryBookingsUnsubscribe = null;
+    }
+    if (!canAdmin('bookings')) return;
+    const branchId = archeryBranchId();
+    const q = query(
+        collection(db, 'bookings'),
+        where('branch_id', '==', branchId),
+        where('service_type', '==', 'ARCHERY'),
+        limit(500)
+    );
+    archeryBookingsUnsubscribe = onSnapshot(q, (snapshot) => {
+        archeryBookingsData = [];
+        snapshot.forEach(docSnap => {
+            archeryBookingsData.push({ id: docSnap.id, firestoreId: docSnap.id, ...docSnap.data() });
+        });
+        renderArcheryAdmin(archeryBookingsData);
+        renderAllBookings((dashboardBookingsData || []).filter(booking => !isArcheryBooking(booking)).concat(archeryBookingsData));
+    }, (error) => {
+        console.error('Error listening to archery bookings:', error);
+        archeryBookingsData = [];
+        renderArcheryAdmin([]);
+        const tbody = document.getElementById('archery-bookings-table-body');
+        if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#c62828;">${escapeHTML(adminFunctionErrorMessage({ code: error.code, message: error.message }))}</td></tr>`;
+    });
+}
+
+function setupRealtimeArcheryAuditLogs() {
+    if (archeryAuditUnsubscribe) {
+        archeryAuditUnsubscribe();
+        archeryAuditUnsubscribe = null;
+    }
+    if (!archeryCan('viewAuditTrail')) {
+        archeryAuditLogsData = [];
+        renderArcheryAuditTrail();
+        return;
+    }
+    const q = query(
+        collection(db, 'audit_logs'),
+        where('branch_id', '==', archeryBranchId()),
+        limit(120)
+    );
+    archeryAuditUnsubscribe = onSnapshot(q, (snapshot) => {
+        archeryAuditLogsData = [];
+        snapshot.forEach(docSnap => {
+            archeryAuditLogsData.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        renderArcheryAuditTrail();
+    }, (error) => {
+        console.error('Error listening to archery audit logs:', error);
+        archeryAuditLogsData = [];
+        renderArcheryAuditTrail();
+    });
+}
+
+function setupRealtimeArcheryAdminData() {
+    updateArcheryRoleVisibility();
+    loadArcheryPageSettings();
+    setupRealtimeArcheryBookings();
+    setupRealtimeArcheryAuditLogs();
+}
+
+window.refreshArcheryAdmin = () => {
+    setupRealtimeArcheryAdminData();
+};
+
 // Real-time Bookings Listener
 function setupRealtimeBookings() {
     if (bookingsUnsubscribe) {
@@ -2696,17 +4986,20 @@ function setupRealtimeBookings() {
         if (!tbody || !roomTbody) return;
         tbody.innerHTML = '';
         roomTbody.innerHTML = '';
-        
+
         let todayBookings = 0;
         let todayRoomBookings = 0;
         const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
 
         let hasTableBookings = false;
         let hasRoomBookings = false;
+        const reportBookings = [];
 
         snapshot.forEach((docSnap) => {
             const booking = docSnap.data();
             const id = docSnap.id;
+            reportBookings.push({ id, firestoreId: id, ...booking });
+            if (isArcheryBooking(booking)) return;
             const status = booking.status || 'pending';
             const isRoom = booking.bookingType === 'room';
             const tableNo = booking.tableNo || '';
@@ -2772,6 +5065,10 @@ function setupRealtimeBookings() {
         }
 
         // Update Dashboard Stats (combine both or just show table bookings?)
+        dashboardBookingsData = reportBookings;
+        if (!archeryBookingsUnsubscribe) renderArcheryAdmin(reportBookings);
+        renderAllBookings(reportBookings);
+        renderDashboardSalesReport();
         document.getElementById('stat-bookings').innerText = todayBookings + todayRoomBookings;
     }, (error) => {
         console.error("Error listening to bookings:", error);
@@ -2842,7 +5139,6 @@ function renderCategoriesSnapshot(snapshot) {
         if (tbody) tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;">ไม่มีข้อมูลหมวดหมู่</td></tr>';
         updateProductCategoryFilterOptions();
         renderProductsTable();
-        renderPosScreen();
         renderDashboardSalesReport();
         return;
     }
@@ -2895,7 +5191,6 @@ function renderCategoriesSnapshot(snapshot) {
     });
     updateProductCategoryFilterOptions();
     renderProductsTable();
-    renderPosScreen();
     renderDashboardSalesReport();
 }
 
@@ -3829,13 +6124,6 @@ function productMoney(value) {
     return amount ? '&#3647;' + amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-';
 }
 
-function posMoney(value) {
-    return '฿' + safeNumber(value).toLocaleString('th-TH', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-    });
-}
-
 function posRound(value) {
     return Math.round(safeNumber(value) * 100) / 100;
 }
@@ -3846,289 +6134,6 @@ function posLimitString(value, maxLength) {
 
 function posVariantKey(value) {
     return String(value ?? '').trim() || 'base';
-}
-
-function posStorageKey() {
-    return 'edenAdminPosCartV1';
-}
-
-function restorePosCart() {
-    try {
-        const saved = JSON.parse(sessionStorage.getItem(posStorageKey()) || '[]');
-        posCart = Array.isArray(saved) ? saved.filter(item => item && item.key) : [];
-    } catch (error) {
-        console.warn('Unable to restore POS cart:', error);
-        posCart = [];
-    }
-}
-
-function persistPosCart() {
-    try {
-        sessionStorage.setItem(posStorageKey(), JSON.stringify(posCart));
-    } catch (error) {
-        console.warn('Unable to persist POS cart:', error);
-    }
-}
-
-function posSellableVariants(product = {}) {
-    const variants = productVariantsForDisplay(product).filter(variant => {
-        if (variant.availableForSale === false) return false;
-        return !product.trackStock || safeNumber(variant.stock) > 0;
-    });
-    if (variants.length) return variants;
-    if (product.trackStock && safeNumber(product.stock) <= 0) return [];
-    return [{
-        id: 'base',
-        name: '',
-        price: safeNumber(product.price),
-        cost: safeNumber(product.cost),
-        sku: product.sku || '',
-        stock: safeNumber(product.stock),
-        lowStock: safeNumber(product.lowStock),
-        availableForSale: product.availableForSale !== false
-    }];
-}
-
-function posProductRows() {
-    return productRows
-        .filter(row => row?.product)
-        .filter(row => row.product.availableForSale !== false)
-        .filter(row => row.product.showOnPos !== false)
-        .filter(row => posSellableVariants(row.product).some(variant => variant.availableForSale !== false))
-        .sort((a, b) => String(a.product.name || '').localeCompare(String(b.product.name || ''), 'th'));
-}
-
-function filteredPosProductRows() {
-    const search = posSearchTerm.trim().toLowerCase();
-    return posProductRows()
-        .filter(row => posSelectedCategory === 'all' || row.product.category === posSelectedCategory)
-        .filter(row => !search || productSearchHaystack(row).includes(search));
-}
-
-function renderPosCategories(rows = posProductRows()) {
-    const container = document.getElementById('pos-category-list');
-    if (!container) return;
-    const categories = new Map();
-    rows.forEach(row => {
-        const categoryId = row.product.category || 'other';
-        categories.set(categoryId, categoriesData[categoryId]?.name || categoryId || 'ไม่ระบุ');
-    });
-    if (posSelectedCategory !== 'all' && !categories.has(posSelectedCategory)) {
-        posSelectedCategory = 'all';
-    }
-    const sortedCategories = Array.from(categories.entries()).sort(([aId, aName], [bId, bName]) => {
-        const aOrder = Number(categoriesData[aId]?.order || 999);
-        const bOrder = Number(categoriesData[bId]?.order || 999);
-        if (aOrder !== bOrder) return aOrder - bOrder;
-        return String(aName).localeCompare(String(bName), 'th');
-    });
-    container.innerHTML = [
-        `<button class="pos-category-btn ${posSelectedCategory === 'all' ? 'active' : ''}" type="button" onclick="setPosCategory('all')">ทั้งหมด</button>`,
-        ...sortedCategories.map(([id, name]) => `
-            <button class="pos-category-btn ${posSelectedCategory === id ? 'active' : ''}" type="button" onclick="setPosCategory('${escapeJSString(id)}')">${escapeHTML(name)}</button>
-        `)
-    ].join('');
-}
-
-function renderPosProducts() {
-    const grid = document.getElementById('pos-product-grid');
-    const count = document.getElementById('pos-product-count');
-    if (!grid) return;
-    const allRows = posProductRows();
-    const rows = filteredPosProductRows();
-    if (count) count.textContent = allRows.length.toLocaleString('th-TH');
-    renderPosCategories(allRows);
-
-    if (!rows.length) {
-        grid.innerHTML = '<div class="pos-empty">ไม่พบสินค้า POS ตามเงื่อนไขที่เลือก</div>';
-        return;
-    }
-
-    grid.innerHTML = rows.map(({ id, product }) => {
-        const variants = posSellableVariants(product);
-        const variantSelect = variants.length > 1 ? `
-            <select class="pos-card-variant" aria-label="เลือกตัวเลือกสินค้า" onchange="updatePosCardPrice(this)">
-                ${variants.map(variant => `
-                    <option value="${escapeHTML(variant.id || variant.name || 'base')}" data-price="${escapeHTML(variant.price)}">${escapeHTML(variant.name || 'ปกติ')} - ${posMoney(variant.price)}</option>
-                `).join('')}
-            </select>
-        ` : '';
-        const firstVariant = variants[0] || {};
-        const stockText = product.trackStock ? `คงเหลือ ${safeNumber(firstVariant.stock ?? product.stock).toLocaleString('th-TH')}` : categoryNameForProduct(product);
-        return `
-            <div class="pos-product-card" data-product-id="${escapeHTML(id)}">
-                <img src="${escapeHTML(safeImageURL(product.imageUrl))}" alt="${escapeHTML(product.name || id)}" loading="lazy">
-                <div class="pos-product-name">${escapeHTML(product.name || id)}</div>
-                <div class="pos-product-meta">${escapeHTML(stockText || '-')}</div>
-                ${variantSelect}
-                <button class="pos-add-btn" type="button" data-default-label="เพิ่ม" onclick="addPosProductFromCard('${escapeJSString(id)}', this.closest('.pos-product-card'))">
-                    เพิ่ม ${posMoney(firstVariant.price ?? product.price)}
-                </button>
-            </div>
-        `;
-    }).join('');
-}
-
-function posCartTotals() {
-    const subtotal = posRound(posCart.reduce((sum, item) => sum + (safeNumber(item.price) * safeNumber(item.quantity, 1)), 0));
-    const discountInput = document.getElementById('pos-discount');
-    const paidInput = document.getElementById('pos-paid-amount');
-    const paymentMethod = document.getElementById('pos-payment-method')?.value || 'cash';
-    const discount = Math.min(Math.max(safeNumber(discountInput?.value), 0), subtotal);
-    const total = posRound(Math.max(subtotal - discount, 0));
-    const taxableSubtotal = posCart
-        .filter(item => item.taxEnabled !== false)
-        .reduce((sum, item) => sum + (safeNumber(item.price) * safeNumber(item.quantity, 1)), 0);
-    const taxableAfterDiscount = subtotal > 0 ? Math.max(taxableSubtotal - (discount * (taxableSubtotal / subtotal)), 0) : 0;
-    const taxIncluded = posRound(taxableAfterDiscount * 7 / 107);
-    const paidAmount = safeNumber(paidInput?.value);
-    const changeAmount = paymentMethod === 'cash' ? posRound(Math.max(paidAmount - total, 0)) : 0;
-    return { subtotal, discount, total, taxableSubtotal, taxIncluded, paymentMethod, paidAmount, changeAmount };
-}
-
-function renderPosCart() {
-    const container = document.getElementById('pos-cart-items');
-    const summary = document.getElementById('pos-summary');
-    if (!container || !summary) return;
-
-    if (!posCart.length) {
-        container.innerHTML = '<div class="pos-empty">ยังไม่มีสินค้าในตะกร้า</div>';
-    } else {
-        container.innerHTML = posCart.map(item => `
-            <div class="pos-cart-row">
-                <div>
-                    <div class="pos-cart-title">${escapeHTML(item.name)}${item.variantName ? ` / ${escapeHTML(item.variantName)}` : ''}</div>
-                    <div class="pos-cart-sub">${escapeHTML(item.sku || item.categoryName || '-')} · ${posMoney(item.price)} x ${safeNumber(item.quantity, 1).toLocaleString('th-TH')}</div>
-                    <button class="pos-remove-btn" type="button" onclick="removePosCartItem('${escapeJSString(item.key)}')">ลบ</button>
-                </div>
-                <div class="pos-qty">
-                    <button type="button" onclick="changePosCartQty('${escapeJSString(item.key)}', -1)">-</button>
-                    <strong>${safeNumber(item.quantity, 1).toLocaleString('th-TH')}</strong>
-                    <button type="button" onclick="changePosCartQty('${escapeJSString(item.key)}', 1)">+</button>
-                </div>
-            </div>
-        `).join('');
-    }
-
-    const totals = posCartTotals();
-    summary.innerHTML = `
-        <div class="pos-summary-row"><span>ยอดก่อนส่วนลด</span><strong>${posMoney(totals.subtotal)}</strong></div>
-        <div class="pos-summary-row"><span>ส่วนลด</span><strong>-${posMoney(totals.discount)}</strong></div>
-        <div class="pos-summary-row"><span>VAT 7% รวมในราคา</span><strong>${posMoney(totals.taxIncluded)}</strong></div>
-        <div class="pos-summary-row"><span>เงินทอน</span><strong>${posMoney(totals.changeAmount)}</strong></div>
-        <div class="pos-summary-row total"><span>ยอดสุทธิ</span><strong>${posMoney(totals.total)}</strong></div>
-    `;
-    persistPosCart();
-}
-
-function renderPosScreen() {
-    if (!document.getElementById('pos-product-grid')) return;
-    renderPosProducts();
-    renderPosCart();
-}
-
-function initPosModule() {
-    if (posControlsBound) {
-        renderPosScreen();
-        return;
-    }
-    restorePosCart();
-    document.getElementById('pos-search-input')?.addEventListener('input', (event) => {
-        posSearchTerm = event.target.value || '';
-        renderPosProducts();
-    });
-    ['pos-discount', 'pos-paid-amount', 'pos-payment-method'].forEach(id => {
-        document.getElementById(id)?.addEventListener('input', renderPosCart);
-        document.getElementById(id)?.addEventListener('change', renderPosCart);
-    });
-    posControlsBound = true;
-    renderPosScreen();
-}
-
-window.setPosCategory = (categoryId = 'all') => {
-    posSelectedCategory = categoryId || 'all';
-    renderPosProducts();
-};
-
-window.refreshPosProducts = async () => {
-    if (!categoriesUnsubscribe) setupRealtimeCategories();
-    if (!productsUnsubscribe) setupRealtimeProducts();
-    await refreshCategoriesOnce();
-    await refreshProductsOnce();
-    renderPosScreen();
-};
-
-window.addPosProductFromCard = (productId, cardEl = null) => {
-    const product = productsData[productId];
-    if (!product) return;
-    const variants = posSellableVariants(product);
-    const selectedVariantId = cardEl?.querySelector('.pos-card-variant')?.value || variants[0]?.id || variants[0]?.name || 'base';
-    const variant = variants.find(item => String(item.id || item.name || 'base') === String(selectedVariantId)) || variants[0] || {};
-    const variantId = variant.id || variant.name || 'base';
-    const key = `${productId}::${variantId}`;
-    const existing = posCart.find(item => item.key === key);
-    if (existing) {
-        existing.quantity = safeNumber(existing.quantity, 1) + 1;
-    } else {
-        posCart.push({
-            key,
-            productId,
-            variantId,
-            name: product.name || productId,
-            variantName: variant.name || '',
-            sku: variant.sku || product.sku || '',
-            category: product.category || '',
-            categoryName: categoryNameForProduct(product),
-            imageUrl: product.imageUrl || '',
-            price: safeNumber(variant.price, safeNumber(product.price)),
-            cost: safeNumber(variant.cost, safeNumber(product.cost)),
-            taxEnabled: product.taxEnabled !== false,
-            quantity: 1
-        });
-    }
-    renderPosCart();
-};
-
-window.updatePosCardPrice = (selectEl) => {
-    const card = selectEl?.closest?.('.pos-product-card');
-    const button = card?.querySelector?.('.pos-add-btn');
-    const price = selectEl?.selectedOptions?.[0]?.dataset?.price;
-    if (button && price !== undefined) button.textContent = `เพิ่ม ${posMoney(price)}`;
-};
-
-window.changePosCartQty = (key, delta) => {
-    posCart = posCart.map(item => {
-        if (item.key !== key) return item;
-        return { ...item, quantity: Math.max(1, safeNumber(item.quantity, 1) + delta) };
-    });
-    renderPosCart();
-};
-
-window.removePosCartItem = (key) => {
-    posCart = posCart.filter(item => item.key !== key);
-    renderPosCart();
-};
-
-window.clearPosCart = () => {
-    if (posCart.length && !confirm('ล้างตะกร้า POS นี้หรือไม่?')) return;
-    posCart = [];
-    posLastReceipt = null;
-    const receipt = document.getElementById('pos-receipt');
-    const printBtn = document.getElementById('pos-print-btn');
-    if (receipt) {
-        receipt.style.display = 'none';
-        receipt.innerHTML = '';
-    }
-    if (printBtn) printBtn.style.display = 'none';
-    renderPosCart();
-};
-
-function generatePosReceiptNo() {
-    const now = new Date();
-    const pad = value => String(value).padStart(2, '0');
-    const datePart = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-    const timePart = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-    return `POS-${datePart}-${timePart}`;
 }
 
 function groupedPosItemsForStock(items = []) {
@@ -4239,59 +6244,6 @@ function buildStockUpdateForProduct(productId, product = {}, entries = [], direc
     return { update, adjustments };
 }
 
-async function commitPosOrderWithStock(orderData, items, isTestOrder) {
-    if (isTestOrder) {
-        const docRef = await addDoc(collection(db, 'orders'), {
-            ...orderData,
-            stockAdjusted: false,
-            stockAdjustments: [],
-            stockMode: 'test-no-stock'
-        });
-        return { docRef, orderData: { ...orderData, stockAdjusted: false, stockAdjustments: [], stockMode: 'test-no-stock' } };
-    }
-
-    const orderRef = doc(collection(db, 'orders'));
-    const committedOrder = await runTransaction(db, async (transaction) => {
-        const stockEntries = groupedPosItemsForStock(items);
-        const byProduct = new Map();
-        stockEntries.forEach(entry => {
-            const list = byProduct.get(entry.productId) || [];
-            list.push(entry);
-            byProduct.set(entry.productId, list);
-        });
-
-        const productSnapshots = new Map();
-        for (const productId of byProduct.keys()) {
-            const productRef = doc(db, 'products', productId);
-            const productSnap = await transaction.get(productRef);
-            if (!productSnap.exists()) {
-                throw new Error(`ไม่พบสินค้า ${productId} ในระบบ`);
-            }
-            productSnapshots.set(productId, { ref: productRef, data: productSnap.data() || {} });
-        }
-
-        const stockAdjustments = [];
-        productSnapshots.forEach(({ ref, data }, productId) => {
-            const result = buildStockUpdateForProduct(productId, data, byProduct.get(productId) || [], -1);
-            if (result.update) {
-                transaction.update(ref, result.update);
-                stockAdjustments.push(...result.adjustments);
-            }
-        });
-
-        const finalOrder = {
-            ...orderData,
-            stockAdjusted: stockAdjustments.length > 0,
-            stockAdjustments,
-            stockMode: stockAdjustments.length ? 'auto' : 'not-tracked'
-        };
-        transaction.set(orderRef, finalOrder);
-        return finalOrder;
-    });
-
-    return { docRef: orderRef, orderData: committedOrder };
-}
-
 async function restorePosOrderStock(orderId, reason = '') {
     const user = auth.currentUser;
     if (!user) throw new Error('กรุณาเข้าสู่ระบบแอดมินก่อน Void ออเดอร์');
@@ -4349,155 +6301,6 @@ async function restorePosOrderStock(orderId, reason = '') {
         });
     });
 }
-
-function buildPosReceiptHTML(order = {}) {
-    const items = Array.isArray(order.items) ? order.items : [];
-    return `
-        <div style="text-align:center; font-weight:900; font-size:1rem;">Eden Cafe</div>
-        <div style="text-align:center;">ใบเสร็จรับเงิน${order.isTestOrder ? ' (TEST)' : ''}</div>
-        <div style="border-top:1px dashed #9aa; margin:10px 0;"></div>
-        <div>เลขที่: ${escapeHTML(order.receiptNo || '-')}</div>
-        <div>เวลา: ${escapeHTML(order.date || '-')}</div>
-        <div>แคชเชียร์: ${escapeHTML(order.cashierName || '-')}</div>
-        <div style="border-top:1px dashed #9aa; margin:10px 0;"></div>
-        ${items.map(item => `
-            <div style="display:flex; justify-content:space-between; gap:10px;">
-                <span>${escapeHTML(item.name)}${item.variantName ? ` / ${escapeHTML(item.variantName)}` : ''} x${safeNumber(item.quantity, 1)}</span>
-                <strong>${posMoney(item.lineTotal)}</strong>
-            </div>
-        `).join('')}
-        <div style="border-top:1px dashed #9aa; margin:10px 0;"></div>
-        <div style="display:flex; justify-content:space-between;"><span>Subtotal</span><strong>${posMoney(order.subtotal)}</strong></div>
-        <div style="display:flex; justify-content:space-between;"><span>Discount</span><strong>-${posMoney(order.discount)}</strong></div>
-        <div style="display:flex; justify-content:space-between;"><span>VAT included</span><strong>${posMoney(order.taxIncluded)}</strong></div>
-        <div style="display:flex; justify-content:space-between; font-size:1.05rem;"><span>Total</span><strong>${posMoney(order.totalAmount)}</strong></div>
-        <div style="display:flex; justify-content:space-between;"><span>Payment</span><strong>${escapeHTML(order.paymentMethod || '-')}</strong></div>
-        <div style="display:flex; justify-content:space-between;"><span>Paid</span><strong>${posMoney(order.paidAmount)}</strong></div>
-        <div style="display:flex; justify-content:space-between;"><span>Change</span><strong>${posMoney(order.changeAmount)}</strong></div>
-        <div style="border-top:1px dashed #9aa; margin:10px 0;"></div>
-        <div style="text-align:center;">ขอบคุณที่อุดหนุน Eden Cafe</div>
-    `;
-}
-
-window.checkoutPosOrder = async () => {
-    if (!posCart.length) {
-        alert('กรุณาเพิ่มสินค้าในตะกร้าก่อนบันทึกออเดอร์');
-        return;
-    }
-    const user = auth.currentUser;
-    if (!user) {
-        alert('กรุณาเข้าสู่ระบบแอดมินก่อนทำรายการ POS');
-        return;
-    }
-    const checkoutBtn = document.getElementById('pos-checkout-btn');
-    const originalText = checkoutBtn?.textContent || '';
-    try {
-        if (checkoutBtn) {
-            checkoutBtn.disabled = true;
-            checkoutBtn.textContent = 'กำลังบันทึกออเดอร์...';
-        }
-        const totals = posCartTotals();
-        if (totals.paymentMethod === 'cash' && totals.paidAmount > 0 && totals.paidAmount < totals.total) {
-            throw new Error('จำนวนเงินที่รับมาต่ำกว่ายอดสุทธิ');
-        }
-        const isTestOrder = !!document.getElementById('pos-soft-launch-mode')?.checked;
-        const receiptNo = generatePosReceiptNo();
-        const now = new Date();
-        const orderItems = posCart.map(item => ({
-            productId: item.productId,
-            variantId: item.variantId,
-            name: item.name,
-            variantName: item.variantName || '',
-            sku: item.sku || '',
-            category: item.category || '',
-            price: posRound(item.price),
-            cost: posRound(item.cost),
-            quantity: safeNumber(item.quantity, 1),
-            lineTotal: posRound(safeNumber(item.price) * safeNumber(item.quantity, 1)),
-            taxEnabled: item.taxEnabled !== false
-        }));
-        const orderData = {
-            id: receiptNo,
-            receiptNo,
-            date: now.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }),
-            source: 'pos',
-            orderType: 'pos',
-            status: 'completed',
-            paymentStatus: 'paid',
-            paymentMethod: totals.paymentMethod,
-            uid: user.uid,
-            customerName: posLimitString(document.getElementById('pos-customer-name')?.value, 120) || 'Walk-in Customer',
-            phone: posLimitString(document.getElementById('pos-customer-phone')?.value, 40),
-            address: 'หน้าร้าน Eden Cafe',
-            note: posLimitString(document.getElementById('pos-note')?.value, 500),
-            items: orderItems,
-            subtotal: totals.subtotal,
-            discount: totals.discount,
-            taxIncluded: totals.taxIncluded,
-            total: totals.total,
-            totalAmount: totals.total,
-            paidAmount: totals.paidAmount || totals.total,
-            changeAmount: totals.changeAmount,
-            cashierUid: user.uid,
-            cashierName: posLimitString(user.displayName || user.email || 'Admin', 120),
-            cashierEmail: posLimitString(user.email || '', 180),
-            isTestOrder,
-            softLaunch: isTestOrder,
-            timestamp: serverTimestamp(),
-            createdAt: serverTimestamp()
-        };
-        const result = await commitPosOrderWithStock(orderData, orderItems, isTestOrder);
-        posLastReceipt = { ...result.orderData, firestoreId: result.docRef.id, timestamp: new Date(), createdAt: new Date() };
-        const receipt = document.getElementById('pos-receipt');
-        const printBtn = document.getElementById('pos-print-btn');
-        if (receipt) {
-            receipt.innerHTML = buildPosReceiptHTML(posLastReceipt);
-            receipt.style.display = 'block';
-        }
-        if (printBtn) printBtn.style.display = 'block';
-        posCart = [];
-        persistPosCart();
-        renderPosCart();
-        alert(isTestOrder ? 'บันทึกออเดอร์ทดสอบ POS สำเร็จ' : 'บันทึกออเดอร์ POS สำเร็จ');
-    } catch (error) {
-        console.error('POS checkout failed:', error);
-        alert(safeAdminError("บันทึกออเดอร์ POS ไม่สำเร็จ"));
-    } finally {
-        if (checkoutBtn) {
-            checkoutBtn.disabled = false;
-            checkoutBtn.textContent = originalText || 'บันทึกออเดอร์และออกใบเสร็จ';
-        }
-    }
-};
-
-window.printPosReceipt = () => {
-    if (!posLastReceipt) {
-        alert('ยังไม่มีใบเสร็จล่าสุดให้พิมพ์');
-        return;
-    }
-    const printWindow = window.open('', '_blank', 'width=420,height=720');
-    if (!printWindow) {
-        alert('เบราว์เซอร์บล็อกหน้าต่างพิมพ์ กรุณาอนุญาต Pop-up');
-        return;
-    }
-    printWindow.document.write(`
-        <!doctype html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>${escapeHTML(posLastReceipt.receiptNo || 'POS Receipt')}</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 18px; color: #111; }
-                @media print { body { margin: 0; } }
-            </style>
-        </head>
-        <body>${buildPosReceiptHTML(posLastReceipt)}</body>
-        </html>
-    `);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-};
 
 function filteredProductRows() {
     const category = document.getElementById('product-category-filter')?.value || 'all';
@@ -4575,7 +6378,7 @@ function renderProductsTable() {
                     <td class="menu-check-cell"><input type="checkbox" class="product-row-check" data-id="${escapeHTML(id)}" ${selectedProductIds.has(id) ? 'checked' : ''}></td>
                     <td>
                         <div class="menu-item-name">
-                            <button class="menu-row-toggle" type="button" data-id="${escapeHTML(id)}" aria-label="Toggle variants">${isExpanded ? '⌃' : '⌄'}</button>
+                            <button class="menu-row-toggle" type="button" data-id="${escapeHTML(id)}" aria-label="Toggle variants">${isExpanded ? 'âŒƒ' : 'âŒ„'}</button>
                             <img loading="lazy" class="menu-item-thumb" src="${safeImageURL(product.imageUrl)}" alt="${escapeHTML(itemName)}">
                             <span class="menu-item-title">
                                 <strong>${escapeHTML(itemName)}</strong>
@@ -4749,7 +6552,7 @@ function renderProductsSnapshot(snapshot) {
     if (snapshot.empty) {
         if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">ไม่มีข้อมูลเมนูสินค้า</td></tr>';
         renderProductsTable();
-        renderPosScreen();
+        renderDashboardSalesReport();
         return;
     }
 
@@ -4763,7 +6566,7 @@ function renderProductsSnapshot(snapshot) {
         if (!productsData[id]) selectedProductIds.delete(id);
     });
     renderProductsTable();
-    renderPosScreen();
+    renderDashboardSalesReport();
 }
 
 async function refreshProductsOnce() {
@@ -5847,6 +7650,283 @@ window.syncMembersFromAuth = async () => {
 };
 
 // ==========================================
+// POS APK Protected Update Admin
+// ==========================================
+function apkStatusPill(status) {
+    const safeStatus = ['active', 'draft', 'revoked'].includes(status) ? status : 'draft';
+    return `<span class="apk-pill ${safeStatus}">${escapeHTML(safeStatus)}</span>`;
+}
+
+function formatApkBytes(value) {
+    const bytes = safeNumber(value, 0);
+    if (bytes <= 0) return '-';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function normalizeApkSha(value) {
+    return String(value || '').replace(/[^a-fA-F0-9]/g, '').toUpperCase().slice(0, 64);
+}
+
+function posApkReleaseForm() {
+    return document.getElementById('pos-apk-release-form');
+}
+
+function setPosApkFormStatus(message, type = '') {
+    const el = document.getElementById('pos-apk-form-status');
+    if (!el) return;
+    el.textContent = message || '';
+    el.className = `apk-admin-status ${type}`.trim();
+}
+
+function resetPosApkReleaseForm() {
+    const form = posApkReleaseForm();
+    if (!form) return;
+    form.reset();
+    document.getElementById('pos-apk-release-id').value = '';
+    document.getElementById('pos-apk-app-id').value = 'com.personal.pos';
+    document.getElementById('pos-apk-channel').value = 'test';
+    document.getElementById('pos-apk-status').value = 'draft';
+    document.getElementById('pos-apk-min-supported').value = '0';
+    document.getElementById('pos-apk-force-update').checked = false;
+    setPosApkFormStatus('');
+}
+window.resetPosApkReleaseForm = resetPosApkReleaseForm;
+
+function posApkReleaseFromForm() {
+    const appId = document.getElementById('pos-apk-app-id')?.value.trim() || 'com.personal.pos';
+    const versionName = document.getElementById('pos-apk-version-name')?.value.trim() || '';
+    const versionCode = safeNumber(document.getElementById('pos-apk-version-code')?.value, 0);
+    const channel = document.getElementById('pos-apk-channel')?.value || 'test';
+    const status = document.getElementById('pos-apk-status')?.value || 'draft';
+    const sha256 = normalizeApkSha(document.getElementById('pos-apk-sha256')?.value || '');
+    const size = safeNumber(document.getElementById('pos-apk-size')?.value, 0);
+    const minSupportedVersionCode = safeNumber(document.getElementById('pos-apk-min-supported')?.value, 0);
+    const functionAsset = document.getElementById('pos-apk-function-asset')?.value.trim() || '';
+    const storagePath = document.getElementById('pos-apk-storage-path')?.value.trim() || '';
+    const releaseNotes = document.getElementById('pos-apk-release-notes')?.value.trim() || '';
+    const forceUpdate = document.getElementById('pos-apk-force-update')?.checked === true;
+
+    if (appId !== 'com.personal.pos') throw new Error('App ID must be com.personal.pos');
+    if (!versionName || versionName.length > 40) throw new Error('Version name is required');
+    if (!versionCode || versionCode < 1) throw new Error('Version code must be greater than 0');
+    if (!['test', 'pilot', 'production'].includes(channel)) throw new Error('Invalid channel');
+    if (!['draft', 'active', 'revoked'].includes(status)) throw new Error('Invalid status');
+    if (!/^[A-F0-9]{64}$/.test(sha256)) throw new Error('SHA256 must be 64 hex characters');
+
+    return {
+        appId,
+        versionName,
+        versionCode,
+        channel,
+        status,
+        sha256,
+        size,
+        functionAsset,
+        storagePath,
+        releaseNotes,
+        minSupportedVersionCode,
+        forceUpdate,
+        updatedBy: auth.currentUser?.uid || '',
+        updatedAt: serverTimestamp()
+    };
+}
+
+function bindPosApkReleaseForm() {
+    const form = posApkReleaseForm();
+    if (!form || posApkFormBound) return;
+    posApkFormBound = true;
+    form.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (!canAdmin('pos')) {
+            alert('POS admin permission is required');
+            return;
+        }
+
+        try {
+            setPosApkFormStatus('Saving release metadata...');
+            const release = posApkReleaseFromForm();
+            const existingId = document.getElementById('pos-apk-release-id')?.value || '';
+            const releaseId = existingId || `${release.appId}_${release.channel}_v${release.versionCode}`.replace(/[^a-zA-Z0-9_.-]/g, '-');
+            const current = posApkReleasesData[releaseId] || null;
+            await setDoc(doc(db, 'pos_apk_releases', releaseId), {
+                ...release,
+                createdBy: current?.createdBy || auth.currentUser?.uid || '',
+                createdAt: current?.createdAt || serverTimestamp()
+            }, { merge: true });
+            setPosApkFormStatus('Release metadata saved', 'success');
+            document.getElementById('pos-apk-release-id').value = releaseId;
+        } catch (error) {
+            console.error('Unable to save POS APK release:', error);
+            setPosApkFormStatus(error.message || 'Save failed', 'error');
+        }
+    });
+}
+
+function renderPosApkReleaseTable() {
+    const tbody = document.getElementById('pos-apk-release-table-body');
+    if (!tbody) return;
+    const rows = Object.entries(posApkReleasesData)
+        .map(([id, release]) => ({ id, ...release }))
+        .sort((a, b) => safeNumber(b.versionCode, 0) - safeNumber(a.versionCode, 0));
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="7">No release metadata yet</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(row => `
+        <tr>
+            <td><strong>${escapeHTML(row.versionName || '-')} / ${escapeHTML(row.versionCode || '-')}</strong><br><small>${escapeHTML(row.id)}<br>${escapeHTML(row.functionAsset || row.storagePath || '-')}</small></td>
+            <td>${escapeHTML(row.channel || '-')}</td>
+            <td>${apkStatusPill(row.status || 'draft')}</td>
+            <td><small>${escapeHTML(String(row.sha256 || '').slice(0, 18))}...</small></td>
+            <td>${formatApkBytes(row.size)}</td>
+            <td>${formatDate(row.updatedAt || row.createdAt)}</td>
+            <td>
+                <button class="btn-action btn-edit" onclick="editPosApkRelease('${escapeJSString(row.id)}')">Edit</button>
+                <button class="btn-action btn-view" onclick="setPosApkReleaseStatus('${escapeJSString(row.id)}','active')">Active</button>
+                <button class="btn-action btn-delete" onclick="setPosApkReleaseStatus('${escapeJSString(row.id)}','revoked')">Revoke</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function renderPosApkDevicesTable() {
+    const tbody = document.getElementById('pos-apk-device-table-body');
+    if (!tbody) return;
+    const rows = Object.entries(posApkDevicesData)
+        .map(([id, device]) => ({ id, ...device }))
+        .sort((a, b) => String(b.updatedAt?.seconds || '').localeCompare(String(a.updatedAt?.seconds || '')));
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="6">No device status reported yet</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(row => `
+        <tr>
+            <td><strong>${escapeHTML(row.id)}</strong><br><small>${escapeHTML(row.lastSeenEmail || '')}</small></td>
+            <td>${escapeHTML(row.channel || '-')}</td>
+            <td>${escapeHTML(row.currentVersionCode || '-')}</td>
+            <td>${escapeHTML(row.targetVersionCode || '-')}</td>
+            <td>${escapeHTML(row.lastUpdateEvent || '-')}</td>
+            <td>${formatDate(row.updatedAt || row.lastUpdateEventAt || row.lastUpdateCheckAt)}</td>
+        </tr>
+    `).join('');
+}
+
+function renderPosApkEventsTable() {
+    const tbody = document.getElementById('pos-apk-event-table-body');
+    if (!tbody) return;
+    const rows = posApkEventsData.slice(0, 30);
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="6">No update events yet</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(row => `
+        <tr>
+            <td>${formatDate(row.createdAt)}</td>
+            <td>${escapeHTML(row.event || '-')}</td>
+            <td>${escapeHTML(row.deviceId || '-')}</td>
+            <td>${escapeHTML(row.releaseId || '-')}</td>
+            <td>${escapeHTML(row.versionName || row.targetVersionCode || '-')}</td>
+            <td>${escapeHTML(row.message || '-')}</td>
+        </tr>
+    `).join('');
+}
+
+function setupRealtimePosApkUpdates() {
+    if (!canAdmin('pos')) return;
+    bindPosApkReleaseForm();
+
+    if (!posApkReleasesUnsubscribe) {
+        posApkReleasesUnsubscribe = onSnapshot(
+            query(collection(db, 'pos_apk_releases'), orderBy('versionCode', 'desc')),
+            snapshot => {
+                posApkReleasesData = {};
+                snapshot.forEach(docSnap => {
+                    posApkReleasesData[docSnap.id] = { id: docSnap.id, ...docSnap.data() };
+                });
+                renderPosApkReleaseTable();
+            },
+            error => console.error('Unable to load POS APK releases:', error)
+        );
+    } else {
+        renderPosApkReleaseTable();
+    }
+
+    if (!posApkDevicesUnsubscribe) {
+        posApkDevicesUnsubscribe = onSnapshot(
+            query(collection(db, 'pos_devices'), orderBy('updatedAt', 'desc')),
+            snapshot => {
+                posApkDevicesData = {};
+                snapshot.forEach(docSnap => {
+                    posApkDevicesData[docSnap.id] = { id: docSnap.id, ...docSnap.data() };
+                });
+                renderPosApkDevicesTable();
+            },
+            error => console.error('Unable to load POS APK devices:', error)
+        );
+    } else {
+        renderPosApkDevicesTable();
+    }
+
+    if (!posApkEventsUnsubscribe) {
+        posApkEventsUnsubscribe = onSnapshot(
+            query(collection(db, 'pos_update_events'), orderBy('createdAt', 'desc'), limit(50)),
+            snapshot => {
+                posApkEventsData = [];
+                snapshot.forEach(docSnap => {
+                    posApkEventsData.push({ id: docSnap.id, ...docSnap.data() });
+                });
+                renderPosApkEventsTable();
+            },
+            error => console.error('Unable to load POS APK events:', error)
+        );
+    } else {
+        renderPosApkEventsTable();
+    }
+}
+window.refreshPosApkUpdates = () => window.refreshAdminSection('pos-apk-updates');
+
+window.editPosApkRelease = (releaseId) => {
+    const release = posApkReleasesData[releaseId];
+    if (!release) return;
+    document.getElementById('pos-apk-release-id').value = releaseId;
+    document.getElementById('pos-apk-app-id').value = release.appId || 'com.personal.pos';
+    document.getElementById('pos-apk-version-name').value = release.versionName || '';
+    document.getElementById('pos-apk-version-code').value = release.versionCode || '';
+    document.getElementById('pos-apk-channel').value = release.channel || 'test';
+    document.getElementById('pos-apk-status').value = release.status || 'draft';
+    document.getElementById('pos-apk-sha256').value = release.sha256 || '';
+    document.getElementById('pos-apk-size').value = release.size || '';
+    document.getElementById('pos-apk-min-supported').value = release.minSupportedVersionCode || 0;
+    document.getElementById('pos-apk-function-asset').value = release.functionAsset || '';
+    document.getElementById('pos-apk-storage-path').value = release.storagePath || '';
+    document.getElementById('pos-apk-force-update').checked = release.forceUpdate === true;
+    document.getElementById('pos-apk-release-notes').value = release.releaseNotes || '';
+    setPosApkFormStatus('Editing ' + releaseId);
+};
+
+window.setPosApkReleaseStatus = async (releaseId, status) => {
+    if (!canAdmin('pos') || !['active', 'draft', 'revoked'].includes(status)) return;
+    const release = posApkReleasesData[releaseId];
+    if (!release) return;
+    const confirmed = status === 'active'
+        ? confirm('Mark this release active for channel ' + (release.channel || '-') + '?')
+        : confirm('Change this release status to ' + status + '?');
+    if (!confirmed) return;
+    try {
+        await updateDoc(doc(db, 'pos_apk_releases', releaseId), {
+            status,
+            updatedBy: auth.currentUser?.uid || '',
+            updatedAt: serverTimestamp()
+        });
+    } catch (error) {
+        console.error('Unable to update POS APK release status:', error);
+        alert(safeAdminError('Update release status failed'));
+    }
+};
+
+// ==========================================
 // Admin Access / Manager Permission Logic
 // ==========================================
 function adminRoleBadgeHTML(role) {
@@ -6394,9 +8474,65 @@ function canRepairMemberAuthDiagnosis(result) {
         ));
 }
 
+function canMergeMemberAuthDiagnosis(result) {
+    const candidateUids = Array.isArray(result?.found?.candidateUids) ? result.found.candidateUids.filter(Boolean) : [];
+    if (candidateUids.length < 2) return false;
+    if (result?.recommendation === 'MEMBER_NOT_FOUND') return false;
+    return result?.recommendation === 'UID_CONFLICT_REVIEW_REQUIRED'
+        || (result?.found?.uidFromEmail && result?.found?.uidFromPhone && result.found.uidFromEmail !== result.found.uidFromPhone);
+}
+
+function memberAuthMergePrimaryUid(result, mode = 'auto') {
+    const found = result?.found || {};
+    const input = result?.input || {};
+    const candidateUids = Array.isArray(found.candidateUids) ? found.candidateUids.filter(Boolean) : [];
+    if (mode === 'email') return found.uidFromEmail || '';
+    if (mode === 'phone') return found.uidFromPhone || '';
+    if (mode === 'requested') return input.requestedUid || '';
+    if (input.requestedUid && candidateUids.includes(input.requestedUid)) return input.requestedUid;
+    return found.uidFromEmail || found.uidFromPhone || candidateUids[0] || '';
+}
+
+function memberAuthMergeActionsHTML(result) {
+    if (!canMergeMemberAuthDiagnosis(result)) return '';
+    const found = result?.found || {};
+    const actions = [];
+    if (found.uidFromEmail) {
+        actions.push(`<button type="button" class="btn-action btn-delete" data-member-auth-merge="email" onclick="mergeMemberAuthDuplicates('email')">รวมไป UID จากอีเมล</button>`);
+    }
+    if (found.uidFromPhone && found.uidFromPhone !== found.uidFromEmail) {
+        actions.push(`<button type="button" class="btn-action btn-view" data-member-auth-merge="phone" onclick="mergeMemberAuthDuplicates('phone')">รวมไป UID จากเบอร์</button>`);
+    }
+    actions.push(`<button type="button" class="btn-action btn-edit" data-member-auth-merge="requested" onclick="mergeMemberAuthDuplicates('requested')">รวมไป UID ที่กรอก</button>`);
+    return `
+        <div class="member-auth-warning-box">
+            <strong>รวมสมาชิกซ้ำ</strong><br>
+            เลือก UID หลักที่จะเก็บไว้ ระบบจะย้ายประวัติซื้อ/จอง, point ledger, member summary, credentials และ phone index ของ UID รองมารวมกับ UID หลัก
+            <div class="member-auth-actions">${actions.join('')}</div>
+        </div>
+    `;
+}
+
+function memberAuthMergeResultHTML(result) {
+    if (!result?.ok) return '';
+    const counts = result.counts || {};
+    const totals = result.totals || {};
+    const mergedUids = Array.isArray(result.mergedUids) ? result.mergedUids : [];
+    return `
+        <div class="member-auth-safe-box">
+            <strong>รวมสมาชิกเรียบร้อย</strong><br>
+            UID หลัก: <span class="member-auth-code">${escapeHTML(result.primaryUid || '-')}</span><br>
+            UID ที่รวมเข้า: <span class="member-auth-code">${escapeHTML(mergedUids.join(', ') || '-')}</span><br>
+            ย้ายออเดอร์ ${safeNumber(counts.ordersUpdated)} รายการ, จอง ${safeNumber(counts.bookingsUpdated)} รายการ, ประวัติแต้ม ${safeNumber(counts.pointLedgerUpdated)} รายการ<br>
+            คะแนนรวมตอนนี้ ${safeNumber(totals.pointsBalance).toLocaleString('th-TH')} แต้ม, ยอดซื้อรวม ${formatMemberCurrency(totals.totalSpent)}
+        </div>
+    `;
+}
+
 function renderMemberAuthDiagnosis(result) {
     const resultEl = document.getElementById('member-auth-check-result');
     const repairBtn = document.getElementById('member-auth-repair-btn');
+    const mergeBtn = document.getElementById('member-auth-merge-btn');
     if (!resultEl) return;
 
     lastMemberAuthDiagnosis = result;
@@ -6405,10 +8541,12 @@ function renderMemberAuthDiagnosis(result) {
     const selected = result?.selected || {};
     const repair = result?.repair || {};
     const canRepair = canRepairMemberAuthDiagnosis(result);
+    const canMerge = canMergeMemberAuthDiagnosis(result);
 
     memberAuthSetBadge(info);
     memberAuthSetStatus(info.title, info.tone);
     if (repairBtn) repairBtn.disabled = !canRepair;
+    if (mergeBtn) mergeBtn.disabled = !canMerge;
 
     const uidRows = [
         ['UID จากอีเมล', found.uidFromEmail],
@@ -6453,6 +8591,8 @@ function renderMemberAuthDiagnosis(result) {
             </div>
         `
         : '';
+    const mergeActionsBox = memberAuthMergeActionsHTML(result);
+    const mergeResultBox = memberAuthMergeResultHTML(lastMemberAuthMergeResult);
 
     resultEl.hidden = false;
     resultEl.innerHTML = `
@@ -6460,7 +8600,9 @@ function renderMemberAuthDiagnosis(result) {
             <strong>${escapeHTML(info.title)}</strong><br>
             ${escapeHTML(info.detail)}
         </div>
+        ${mergeResultBox}
         ${repairMessage}
+        ${mergeActionsBox}
         ${passwordSetupBox}
         <div class="member-detail-grid" style="margin-top:12px;">${uidRows}</div>
         <div class="member-auth-status-grid">${statusChips}</div>
@@ -6472,6 +8614,78 @@ function renderMemberAuthDiagnosis(result) {
     `;
 }
 
+async function mergeMemberAuthDuplicates(mode = 'auto') {
+    const diagnosis = lastMemberAuthDiagnosis;
+    if (!canMergeMemberAuthDiagnosis(diagnosis)) {
+        alert('ต้องตรวจแล้วพบ UID ซ้ำก่อน จึงจะรวมสมาชิกได้');
+        return;
+    }
+
+    const found = diagnosis.found || {};
+    const candidateUids = Array.isArray(found.candidateUids) ? found.candidateUids.filter(Boolean) : [];
+    const primaryUid = memberAuthMergePrimaryUid(diagnosis, mode);
+    const duplicateUids = candidateUids.filter(uid => uid && uid !== primaryUid);
+    if (!primaryUid || !duplicateUids.length) {
+        alert('ไม่พบ UID หลักหรือ UID รองสำหรับรวม กรุณากรอก UID หลักแล้วลองใหม่');
+        return;
+    }
+    if (!candidateUids.includes(primaryUid)) {
+        alert('UID หลักต้องอยู่ในชุด UID ที่ระบบตรวจพบ');
+        return;
+    }
+
+    const email = String(document.getElementById('member-auth-email')?.value || '').trim();
+    const phoneNumber = String(document.getElementById('member-auth-phone')?.value || '').trim();
+    const confirmed = confirm([
+        'ยืนยันรวมสมาชิกซ้ำ?',
+        '',
+        `UID หลักที่จะเก็บไว้: ${primaryUid}`,
+        `UID ที่จะรวมเข้า: ${duplicateUids.join(', ')}`,
+        '',
+        'ระบบจะย้ายประวัติซื้อ/จอง คะแนน และ point ledger ไป UID หลัก'
+    ].join('\n'));
+    if (!confirmed) return;
+
+    const mergeBtn = document.getElementById('member-auth-merge-btn');
+    const repairBtn = document.getElementById('member-auth-repair-btn');
+    const submitBtn = document.querySelector('#member-auth-check-form button[type="submit"]');
+    const actionButtons = document.querySelectorAll('[data-member-auth-merge]');
+    try {
+        if (mergeBtn) mergeBtn.disabled = true;
+        if (repairBtn) repairBtn.disabled = true;
+        if (submitBtn) submitBtn.disabled = true;
+        actionButtons.forEach(button => { button.disabled = true; });
+        memberAuthSetBadge({ badge: 'กำลังรวม', tone: 'warn' });
+        memberAuthSetStatus('กำลังรวมสมาชิกและย้ายประวัติ...', 'warn');
+        const result = await callAdminFunction('mergeDuplicateMemberAccounts', {
+            email,
+            phoneNumber,
+            primaryUid,
+            duplicateUids
+        });
+        lastMemberAuthMergeResult = result;
+        memberAuthSetBadge({ badge: 'รวมแล้ว', tone: 'ok' });
+        memberAuthSetStatus('รวมสมาชิกเรียบร้อย กำลังตรวจข้อมูลล่าสุด...', 'ok');
+        await diagnoseMemberAuthLogin();
+    } catch (error) {
+        console.error('Member merge failed:', error);
+        memberAuthSetBadge({ badge: 'รวมไม่สำเร็จ', tone: 'error' });
+        memberAuthSetStatus(error.message || 'รวมสมาชิกไม่สำเร็จ', 'error');
+        const resultEl = document.getElementById('member-auth-check-result');
+        if (resultEl) {
+            resultEl.hidden = false;
+            resultEl.insertAdjacentHTML('afterbegin', `<div class="member-auth-warning-box"><strong>รวมสมาชิกไม่สำเร็จ</strong><br>${escapeHTML(error.message || safeAdminError('รวมสมาชิกไม่สำเร็จ'))}</div>`);
+        }
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
+        if (repairBtn) repairBtn.disabled = !canRepairMemberAuthDiagnosis(lastMemberAuthDiagnosis);
+        if (mergeBtn) mergeBtn.disabled = !canMergeMemberAuthDiagnosis(lastMemberAuthDiagnosis);
+        document.querySelectorAll('[data-member-auth-merge]').forEach(button => {
+            button.disabled = !canMergeMemberAuthDiagnosis(lastMemberAuthDiagnosis);
+        });
+    }
+}
+
 async function diagnoseMemberAuthLogin(options = {}) {
     const repair = options.repair === true;
     const email = String(document.getElementById('member-auth-email')?.value || '').trim();
@@ -6479,6 +8693,7 @@ async function diagnoseMemberAuthLogin(options = {}) {
     const uid = String(document.getElementById('member-auth-uid')?.value || '').trim();
     const resultEl = document.getElementById('member-auth-check-result');
     const repairBtn = document.getElementById('member-auth-repair-btn');
+    const mergeBtn = document.getElementById('member-auth-merge-btn');
     const submitBtn = document.querySelector('#member-auth-check-form button[type="submit"]');
 
     if (!email && !phoneNumber && !uid) {
@@ -6490,6 +8705,7 @@ async function diagnoseMemberAuthLogin(options = {}) {
     try {
         if (submitBtn) submitBtn.disabled = true;
         if (repairBtn) repairBtn.disabled = true;
+        if (mergeBtn) mergeBtn.disabled = true;
         if (resultEl && !repair) resultEl.hidden = true;
         memberAuthSetBadge({ badge: repair ? 'กำลังซ่อม' : 'กำลังตรวจ', tone: 'muted' });
         memberAuthSetStatus(repair ? 'กำลังซ่อม index อย่างปลอดภัย...' : 'กำลังตรวจข้อมูล login สมาชิก...');
@@ -6507,6 +8723,7 @@ async function diagnoseMemberAuthLogin(options = {}) {
     } finally {
         if (submitBtn) submitBtn.disabled = false;
         if (repairBtn) repairBtn.disabled = !canRepairMemberAuthDiagnosis(lastMemberAuthDiagnosis);
+        if (mergeBtn) mergeBtn.disabled = !canMergeMemberAuthDiagnosis(lastMemberAuthDiagnosis);
     }
 }
 
@@ -6514,17 +8731,24 @@ function bindMemberAuthDiagnostics() {
     if (memberAuthDiagnosticsBound) return;
     const form = document.getElementById('member-auth-check-form');
     const repairBtn = document.getElementById('member-auth-repair-btn');
+    const mergeBtn = document.getElementById('member-auth-merge-btn');
     if (form) {
         form.addEventListener('submit', (event) => {
             event.preventDefault();
+            lastMemberAuthMergeResult = null;
             diagnoseMemberAuthLogin();
         });
     }
     if (repairBtn) {
         repairBtn.addEventListener('click', () => diagnoseMemberAuthLogin({ repair: true }));
     }
+    if (mergeBtn) {
+        mergeBtn.addEventListener('click', () => mergeMemberAuthDuplicates('auto'));
+    }
     memberAuthDiagnosticsBound = true;
 }
+
+window.mergeMemberAuthDuplicates = mergeMemberAuthDuplicates;
 
 window.openMemberPasswordSetup = (mode = 'phone') => {
     window.open(memberAuthSetupUrl(mode), '_blank', 'noopener');
@@ -6555,7 +8779,11 @@ function bindMemberFilters() {
 }
 
 function memberOrderUid(order = {}) {
-    return String(order.uid || order.customerUid || order.userId || order.memberUid || '').trim();
+    const customerUid = String(order.customerUid || '').trim();
+    if (customerUid) return customerUid;
+    const source = String(order.source || '').toLowerCase();
+    if (source === 'pos') return String(order.userId || order.memberUid || '').trim();
+    return String(order.uid || order.userId || order.memberUid || '').trim();
 }
 
 function memberBookingUid(booking = {}) {
@@ -6636,7 +8864,9 @@ function rebuildMembersData() {
     renderMembersTable();
     renderAdminUserOptions();
     renderLoyaltyMemberOptions();
+    renderArcheryMemberOptions();
     renderLoyaltySummary();
+    renderDashboardSalesReport();
 }
 
 function getMemberRows() {
@@ -6799,10 +9029,12 @@ window.exportMembersCSV = () => {
 };
 
 async function loadMemberActivity(uid) {
-    const [customerOrdersSnap, legacyOrdersSnap, bookingsSnap] = await Promise.all([
+    const [customerOrdersSnap, legacyOrdersSnap, uidBookingsSnap, customerBookingsSnap, memberBookingsSnap] = await Promise.all([
         getDocs(query(collection(db, 'orders'), where('customerUid', '==', uid))).catch(() => ({ docs: [], forEach: () => {} })),
         getDocs(query(collection(db, 'orders'), where('uid', '==', uid))).catch(() => ({ docs: [], forEach: () => {} })),
-        getDocs(query(collection(db, 'bookings'), where('uid', '==', uid)))
+        getDocs(query(collection(db, 'bookings'), where('uid', '==', uid))).catch(() => ({ docs: [] })),
+        getDocs(query(collection(db, 'bookings'), where('customerUid', '==', uid))).catch(() => ({ docs: [] })),
+        getDocs(query(collection(db, 'bookings'), where('member_id', '==', uid))).catch(() => ({ docs: [] }))
     ]);
 
     const ordersById = new Map();
@@ -6817,8 +9049,10 @@ async function loadMemberActivity(uid) {
         }
     });
     const orders = Array.from(ordersById.values());
-    const bookings = [];
-    bookingsSnap.forEach(docSnap => bookings.push({ id: docSnap.id, ...docSnap.data() }));
+    const bookingsById = new Map();
+    [...uidBookingsSnap.docs, ...customerBookingsSnap.docs, ...memberBookingsSnap.docs]
+        .forEach(docSnap => bookingsById.set(docSnap.id, { id: docSnap.id, ...docSnap.data() }));
+    const bookings = Array.from(bookingsById.values());
 
     orders.sort((a, b) => memberTimestampToMillis(b.timestamp || b.createdAt) - memberTimestampToMillis(a.timestamp || a.createdAt));
     bookings.sort((a, b) => memberTimestampToMillis(b.timestamp || b.createdAt) - memberTimestampToMillis(a.timestamp || a.createdAt));
@@ -6828,8 +9062,9 @@ async function loadMemberActivity(uid) {
 function renderActivityItems(items, type) {
     if (!items.length) return '<div class="member-empty-state">No history yet</div>';
     return items.slice(0, 8).map(item => {
+        const orderLabel = item.receiptNo || item.orderNumber || item.id.slice(0, 8).toUpperCase();
         const title = type === 'order'
-            ? `Order ${escapeHTML(item.id.slice(0, 8).toUpperCase())}`
+            ? `Order ${escapeHTML(orderLabel)}`
             : `${escapeHTML(item.bookingType || 'booking')} - ${escapeHTML(item.date || '-')}`;
         const right = type === 'order'
             ? formatMemberCurrency(item.totalAmount || item.total)
@@ -7655,13 +9890,16 @@ window.loadPromptPaySettings = async function() {
     try {
         const snap = await getDoc(doc(db, 'site_settings', 'promptpay'));
         const settings = normalizePromptPaySettings(snap.exists() ? snap.data() : defaultPromptPaySettings());
+        dashboardPromptPaySettings = settings;
         applyPromptPaySettingsToForm(settings);
         setPromptPayAdminStatus(snap.exists() ? 'PromptPay settings loaded.' : 'Using default PromptPay settings. Save once to publish them.', snap.exists() ? 'success' : 'warning');
+        renderDashboardSalesReport();
         return settings;
     } catch (error) {
         console.error('Error loading PromptPay settings:', error);
         applyPromptPaySettingsToForm(defaultPromptPaySettings());
         setPromptPayAdminStatus('Unable to load PromptPay settings: ' + error.message, 'error');
+        renderDashboardSalesReport();
         return null;
     }
 };
@@ -7766,8 +10004,10 @@ promptPaySettingsForm?.addEventListener('submit', async (event) => {
             updatedBy: auth.currentUser?.uid || '',
             updatedByEmail: auth.currentUser?.email || ''
         }, { merge: true });
+        dashboardPromptPaySettings = payload;
         applyPromptPaySettingsToForm(payload);
         setPromptPayAdminStatus('PromptPay settings saved. POS will use ' + activePromptPayAccount(payload).label + ' automatically.', 'success');
+        renderDashboardSalesReport();
     } catch (error) {
         console.error('Error saving PromptPay settings:', error);
         setPromptPayAdminStatus('Unable to save PromptPay settings: ' + error.message, 'error');
