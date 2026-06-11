@@ -1,0 +1,444 @@
+.archery-hero {
+    min-height: 78vh;
+    display: flex;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+    background: #10261b;
+    color: #fff;
+}
+
+.archery-hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(10, 34, 22, 0.82), rgba(10, 34, 22, 0.38) 48%, rgba(10, 34, 22, 0.12));
+    z-index: 1;
+}
+
+.archery-hero img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.archery-hero-content {
+    position: relative;
+    z-index: 2;
+    width: min(92%, 1160px);
+    margin: 0 auto;
+    padding: 120px 0 80px;
+}
+
+.archery-hero h1 {
+    max-width: 680px;
+    color: #fff;
+    font-size: clamp(2.2rem, 5vw, 4.8rem);
+    letter-spacing: 0;
+    margin-bottom: 18px;
+}
+
+.archery-hero p {
+    max-width: 560px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 1.08rem;
+}
+
+.archery-hero-actions,
+.archery-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+}
+
+.archery-band {
+    padding: 70px 0;
+    background: #fff;
+}
+
+.archery-band.alt {
+    background: #f4f8f2;
+}
+
+.archery-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.archery-card,
+.archery-panel {
+    background: #fff;
+    border: 1px solid #dfe9dd;
+    border-radius: 8px;
+    padding: 20px;
+}
+
+.archery-card strong,
+.archery-panel h2,
+.archery-panel h3 {
+    color: #123a26;
+}
+
+.archery-booking-shell {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(320px, 0.55fr);
+    gap: 24px;
+    align-items: start;
+}
+
+.archery-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.archery-form-grid .full {
+    grid-column: 1 / -1;
+}
+
+.archery-section-lead {
+    max-width: 760px;
+    color: #5f7067;
+    margin-bottom: 24px;
+}
+
+.archery-login-panel {
+    display: grid;
+    gap: 8px;
+    max-width: 760px;
+    margin: 18px 0 24px;
+    padding: 18px;
+    border: 1px solid #dfe9dd;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.archery-login-panel[hidden] {
+    display: none !important;
+}
+
+.archery-field {
+    display: grid;
+    gap: 6px;
+    color: #2d4035;
+    font-weight: 600;
+}
+
+.archery-field input,
+.archery-field select,
+.archery-field textarea {
+    width: 100%;
+    min-height: 44px;
+    border: 1px solid #ccdacd;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font: inherit;
+    background: #fff;
+}
+
+.archery-field textarea {
+    min-height: 92px;
+    resize: vertical;
+}
+
+.archery-status {
+    min-height: 24px;
+    color: #577064;
+    font-weight: 600;
+}
+
+.archery-status.error {
+    color: #b42318;
+}
+
+.archery-status.success {
+    color: #137234;
+}
+
+.archery-status.loading {
+    color: #577064;
+}
+
+.archery-action-row .btn.is-loading {
+    align-items: center;
+    display: inline-flex;
+    gap: 8px;
+    justify-content: center;
+}
+
+.archery-btn-spinner {
+    animation: archery-spin 0.8s linear infinite;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    display: inline-block;
+    height: 14px;
+    width: 14px;
+}
+
+@keyframes archery-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.archery-suggestions {
+    margin: 8px 0 14px;
+}
+
+.archery-suggestions p {
+    margin: 0 0 8px;
+    color: #5f7067;
+    font-weight: 600;
+}
+
+.archery-suggestion-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.archery-suggestion-row button {
+    min-height: 36px;
+    border: 1px solid #cfded0;
+    border-radius: 8px;
+    background: #fff;
+    color: #123a26;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 6px 12px;
+}
+
+.archery-summary-list {
+    display: grid;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.archery-summary-list li {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    border-bottom: 1px solid #edf2ed;
+    padding-bottom: 8px;
+}
+
+.archery-summary-list span {
+    color: #66756c;
+}
+
+.archery-confirm-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) 300px;
+    gap: 24px;
+    align-items: start;
+}
+
+.archery-qr-box {
+    min-height: 300px;
+    display: grid;
+    place-items: center;
+    background: #fff;
+    border: 1px solid #dfe9dd;
+    border-radius: 8px;
+    padding: 18px;
+}
+
+.archery-qr-box img {
+    width: 240px;
+    height: 240px;
+    object-fit: contain;
+}
+
+.archery-qr-payload {
+    width: 100%;
+    max-width: 260px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #53645b;
+    background: #f6faf6;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 0.78rem;
+}
+
+.archery-admin-grid {
+    display: grid;
+    grid-template-columns: minmax(360px, 0.75fr) minmax(0, 1.25fr);
+    gap: 18px;
+    align-items: start;
+}
+
+.archery-admin-toolbar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.archery-admin-toolbar input,
+.archery-admin-toolbar select {
+    min-height: 40px;
+    border: 1px solid #d7e2d8;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font: inherit;
+}
+
+.archery-schedule-wrap,
+.archery-table-wrap {
+    overflow: auto;
+    border: 1px solid #e3ece4;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.archery-admin-panels {
+    margin-top: 18px;
+}
+
+.archery-panel[hidden] {
+    display: none !important;
+}
+
+.archery-schedule {
+    min-width: 1040px;
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.archery-schedule th,
+.archery-schedule td {
+    border-bottom: 1px solid #edf2ed;
+    border-right: 1px solid #edf2ed;
+    padding: 8px;
+    vertical-align: top;
+    font-size: 0.82rem;
+}
+
+.archery-schedule th {
+    position: sticky;
+    top: 0;
+    background: #f7faf6;
+    z-index: 1;
+}
+
+.archery-slot-chip {
+    display: grid;
+    gap: 2px;
+    min-height: 46px;
+    border-radius: 8px;
+    padding: 6px;
+    background: #eef7ef;
+    color: #1d4b2f;
+    line-height: 1.2;
+}
+
+.archery-slot-chip.busy {
+    background: #fff3d6;
+    color: #6d4b00;
+}
+
+.archery-slot-chip.held {
+    background: #edf2ff;
+    color: #26457a;
+}
+
+.archery-slot-chip.checked-in {
+    background: #e8f7f5;
+    color: #12665f;
+}
+
+.archery-slot-chip.no-show,
+.archery-slot-chip.cancel-requested {
+    background: #fff0e8;
+    color: #8a3a16;
+}
+
+.archery-slot-chip.closed {
+    background: #f4eeee;
+    color: #8a302b;
+}
+
+.archery-action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.archery-action-buttons button {
+    min-height: 32px;
+    border: 1px solid #cfded0;
+    border-radius: 8px;
+    background: #fff;
+    color: #123a26;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 700;
+    padding: 5px 8px;
+}
+
+.archery-action-buttons button.danger {
+    color: #9f261d;
+    border-color: #efc8c2;
+}
+
+.archery-action-buttons button:disabled {
+    cursor: wait;
+    opacity: 0.62;
+}
+
+.archery-panel-list {
+    display: grid;
+    gap: 8px;
+}
+
+.archery-panel-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid #edf2ed;
+}
+
+.archery-panel-row:last-child {
+    border-bottom: 0;
+}
+
+.archery-panel-row small {
+    color: #60716a;
+}
+
+@media (max-width: 980px) {
+    .archery-grid,
+    .archery-booking-shell,
+    .archery-confirm-grid,
+    .archery-admin-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .archery-admin-toolbar {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    .archery-hero {
+        min-height: 72vh;
+    }
+
+    .archery-form-grid,
+    .archery-admin-toolbar {
+        grid-template-columns: 1fr;
+    }
+
+}
