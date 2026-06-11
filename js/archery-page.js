@@ -96,13 +96,15 @@ function renderPackages(settings = {}) {
     const packageGrid = grids[0];
     if (!packageGrid) return;
 
-    const lead = String(settings.packageLead || settings.package_lead || '').trim();
+    const isEnglish = String(document.documentElement.lang || '').toLowerCase().startsWith('en');
+    const sourcePackages = isEnglish && Array.isArray(settings.packagesEn)
+        ? settings.packagesEn
+        : (!isEnglish && Array.isArray(settings.packages) ? settings.packages : []);
+    const lead = String(isEnglish ? (settings.packageLeadEn || '') : (settings.packageLead || settings.package_lead || '')).trim();
     const leadEl = document.querySelector('.archery-band .archery-section-lead');
     if (lead && leadEl) leadEl.textContent = lead;
 
-    const packages = Array.isArray(settings.packages)
-        ? settings.packages.map(normalizePackage).filter(item => item.durationMinutes > 0)
-        : [];
+    const packages = sourcePackages.map(normalizePackage).filter(item => item.durationMinutes > 0);
     if (!packages.length) return;
 
     packageGrid.classList.add('archery-dynamic-list');
