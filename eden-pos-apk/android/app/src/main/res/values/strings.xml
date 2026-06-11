@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Eden Cafe POS</string>
+    <string name="title_activity_main">Eden Cafe POS</string>
+    <string name="package_name">com.personal.pos</string>
+    <string name="custom_url_scheme">com.personal.pos</string>
+    <string name="default_web_client_id">962163014966-chm7ibim5e99fha865j0k1fu2f5ifpa5.apps.googleusercontent.com</string>
+</resources>

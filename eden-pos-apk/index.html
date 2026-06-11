@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b613e" />
+    <link rel="icon" type="image/webp" href="/Images/eden-logo.webp" />
+    <link rel="alternate icon" type="image/png" href="/Images/eden-logo.png" />
+    <title>Eden Cafe POS</title>
+    <style>
+      .boot-fallback {
+        align-items: center;
+        background: #f7f8f6;
+        color: #173c2b;
+        display: flex;
+        flex-direction: column;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        gap: 12px;
+        min-height: 100vh;
+        justify-content: center;
+        padding: 24px;
+        text-align: center;
+      }
+
+      .boot-fallback strong {
+        color: #159447;
+        font-size: 24px;
+      }
+
+      .boot-fallback small {
+        color: #6d7b72;
+        font-size: 14px;
+        max-width: 460px;
+      }
+    </style>
+    <script>
+      (function () {
+        function showBootError(message) {
+          var root = document.getElementById("root");
+          if (!root) return;
+          root.innerHTML =
+            '<div class="boot-fallback"><strong>Eden Cafe POS</strong><small>' +
+            String(message || "App startup error").replace(/[<>&]/g, function (value) {
+              return { "<": "&lt;", ">": "&gt;", "&": "&amp;" }[value];
+            }) +
+            "</small></div>";
+        }
+
+        window.addEventListener("error", function (event) {
+          showBootError(event.message || "JavaScript error");
+        });
+        window.addEventListener("unhandledrejection", function (event) {
+          var reason = event.reason;
+          showBootError((reason && (reason.message || reason.toString())) || "Startup promise rejected");
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root">
+      <div class="boot-fallback">
+        <strong>Eden Cafe POS</strong>
+        <small>Loading app...</small>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

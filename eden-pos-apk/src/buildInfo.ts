@@ -1,0 +1,4 @@
+export const POS_APP_NAME = "Eden Cafe POS";
+export const POS_BUILD_VERSION_NAME = "1.26";
+export const POS_BUILD_VERSION_CODE = 27;
+export const POS_BUILD_VERSION_LABEL = `v${POS_BUILD_VERSION_NAME} (${POS_BUILD_VERSION_CODE})`;

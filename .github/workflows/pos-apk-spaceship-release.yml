@@ -1,0 +1,175 @@
+name: POS APK Spaceship Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        options:
+          - test
+          - pilot
+          - production
+        required: true
+        type: choice
+        default: test
+      version_name:
+        description: Android versionName to publish
+        required: true
+        type: string
+        default: "1.23"
+      version_code:
+        description: Android versionCode to publish
+        required: true
+        type: string
+        default: "24"
+      remote_dir:
+        description: Spaceship FTP directory for APK files
+        required: true
+        type: string
+        default: "pos-apk/releases"
+      release_notes:
+        description: Release notes for Admin metadata
+        required: false
+        type: string
+        default: "Eden POS APK protected update release."
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-upload:
+    name: Build APK and upload to Spaceship
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: eden-pos-apk/package-lock.json
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install POS dependencies
+        working-directory: eden-pos-apk
+        run: npm ci
+
+      - name: Build POS web assets
+        working-directory: eden-pos-apk
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        working-directory: eden-pos-apk
+        run: npx cap sync android
+
+      - name: Assemble release APK
+        working-directory: eden-pos-apk/android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :app:assembleRelease
+
+      - name: Prepare release metadata
+        id: metadata
+        shell: bash
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          VERSION_NAME: ${{ inputs.version_name }}
+          VERSION_CODE: ${{ inputs.version_code }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          SPACESHIP_APK_BASE_URL: ${{ secrets.SPACESHIP_APK_BASE_URL }}
+        run: |
+          set -euo pipefail
+          apk_source="eden-pos-apk/android/app/build/outputs/apk/release/app-release.apk"
+          file_name="eden-pos-${VERSION_NAME}-v${VERSION_CODE}-${CHANNEL}.apk"
+          mkdir -p release-out
+          cp "$apk_source" "release-out/$file_name"
+          sha256="$(sha256sum "release-out/$file_name" | awk '{print toupper($1)}')"
+          size="$(stat -c%s "release-out/$file_name")"
+          test -n "$SPACESHIP_APK_BASE_URL"
+          base_url="${SPACESHIP_APK_BASE_URL%/}"
+          storage_path="${base_url}/${file_name}"
+          release_id="com.personal.pos_${CHANNEL}_v${VERSION_CODE}"
+
+          {
+            echo "file_name=$file_name"
+            echo "sha256=$sha256"
+            echo "size=$size"
+            echo "storage_path=$storage_path"
+            echo "release_id=$release_id"
+          } >> "$GITHUB_OUTPUT"
+
+          jq -n \
+            --arg appId "com.personal.pos" \
+            --arg releaseId "$release_id" \
+            --arg versionName "$VERSION_NAME" \
+            --argjson versionCode "$VERSION_CODE" \
+            --arg channel "$CHANNEL" \
+            --arg status "draft" \
+            --arg sha256 "$sha256" \
+            --argjson size "$size" \
+            --arg storagePath "$storage_path" \
+            --arg releaseNotes "$RELEASE_NOTES" \
+            '{
+              releaseId: $releaseId,
+              appId: $appId,
+              versionName: $versionName,
+              versionCode: $versionCode,
+              channel: $channel,
+              status: $status,
+              sha256: $sha256,
+              size: $size,
+              functionAsset: "",
+              storagePath: $storagePath,
+              minSupportedVersionCode: 0,
+              forceUpdate: false,
+              releaseNotes: $releaseNotes
+            }' > release-out/pos-apk-release-manifest.json
+
+      - name: Upload APK to Spaceship
+        shell: bash
+        env:
+          SPACESHIP_FTP_SERVER: ${{ secrets.SPACESHIP_FTP_SERVER }}
+          SPACESHIP_FTP_USERNAME: ${{ secrets.SPACESHIP_FTP_USERNAME }}
+          SPACESHIP_FTP_PASSWORD: ${{ secrets.SPACESHIP_FTP_PASSWORD }}
+          REMOTE_DIR: ${{ inputs.remote_dir }}
+          FILE_NAME: ${{ steps.metadata.outputs.file_name }}
+        run: |
+          set -euo pipefail
+          test -n "$SPACESHIP_FTP_SERVER"
+          test -n "$SPACESHIP_FTP_USERNAME"
+          test -n "$SPACESHIP_FTP_PASSWORD"
+          remote_dir="${REMOTE_DIR#/}"
+          curl --fail --show-error --ssl-reqd --ftp-pasv --ftp-create-dirs \
+            --user "$SPACESHIP_FTP_USERNAME:$SPACESHIP_FTP_PASSWORD" \
+            --upload-file "release-out/$FILE_NAME" \
+            "ftp://${SPACESHIP_FTP_SERVER}/${remote_dir}/${FILE_NAME}"
+
+      - name: Upload release metadata artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pos-apk-release-${{ inputs.channel }}-v${{ inputs.version_code }}
+          path: release-out/
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## POS APK Spaceship release"
+            echo ""
+            echo "- Release ID: ${{ steps.metadata.outputs.release_id }}"
+            echo "- APK: ${{ steps.metadata.outputs.file_name }}"
+            echo "- SHA256: ${{ steps.metadata.outputs.sha256 }}"
+            echo "- Size: ${{ steps.metadata.outputs.size }}"
+            echo "- Storage path: ${{ steps.metadata.outputs.storage_path }}"
+            echo ""
+            echo "Paste the generated manifest values into Admin > POS APK Updates, then mark the release active after a test-device install."
+          } >> "$GITHUB_STEP_SUMMARY"

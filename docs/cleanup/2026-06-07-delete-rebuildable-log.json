@@ -1,0 +1,165 @@
+﻿{
+    "deleted_at":  "2026-06-07T11:19:50+07:00",
+    "workspace":  "D:\\Eden Cafe Website",
+    "manifest":  "D:\\Eden Cafe Website\\docs\\cleanup\\2026-06-06-eden-cleanup-inventory.json",
+    "policy":  "Deleted only user-approved delete-rebuildable entries from manifest.",
+    "deleted_or_already_missing_count":  22,
+    "failed_count":  0,
+    "original_manifest_mb_cleared":  540.978,
+    "results":  [
+                    {
+                        "path":  "D:\\Eden Cafe Website\\functions\\node_modules",
+                        "status":  "already-missing",
+                        "original_size_mb":  47.773,
+                        "original_files":  5713,
+                        "message":  "Already removed or missing before this pass."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\node_modules",
+                        "status":  "deleted",
+                        "original_size_mb":  301.001,
+                        "original_files":  21798,
+                        "message":  "Deleted by Node fs.rm fallback after PowerShell long-path failure."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\.vite",
+                        "status":  "deleted",
+                        "original_size_mb":  11.096,
+                        "original_files":  48,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\.chrome-preview-profile",
+                        "status":  "deleted",
+                        "original_size_mb":  11.024,
+                        "original_files":  182,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\dist",
+                        "status":  "deleted",
+                        "original_size_mb":  2.063,
+                        "original_files":  12,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\android\\.gradle",
+                        "status":  "deleted",
+                        "original_size_mb":  6.43,
+                        "original_files":  15,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\android\\build",
+                        "status":  "deleted",
+                        "original_size_mb":  0.124,
+                        "original_files":  1,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\android\\app\\build",
+                        "status":  "deleted",
+                        "original_size_mb":  91.739,
+                        "original_files":  1163,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\.firebase",
+                        "status":  "deleted",
+                        "original_size_mb":  0.087,
+                        "original_files":  1,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\downloads",
+                        "status":  "deleted",
+                        "original_size_mb":  0,
+                        "original_files":  0,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\preview-pos-4174.png",
+                        "status":  "deleted",
+                        "original_size_mb":  0.039,
+                        "original_files":  1,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\vite-5174.out.log",
+                        "status":  "deleted",
+                        "original_size_mb":  0.037,
+                        "original_files":  1,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\vite-5174.err.log",
+                        "status":  "deleted",
+                        "original_size_mb":  0.007,
+                        "original_files":  1,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\vite-preview-4175.out.log",
+                        "status":  "deleted",
+                        "original_size_mb":  0,
+                        "original_files":  1,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\vite-preview-4175.err.log",
+                        "status":  "deleted",
+                        "original_size_mb":  0,
+                        "original_files":  1,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\vite-preview-4188.out.log",
+                        "status":  "deleted",
+                        "original_size_mb":  0,
+                        "original_files":  1,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\vite-preview-4188.err.log",
+                        "status":  "deleted",
+                        "original_size_mb":  0,
+                        "original_files":  1,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\vite-preview-4191.out.log",
+                        "status":  "deleted",
+                        "original_size_mb":  0,
+                        "original_files":  1,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\vite-preview-4191.err.log",
+                        "status":  "deleted",
+                        "original_size_mb":  0,
+                        "original_files":  1,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\artifacts\\ui-scroll-audit-20260606T043206",
+                        "status":  "deleted",
+                        "original_size_mb":  2.393,
+                        "original_files":  36,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\Eden Cafe Website\\eden-pos-apk\\artifacts\\ui-scroll-audit-20260606T-after-scroll-fix",
+                        "status":  "deleted",
+                        "original_size_mb":  2.991,
+                        "original_files":  64,
+                        "message":  "Approved delete-rebuildable manifest entry."
+                    },
+                    {
+                        "path":  "D:\\eden-cafe-faq-upload",
+                        "status":  "deleted",
+                        "original_size_mb":  64.174,
+                        "original_files":  258,
+                        "message":  "Deleted by PowerShell fallback."
+                    }
+                ]
+}
