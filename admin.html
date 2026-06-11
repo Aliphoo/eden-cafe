@@ -1859,6 +1859,34 @@
                         <button class="btn-action" type="submit">Create Walk-in Booking</button>
                     </form>
 
+                    <form id="archery-page-settings-form" class="archery-panel">
+                        <h3>Archery Page Settings</h3>
+                        <div class="archery-form-grid">
+                            <label class="archery-field full">
+                                Hero image URL
+                                <input type="text" id="archery-page-hero-url" maxlength="500" placeholder="/Images/archery/archery-hero.png">
+                            </label>
+                            <label class="archery-field full">
+                                Upload new hero image
+                                <input type="file" id="archery-page-hero-file" accept="image/*">
+                            </label>
+                            <div class="archery-page-hero-preview full">
+                                <img id="archery-page-hero-preview" src="/Images/archery/archery-hero.png" alt="Archery hero preview">
+                            </div>
+                            <label class="archery-field full">
+                                Package lead text
+                                <textarea id="archery-page-package-lead" maxlength="300" rows="2"></textarea>
+                            </label>
+                        </div>
+                        <div class="archery-page-settings-head">
+                            <h4>Package conditions</h4>
+                            <button class="btn-action btn-view" id="archery-page-add-package" type="button">Add package</button>
+                        </div>
+                        <div id="archery-page-package-list" class="archery-page-package-list"></div>
+                        <p class="archery-status" id="archery-page-settings-status"></p>
+                        <button class="btn-action" type="submit">Save Archery Page</button>
+                    </form>
+
                     <div>
                         <div class="archery-admin-toolbar">
                             <input type="date" id="archery-admin-board-date">

@@ -1765,6 +1765,7 @@ function permissionFromImageFolder(folder) {
   if (value === 'shop_products') return 'shop';
   if (value === 'blogs') return 'blogs';
   if (value === 'rooms') return 'rooms';
+  if (value === 'archery') return 'bookings';
   return 'products';
 }
 

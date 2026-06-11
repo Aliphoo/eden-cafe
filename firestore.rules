@@ -581,7 +581,8 @@ service cloud.firestore {
       allow write: if (docId == 'footer' && hasAdminPermission('footer'))
         || (docId == 'promptpay' && hasAdminPermission('promptpay'))
         || (docId == 'marketing' && hasAdminPermission('marketing'))
-        || (docId == 'loyalty' && hasAdminPermission('loyalty'));
+        || (docId == 'loyalty' && hasAdminPermission('loyalty'))
+        || (docId == 'archery' && hasAdminPermission('bookings'));
     }
     match /categories/{docId} {
       allow read: if true;

@@ -424,8 +424,10 @@ let archeryBookingsUnsubscribe = null;
 let archeryAuditUnsubscribe = null;
 let archeryBookingsData = [];
 let archeryAuditLogsData = [];
+let archeryPageSettingsData = null;
 const archeryActionLoading = new Set();
 let archeryAdminControlsBound = false;
+let archeryPageSettingsBound = false;
 let allBookingsControlsBound = false;
 let categoriesUnsubscribe = null;
 let productsUnsubscribe = null;
@@ -3610,6 +3612,209 @@ const ARCHERY_AUDIT_ACTIONS = new Set([
     'refundPayment',
     'overrideResourceLock'
 ]);
+const ARCHERY_PAGE_SETTINGS_REF = () => doc(db, 'site_settings', 'archery');
+const DEFAULT_ARCHERY_PAGE_SETTINGS = {
+    heroImageUrl: '/Images/archery/archery-hero.png',
+    packageLead: 'Open daily 10:00-20:00. Choose 60 / 120 / 180 minute packages.',
+    packages: [
+        {
+            durationMinutes: 60,
+            price: 350,
+            title: '60 min',
+            description: 'Short round for a quick trial or cafe visit.',
+            conditions: ['Best for first-time guests', 'Includes lane time and basic equipment']
+        },
+        {
+            durationMinutes: 120,
+            price: 600,
+            title: '120 min',
+            description: 'Standard session for practice or visiting with friends.',
+            conditions: ['Recommended for small groups', 'Includes lane time and basic equipment']
+        },
+        {
+            durationMinutes: 180,
+            price: 800,
+            title: '180 min',
+            description: 'Long session for group activities or workshops.',
+            conditions: ['Suitable for longer practice', 'Includes lane time and basic equipment']
+        }
+    ]
+};
+
+function normalizeArcheryPagePackage(item = {}, index = 0) {
+    const duration = Number(item.durationMinutes || item.duration_minutes || item.duration || 0) || [60, 120, 180][index] || 60;
+    const price = Number(item.price || item.amount || item.amountTotal || item.amount_total || 0) || 0;
+    const conditions = Array.isArray(item.conditions)
+        ? item.conditions.map(value => String(value || '').trim()).filter(Boolean).slice(0, 12)
+        : String(item.conditionsText || item.conditions || '').split(/\r?\n/).map(value => value.trim()).filter(Boolean).slice(0, 12);
+    return {
+        durationMinutes: duration,
+        price,
+        title: String(item.title || `${duration} min`).trim().slice(0, 80),
+        description: String(item.description || '').trim().slice(0, 260),
+        conditions
+    };
+}
+
+function normalizeArcheryPageSettings(data = {}) {
+    const fallback = DEFAULT_ARCHERY_PAGE_SETTINGS;
+    const packages = Array.isArray(data.packages) && data.packages.length
+        ? data.packages.map(normalizeArcheryPagePackage).filter(item => item.durationMinutes > 0)
+        : fallback.packages.map(normalizeArcheryPagePackage);
+    return {
+        heroImageUrl: safeImageURL(data.heroImageUrl || data.hero_image_url || data.heroUrl || fallback.heroImageUrl, fallback.heroImageUrl),
+        packageLead: String(data.packageLead || data.package_lead || fallback.packageLead).trim().slice(0, 300),
+        packages
+    };
+}
+
+function archeryPageSettingsStatus(message, tone = '') {
+    const status = document.getElementById('archery-page-settings-status');
+    if (!status) return;
+    status.textContent = message || '';
+    status.className = 'archery-status' + (tone ? ' ' + tone : '');
+}
+
+function renderArcheryPagePackageRows(packages = []) {
+    const list = document.getElementById('archery-page-package-list');
+    if (!list) return;
+    const rows = packages.length ? packages : DEFAULT_ARCHERY_PAGE_SETTINGS.packages;
+    list.innerHTML = rows.map((item, index) => {
+        const normalized = normalizeArcheryPagePackage(item, index);
+        return `
+            <div class="archery-page-package-row" data-package-index="${index}">
+                <label class="archery-field">
+                    Minutes
+                    <input type="number" min="15" step="15" data-page-package-field="durationMinutes" value="${escapeHTML(normalized.durationMinutes)}">
+                </label>
+                <label class="archery-field">
+                    Price
+                    <input type="number" min="0" step="1" data-page-package-field="price" value="${escapeHTML(normalized.price)}">
+                </label>
+                <label class="archery-field">
+                    Title
+                    <input type="text" maxlength="80" data-page-package-field="title" value="${escapeHTML(normalized.title)}">
+                </label>
+                <button class="remove-package" type="button" data-page-package-remove="${index}">Remove</button>
+                <label class="archery-field full">
+                    Description
+                    <textarea maxlength="260" data-page-package-field="description">${escapeHTML(normalized.description)}</textarea>
+                </label>
+                <label class="archery-field full">
+                    Conditions (one line each)
+                    <textarea maxlength="800" data-page-package-field="conditions">${escapeHTML(normalized.conditions.join('\n'))}</textarea>
+                </label>
+            </div>
+        `;
+    }).join('');
+}
+
+function readArcheryPagePackageRows() {
+    return Array.from(document.querySelectorAll('.archery-page-package-row')).map((row, index) => {
+        const value = field => row.querySelector(`[data-page-package-field="${field}"]`)?.value || '';
+        return normalizeArcheryPagePackage({
+            durationMinutes: value('durationMinutes'),
+            price: value('price'),
+            title: value('title'),
+            description: value('description'),
+            conditionsText: value('conditions')
+        }, index);
+    }).filter(item => item.durationMinutes > 0);
+}
+
+function fillArcheryPageSettingsForm(settings = DEFAULT_ARCHERY_PAGE_SETTINGS) {
+    const normalized = normalizeArcheryPageSettings(settings);
+    const heroUrl = document.getElementById('archery-page-hero-url');
+    const lead = document.getElementById('archery-page-package-lead');
+    const preview = document.getElementById('archery-page-hero-preview');
+    if (heroUrl) heroUrl.value = normalized.heroImageUrl;
+    if (lead) lead.value = normalized.packageLead;
+    if (preview) preview.src = normalized.heroImageUrl;
+    renderArcheryPagePackageRows(normalized.packages);
+}
+
+function bindArcheryPageSettingsControls() {
+    if (archeryPageSettingsBound) return;
+    archeryPageSettingsBound = true;
+    document.getElementById('archery-page-hero-url')?.addEventListener('input', event => {
+        const preview = document.getElementById('archery-page-hero-preview');
+        if (preview) preview.src = safeImageURL(event.target.value, DEFAULT_ARCHERY_PAGE_SETTINGS.heroImageUrl);
+    });
+    document.getElementById('archery-page-add-package')?.addEventListener('click', () => {
+        const packages = readArcheryPagePackageRows();
+        packages.push(normalizeArcheryPagePackage({ durationMinutes: 60, price: 0, title: 'New package', conditions: [] }, packages.length));
+        renderArcheryPagePackageRows(packages);
+    });
+    document.getElementById('archery-page-package-list')?.addEventListener('click', event => {
+        const button = event.target.closest('[data-page-package-remove]');
+        if (!button) return;
+        const index = Number(button.dataset.pagePackageRemove);
+        const packages = readArcheryPagePackageRows().filter((_, rowIndex) => rowIndex !== index);
+        renderArcheryPagePackageRows(packages);
+    });
+    document.getElementById('archery-page-settings-form')?.addEventListener('submit', saveArcheryPageSettings);
+}
+
+async function loadArcheryPageSettings() {
+    bindArcheryPageSettingsControls();
+    if (!canAdmin('bookings')) return;
+    archeryPageSettingsStatus('Loading page settings...');
+    try {
+        const snap = await getDoc(ARCHERY_PAGE_SETTINGS_REF());
+        archeryPageSettingsData = normalizeArcheryPageSettings(snap.exists() ? snap.data() : DEFAULT_ARCHERY_PAGE_SETTINGS);
+        fillArcheryPageSettingsForm(archeryPageSettingsData);
+        archeryPageSettingsStatus(snap.exists() ? 'Page settings loaded.' : 'Using default page settings.', 'success');
+    } catch (error) {
+        console.error('Unable to load archery page settings:', error);
+        archeryPageSettingsData = normalizeArcheryPageSettings(DEFAULT_ARCHERY_PAGE_SETTINGS);
+        fillArcheryPageSettingsForm(archeryPageSettingsData);
+        archeryPageSettingsStatus(error.message || safeAdminError('Load archery page settings failed'), 'error');
+    }
+}
+
+async function saveArcheryPageSettings(event) {
+    event.preventDefault();
+    if (!canAdmin('bookings')) {
+        archeryPageSettingsStatus('This admin account cannot edit Archery page settings.', 'error');
+        return;
+    }
+    const submit = event.submitter || event.target.querySelector('button[type="submit"]');
+    if (submit) submit.disabled = true;
+    archeryPageSettingsStatus('Saving Archery page settings...');
+    try {
+        const file = document.getElementById('archery-page-hero-file')?.files?.[0] || null;
+        let heroImageUrl = document.getElementById('archery-page-hero-url')?.value.trim() || DEFAULT_ARCHERY_PAGE_SETTINGS.heroImageUrl;
+        if (file) {
+            archeryPageSettingsStatus('Uploading hero image...');
+            const blob = await compressToWebP(file, 0.84);
+            heroImageUrl = await uploadAdminImage(blob, 'archery', `archery-hero-${Date.now()}.webp`);
+            const heroInput = document.getElementById('archery-page-hero-url');
+            const preview = document.getElementById('archery-page-hero-preview');
+            if (heroInput) heroInput.value = heroImageUrl;
+            if (preview) preview.src = heroImageUrl;
+        }
+        const payload = normalizeArcheryPageSettings({
+            heroImageUrl,
+            packageLead: document.getElementById('archery-page-package-lead')?.value || '',
+            packages: readArcheryPagePackageRows()
+        });
+        await setDoc(ARCHERY_PAGE_SETTINGS_REF(), {
+            ...payload,
+            updatedAt: serverTimestamp(),
+            updatedBy: auth.currentUser?.uid || '',
+            updatedByEmail: auth.currentUser?.email || ''
+        }, { merge: true });
+        archeryPageSettingsData = payload;
+        const fileInput = document.getElementById('archery-page-hero-file');
+        if (fileInput) fileInput.value = '';
+        archeryPageSettingsStatus('Archery page settings saved.', 'success');
+    } catch (error) {
+        console.error('Unable to save archery page settings:', error);
+        archeryPageSettingsStatus(error.message || safeAdminError('Save archery page settings failed'), 'error');
+    } finally {
+        if (submit) submit.disabled = false;
+    }
+}
 
 function archeryBranchId() {
     const access = currentAdminAccess || {};
@@ -4435,6 +4640,7 @@ function setupRealtimeArcheryAuditLogs() {
 
 function setupRealtimeArcheryAdminData() {
     updateArcheryRoleVisibility();
+    loadArcheryPageSettings();
     setupRealtimeArcheryBookings();
     setupRealtimeArcheryAuditLogs();
 }
