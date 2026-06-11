@@ -97,18 +97,35 @@ async function readSlotLocksOutsideTransaction(db, branchId, resourceId, slotKey
 }
 
 async function findAvailableLane(transaction, db, branchId, slotKeys) {
+  const selected = await findAvailableLanes(transaction, db, branchId, slotKeys, 1);
+  return { lane: selected.lanes[0], locks: selected.locks };
+}
+
+async function findAvailableLanes(transaction, db, branchId, slotKeys, requiredCount = 1) {
+  const count = Math.floor(Number(requiredCount || 1) || 1);
+  if (count < 1 || count > 10) {
+    throw apiError('INVALID_PARTY_SIZE', 400, 'party_size must be an integer from 1 to 10');
+  }
   const lanes = await loadLaneResources(db, branchId, transaction);
   if (!lanes.length) {
     throw apiError('NO_LANE_AVAILABLE', 409, 'No active archery lanes are configured for this branch');
   }
 
   const now = new Date();
+  const selectedLanes = [];
+  const selectedLocks = [];
   for (const lane of lanes) {
     const locks = await readSlotLocks(transaction, db, branchId, lane.resource_id, slotKeys);
     const conflict = locks.find(lock => lock.snap.exists && isActiveLock(lock.data, now));
-    if (!conflict) return { lane, locks };
+    if (!conflict) {
+      selectedLanes.push(lane);
+      selectedLocks.push(...locks.map(lock => ({ ...lock, resource_id: lane.resource_id })));
+      if (selectedLanes.length >= count) {
+        return { lanes: selectedLanes, locks: selectedLocks };
+      }
+    }
   }
-  throw apiError('NO_LANE_AVAILABLE', 409, 'No lane is available for the requested time');
+  throw apiError('NO_LANE_AVAILABLE', 409, 'Not enough lanes are available for the requested time');
 }
 
 async function assertResourceAvailable(transaction, db, branchId, resourceId, slotKeys, allowedBookingId = '') {
@@ -125,6 +142,7 @@ async function assertResourceAvailable(transaction, db, branchId, resourceId, sl
 function writeLocks(transaction, lockEntries, options = {}) {
   const now = FieldValue.serverTimestamp();
   lockEntries.forEach(lock => {
+    const resourceId = cleanString(lock.resource_id || options.resourceId, 180);
     transaction.set(lock.ref, {
       lock_id: lock.ref.id,
       branch_id: options.branchId,
@@ -132,8 +150,8 @@ function writeLocks(transaction, lockEntries, options = {}) {
       member_id: options.memberId,
       service_type: SERVICE_TYPE,
       resource_type_id: RESOURCE_TYPE_ID,
-      resource_id: options.resourceId,
-      assigned_resource_id: options.resourceId,
+      resource_id: resourceId,
+      assigned_resource_id: resourceId,
       slot_key: lock.slot_key,
       lock_status: options.status,
       status: options.status,
@@ -180,6 +198,7 @@ module.exports = {
   loadLaneResources,
   readSlotLocksOutsideTransaction,
   findAvailableLane,
+  findAvailableLanes,
   assertResourceAvailable,
   writeLocks,
   queryLocksForBooking,

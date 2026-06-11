@@ -7,7 +7,7 @@
     <link rel="icon" type="image/webp" href="/Images/Logo.webp">
     <meta name="description" content="จอง Eden Archery ด้วยบัญชีสมาชิก Eden เดิม">
     <link rel="stylesheet" href="/style.css">
-    <link rel="stylesheet" href="/archery.css?v=availability-loading-1">
+    <link rel="stylesheet" href="/archery.css?v=archery-choice-ui-2">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -92,6 +92,30 @@
                                     <option value="180">180 นาที - 800 THB</option>
                                 </select>
                             </label>
+                            <label class="archery-field full">
+                                จำนวนคน
+                                <select id="archery-party-size" required>
+                                    <option value="1" selected>1 คน</option>
+                                    <option value="2">2 คน</option>
+                                    <option value="3">3 คน</option>
+                                    <option value="4">4 คน</option>
+                                    <option value="5">5 คน</option>
+                                    <option value="6">6 คน</option>
+                                    <option value="7">7 คน</option>
+                                    <option value="8">8 คน</option>
+                                    <option value="9">9 คน</option>
+                                    <option value="10">10 คน</option>
+                                </select>
+                                <small>1 คนใช้ 1 เลน</small>
+                            </label>
+                            <div class="archery-field full">
+                                <span>ระดับประสบการณ์</span>
+                                <div class="archery-choice-grid" id="archery-ability-options"></div>
+                            </div>
+                            <div class="archery-field full">
+                                <span>อุปกรณ์</span>
+                                <div class="archery-choice-grid" id="archery-equipment-options"></div>
+                            </div>
                         </div>
 
                         <p class="archery-status" id="archery-status" aria-live="polite"></p>
@@ -135,7 +159,7 @@
         }
     </script>
     <script type="module" src="/js/auth.js?v=availability-loading-1"></script>
-    <script type="module" src="/js/archery.js?v=availability-loading-1"></script>
+    <script type="module" src="/js/archery.js?v=archery-pricing-options-1"></script>
     <script src="/js/cart.js?v=1"></script>
 </body>
 </html>

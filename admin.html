@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Eden Cafe - Admin Dashboard</title>
     <link rel="icon" href="Images/Logo.webp" type="image/webp">
-    <link rel="stylesheet" href="archery.css">
+    <link rel="stylesheet" href="archery.css?v=archery-admin-ux-1">
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
     <!-- Chart.js -->
@@ -1807,15 +1807,21 @@
             <div class="section-container">
                 <div class="section-header">
                     <div>
-                        <h2>Eden Archery Operations</h2>
-                        <p style="color:#667; margin-top:4px;">10:00-20:00 / Lane 1-10 / shared booking locks</p>
+                        <h2>Eden Archery</h2>
+                        <p style="color:#667; margin-top:4px;">Walk-in booking, lane board, payment, and pricing settings</p>
                     </div>
                     <button class="btn-action" onclick="refreshArcheryAdmin()">Refresh</button>
                 </div>
 
                 <div class="archery-admin-grid">
                     <form id="archery-walkin-form" class="archery-panel">
-                        <h3>Create Walk-in Booking</h3>
+                        <div class="archery-panel-title">
+                            <span class="archery-step-badge">1</span>
+                            <div>
+                                <h3>Create Walk-in Booking</h3>
+                                <p>Search a member, choose time, then review the total before creating.</p>
+                            </div>
+                        </div>
                         <div class="archery-form-grid">
                             <label class="archery-field full">
                                 Search member
@@ -1850,6 +1856,36 @@
                                     <option value="180">180 min</option>
                                 </select>
                             </label>
+                            <label class="archery-field">
+                                People
+                                <select id="archery-admin-party-size" required>
+                                    <option value="1" selected>1 person</option>
+                                    <option value="2">2 people</option>
+                                    <option value="3">3 people</option>
+                                    <option value="4">4 people</option>
+                                    <option value="5">5 people</option>
+                                    <option value="6">6 people</option>
+                                    <option value="7">7 people</option>
+                                    <option value="8">8 people</option>
+                                    <option value="9">9 people</option>
+                                    <option value="10">10 people</option>
+                                </select>
+                            </label>
+                            <div class="archery-field full">
+                                <span>Experience level</span>
+                                <div class="archery-choice-grid" id="archery-admin-ability-options"></div>
+                            </div>
+                            <div class="archery-field full">
+                                <span>Equipment</span>
+                                <div class="archery-choice-grid" id="archery-admin-equipment-options"></div>
+                            </div>
+                            <div class="archery-price-card full">
+                                <div>
+                                    <span>Price preview</span>
+                                    <strong id="archery-admin-price-total">-</strong>
+                                </div>
+                                <ul class="archery-summary-list" id="archery-admin-price-preview"></ul>
+                            </div>
                             <label class="archery-field full">
                                 Note
                                 <textarea id="archery-admin-note" maxlength="500"></textarea>
@@ -1860,7 +1896,13 @@
                     </form>
 
                     <form id="archery-page-settings-form" class="archery-panel">
-                        <h3>Archery Page Settings</h3>
+                        <div class="archery-panel-title">
+                            <span class="archery-step-badge">2</span>
+                            <div>
+                                <h3>Page & Pricing Settings</h3>
+                                <p>Update public page content and the prices used by both online and walk-in bookings.</p>
+                            </div>
+                        </div>
                         <div class="archery-form-grid">
                             <label class="archery-field full">
                                 Hero image URL
@@ -1879,10 +1921,28 @@
                             </label>
                         </div>
                         <div class="archery-page-settings-head">
-                            <h4>Package conditions</h4>
+                            <h4>Public package cards</h4>
                             <button class="btn-action btn-view" id="archery-page-add-package" type="button">Add package</button>
                         </div>
                         <div id="archery-page-package-list" class="archery-page-package-list"></div>
+                        <div class="archery-page-settings-head">
+                            <h4>Pricing & Options</h4>
+                            <small>Server uses these values for real totals.</small>
+                        </div>
+                        <div class="archery-form-grid">
+                            <div class="archery-field full">
+                                <span>Package prices</span>
+                                <div id="archery-pricing-package-list" class="archery-page-package-list"></div>
+                            </div>
+                            <div class="archery-field full">
+                                <span>Ability / coach options</span>
+                                <div id="archery-pricing-ability-list" class="archery-page-package-list"></div>
+                            </div>
+                            <div class="archery-field full">
+                                <span>Equipment options</span>
+                                <div id="archery-pricing-equipment-list" class="archery-page-package-list"></div>
+                            </div>
+                        </div>
                         <p class="archery-status" id="archery-page-settings-status"></p>
                         <button class="btn-action" type="submit">Save Archery Page</button>
                     </form>
@@ -3096,7 +3156,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=archery-mvp-1"></script>
+    <script type="module" src="js/admin.js?v=archery-admin-ux-1"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {

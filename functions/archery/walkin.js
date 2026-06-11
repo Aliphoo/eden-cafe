@@ -13,6 +13,11 @@ const {
   createArcheryBookingInTransaction,
   assertNoClientLane,
 } = require('./bookingHold');
+const {
+  loadArcheryPricingConfig,
+  calculateArcheryPricing,
+  normalizePartySize,
+} = require('./pricing');
 
 const WALKIN_PAYMENT_STATUSES = new Set(['PAID_COUNTER', 'UNPAID']);
 
@@ -30,7 +35,9 @@ const createWalkInArcheryBooking = httpFunction(async ({ db, data, actor, reques
   if (!WALKIN_PAYMENT_STATUSES.has(paymentStatus)) {
     throw apiError('INVALID_PAYMENT_STATUS', 400, 'Walk-in payment_status must be PAID_COUNTER or UNPAID');
   }
-  const amount = Number(data.amount || data.amount_total || 0) || 0;
+  const pricingConfig = await loadArcheryPricingConfig(null, db);
+  const pricingPreview = calculateArcheryPricing(pricingConfig, timing, data);
+  const partySize = normalizePartySize(pricingPreview);
 
   const result = await runIdempotentTransaction(db, {
     branchId,
@@ -43,6 +50,9 @@ const createWalkInArcheryBooking = httpFunction(async ({ db, data, actor, reques
       start_time: timing.start_time,
       duration_minutes: timing.duration_minutes,
       package_code: timing.package_code,
+      party_size: partySize,
+      ability_option_id: pricingPreview.ability_option_id,
+      equipment_option_id: pricingPreview.equipment_option_id,
       payment_status: paymentStatus,
     },
   }, async transaction => {
@@ -52,7 +62,8 @@ const createWalkInArcheryBooking = httpFunction(async ({ db, data, actor, reques
       memberId,
       source: 'WALK_IN',
       timing,
-      amount,
+      pricingConfig,
+      pricingSelection: data,
       bookingStatus: 'CONFIRMED',
       paymentStatus,
       lockStatus: 'CONFIRMED',
@@ -74,7 +85,7 @@ const createWalkInArcheryBooking = httpFunction(async ({ db, data, actor, reques
         booking_id: created.booking_id,
         member_id: memberId,
         service_type: SERVICE_TYPE,
-        amount,
+        amount: created.booking.amount_total,
         currency: 'THB',
         payment_method: 'COUNTER',
         payment_status: 'PAID_COUNTER',
@@ -100,6 +111,13 @@ const createWalkInArcheryBooking = httpFunction(async ({ db, data, actor, reques
         booking_status: 'CONFIRMED',
         payment_status: paymentStatus,
         assigned_resource_id: created.assigned_resource_id,
+        assigned_resource_ids: created.assigned_resource_ids,
+        assigned_lane_numbers: created.assigned_lane_numbers,
+        party_size: created.booking.party_size,
+        required_lane_count: created.booking.required_lane_count,
+        amount_total: created.booking.amount_total,
+        ability_option_id: created.booking.ability_option_id,
+        equipment_option_id: created.booking.equipment_option_id,
       },
       requestId,
     });
@@ -112,6 +130,24 @@ const createWalkInArcheryBooking = httpFunction(async ({ db, data, actor, reques
       payment_status: paymentStatus,
       payment_id: paymentId,
       assigned_resource_id: created.assigned_resource_id,
+      assigned_resource_ids: created.assigned_resource_ids,
+      assigned_lane_numbers: created.assigned_lane_numbers,
+      party_size: created.booking.party_size,
+      required_lane_count: created.booking.required_lane_count,
+      amount_total: created.booking.amount_total,
+      package_amount: created.booking.package_amount,
+      ability_option_id: created.booking.ability_option_id,
+      ability_label: created.booking.ability_label,
+      coach_required: created.booking.coach_required,
+      coach_rate_per_hour: created.booking.coach_rate_per_hour,
+      coach_amount: created.booking.coach_amount,
+      equipment_option_id: created.booking.equipment_option_id,
+      equipment_label: created.booking.equipment_label,
+      equipment_rate_per_hour: created.booking.equipment_rate_per_hour,
+      equipment_amount: created.booking.equipment_amount,
+      amount_breakdown: created.booking.amount_breakdown,
+      pricing_version: created.booking.pricing_version,
+      pricing_updated_at: created.booking.pricing_updated_at,
     };
   });
 

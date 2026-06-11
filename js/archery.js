@@ -5,6 +5,30 @@ import qrcodeFactory from './qrcode-generator.esm.js';
 
 const BRANCH_ID = 'BKK_MAIN';
 const PACKAGE_PRICES = { 60: 350, 120: 600, 180: 800 };
+const DEFAULT_PRICING_CONFIG = {
+    version: '2026-06-default',
+    packages: [
+        { durationMinutes: 60, price: 350, title: '60 min', active: true },
+        { durationMinutes: 120, price: 600, title: '120 min', active: true },
+        { durationMinutes: 180, price: 800, title: '180 min', active: true }
+    ],
+    abilityOptions: [
+        { id: 'first_time_with_coach', label: 'ครั้งแรก ต้องการโค้ช', ratePerHour: 50, coachRequired: true, active: true },
+        { id: 'experienced_with_coach', label: 'เคยยิงแล้ว ต้องการโค้ช', ratePerHour: 50, coachRequired: true, active: true },
+        { id: 'experienced_no_coach', label: 'เคยยิงแล้ว ไม่ต้องการโค้ช', ratePerHour: 0, coachRequired: false, active: true }
+    ],
+    equipmentOptions: [
+        { id: 'rent_full_set', label: 'เช่าอุปกรณ์ครบเซ็ต', ratePerHour: 100, active: true },
+        { id: 'bring_own', label: 'นำอุปกรณ์มาเอง', ratePerHour: 0, active: true }
+    ]
+};
+const OPTION_LABELS_TH = {
+    first_time_with_coach: 'ครั้งแรก ต้องการโค้ช',
+    experienced_with_coach: 'เคยยิงแล้ว ต้องการโค้ช',
+    experienced_no_coach: 'เคยยิงแล้ว ไม่ต้องการโค้ช',
+    rent_full_set: 'เช่าอุปกรณ์ครบเซ็ต',
+    bring_own: 'นำอุปกรณ์มาเอง'
+};
 const STORAGE_KEY = 'eden_archery_last_booking';
 const HOLD_STORAGE_KEY = 'eden_archery_active_hold';
 const HOLD_MINUTES = 10;
@@ -19,6 +43,7 @@ let busyAction = '';
 let isCheckingAvailability = false;
 let holdIdempotencyKey = '';
 let beamPaymentIdempotencyKey = '';
+let archeryPricingConfig = DEFAULT_PRICING_CONFIG;
 
 const AVAILABILITY_BUTTON_TEXT = 'ตรวจสอบเวลา';
 const AVAILABILITY_LOADING_TEXT = 'กำลังตรวจสอบ...';
@@ -62,6 +87,11 @@ function packageMinutes() {
     return normalizeDuration($('archery-package')?.value);
 }
 
+function partySize() {
+    const value = Number($('archery-party-size')?.value || 1);
+    return Number.isInteger(value) && value >= 1 && value <= 10 ? value : 1;
+}
+
 function selectedDate() {
     return $('archery-date')?.value || todayISO();
 }
@@ -80,6 +110,84 @@ function packageCode(duration = packageMinutes()) {
 
 function money(value) {
     return Math.round(Number(value) || 0).toLocaleString('th-TH') + ' THB';
+}
+
+function activeItems(items = []) {
+    return (Array.isArray(items) ? items : []).filter(item => item && item.active !== false);
+}
+
+function normalizePricingConfig(data = {}) {
+    const source = data.pricing || data.bookingOptions || data.booking_options || data || {};
+    const packages = Array.isArray(source.packages) && source.packages.length ? source.packages : DEFAULT_PRICING_CONFIG.packages;
+    const abilityOptions = Array.isArray(source.abilityOptions || source.ability_options) && (source.abilityOptions || source.ability_options).length
+        ? (source.abilityOptions || source.ability_options)
+        : DEFAULT_PRICING_CONFIG.abilityOptions;
+    const equipmentOptions = Array.isArray(source.equipmentOptions || source.equipment_options) && (source.equipmentOptions || source.equipment_options).length
+        ? (source.equipmentOptions || source.equipment_options)
+        : DEFAULT_PRICING_CONFIG.equipmentOptions;
+    return {
+        version: source.version || source.pricingVersion || source.pricing_version || DEFAULT_PRICING_CONFIG.version,
+        packages: packages.map((item, index) => ({
+            durationMinutes: Number(item.durationMinutes || item.duration_minutes || item.duration || DEFAULT_PRICING_CONFIG.packages[index]?.durationMinutes || 60) || 60,
+            price: Number(item.price || item.amount || item.amountTotal || item.amount_total || DEFAULT_PRICING_CONFIG.packages[index]?.price || 0) || 0,
+            title: String(item.title || '').trim(),
+            active: item.active !== false
+        })),
+        abilityOptions: abilityOptions.map((item, index) => ({
+            id: String(item.id || item.option_id || DEFAULT_PRICING_CONFIG.abilityOptions[index]?.id || '').trim(),
+            label: String(item.label || DEFAULT_PRICING_CONFIG.abilityOptions[index]?.label || '').trim(),
+            ratePerHour: Number(item.ratePerHour || item.rate_per_hour || item.rate || 0) || 0,
+            coachRequired: item.coachRequired === true || item.coach_required === true,
+            active: item.active !== false
+        })).filter(item => item.id),
+        equipmentOptions: equipmentOptions.map((item, index) => ({
+            id: String(item.id || item.option_id || DEFAULT_PRICING_CONFIG.equipmentOptions[index]?.id || '').trim(),
+            label: String(item.label || DEFAULT_PRICING_CONFIG.equipmentOptions[index]?.label || '').trim(),
+            ratePerHour: Number(item.ratePerHour || item.rate_per_hour || item.rate || 0) || 0,
+            active: item.active !== false
+        })).filter(item => item.id)
+    };
+}
+
+function packagePrice(duration = packageMinutes()) {
+    const item = activeItems(archeryPricingConfig.packages).find(row => row.durationMinutes === normalizeDuration(duration));
+    return Number(item?.price || PACKAGE_PRICES[normalizeDuration(duration)] || 0) || 0;
+}
+
+function selectedOption(group) {
+    const checked = document.querySelector(`input[name="${group}"]:checked`);
+    const options = group === 'archery-ability' ? archeryPricingConfig.abilityOptions : archeryPricingConfig.equipmentOptions;
+    return activeItems(options).find(item => item.id === checked?.value) || activeItems(options)[0] || null;
+}
+
+function calculateDraftPricing() {
+    const duration = packageMinutes();
+    const hours = duration / 60;
+    const ability = selectedOption('archery-ability');
+    const equipment = selectedOption('archery-equipment');
+    const packageAmount = packagePrice(duration);
+    const coachAmount = Math.round(Number(ability?.ratePerHour || 0) * hours);
+    const equipmentAmount = Math.round(Number(equipment?.ratePerHour || 0) * hours);
+    const people = partySize();
+    const perPersonTotal = packageAmount + coachAmount + equipmentAmount;
+    return {
+        packageAmount,
+        coachAmount,
+        equipmentAmount,
+        partySize: people,
+        requiredLaneCount: people,
+        packageTotal: packageAmount * people,
+        coachTotal: coachAmount * people,
+        equipmentTotal: equipmentAmount * people,
+        perPersonTotal,
+        amountTotal: perPersonTotal * people,
+        ability,
+        equipment
+    };
+}
+
+function optionDisplayLabel(option = {}) {
+    return OPTION_LABELS_TH[option.id || option.option_id] || option.label || '-';
 }
 
 function setStatus(id, message, type = '') {
@@ -153,9 +261,12 @@ function setAvailabilityControlsChecking(isChecking) {
             ? '<span class="archery-btn-spinner" aria-hidden="true"></span><span>' + AVAILABILITY_LOADING_TEXT + '</span>'
             : AVAILABILITY_BUTTON_TEXT;
     }
-    ['archery-date', 'archery-start', 'archery-package'].forEach(id => {
+    ['archery-date', 'archery-start', 'archery-package', 'archery-party-size'].forEach(id => {
         const field = $(id);
         if (field) field.disabled = isChecking;
+    });
+    document.querySelectorAll('input[name="archery-ability"], input[name="archery-equipment"]').forEach(field => {
+        field.disabled = isChecking;
     });
 }
 
@@ -179,12 +290,16 @@ function restoreButtonStates() {
 }
 
 function idempotencyKey(action, keyParts = []) {
+    const pricing = calculateDraftPricing();
     const base = [
         action,
         currentUser?.uid || 'anonymous',
         selectedDate(),
         selectedStartTime(),
         packageMinutes(),
+        partySize(),
+        pricing.ability?.id || '',
+        pricing.equipment?.id || '',
         ...keyParts
     ].join(':');
     const browserCrypto = globalThis.crypto;
@@ -236,12 +351,16 @@ function fillTimeOptions() {
 
 function selectionPayload() {
     const duration = packageMinutes();
+    const pricing = calculateDraftPricing();
     return {
         branch_id: BRANCH_ID,
         booking_date: selectedDate(),
         start_time: selectedStartTime(),
         duration_minutes: duration,
-        package_code: packageCode(duration)
+        package_code: packageCode(duration),
+        party_size: pricing.partySize,
+        ability_option_id: pricing.ability?.id || '',
+        equipment_option_id: pricing.equipment?.id || ''
     };
 }
 
@@ -249,7 +368,7 @@ function summaryRows(rows) {
     return rows.map(([label, value]) => `<li><span>${escapeHTML(label)}</span><strong>${escapeHTML(value || '-')}</strong></li>`).join('');
 }
 
-function renderDraftSummary() {
+function renderDraftSummaryLegacy() {
     const el = $('archery-hold-summary');
     if (!el || currentHold) return;
     const duration = packageMinutes();
@@ -258,6 +377,24 @@ function renderDraftSummary() {
         ['เวลา', selectedStartTime() + '-' + selectedEndTime()],
         ['แพ็กเกจ', duration + ' นาที'],
         ['ยอดรวม', money(PACKAGE_PRICES[duration])]
+    ]);
+}
+
+function renderDraftSummary() {
+    const el = $('archery-hold-summary');
+    if (!el || currentHold) return;
+    const duration = packageMinutes();
+    const pricing = calculateDraftPricing();
+    el.innerHTML = summaryRows([
+        ['Date', selectedDate()],
+        ['Time', selectedStartTime() + '-' + selectedEndTime()],
+        ['Package', duration + ' min'],
+        ['People', String(pricing.partySize)],
+        ['Lanes needed', String(pricing.requiredLaneCount)],
+        ['Package / person', money(pricing.packageAmount)],
+        ['Coach / person', `${optionDisplayLabel(pricing.ability)} / ${money(pricing.coachAmount)}`],
+        ['Equipment / person', `${optionDisplayLabel(pricing.equipment)} / ${money(pricing.equipmentAmount)}`],
+        ['Total', money(pricing.amountTotal)]
     ]);
 }
 
@@ -286,13 +423,73 @@ function renderSuggestions(times = []) {
 
 function renderAvailability(result) {
     const available = result?.available === true;
+    const required = Number(result?.required_lane_count || partySize()) || 1;
+    const availableCount = Number(result?.available_lane_count || 0) || 0;
     if (available) {
         setStatus('archery-status', 'เวลานี้ยังว่าง สามารถยืนยันเวลาได้', 'success');
     } else {
         setStatus('archery-status', 'เวลานี้ถูกจองแล้ว กรุณาเลือกเวลาอื่น', 'error');
     }
+    setStatus(
+        'archery-status',
+        available
+            ? `เวลานี้ว่างพอสำหรับ ${required} เลน (${availableCount} เลนว่าง)`
+            : `เลนว่างไม่พอ ต้องใช้ ${required} เลน แต่มีว่าง ${availableCount} เลน`,
+        available ? 'success' : 'error'
+    );
     renderSuggestions(result?.suggested_start_times || []);
     restoreButtonStates();
+}
+
+function renderOptionCards(containerId, inputName, options = [], formatter = () => '') {
+    const el = $(containerId);
+    if (!el) return;
+    const active = activeItems(options);
+    el.innerHTML = active.map((option, index) => `
+        <label class="archery-choice-card">
+            <input type="radio" name="${escapeHTML(inputName)}" value="${escapeHTML(option.id)}" ${index === 0 ? 'checked' : ''} required>
+            <strong>${escapeHTML(optionDisplayLabel(option))}</strong>
+            <small>${escapeHTML(formatter(option))}</small>
+        </label>
+    `).join('');
+    el.querySelectorAll('input[type="radio"]').forEach(input => {
+        input.addEventListener('change', () => {
+            resetAvailabilityState();
+            resetHoldState();
+            renderDraftSummary();
+        });
+    });
+}
+
+function renderPricingOptions() {
+    const packageSelect = $('archery-package');
+    if (packageSelect) {
+        const selected = packageSelect.value;
+        packageSelect.innerHTML = activeItems(archeryPricingConfig.packages).map(item => (
+            `<option value="${escapeHTML(item.durationMinutes)}">${escapeHTML(item.title || item.durationMinutes + ' min')} - ${escapeHTML(money(item.price))}</option>`
+        )).join('');
+        if (selected && Array.from(packageSelect.options).some(option => option.value === selected)) packageSelect.value = selected;
+    }
+    renderOptionCards('archery-ability-options', 'archery-ability', archeryPricingConfig.abilityOptions, option => {
+        const suffix = option.ratePerHour ? `${money(option.ratePerHour)} / ชม.` : 'ไม่มีค่าใช้จ่ายเพิ่ม';
+        return option.coachRequired ? `มีโค้ชดูแล · ${suffix}` : suffix;
+    });
+    renderOptionCards('archery-equipment-options', 'archery-equipment', archeryPricingConfig.equipmentOptions, option => (
+        option.ratePerHour ? `${money(option.ratePerHour)} / ชม.` : 'ไม่มีค่าใช้จ่ายเพิ่ม'
+    ));
+    fillTimeOptions();
+    renderDraftSummary();
+}
+
+async function loadPricingOptions() {
+    try {
+        const snap = db ? await getDoc(doc(db, 'site_settings', 'archery')) : null;
+        archeryPricingConfig = normalizePricingConfig(snap?.exists() ? snap.data() : DEFAULT_PRICING_CONFIG);
+    } catch (error) {
+        console.warn('Unable to load archery pricing settings:', error);
+        archeryPricingConfig = normalizePricingConfig(DEFAULT_PRICING_CONFIG);
+    }
+    renderPricingOptions();
 }
 
 function resetAvailabilityState() {
@@ -319,7 +516,34 @@ function sanitizeHoldResponse(hold = {}) {
         provider_ref: hold.provider_ref || hold.payment?.provider_ref || '',
         beam_payment_link_id: hold.beam_payment_link_id || hold.payment?.beam_payment_link_id || '',
         payment_environment: hold.payment_environment || hold.payment?.payment_environment || 'sandbox',
-        amount_total: hold.amount_total || PACKAGE_PRICES[hold.duration_minutes || packageMinutes()],
+        amount_total: hold.amount_total || calculateDraftPricing().amountTotal,
+        party_size: hold.party_size || hold.partySize || calculateDraftPricing().partySize,
+        required_lane_count: hold.required_lane_count || hold.requiredLaneCount || calculateDraftPricing().requiredLaneCount,
+        assigned_resource_ids: Array.isArray(hold.assigned_resource_ids) ? hold.assigned_resource_ids : [],
+        assigned_lane_numbers: Array.isArray(hold.assigned_lane_numbers) ? hold.assigned_lane_numbers : [],
+        package_amount: hold.package_amount || hold.amount_breakdown?.package || calculateDraftPricing().packageTotal,
+        ability_option_id: hold.ability_option_id || calculateDraftPricing().ability?.id || '',
+        ability_label: hold.ability_label || optionDisplayLabel(calculateDraftPricing().ability),
+        coach_required: hold.coach_required === true || calculateDraftPricing().ability?.coachRequired === true,
+        coach_rate_per_hour: hold.coach_rate_per_hour || calculateDraftPricing().ability?.ratePerHour || 0,
+        coach_amount: hold.coach_amount || hold.amount_breakdown?.coach || calculateDraftPricing().coachTotal,
+        equipment_option_id: hold.equipment_option_id || calculateDraftPricing().equipment?.id || '',
+        equipment_label: hold.equipment_label || optionDisplayLabel(calculateDraftPricing().equipment),
+        equipment_rate_per_hour: hold.equipment_rate_per_hour || calculateDraftPricing().equipment?.ratePerHour || 0,
+        equipment_amount: hold.equipment_amount || hold.amount_breakdown?.equipment || calculateDraftPricing().equipmentTotal,
+        amount_breakdown: hold.amount_breakdown || {
+            package_per_person: calculateDraftPricing().packageAmount,
+            coach_per_person: calculateDraftPricing().coachAmount,
+            equipment_per_person: calculateDraftPricing().equipmentAmount,
+            per_person_total: calculateDraftPricing().perPersonTotal,
+            party_size: calculateDraftPricing().partySize,
+            required_lane_count: calculateDraftPricing().requiredLaneCount,
+            package: calculateDraftPricing().packageTotal,
+            coach: calculateDraftPricing().coachTotal,
+            equipment: calculateDraftPricing().equipmentTotal,
+            total: calculateDraftPricing().amountTotal
+        },
+        pricing_version: hold.pricing_version || archeryPricingConfig.version || '',
         expires_at: hold.expires_at || new Date(Date.now() + HOLD_MINUTES * 60 * 1000).toISOString(),
         payment_required: hold.payment_required !== false
     };
@@ -486,7 +710,7 @@ function startPaymentPolling({ immediate = false } = {}) {
     }, 5000);
 }
 
-function renderHoldSummary(hold) {
+function renderHoldSummaryLegacy(hold) {
     const el = $('archery-hold-summary');
     if (!el || !hold) return;
     const duration = normalizeDuration(hold.duration_minutes);
@@ -496,6 +720,33 @@ function renderHoldSummary(hold) {
         ['เวลา', hold.start_time + '-' + (hold.end_time || timeLabel(minutesFromTime(hold.start_time) + duration))],
         ['แพ็กเกจ', duration + ' นาที'],
         ['ยอดรวม', money(hold.amount_total || PACKAGE_PRICES[duration])],
+        ['Payment', hold.payment_status || 'UNPAID']
+    ]);
+    startCountdown();
+}
+
+function renderHoldSummary(hold) {
+    const el = $('archery-hold-summary');
+    if (!el || !hold) return;
+    const duration = normalizeDuration(hold.duration_minutes);
+    const breakdown = hold.amount_breakdown || {};
+    const laneNumbers = Array.isArray(hold.assigned_lane_numbers) && hold.assigned_lane_numbers.length
+        ? hold.assigned_lane_numbers.map(number => `Lane ${number}`).join(', ')
+        : (Array.isArray(hold.assigned_resource_ids) && hold.assigned_resource_ids.length
+            ? hold.assigned_resource_ids.map(id => String(id || '').match(/(\d{2})$/)?.[1]).filter(Boolean).map(number => `Lane ${Number(number)}`).join(', ')
+            : '');
+    el.innerHTML = summaryRows([
+        ['Booking ID', hold.booking_id],
+        ['Date', hold.booking_date],
+        ['Time', hold.start_time + '-' + (hold.end_time || timeLabel(minutesFromTime(hold.start_time) + duration))],
+        ['Package', duration + ' min'],
+        ['People', String(hold.party_size || 1)],
+        ['Lanes needed', String(hold.required_lane_count || hold.party_size || 1)],
+        ['Assigned lanes', laneNumbers || '-'],
+        ['Package / person', money(breakdown.package_per_person || packagePrice(duration))],
+        ['Coach / person', `${optionDisplayLabel({ id: hold.ability_option_id, label: hold.ability_label })} / ${money(breakdown.coach_per_person || 0)}`],
+        ['Equipment / person', `${optionDisplayLabel({ id: hold.equipment_option_id, label: hold.equipment_label })} / ${money(breakdown.equipment_per_person || 0)}`],
+        ['Total', money(hold.amount_total || breakdown.total || packagePrice(duration))],
         ['Payment', hold.payment_status || 'UNPAID']
     ]);
     startCountdown();
@@ -580,7 +831,6 @@ async function createHold(event) {
         const hold = await api.createArcheryHold({
             ...selectionPayload(),
             member_id: currentUser.uid,
-            amount: PACKAGE_PRICES[duration],
             idempotency_key: holdIdempotencyKey
         });
         currentHold = sanitizeHoldResponse(hold);
@@ -664,8 +914,8 @@ function initBookingPage() {
         dateInput.min = todayISO();
         dateInput.value = dateInput.value || todayISO();
     }
-    fillTimeOptions();
-    ['archery-date', 'archery-start', 'archery-package'].forEach(id => {
+    loadPricingOptions();
+    ['archery-date', 'archery-start', 'archery-package', 'archery-party-size'].forEach(id => {
         const el = $(id);
         if (!el) return;
         el.addEventListener('change', () => {
@@ -719,12 +969,20 @@ function renderConfirmPageBooking(booking) {
     const bookingDate = booking.booking_date || booking.date || '';
     const startTime = booking.start_time || booking.startTime || '';
     const endTime = booking.end_time || booking.endTime || (startTime ? timeLabel(minutesFromTime(startTime) + duration) : '');
+    const party = Number(booking.party_size || booking.partySize || 1) || 1;
+    const laneNumbers = Array.isArray(booking.assigned_lane_numbers) && booking.assigned_lane_numbers.length
+        ? booking.assigned_lane_numbers.map(number => `Lane ${number}`).join(', ')
+        : (Array.isArray(booking.assigned_resource_ids) && booking.assigned_resource_ids.length
+            ? booking.assigned_resource_ids.map(id => String(id || '').match(/(\d{2})$/)?.[1]).filter(Boolean).map(number => `Lane ${Number(number)}`).join(', ')
+            : '');
     if (summary) {
         summary.innerHTML = summaryRows([
             ['Booking ID', bookingId],
             ['วันที่', bookingDate],
             ['เวลา', [startTime, endTime].filter(Boolean).join('-')],
             ['แพ็กเกจ', duration + ' นาที'],
+            ['People', String(party)],
+            ['Lanes', laneNumbers || '-'],
             ['Payment status', booking.payment_status || booking.paymentStatus || '-'],
             ['สถานะ', bookingStatusLabel(booking)]
         ]);

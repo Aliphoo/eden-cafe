@@ -3640,6 +3640,23 @@ const DEFAULT_ARCHERY_PAGE_SETTINGS = {
         }
     ]
 };
+const DEFAULT_ARCHERY_PRICING = {
+    version: '2026-06-default',
+    packages: [
+        { durationMinutes: 60, price: 350, title: '60 min', active: true },
+        { durationMinutes: 120, price: 600, title: '120 min', active: true },
+        { durationMinutes: 180, price: 800, title: '180 min', active: true }
+    ],
+    abilityOptions: [
+        { id: 'first_time_with_coach', label: 'First time, coach required', ratePerHour: 50, coachRequired: true, active: true },
+        { id: 'experienced_with_coach', label: 'Experienced, coach requested', ratePerHour: 50, coachRequired: true, active: true },
+        { id: 'experienced_no_coach', label: 'Experienced, no coach', ratePerHour: 0, coachRequired: false, active: true }
+    ],
+    equipmentOptions: [
+        { id: 'rent_full_set', label: 'Rent full equipment set', ratePerHour: 100, active: true },
+        { id: 'bring_own', label: 'Bring own equipment', ratePerHour: 0, active: true }
+    ]
+};
 
 function normalizeArcheryPagePackage(item = {}, index = 0) {
     const duration = Number(item.durationMinutes || item.duration_minutes || item.duration || 0) || [60, 120, 180][index] || 60;
@@ -3666,6 +3683,51 @@ function normalizeArcheryPageSettings(data = {}) {
         packageLead: String(data.packageLead || data.package_lead || fallback.packageLead).trim().slice(0, 300),
         packages
     };
+}
+
+function normalizeArcheryPricing(data = {}) {
+    const source = data.pricing || data.bookingOptions || data.booking_options || {};
+    const packagesSource = Array.isArray(source.packages) && source.packages.length ? source.packages : DEFAULT_ARCHERY_PRICING.packages;
+    const abilitySource = Array.isArray(source.abilityOptions || source.ability_options) && (source.abilityOptions || source.ability_options).length
+        ? (source.abilityOptions || source.ability_options)
+        : DEFAULT_ARCHERY_PRICING.abilityOptions;
+    const equipmentSource = Array.isArray(source.equipmentOptions || source.equipment_options) && (source.equipmentOptions || source.equipment_options).length
+        ? (source.equipmentOptions || source.equipment_options)
+        : DEFAULT_ARCHERY_PRICING.equipmentOptions;
+    return {
+        version: String(source.version || source.pricingVersion || source.pricing_version || DEFAULT_ARCHERY_PRICING.version).trim(),
+        packages: packagesSource.map((item, index) => ({
+            durationMinutes: Number(item.durationMinutes || item.duration_minutes || item.duration || DEFAULT_ARCHERY_PRICING.packages[index]?.durationMinutes || 60) || 60,
+            price: Number(item.price || item.amount || item.amountTotal || item.amount_total || DEFAULT_ARCHERY_PRICING.packages[index]?.price || 0) || 0,
+            title: String(item.title || DEFAULT_ARCHERY_PRICING.packages[index]?.title || '').trim().slice(0, 80),
+            active: item.active !== false
+        })),
+        abilityOptions: abilitySource.map((item, index) => ({
+            id: String(item.id || item.option_id || DEFAULT_ARCHERY_PRICING.abilityOptions[index]?.id || '').trim().slice(0, 80),
+            label: String(item.label || DEFAULT_ARCHERY_PRICING.abilityOptions[index]?.label || '').trim().slice(0, 120),
+            ratePerHour: Number(item.ratePerHour || item.rate_per_hour || item.rate || 0) || 0,
+            coachRequired: item.coachRequired === true || item.coach_required === true,
+            active: item.active !== false
+        })).filter(item => item.id),
+        equipmentOptions: equipmentSource.map((item, index) => ({
+            id: String(item.id || item.option_id || DEFAULT_ARCHERY_PRICING.equipmentOptions[index]?.id || '').trim().slice(0, 80),
+            label: String(item.label || DEFAULT_ARCHERY_PRICING.equipmentOptions[index]?.label || '').trim().slice(0, 120),
+            ratePerHour: Number(item.ratePerHour || item.rate_per_hour || item.rate || 0) || 0,
+            active: item.active !== false
+        })).filter(item => item.id)
+    };
+}
+
+function archeryPricingConfig() {
+    return normalizeArcheryPricing(archeryPageSettingsData || {});
+}
+
+function activeArcheryItems(items = []) {
+    return (Array.isArray(items) ? items : []).filter(item => item && item.active !== false);
+}
+
+function archeryMoney(value) {
+    return Math.round(Number(value) || 0).toLocaleString('th-TH') + ' THB';
 }
 
 function archeryPageSettingsStatus(message, tone = '') {
@@ -3709,6 +3771,70 @@ function renderArcheryPagePackageRows(packages = []) {
     }).join('');
 }
 
+function renderArcheryPricingPackageRows(packages = []) {
+    const list = document.getElementById('archery-pricing-package-list');
+    if (!list) return;
+    const rows = packages.length ? packages : DEFAULT_ARCHERY_PRICING.packages;
+    list.innerHTML = rows.map((item, index) => `
+        <div class="archery-page-package-row" data-pricing-package-index="${index}">
+            <label class="archery-field">
+                Minutes
+                <input type="number" min="15" step="15" data-pricing-package-field="durationMinutes" value="${escapeHTML(item.durationMinutes)}">
+            </label>
+            <label class="archery-field">
+                Price
+                <input type="number" min="0" step="1" data-pricing-package-field="price" value="${escapeHTML(item.price)}">
+            </label>
+            <label class="archery-field">
+                Title
+                <input type="text" maxlength="80" data-pricing-package-field="title" value="${escapeHTML(item.title || item.durationMinutes + ' min')}">
+            </label>
+            <label class="archery-field">
+                Active
+                <input type="checkbox" data-pricing-package-field="active" ${item.active !== false ? 'checked' : ''}>
+            </label>
+        </div>
+    `).join('');
+}
+
+function renderArcheryPricingOptionRows(listId, kind, options = []) {
+    const list = document.getElementById(listId);
+    if (!list) return;
+    list.innerHTML = options.map((item, index) => `
+        <div class="archery-page-package-row" data-pricing-option-kind="${kind}" data-pricing-option-index="${index}">
+            <label class="archery-field">
+                ID
+                <input type="text" maxlength="80" data-pricing-option-field="id" value="${escapeHTML(item.id)}">
+            </label>
+            <label class="archery-field">
+                Label
+                <input type="text" maxlength="120" data-pricing-option-field="label" value="${escapeHTML(item.label)}">
+            </label>
+            <label class="archery-field">
+                Rate / hour
+                <input type="number" min="0" step="1" data-pricing-option-field="ratePerHour" value="${escapeHTML(item.ratePerHour)}">
+            </label>
+            ${kind === 'ability' ? `
+                <label class="archery-field">
+                    Coach required
+                    <input type="checkbox" data-pricing-option-field="coachRequired" ${item.coachRequired ? 'checked' : ''}>
+                </label>
+            ` : ''}
+            <label class="archery-field">
+                Active
+                <input type="checkbox" data-pricing-option-field="active" ${item.active !== false ? 'checked' : ''}>
+            </label>
+        </div>
+    `).join('');
+}
+
+function renderArcheryPricingEditor(pricing = DEFAULT_ARCHERY_PRICING) {
+    const normalized = normalizeArcheryPricing({ pricing });
+    renderArcheryPricingPackageRows(normalized.packages);
+    renderArcheryPricingOptionRows('archery-pricing-ability-list', 'ability', normalized.abilityOptions);
+    renderArcheryPricingOptionRows('archery-pricing-equipment-list', 'equipment', normalized.equipmentOptions);
+}
+
 function readArcheryPagePackageRows() {
     return Array.from(document.querySelectorAll('.archery-page-package-row')).map((row, index) => {
         const value = field => row.querySelector(`[data-page-package-field="${field}"]`)?.value || '';
@@ -3722,8 +3848,39 @@ function readArcheryPagePackageRows() {
     }).filter(item => item.durationMinutes > 0);
 }
 
+function readArcheryPricingPackageRows() {
+    return Array.from(document.querySelectorAll('[data-pricing-package-index]')).map((row, index) => ({
+        durationMinutes: Number(row.querySelector('[data-pricing-package-field="durationMinutes"]')?.value || 0) || [60, 120, 180][index] || 60,
+        price: Number(row.querySelector('[data-pricing-package-field="price"]')?.value || 0) || 0,
+        title: String(row.querySelector('[data-pricing-package-field="title"]')?.value || '').trim().slice(0, 80),
+        active: row.querySelector('[data-pricing-package-field="active"]')?.checked !== false
+    })).filter(item => item.durationMinutes > 0);
+}
+
+function readArcheryPricingOptionRows(kind) {
+    return Array.from(document.querySelectorAll(`[data-pricing-option-kind="${kind}"]`)).map(row => ({
+        id: String(row.querySelector('[data-pricing-option-field="id"]')?.value || '').trim().slice(0, 80),
+        label: String(row.querySelector('[data-pricing-option-field="label"]')?.value || '').trim().slice(0, 120),
+        ratePerHour: Number(row.querySelector('[data-pricing-option-field="ratePerHour"]')?.value || 0) || 0,
+        coachRequired: row.querySelector('[data-pricing-option-field="coachRequired"]')?.checked === true,
+        active: row.querySelector('[data-pricing-option-field="active"]')?.checked !== false
+    })).filter(item => item.id && item.label);
+}
+
+function readArcheryPricingEditor() {
+    return normalizeArcheryPricing({
+        pricing: {
+            version: archeryPricingConfig().version || DEFAULT_ARCHERY_PRICING.version,
+            packages: readArcheryPricingPackageRows(),
+            abilityOptions: readArcheryPricingOptionRows('ability'),
+            equipmentOptions: readArcheryPricingOptionRows('equipment')
+        }
+    });
+}
+
 function fillArcheryPageSettingsForm(settings = DEFAULT_ARCHERY_PAGE_SETTINGS) {
     const normalized = normalizeArcheryPageSettings(settings);
+    const pricing = normalizeArcheryPricing(settings);
     const heroUrl = document.getElementById('archery-page-hero-url');
     const lead = document.getElementById('archery-page-package-lead');
     const preview = document.getElementById('archery-page-hero-preview');
@@ -3731,6 +3888,8 @@ function fillArcheryPageSettingsForm(settings = DEFAULT_ARCHERY_PAGE_SETTINGS) {
     if (lead) lead.value = normalized.packageLead;
     if (preview) preview.src = normalized.heroImageUrl;
     renderArcheryPagePackageRows(normalized.packages);
+    renderArcheryPricingEditor(pricing);
+    renderAdminWalkinPricingOptions();
 }
 
 function bindArcheryPageSettingsControls() {
@@ -3761,12 +3920,19 @@ async function loadArcheryPageSettings() {
     archeryPageSettingsStatus('Loading page settings...');
     try {
         const snap = await getDoc(ARCHERY_PAGE_SETTINGS_REF());
-        archeryPageSettingsData = normalizeArcheryPageSettings(snap.exists() ? snap.data() : DEFAULT_ARCHERY_PAGE_SETTINGS);
+        const raw = snap.exists() ? snap.data() : DEFAULT_ARCHERY_PAGE_SETTINGS;
+        archeryPageSettingsData = {
+            ...normalizeArcheryPageSettings(raw),
+            pricing: normalizeArcheryPricing(raw)
+        };
         fillArcheryPageSettingsForm(archeryPageSettingsData);
         archeryPageSettingsStatus(snap.exists() ? 'Page settings loaded.' : 'Using default page settings.', 'success');
     } catch (error) {
         console.error('Unable to load archery page settings:', error);
-        archeryPageSettingsData = normalizeArcheryPageSettings(DEFAULT_ARCHERY_PAGE_SETTINGS);
+        archeryPageSettingsData = {
+            ...normalizeArcheryPageSettings(DEFAULT_ARCHERY_PAGE_SETTINGS),
+            pricing: normalizeArcheryPricing(DEFAULT_ARCHERY_PRICING)
+        };
         fillArcheryPageSettingsForm(archeryPageSettingsData);
         archeryPageSettingsStatus(error.message || safeAdminError('Load archery page settings failed'), 'error');
     }
@@ -3798,13 +3964,16 @@ async function saveArcheryPageSettings(event) {
             packageLead: document.getElementById('archery-page-package-lead')?.value || '',
             packages: readArcheryPagePackageRows()
         });
+        const pricing = readArcheryPricingEditor();
         await setDoc(ARCHERY_PAGE_SETTINGS_REF(), {
             ...payload,
+            pricing,
             updatedAt: serverTimestamp(),
             updatedBy: auth.currentUser?.uid || '',
             updatedByEmail: auth.currentUser?.email || ''
         }, { merge: true });
-        archeryPageSettingsData = payload;
+        archeryPageSettingsData = { ...payload, pricing };
+        renderAdminWalkinPricingOptions();
         const fileInput = document.getElementById('archery-page-hero-file');
         if (fileInput) fileInput.value = '';
         archeryPageSettingsStatus('Archery page settings saved.', 'success');
@@ -3906,6 +4075,126 @@ function archeryResourceLabel(resourceId = '') {
     return lane ? `Lane ${Number(lane[1])}` : (resourceId || '-');
 }
 
+function archeryPartySizeFromBooking(booking = {}) {
+    const value = Number(booking.party_size || booking.partySize || booking.required_lane_count || booking.requiredLaneCount || 1);
+    return Number.isInteger(value) && value >= 1 ? value : 1;
+}
+
+function archeryLaneNumbersFromBooking(booking = {}) {
+    const directNumbers = Array.isArray(booking.assigned_lane_numbers)
+        ? booking.assigned_lane_numbers
+        : Array.isArray(booking.assignedLaneNumbers)
+            ? booking.assignedLaneNumbers
+            : [];
+    const fromIds = (Array.isArray(booking.assigned_resource_ids)
+        ? booking.assigned_resource_ids
+        : Array.isArray(booking.assignedResourceIds)
+            ? booking.assignedResourceIds
+            : [])
+        .concat([booking.assigned_resource_id, booking.resource_id, booking.lane_id, booking.laneId])
+        .map(value => String(value || '').match(/(\d{2})$/)?.[1])
+        .filter(Boolean)
+        .map(Number);
+    const numbers = directNumbers.concat(fromIds)
+        .map(Number)
+        .filter(number => Number.isInteger(number) && number >= 1 && number <= 10);
+    return Array.from(new Set(numbers));
+}
+
+function archeryLanesLabel(booking = {}) {
+    const lanes = archeryLaneNumbersFromBooking(booking);
+    return lanes.length ? lanes.map(number => `Lane ${number}`).join(', ') : archeryResourceLabel(booking.assigned_resource_id || booking.resource_id);
+}
+
+function adminSelectedArcheryOption(name, options = []) {
+    const checked = document.querySelector(`input[name="${name}"]:checked`);
+    return activeArcheryItems(options).find(item => item.id === checked?.value) || activeArcheryItems(options)[0] || null;
+}
+
+function adminArcheryOptionLabel(option = {}) {
+    const labels = {
+        first_time_with_coach: 'First time + coach',
+        experienced_with_coach: 'Experienced + coach',
+        experienced_no_coach: 'Experienced, no coach',
+        rent_full_set: 'Rent equipment',
+        bring_own: 'Bring own equipment'
+    };
+    return labels[option.id || option.option_id] || option.label || '-';
+}
+
+function adminArcheryPricePreview() {
+    const pricing = archeryPricingConfig();
+    const duration = Number(document.getElementById('archery-admin-package')?.value || 60) || 60;
+    const hours = duration / 60;
+    const packageRow = activeArcheryItems(pricing.packages).find(item => item.durationMinutes === duration) || pricing.packages[0] || {};
+    const ability = adminSelectedArcheryOption('archery-admin-ability', pricing.abilityOptions);
+    const equipment = adminSelectedArcheryOption('archery-admin-equipment', pricing.equipmentOptions);
+    const partySize = Math.max(1, Math.min(10, Math.floor(Number(document.getElementById('archery-admin-party-size')?.value || 1) || 1)));
+    const packageAmount = Number(packageRow.price || 0) || 0;
+    const coachAmount = Math.round(Number(ability?.ratePerHour || 0) * hours);
+    const equipmentAmount = Math.round(Number(equipment?.ratePerHour || 0) * hours);
+    const perPersonTotal = packageAmount + coachAmount + equipmentAmount;
+    return {
+        duration,
+        partySize,
+        requiredLaneCount: partySize,
+        packageAmount,
+        coachAmount,
+        equipmentAmount,
+        amountTotal: perPersonTotal * partySize,
+        ability,
+        equipment
+    };
+}
+
+function renderAdminPricePreview() {
+    const el = document.getElementById('archery-admin-price-preview');
+    if (!el) return;
+    const preview = adminArcheryPricePreview();
+    const total = document.getElementById('archery-admin-price-total');
+    if (total) total.textContent = archeryMoney(preview.amountTotal);
+    el.innerHTML = [
+        ['People', String(preview.partySize)],
+        ['Lanes needed', String(preview.requiredLaneCount)],
+        ['Package / person', archeryMoney(preview.packageAmount)],
+        ['Coach / person', `${adminArcheryOptionLabel(preview.ability)} / ${archeryMoney(preview.coachAmount)}`],
+        ['Equipment / person', `${adminArcheryOptionLabel(preview.equipment)} / ${archeryMoney(preview.equipmentAmount)}`]
+    ].map(([label, value]) => `<li><span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong></li>`).join('');
+}
+
+function renderAdminOptionCards(containerId, inputName, options = [], formatter = () => '') {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = activeArcheryItems(options).map((option, index) => `
+        <label class="archery-choice-card">
+            <input type="radio" name="${escapeHTML(inputName)}" value="${escapeHTML(option.id)}" ${index === 0 ? 'checked' : ''} required>
+            <strong>${escapeHTML(adminArcheryOptionLabel(option))}</strong>
+            <small>${escapeHTML(formatter(option))}</small>
+        </label>
+    `).join('');
+    el.querySelectorAll('input[type="radio"]').forEach(input => input.addEventListener('change', renderAdminPricePreview));
+}
+
+function renderAdminWalkinPricingOptions() {
+    const pricing = archeryPricingConfig();
+    const packageSelect = document.getElementById('archery-admin-package');
+    if (packageSelect) {
+        const selected = packageSelect.value;
+        packageSelect.innerHTML = activeArcheryItems(pricing.packages).map(item => (
+            `<option value="${escapeHTML(item.durationMinutes)}">${escapeHTML(item.title || item.durationMinutes + ' min')} - ${escapeHTML(archeryMoney(item.price))}</option>`
+        )).join('');
+        if (selected && Array.from(packageSelect.options).some(option => option.value === selected)) packageSelect.value = selected;
+    }
+    renderAdminOptionCards('archery-admin-ability-options', 'archery-admin-ability', pricing.abilityOptions, option => (
+        `${option.coachRequired ? 'Coach included · ' : ''}${option.ratePerHour ? archeryMoney(option.ratePerHour) + ' / hour' : 'No extra charge'}`
+    ));
+    renderAdminOptionCards('archery-admin-equipment-options', 'archery-admin-equipment', pricing.equipmentOptions, option => (
+        option.ratePerHour ? archeryMoney(option.ratePerHour) + ' / hour' : 'No extra charge'
+    ));
+    adminFillArcheryTimeOptions();
+    renderAdminPricePreview();
+}
+
 function updateArcheryRoleVisibility() {
     const form = document.getElementById('archery-walkin-form');
     if (form) form.hidden = !archeryCan('createWalkIn');
@@ -3922,7 +4211,12 @@ function bindArcheryAdminControls() {
         if (el && !el.value) el.value = date;
     });
     adminFillArcheryTimeOptions();
-    document.getElementById('archery-admin-package')?.addEventListener('change', adminFillArcheryTimeOptions);
+    renderAdminWalkinPricingOptions();
+    document.getElementById('archery-admin-package')?.addEventListener('change', () => {
+        adminFillArcheryTimeOptions();
+        renderAdminPricePreview();
+    });
+    document.getElementById('archery-admin-party-size')?.addEventListener('change', renderAdminPricePreview);
     [
         'archery-admin-board-date',
         'archery-admin-board-status',
@@ -3991,6 +4285,8 @@ function archeryPackageMinutes(booking = {}) {
 }
 
 function archeryLaneNumberFromBooking(booking = {}) {
+    const lanes = archeryLaneNumbersFromBooking(booking);
+    if (lanes.length) return lanes[0];
     const direct = Number(booking.lane_number || 0);
     if (direct) return direct;
     const match = String(booking.assigned_resource_id || booking.resource_id || booking.lane_id || booking.laneId || '').match(/(\d{2})$/);
@@ -4036,7 +4332,7 @@ function archeryBookingMatchesBoardFilters(booking = {}) {
     const status = archeryBookingStatus(booking);
     if (sourceFilter !== 'all' && source !== sourceFilter.toUpperCase()) return false;
     if (paymentFilter !== 'all' && payment !== paymentFilter) return false;
-    if (laneFilter !== 'all' && archeryLaneNumberFromBooking(booking) !== Number(laneFilter)) return false;
+    if (laneFilter !== 'all' && !archeryLaneNumbersFromBooking(booking).includes(Number(laneFilter))) return false;
     if (packageFilter !== 'all' && archeryPackageMinutes(booking) !== Number(packageFilter)) return false;
     if (memberFilter) {
         const haystack = [
@@ -4064,7 +4360,7 @@ function archeryBookingMatchesBoardFilters(booking = {}) {
 
 function archeryBookingAtSlot(bookings, laneNumber, minute) {
     return bookings.find(booking => {
-        if (archeryLaneNumberFromBooking(booking) !== laneNumber) return false;
+        if (!archeryLaneNumbersFromBooking(booking).includes(laneNumber)) return false;
         const start = adminMinutesFromTime(archeryBookingStartTime(booking));
         const end = adminMinutesFromTime(archeryBookingEndTime(booking));
         return start <= minute && minute < end;
@@ -4100,6 +4396,7 @@ function renderArcherySchedule(bookings = []) {
                 <td>
                     <span class="archery-slot-chip ${archerySlotClass(booking)}">
                         <strong>${escapeHTML(booking.customerName || booking.customer_name || booking.name || booking.member_id || 'Member')}</strong>
+                        <small>${escapeHTML(archeryPartySizeFromBooking(booking))} people / ${escapeHTML(archeryLanesLabel(booking))}</small>
                         <small>${escapeHTML(archeryPaymentLabel(booking))} / ${escapeHTML(archeryStatusLabel(booking))}</small>
                     </span>
                 </td>
@@ -4145,6 +4442,18 @@ function archeryActionButtons(booking = {}) {
     return `<div class="archery-action-buttons">${buttons.join('') || '-'}</div>`;
 }
 
+function archeryOptionSummary(booking = {}) {
+    return [
+        booking.ability_label || booking.abilityLabel || '',
+        booking.equipment_label || booking.equipmentLabel || ''
+    ].filter(Boolean).join(' / ');
+}
+
+function archeryAmountLabel(booking = {}) {
+    const amount = Number(booking.amount_total || booking.amountTotal || booking.total_price || booking.amount || 0) || 0;
+    return amount ? archeryMoney(amount) : '-';
+}
+
 function renderArcheryAdmin(bookings = []) {
     bindArcheryAdminControls();
     updateArcheryRoleVisibility();
@@ -4170,9 +4479,9 @@ function renderArcheryAdmin(bookings = []) {
         <tr>
             <td><strong>${escapeHTML(booking.id || booking.firestoreId || '-')}</strong><br><small>${escapeHTML(archeryBookingDate(booking))}</small></td>
             <td>${escapeHTML(booking.customerName || booking.customer_name || booking.name || 'Member')}<br><small>${escapeHTML(booking.member_id || booking.uid || '')}</small></td>
-            <td>Lane ${escapeHTML(archeryLaneNumberFromBooking(booking) || '-')}<br><small>${escapeHTML(archeryBookingStartTime(booking) || '-')} - ${escapeHTML(archeryBookingEndTime(booking) || '-')}</small></td>
+            <td>${escapeHTML(archeryPartySizeFromBooking(booking))} people / ${escapeHTML(archeryLanesLabel(booking))}<br><small>${escapeHTML(archeryBookingStartTime(booking) || '-')} - ${escapeHTML(archeryBookingEndTime(booking) || '-')}</small></td>
             <td>${escapeHTML(String(booking.source || 'ONLINE').replace('_', ' '))}</td>
-            <td>${escapeHTML(archeryPaymentLabel(booking))}</td>
+            <td>${escapeHTML(archeryPaymentLabel(booking))}<br><small>${escapeHTML(archeryAmountLabel(booking))}${archeryOptionSummary(booking) ? ' / ' + escapeHTML(archeryOptionSummary(booking)) : ''}</small></td>
             <td>${escapeHTML(archeryStatusLabel(booking))}</td>
             <td>${archeryActionButtons(booking)}</td>
         </tr>
@@ -4203,7 +4512,8 @@ function renderArcheryPaymentPanel(bookings = []) {
             <div class="archery-panel-row">
                 <div>
                     <strong>${escapeHTML(booking.customerName || booking.customer_name || booking.name || booking.member_id || 'Member')}</strong>
-                    <small>${escapeHTML(archeryBookingStartTime(booking))} / ${escapeHTML(archeryPaymentLabel(booking))} / ${escapeHTML(booking.id || booking.firestoreId || '')}</small>
+                    <small>${escapeHTML(archeryBookingStartTime(booking))} / ${escapeHTML(archeryPartySizeFromBooking(booking))} people / ${escapeHTML(archeryLanesLabel(booking))} / ${escapeHTML(archeryPaymentLabel(booking))} / ${escapeHTML(archeryAmountLabel(booking))} / ${escapeHTML(booking.id || booking.firestoreId || '')}</small>
+                    ${archeryOptionSummary(booking) ? `<small>${escapeHTML(archeryOptionSummary(booking))}</small>` : ''}
                 </div>
                 <div class="archery-action-buttons">
                     ${canRecord ? archeryActionButton('Paid Counter', 'archeryAdminPayment', id, 'recordCounterPayment') : '<span>-</span>'}
@@ -4345,7 +4655,7 @@ function renderAllBookings(bookings = []) {
             <td>${escapeHTML(allBookingServiceLabel(booking))}</td>
             <td>${escapeHTML(booking.customerName || booking.customer_name || booking.name || 'Member')}<br><small>${escapeHTML(booking.member_id || booking.uid || booking.customerUid || '')}</small></td>
             <td>${escapeHTML(isArcheryBooking(booking) ? archeryBookingDate(booking) : (booking.date || '-'))}<br><small>${escapeHTML(isArcheryBooking(booking) ? archeryBookingStartTime(booking) : (booking.startTime || booking.start_time || booking.arrivalTime || '-'))} ${isArcheryBooking(booking) ? '- ' + escapeHTML(archeryBookingEndTime(booking)) : (booking.endTime || booking.end_time ? '- ' + escapeHTML(booking.endTime || booking.end_time) : '')}</small></td>
-            <td>${escapeHTML(isArcheryBooking(booking) ? archeryResourceLabel(booking.assigned_resource_id || booking.resource_id) : (booking.laneLabel || booking.tableNo || booking.tableZone || booking.roomType || '-'))}</td>
+            <td>${escapeHTML(isArcheryBooking(booking) ? `${archeryPartySizeFromBooking(booking)} people / ${archeryLanesLabel(booking)}` : (booking.laneLabel || booking.tableNo || booking.tableZone || booking.roomType || '-'))}</td>
             <td>${escapeHTML(isArcheryBooking(booking) ? archeryPaymentLabel(booking) : (booking.paymentStatus || booking.payment_status || '-'))}</td>
             <td>${escapeHTML(isArcheryBooking(booking) ? archeryStatusLabel(booking) : (booking.status || '-'))}</td>
         </tr>
@@ -4363,6 +4673,7 @@ async function createArcheryWalkInFromAdmin(event) {
     if (submit) submit.disabled = true;
     try {
         const duration = Number(document.getElementById('archery-admin-package')?.value || 60) || 60;
+        const preview = adminArcheryPricePreview();
         const result = await callAdminFunction('createWalkInArcheryBooking', archeryMutationPayload('createWalkInArcheryBooking', '', {
             member_id: document.getElementById('archery-admin-member-id')?.value.trim() || '',
             customer_name: document.getElementById('archery-admin-customer-name')?.value.trim() || '',
@@ -4371,13 +4682,17 @@ async function createArcheryWalkInFromAdmin(event) {
             start_time: document.getElementById('archery-admin-start')?.value || '10:00',
             duration_minutes: duration,
             package_code: `ARCHERY_${duration}`,
+            party_size: preview.partySize,
+            ability_option_id: preview.ability?.id || '',
+            equipment_option_id: preview.equipment?.id || '',
             payment_status: 'UNPAID',
             note: document.getElementById('archery-admin-note')?.value.trim() || ''
         }));
-        archerySetStatus('Created booking ' + (result.booking_id || '') + ' / ' + archeryResourceLabel(result.assigned_resource_id), 'success');
+        archerySetStatus('Created booking ' + (result.booking_id || '') + ' / ' + (result.assigned_lane_numbers?.length ? result.assigned_lane_numbers.map(number => `Lane ${number}`).join(', ') : archeryResourceLabel(result.assigned_resource_id)), 'success');
         event.target.reset();
         document.getElementById('archery-admin-date').value = adminTodayISO();
         adminFillArcheryTimeOptions();
+        renderAdminWalkinPricingOptions();
         refreshArcheryAdmin();
     } catch (error) {
         archerySetStatus(error.message || safeAdminError('Create walk-in failed'), 'error');
@@ -4442,6 +4757,11 @@ window.archeryAdminExtend = async (bookingId) => {
 };
 
 window.archeryAdminMove = async (bookingId) => {
+    const booking = archeryBookingById(bookingId);
+    if (archeryPartySizeFromBooking(booking) > 1 || archeryLaneNumbersFromBooking(booking).length > 1) {
+        alert('Move lane is not supported for bookings that use multiple lanes.');
+        return;
+    }
     const lane = prompt('New lane number 1-10');
     if (!lane) return;
     if (!archeryCan('moveLane')) {

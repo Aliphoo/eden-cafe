@@ -19,6 +19,7 @@ const {
   readSlotLocksOutsideTransaction,
   isActiveLock,
 } = require('../shared/locks');
+const { normalizePartySize } = require('./pricing');
 
 async function countAvailableLanes(db, branchId, slotKeys) {
   const lanes = await loadLaneResources(db, branchId);
@@ -31,7 +32,7 @@ async function countAvailableLanes(db, branchId, slotKeys) {
   return { availableCount, laneCount: lanes.length };
 }
 
-async function suggestedTimes(db, branchId, bookingDate, durationMinutes, requestedStartTime = '') {
+async function suggestedTimes(db, branchId, bookingDate, durationMinutes, requestedStartTime = '', requiredCount = 1) {
   const suggestions = [];
   for (let minute = OPEN_MINUTES; minute + durationMinutes <= CLOSE_MINUTES; minute += SLOT_MINUTES) {
     const startTime = timeFromMinutes(minute);
@@ -43,7 +44,7 @@ async function suggestedTimes(db, branchId, bookingDate, durationMinutes, reques
       package_code: normalizePackageCode(durationMinutes),
     });
     const { availableCount } = await countAvailableLanes(db, branchId, generateSlotKeys(timing));
-    if (availableCount > 0) suggestions.push(startTime);
+    if (availableCount >= requiredCount) suggestions.push(startTime);
     if (suggestions.length >= 8) break;
   }
   return suggestions;
@@ -53,6 +54,8 @@ const getArcheryAvailability = httpFunction(async ({ db, data }) => {
   const branchId = normalizeBranchId(data.branch_id);
   const bookingDate = normalizeDate(data.booking_date || data.date);
   const durationMinutes = normalizeDuration(data.duration_minutes || data.durationMinutes || data.package_minutes || 60);
+  const partySize = normalizePartySize(data);
+  const requiredLaneCount = partySize;
   const timing = normalizeTiming({
     booking_date: bookingDate,
     start_time: data.start_time || data.startTime || data.time,
@@ -61,6 +64,7 @@ const getArcheryAvailability = httpFunction(async ({ db, data }) => {
   });
   const slotKeys = generateSlotKeys(timing);
   const { availableCount, laneCount } = await countAvailableLanes(db, branchId, slotKeys);
+  const available = availableCount >= requiredLaneCount;
 
   return {
     service_type: SERVICE_TYPE,
@@ -70,13 +74,15 @@ const getArcheryAvailability = httpFunction(async ({ db, data }) => {
     start_time: timing.start_time,
     end_time: timing.end_time,
     duration_minutes: timing.duration_minutes,
-    available: availableCount > 0,
+    party_size: partySize,
+    required_lane_count: requiredLaneCount,
+    available,
     available_lane_count: availableCount,
     total_lane_count: laneCount,
-    suggested_start_times: availableCount > 0
+    suggested_start_times: available
       ? []
-      : await suggestedTimes(db, branchId, timing.booking_date, timing.duration_minutes, timing.start_time),
-    reason: availableCount > 0 ? '' : 'NO_LANE_AVAILABLE',
+      : await suggestedTimes(db, branchId, timing.booking_date, timing.duration_minutes, timing.start_time, requiredLaneCount),
+    reason: available ? '' : 'NO_LANE_AVAILABLE',
   };
 }, {
   name: 'getArcheryAvailability',

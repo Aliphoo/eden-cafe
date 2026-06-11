@@ -37,6 +37,24 @@ function assertBookingStatus(booking, allowed) {
   return status;
 }
 
+function bookingResourceIds(booking = {}) {
+  const fromArray = Array.isArray(booking.assigned_resource_ids)
+    ? booking.assigned_resource_ids
+    : Array.isArray(booking.assignedResourceIds)
+      ? booking.assignedResourceIds
+      : [];
+  const ids = fromArray
+    .concat([booking.assigned_resource_id, booking.resource_id])
+    .map(value => cleanString(value, 180))
+    .filter(Boolean);
+  return Array.from(new Set(ids));
+}
+
+function bookingRequiredLaneCount(booking = {}) {
+  const count = Number(booking.required_lane_count || booking.requiredLaneCount || booking.party_size || booking.partySize || 1) || 1;
+  return Math.max(1, Math.floor(count));
+}
+
 function baseAdminPayload(data, actor) {
   return {
     branchId: normalizeBranchId(data.branch_id),
@@ -91,6 +109,7 @@ const adminCheckInBooking = httpFunction(async ({ db, data, actor, requestId }) 
       branch_id: payload.branchId,
       booking_id: payload.bookingId,
       resource_id: booking.assigned_resource_id || booking.resource_id,
+      resource_ids: bookingResourceIds(booking),
       member_id: booking.member_id,
       status: 'CHECKED_IN',
       checked_in_by: actor.uid,
@@ -171,6 +190,9 @@ const adminMoveBookingLane = httpFunction(async ({ db, data, actor, requestId })
     if (!targetResourceId) throw apiError('RESOURCE_REQUIRED', 400, 'target_resource_id is required');
     const { ref, booking } = await readBookingOrThrow(transaction, db, payload.branchId, payload.bookingId);
     assertBookingStatus(booking, ['CONFIRMED', 'CHECKED_IN']);
+    if (bookingRequiredLaneCount(booking) > 1 || bookingResourceIds(booking).length > 1) {
+      throw apiError('MULTI_LANE_MOVE_NOT_SUPPORTED', 409, 'Move is not supported for bookings that use multiple lanes');
+    }
     const timing = timingFromBooking(booking);
     const slotKeys = generateSlotKeys(timing);
     const lanes = await loadLaneResources(db, payload.branchId, transaction);
@@ -194,6 +216,7 @@ const adminMoveBookingLane = httpFunction(async ({ db, data, actor, requestId })
     transaction.update(ref, {
       assigned_resource_id: targetResourceId,
       resource_id: targetResourceId,
+      assigned_resource_ids: [targetResourceId],
       moved_at: now,
       moved_by: actor.uid,
       updated_at: now,
@@ -237,7 +260,8 @@ const adminExtendBooking = httpFunction(async ({ db, data, actor, requestId }) =
     ) {
       throw apiError('OUTSIDE_OPERATING_HOURS', 400, 'Extension is outside operating hours');
     }
-    const resourceId = cleanString(booking.assigned_resource_id || booking.resource_id, 180);
+    const resourceIds = bookingResourceIds(booking);
+    if (!resourceIds.length) throw apiError('RESOURCE_REQUIRED', 400, 'Booking has no assigned resource');
     const extraTiming = {
       booking_date: timing.booking_date,
       start_time: timing.end_time,
@@ -248,13 +272,17 @@ const adminExtendBooking = httpFunction(async ({ db, data, actor, requestId }) =
       package_code: `EXTEND_${newEndMinutes - timing.end_minutes}`,
     };
     const extraSlotKeys = generateSlotKeys(extraTiming);
-    const extraLocks = await assertResourceAvailable(transaction, db, payload.branchId, resourceId, extraSlotKeys, payload.bookingId);
+    const extraLocksByLane = [];
+    for (const resourceId of resourceIds) {
+      const locks = await assertResourceAvailable(transaction, db, payload.branchId, resourceId, extraSlotKeys, payload.bookingId);
+      extraLocksByLane.push(...locks.map(lock => ({ ...lock, resource_id: resourceId })));
+    }
     const lockStatus = cleanString(booking.booking_status || booking.status, 40).toUpperCase() === 'CHECKED_IN' ? 'CHECKED_IN' : 'CONFIRMED';
-    writeLocks(transaction, extraLocks, {
+    writeLocks(transaction, extraLocksByLane, {
       branchId: payload.branchId,
       bookingId: payload.bookingId,
       memberId: booking.member_id,
-      resourceId,
+      resourceId: resourceIds[0],
       status: lockStatus,
       lockType: 'BOOKING_EXTENSION',
     });
@@ -279,7 +307,8 @@ const adminExtendBooking = httpFunction(async ({ db, data, actor, requestId }) =
       quantity: 1,
       unit_price: Number(data.extra_amount || 0) || 0,
       total_price: Number(data.extra_amount || 0) || 0,
-      resource_id: resourceId,
+      resource_id: resourceIds[0],
+      resource_ids: resourceIds,
       created_at: now,
       updated_at: now,
     }, { merge: true });
