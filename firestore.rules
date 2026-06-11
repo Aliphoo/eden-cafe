@@ -529,6 +529,27 @@ service cloud.firestore {
           && canReadOwnerManagerCashierBranch(resource.data.branch_id)
         );
     }
+    function canReadWebPaymentBranch(branchId) {
+      return hasAnyRole(['OWNER', 'MANAGER', 'ARCHERY_STAFF']) && hasBranch(branchId);
+    }
+    function canReadResourceBranchAsWebPaymentStaff() {
+      return isOwner()
+        || (
+          resource.data.keys().hasAny(['branch_id'])
+          && canReadWebPaymentBranch(resource.data.branch_id)
+        );
+    }
+    function paymentSensitiveOrderFields() {
+      return [
+        'paymentStatus', 'payment_status', 'payment_id', 'payment_provider',
+        'payment_env', 'payment_environment', 'provider_ref', 'paidAt', 'paid_at',
+        'payment_updated_at', 'receipt_id', 'refund_id', 'refund_request_id'
+      ];
+    }
+    function isAdminOrderNonPaymentUpdate() {
+      return hasAdminPermission('orders')
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(paymentSensitiveOrderFields());
+    }
 
     // Publicly readable collections (content)
     match /shop_products/{docId} {
@@ -722,10 +743,10 @@ service cloud.firestore {
         && request.resource.data.items is list
         && request.resource.data.items.size() > 0
         && request.resource.data.items.size() <= 50
-        && (!request.resource.data.keys().hasAny(['status']) || request.resource.data.status in ['pending', 'processing', 'completed', 'cancelled'])
+        && (!request.resource.data.keys().hasAny(['status']) || request.resource.data.status == 'pending')
         && (!request.resource.data.keys().hasAny(['source']) || request.resource.data.source == 'online')
         && (!request.resource.data.keys().hasAny(['orderType']) || request.resource.data.orderType in ['online', 'shop'])
-        && (!request.resource.data.keys().hasAny(['paymentStatus']) || request.resource.data.paymentStatus in ['pending', 'paid', 'failed', 'refunded'])
+        && (!request.resource.data.keys().hasAny(['paymentStatus']) || request.resource.data.paymentStatus == 'pending')
         && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'thai_chuay_thai_plus', 'qr', 'card', 'other'])
         && (!request.resource.data.keys().hasAny(['paymentLabel']) || (request.resource.data.paymentLabel is string && request.resource.data.paymentLabel.size() <= 80))
         && (!request.resource.data.keys().hasAny(['fulfillmentMethod']) || request.resource.data.fulfillmentMethod in ['delivery', 'pickup'])
@@ -736,7 +757,7 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['totalAmount']) || (request.resource.data.totalAmount is number && request.resource.data.totalAmount >= 0 && request.resource.data.totalAmount <= 1000000))
         && request.resource.data.timestamp == request.time);
       allow read: if hasAdminPermission('orders') || hasAdminPermission('pos') || ownsResource();
-      allow update: if hasAdminPermission('orders') || isPosAdminOrderWrite() || isValidPosOrderVoidUpdate() || isValidPosOpenBillUpdate();
+      allow update: if isAdminOrderNonPaymentUpdate() || isPosAdminOrderWrite() || isValidPosOrderVoidUpdate() || isValidPosOpenBillUpdate();
       allow delete: if hasAdminPermission('orders');
     }
     match /bookings/{docId} {
@@ -767,12 +788,28 @@ service cloud.firestore {
       allow read: if ownsResource() || canReadResourceBranchAsOwnerManagerCashier();
       allow create, update, delete: if denyWrite();
     }
+    match /payment_items/{docId} {
+      allow read: if ownsResource() || canReadResourceBranchAsWebPaymentStaff();
+      allow create, update, delete: if denyWrite();
+    }
     match /payment_webhook_events/{docId} {
       allow read: if canReadResourceBranchAsOwnerManager();
       allow create, update, delete: if denyWrite();
     }
     match /payment_reconciliation_queue/{docId} {
       allow read: if canReadResourceBranchAsOwnerManager();
+      allow create, update, delete: if denyWrite();
+    }
+    match /refund_requests/{docId} {
+      allow read: if ownsResource() || canReadResourceBranchAsWebPaymentStaff();
+      allow create, update, delete: if denyWrite();
+    }
+    match /refunds/{docId} {
+      allow read: if ownsResource() || canReadResourceBranchAsWebPaymentStaff();
+      allow create, update, delete: if denyWrite();
+    }
+    match /receipts/{docId} {
+      allow read: if ownsResource() || canReadResourceBranchAsWebPaymentStaff();
       allow create, update, delete: if denyWrite();
     }
     match /reward_points/{docId} {

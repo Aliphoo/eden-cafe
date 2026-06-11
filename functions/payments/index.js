@@ -9,6 +9,7 @@ const {
   normalizeBranchId,
 } = require('../shared/time');
 const beamArcheryPayments = require('./beamArchery');
+const webPaymentCore = require('./webPaymentCore');
 
 function paymentId(prefix, value) {
   return `${prefix}_${sha256(value).slice(0, 40)}`;
@@ -195,4 +196,13 @@ module.exports = {
   beamArcheryPaymentWebhook: beamArcheryPayments.beamArcheryPaymentWebhook,
   getArcheryPaymentStatus: beamArcheryPayments.getArcheryPaymentStatus,
   reconcileBeamLatePayment: beamArcheryPayments.reconcileBeamLatePayment,
+  createPaymentIntent: webPaymentCore.createPaymentIntent,
+  getPaymentStatus: webPaymentCore.getPaymentStatus,
+  listPaymentsForSource: webPaymentCore.listPaymentsForSource,
+  cancelPendingPayment: webPaymentCore.cancelPendingPayment,
+  requestRefund: webPaymentCore.requestRefund,
+  approveRefund: webPaymentCore.approveRefund,
+  reconcileLatePayment: webPaymentCore.reconcileLatePayment,
+  issueWebReceipt: webPaymentCore.issueWebReceipt,
+  paymentWebhook: webPaymentCore.paymentWebhook,
 };
