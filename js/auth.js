@@ -52,6 +52,18 @@ window.EdenApi = {
     },
     tableAvailability({ date, time }) {
         return edenApiRequest('/getTableAvailability', { query: { date, time } });
+    },
+    getArcheryAvailability(params = {}) {
+        return edenApiRequest('/getArcheryAvailability', { method: 'POST', body: params });
+    },
+    createArcheryHold(bookingData) {
+        return edenApiRequest('/createArcheryHold', { method: 'POST', body: bookingData });
+    },
+    createBeamArcheryPayment(paymentData) {
+        return edenApiRequest('/createBeamArcheryPayment', { method: 'POST', body: paymentData });
+    },
+    getArcheryPaymentStatus(params = {}) {
+        return edenApiRequest('/getArcheryPaymentStatus', { method: 'POST', body: params });
     }
 };
 
