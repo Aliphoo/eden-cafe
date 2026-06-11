@@ -16,8 +16,12 @@ let latestAvailability = null;
 let holdTimer = null;
 let paymentPollTimer = null;
 let busyAction = '';
+let isCheckingAvailability = false;
 let holdIdempotencyKey = '';
 let beamPaymentIdempotencyKey = '';
+
+const AVAILABILITY_BUTTON_TEXT = 'ตรวจสอบเวลา';
+const AVAILABILITY_LOADING_TEXT = 'กำลังตรวจสอบ...';
 
 function $(id) {
     return document.getElementById(id);
@@ -84,6 +88,7 @@ function setStatus(id, message, type = '') {
     el.textContent = message || '';
     el.classList.toggle('error', type === 'error');
     el.classList.toggle('success', type === 'success');
+    el.classList.toggle('loading', type === 'loading');
 }
 
 function errorCode(error) {
@@ -137,11 +142,28 @@ function setLoading(action, isLoading) {
     });
 }
 
+function setAvailabilityControlsChecking(isChecking) {
+    isCheckingAvailability = isChecking;
+    const checkBtn = $('archery-check-btn');
+    if (checkBtn) {
+        checkBtn.disabled = isChecking;
+        checkBtn.classList.toggle('is-loading', isChecking);
+        checkBtn.setAttribute('aria-busy', isChecking ? 'true' : 'false');
+        checkBtn.innerHTML = isChecking
+            ? '<span class="archery-btn-spinner" aria-hidden="true"></span><span>' + AVAILABILITY_LOADING_TEXT + '</span>'
+            : AVAILABILITY_BUTTON_TEXT;
+    }
+    ['archery-date', 'archery-start', 'archery-package'].forEach(id => {
+        const field = $(id);
+        if (field) field.disabled = isChecking;
+    });
+}
+
 function restoreButtonStates() {
     const checkBtn = $('archery-check-btn');
     const holdBtn = $('archery-hold-btn');
     const confirmBtn = $('archery-confirm-btn');
-    if (checkBtn) checkBtn.disabled = false;
+    if (checkBtn) checkBtn.disabled = isCheckingAvailability;
     if (holdBtn) holdBtn.disabled = !currentUser || !latestAvailability?.available || !!currentHold;
     if (confirmBtn) {
         const paymentStatus = String(currentHold?.payment_status || '').toUpperCase();
@@ -264,14 +286,19 @@ function renderSuggestions(times = []) {
 
 function renderAvailability(result) {
     const available = result?.available === true;
-    const count = Number(result?.available_lane_count || 0);
     if (available) {
-        const countText = count > 0 ? ` มีช่องว่าง ${count} ช่อง` : '';
-        setStatus('archery-status', `เวลานี้ยังจองได้${countText}`, 'success');
+        setStatus('archery-status', 'เวลานี้ยังว่าง สามารถยืนยันเวลาได้', 'success');
     } else {
-        setStatus('archery-status', userMessage({ code: result?.reason || 'NO_LANE_AVAILABLE' }), 'error');
+        setStatus('archery-status', 'เวลานี้ถูกจองแล้ว กรุณาเลือกเวลาอื่น', 'error');
     }
     renderSuggestions(result?.suggested_start_times || []);
+    restoreButtonStates();
+}
+
+function resetAvailabilityState() {
+    latestAvailability = null;
+    renderSuggestions([]);
+    setStatus('archery-status', '');
     restoreButtonStates();
 }
 
@@ -499,23 +526,27 @@ async function fillMemberState(user) {
 
 async function refreshAvailability(event) {
     if (event) event.preventDefault();
-    if (busyAction) return;
+    if (isCheckingAvailability || busyAction) return;
     const api = await waitForApi();
     if (!api?.getArcheryAvailability) {
-        setStatus('archery-status', 'ระบบจองยังไม่พร้อม กรุณารีเฟรชหน้า', 'error');
+        setStatus('archery-status', 'ระบบยังไม่พร้อม กรุณาลองใหม่อีกครั้ง', 'error');
         return;
     }
     try {
         setLoading('availability', true);
-        setStatus('archery-status', 'กำลังตรวจสอบเวลาว่าง...');
+        setAvailabilityControlsChecking(true);
+        latestAvailability = null;
+        restoreButtonStates();
+        setStatus('archery-status', 'กำลังตรวจสอบเวลาว่าง...', 'loading');
         latestAvailability = await api.getArcheryAvailability(selectionPayload());
         renderAvailability(latestAvailability);
         renderDraftSummary();
     } catch (error) {
         latestAvailability = null;
         renderSuggestions([]);
-        setStatus('archery-status', userMessage(error), 'error');
+        setStatus('archery-status', 'ระบบยังไม่พร้อม กรุณาลองใหม่อีกครั้ง', 'error');
     } finally {
+        setAvailabilityControlsChecking(false);
         setLoading('availability', false);
         restoreButtonStates();
     }
@@ -530,11 +561,9 @@ async function createHold(event) {
         return;
     }
     if (!latestAvailability?.available) {
-        await refreshAvailability();
-        if (!latestAvailability?.available) {
-            restoreButtonStates();
-            return;
-        }
+        setStatus('archery-status', 'กรุณาตรวจสอบเวลาว่างก่อนยืนยันเวลา', 'error');
+        restoreButtonStates();
+        return;
     }
     setLoading('hold', true);
     const api = await waitForApi();
@@ -641,7 +670,7 @@ function initBookingPage() {
         if (!el) return;
         el.addEventListener('change', () => {
             if (id === 'archery-package') fillTimeOptions();
-            latestAvailability = null;
+            resetAvailabilityState();
             resetHoldState();
             renderDraftSummary();
         });

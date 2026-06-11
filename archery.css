@@ -159,6 +159,33 @@
     color: #137234;
 }
 
+.archery-status.loading {
+    color: #577064;
+}
+
+.archery-action-row .btn.is-loading {
+    align-items: center;
+    display: inline-flex;
+    gap: 8px;
+    justify-content: center;
+}
+
+.archery-btn-spinner {
+    animation: archery-spin 0.8s linear infinite;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    display: inline-block;
+    height: 14px;
+    width: 14px;
+}
+
+@keyframes archery-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 .archery-suggestions {
     margin: 8px 0 14px;
 }
