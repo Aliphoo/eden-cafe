@@ -4,6 +4,7 @@ import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmail
 import { collection, getDocs, doc, setDoc, addDoc, query, orderBy, onSnapshot, getDoc, serverTimestamp, runTransaction, where, limit, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
+const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net';
 const ADMIN_COLLECTION = 'admin_users';
 const ADMIN_PERMISSION_LABELS = {
     dashboard: 'ภาพรวมระบบ', members: 'จัดการสมาชิก', pos: 'POS หน้าร้าน', orders: 'ออเดอร์สินค้า',
@@ -1610,6 +1611,125 @@ function currentPosCustomerPayload() {
     };
 }
 
+function posLoyaltyIdempotencyKey(order = {}) {
+    return posLimitString(order.firestoreId || order.receiptNo || order.id || '', 120);
+}
+
+function posInitialLoyaltyFields({ isTestOrder = false, paymentStatus = 'paid', customerPayload = {}, receiptNo = '' } = {}) {
+    const customerUid = posLimitString(customerPayload.customerUid, 120);
+    const idempotencyKey = posLimitString(receiptNo, 120);
+    if (isTestOrder) {
+        return {
+            loyaltySyncStatus: 'skipped',
+            loyaltyError: 'test-order',
+            loyaltyIdempotencyKey: idempotencyKey
+        };
+    }
+    if (paymentStatus !== 'paid') {
+        return {
+            loyaltySyncStatus: 'skipped',
+            loyaltyError: 'pending-payment',
+            loyaltyIdempotencyKey: idempotencyKey
+        };
+    }
+    if (!customerUid) {
+        return {
+            loyaltySyncStatus: 'skipped',
+            loyaltyError: 'no-customer',
+            loyaltyIdempotencyKey: idempotencyKey
+        };
+    }
+    return {
+        loyaltySyncStatus: 'pending',
+        loyaltyError: '',
+        loyaltyIdempotencyKey: idempotencyKey
+    };
+}
+
+async function callPosCloudFunction(functionName, body = {}) {
+    const user = auth.currentUser;
+    if (!user || typeof user.getIdToken !== 'function') throw new Error('POS admin sign-in required');
+    const response = await fetch(`${FUNCTIONS_BASE_URL}/${functionName}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + await user.getIdToken()
+        },
+        body: JSON.stringify(body)
+    });
+    let data = {};
+    try {
+        data = await response.json();
+    } catch (_) {
+        data = {};
+    }
+    if (!response.ok) throw new Error(data.error || `${functionName} failed`);
+    return data;
+}
+
+async function updatePosOrderLoyaltyStatus(order, payload = {}) {
+    const firestoreId = posLimitString(order?.firestoreId, 180);
+    if (!firestoreId) return;
+    await updateDoc(doc(db, 'orders', firestoreId), {
+        ...payload,
+        updatedAt: serverTimestamp(),
+        updatedBy: auth.currentUser?.uid || ''
+    });
+}
+
+async function syncPosLoyaltySale(order = {}) {
+    if (!order.firestoreId) return null;
+    const customerUid = posLimitString(order.customerUid, 120);
+    const idempotencyKey = posLoyaltyIdempotencyKey(order);
+    if (order.isTestOrder === true || order.softLaunch === true) {
+        await updatePosOrderLoyaltyStatus(order, {
+            loyaltySyncStatus: 'skipped',
+            loyaltyError: 'test-order',
+            loyaltyIdempotencyKey: idempotencyKey,
+            loyaltySyncedAt: serverTimestamp()
+        }).catch(error => console.warn('Unable to mark test POS loyalty skip:', error));
+        return { status: 'skipped', reason: 'test-order' };
+    }
+    if (!customerUid) {
+        await updatePosOrderLoyaltyStatus(order, {
+            loyaltySyncStatus: 'skipped',
+            loyaltyError: 'no-customer',
+            loyaltyIdempotencyKey: idempotencyKey,
+            loyaltySyncedAt: serverTimestamp()
+        }).catch(error => console.warn('Unable to mark POS loyalty skip:', error));
+        return { status: 'skipped', reason: 'no-customer' };
+    }
+
+    try {
+        await updatePosOrderLoyaltyStatus(order, {
+            loyaltySyncStatus: 'syncing',
+            loyaltyError: '',
+            loyaltyIdempotencyKey: idempotencyKey
+        }).catch(error => console.warn('Unable to mark POS loyalty syncing:', error));
+        const result = await callPosCloudFunction('applyPosLoyaltySale', {
+            orderId: order.firestoreId,
+            receiptNo: order.receiptNo || order.id || order.firestoreId,
+            customerUid,
+            idempotencyKey,
+            netAmount: safeNumber(order.totalAmount ?? order.total),
+            normalDiscount: safeNumber(order.discount),
+            subtotal: safeNumber(order.subtotal),
+            redeemedPoints: safeNumber(order.redeemedPoints),
+            items: Array.isArray(order.items) ? order.items : []
+        });
+        return { status: 'synced', ...(result.loyalty || {}) };
+    } catch (error) {
+        console.warn('POS loyalty sync failed:', error);
+        await updatePosOrderLoyaltyStatus(order, {
+            loyaltySyncStatus: 'failed',
+            loyaltyError: posLimitString(error.message || 'Unable to apply loyalty sale.', 500),
+            loyaltyIdempotencyKey: idempotencyKey,
+            loyaltySyncedAt: serverTimestamp()
+        }).catch(updateError => console.warn('Unable to mark POS loyalty failure:', updateError));
+        return { status: 'failed', error: error.message || 'Unable to apply loyalty sale.' };
+    }
+}
+
 function buildPosCartItemFromOrderItem(item = {}, index = 0) {
     const productId = posLimitString(item.productId || item.id || ('open-bill-item-' + index), 120);
     const variantId = posVariantKey(item.variantId || item.variantName || 'base');
@@ -2182,6 +2302,7 @@ function buildPosOrderFields(user, options = {}) {
         : (totals.paymentMethod === 'cash' ? posRound(Math.max(paidAmount - totals.total, 0)) : 0);
     const isTestOrder = !!document.getElementById('pos-soft-launch-mode')?.checked;
     const customerPayload = currentPosCustomerPayload();
+    const loyaltyFields = posInitialLoyaltyFields({ isTestOrder, paymentStatus, customerPayload, receiptNo });
 
     return {
         totals,
@@ -2217,6 +2338,7 @@ function buildPosOrderFields(user, options = {}) {
             cashierEmail: posLimitString(user.email || '', 180),
             isTestOrder,
             softLaunch: isTestOrder,
+            ...loyaltyFields,
             billStatus: options.billStatus || (pendingPayment ? 'open' : 'paid'),
             isOpenBill: options.isOpenBill ?? pendingPayment,
             orderMode: options.orderMode || (pendingPayment ? 'open_bill' : 'pay_now')
@@ -2808,6 +2930,24 @@ window.checkoutPosOrder = async () => {
         }
         if (printBtn) printBtn.style.display = 'block';
         await autoPrintPosReceipt(posLastReceipt).catch(error => console.warn('Unable to auto print POS receipt:', error));
+        const loyaltyResult = await syncPosLoyaltySale(posLastReceipt);
+        if (loyaltyResult?.status === 'synced') {
+            posLastReceipt = {
+                ...posLastReceipt,
+                loyalty: loyaltyResult,
+                earnedPoints: safeNumber(loyaltyResult.earnedPoints),
+                redeemedPoints: safeNumber(loyaltyResult.redeemedPoints),
+                loyaltyDiscount: safeNumber(loyaltyResult.loyaltyDiscount),
+                loyaltySyncStatus: 'synced',
+                loyaltyError: ''
+            };
+        } else if (loyaltyResult?.status) {
+            posLastReceipt = {
+                ...posLastReceipt,
+                loyaltySyncStatus: loyaltyResult.status,
+                loyaltyError: loyaltyResult.reason || loyaltyResult.error || ''
+            };
+        }
         posCart = [];
         setPosActiveBill(null);
         persistPosCart();

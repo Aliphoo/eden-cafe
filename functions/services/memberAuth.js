@@ -398,11 +398,22 @@ function createMemberAuthHandlers({
     return snap.exists ? snap.data() || {} : {};
   }
 
-  async function loadMemberByUid(uid) {
+  async function loadMemberByUid(uid, depth = 0) {
     const safeUid = cleanString(uid, 160);
     if (!safeUid) return null;
     const snap = await db.collection('users').doc(safeUid).get();
-    return snap.exists ? { uid: snap.id, data: snap.data() || {} } : null;
+    if (snap.exists) {
+      const data = snap.data() || {};
+      const mergedInto = cleanString(data.mergedInto || data.primaryUid || '', 160);
+      if (mergedInto && mergedInto !== safeUid && depth < 3) return loadMemberByUid(mergedInto, depth + 1);
+      return { uid: snap.id, data };
+    }
+
+    const redirectSnap = await db.collection('member_merge_redirects').doc(safeUid).get();
+    const redirect = redirectSnap.exists ? redirectSnap.data() || {} : {};
+    const primaryUid = cleanString(redirect.primaryUid || redirect.mergedInto || '', 160);
+    if (primaryUid && primaryUid !== safeUid && depth < 3) return loadMemberByUid(primaryUid, depth + 1);
+    return null;
   }
 
   async function findCanonicalMemberForGoogle(decoded = {}) {
