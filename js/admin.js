@@ -306,6 +306,19 @@ async function hasOwnerTokenClaim(user) {
     }
 }
 
+async function hasOwnerUserProfile(user) {
+    if (!user) return false;
+    try {
+        const snap = await getDoc(doc(db, 'users', user.uid));
+        if (!snap.exists()) return false;
+        const profile = snap.data() || {};
+        return profile.is_owner === true || String(profile.role || '').toUpperCase() === 'OWNER';
+    } catch (error) {
+        console.warn('Unable to read owner user profile:', error);
+        return false;
+    }
+}
+
 function buildBootstrapOwnerAccess(user, source = 'bootstrap') {
     return {
         uid: user.uid,
@@ -325,6 +338,7 @@ async function loadAdminAccess(user) {
     if (!user) return null;
     if (isAdminUser(user)) return buildBootstrapOwnerAccess(user);
     if (await hasOwnerTokenClaim(user)) return buildBootstrapOwnerAccess(user, 'owner_claim');
+    if (await hasOwnerUserProfile(user)) return buildBootstrapOwnerAccess(user, 'owner_profile');
 
     let snap;
     try {
@@ -363,7 +377,7 @@ async function loadAdminAccess(user) {
 }
 
 async function ensureBootstrapOwnerRecord(user) {
-    if (!user || (!isAdminUser(user) && !(await hasOwnerTokenClaim(user)))) return;
+    if (!user || (!isAdminUser(user) && !(await hasOwnerTokenClaim(user)) && !(await hasOwnerUserProfile(user)))) return;
     try {
         await setDoc(doc(db, ADMIN_COLLECTION, user.uid), {
             uid: user.uid,

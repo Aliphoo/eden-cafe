@@ -6,25 +6,47 @@ service cloud.firestore {
     }
     function isAdmin() {
       return isSignedIn()
-        && request.auth.token.email is string
         && (
-          request.auth.token.email.matches('(?i)^(admin@edencafe\\.com|phoo1236@gmail\\.com|sonsawan\\.1231@gmail\\.com)$')
+          (
+            request.auth.token.email is string
+            && request.auth.token.email.matches('(?i)^(admin@edencafe\\.com|phoo1236@gmail\\.com|sonsawan\\.1231@gmail\\.com)$')
+          )
+          || (request.auth.token.keys().hasAny(['role']) && request.auth.token.role == 'OWNER')
+          || (request.auth.token.keys().hasAny(['is_owner']) && request.auth.token.is_owner == true)
           || (
             exists(/databases/$(database)/documents/admin_users/$(request.auth.uid))
             && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.status == 'active'
             && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role in ['owner', 'head_manager', 'manager']
           )
+          || (
+            exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && (
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'OWNER'
+              || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.is_owner == true
+            )
+          )
         );
     }
     function isOwner() {
       return isSignedIn()
-        && request.auth.token.email is string
         && (
-          request.auth.token.email.matches('(?i)^(admin@edencafe\\.com|phoo1236@gmail\\.com|sonsawan\\.1231@gmail\\.com)$')
+          (
+            request.auth.token.email is string
+            && request.auth.token.email.matches('(?i)^(admin@edencafe\\.com|phoo1236@gmail\\.com|sonsawan\\.1231@gmail\\.com)$')
+          )
+          || (request.auth.token.keys().hasAny(['role']) && request.auth.token.role == 'OWNER')
+          || (request.auth.token.keys().hasAny(['is_owner']) && request.auth.token.is_owner == true)
           || (
             exists(/databases/$(database)/documents/admin_users/$(request.auth.uid))
             && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.status == 'active'
             && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'owner'
+          )
+          || (
+            exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && (
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'OWNER'
+              || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.is_owner == true
+            )
           )
         );
     }
