@@ -39,7 +39,10 @@ service cloud.firestore {
           || (
             exists(/databases/$(database)/documents/admin_users/$(request.auth.uid))
             && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.status == 'active'
-            && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'owner'
+            && (
+              get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'owner'
+              || get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.permissions.adminAccess == true
+            )
           )
           || (
             exists(/databases/$(database)/documents/users/$(request.auth.uid))

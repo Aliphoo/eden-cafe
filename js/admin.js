@@ -174,7 +174,8 @@ const ADMIN_PERMISSION_LABELS = {
     faqs: 'FAQ',
     promptpay: '\u0e08\u0e31\u0e14\u0e01\u0e32\u0e23\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e40\u0e1e\u0e22\u0e4c',
     marketing: 'Marketing Tools',
-    footer: 'Footer'
+    footer: 'Footer',
+    adminAccess: 'Admin Access'
 };
 const ADMIN_PERMISSION_HELP = {
     pos: 'อนุญาตให้ล็อกอิน Eden POS APK และซิงค์บิล/ใบเสร็จหน้าร้าน'
@@ -395,13 +396,14 @@ async function ensureBootstrapOwnerRecord(user) {
 }
 
 function isOwnerAccess(access = currentAdminAccess) {
-    return !!access && access.status === 'active' && access.role === 'owner';
+    return !!access
+        && access.status === 'active'
+        && (access.role === 'owner' || access.permissions?.adminAccess === true);
 }
 
 function canAdmin(permission) {
     if (!currentAdminAccess || currentAdminAccess.status !== 'active') return false;
     if (currentAdminAccess.role === 'owner') return true;
-    if (permission === 'adminAccess') return false;
     if (currentAdminAccess.role === 'head_manager') return true;
     return currentAdminAccess.permissions?.[permission] === true;
 }
@@ -8157,7 +8159,7 @@ async function saveAdminAccessFromForm() {
         resetAdminAccessForm();
     } catch (error) {
         console.error('Unable to save admin access:', error);
-        alert(safeAdminError("บันทึกสิทธิ์ผู้จัดการไม่สำเร็จ"));
+        alert(error.message || safeAdminError("บันทึกสิทธิ์ผู้จัดการไม่สำเร็จ"));
     }
 }
 

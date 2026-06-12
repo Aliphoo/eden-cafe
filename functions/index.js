@@ -400,7 +400,7 @@ async function requireOwnerAccess(req) {
 
   const accessSnap = await db.collection('admin_users').doc(decoded.uid).get();
   const access = accessSnap.exists ? accessSnap.data() || {} : {};
-  if (access.status === 'active' && access.role === 'owner') return decoded;
+  if (access.status === 'active' && (access.role === 'owner' || access.permissions?.adminAccess === true)) return decoded;
 
   const error = new Error('Owner permission required');
   error.statusCode = 403;
@@ -547,6 +547,7 @@ function normalizeAdminPermissions(role, raw = {}) {
     'promptpay',
     'marketing',
     'footer',
+    'adminAccess',
   ];
   const all = Object.fromEntries(allowed.map(key => [key, true]));
   if (role === 'owner' || role === 'head_manager') return all;
@@ -1394,7 +1395,11 @@ exports.upsertAdminAccessUser = onRequest(
       const status = error.statusCode || (/required|valid|password|uid|email/i.test(error.message) ? 400 : 500);
       logger.warn('Admin access user upsert failed', { message: error.message, status });
       const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to save admin access user. Please check the required fields.');
-      res.status(status).json({ error: publicError.message });
+      res.status(status).json({
+        error: error.message || publicError.message,
+        code: String(error.message || 'ADMIN_ACCESS_SAVE_FAILED').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, ''),
+        status,
+      });
     }
   }
 );
