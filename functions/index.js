@@ -337,6 +337,10 @@ async function requireAdminUid(req) {
   return decoded.uid || '';
 }
 
+function hasOwnerClaim(decoded = {}) {
+  return decoded.is_owner === true || String(decoded.role || '').toUpperCase() === 'OWNER';
+}
+
 async function requireAdminAccess(req, permission = '') {
   const header = req.get('authorization') || '';
   const match = header.match(/^Bearer\s+(.+)$/i);
@@ -348,6 +352,7 @@ async function requireAdminAccess(req, permission = '') {
 
   const decoded = await admin.auth().verifyIdToken(match[1]);
   const email = String(decoded.email || '').trim().toLowerCase();
+  if (hasOwnerClaim(decoded)) return decoded;
   if (ADMIN_EMAILS.has(email)) return decoded;
 
   const accessSnap = await db.collection('admin_users').doc(decoded.uid).get();
@@ -379,6 +384,7 @@ async function requireAdminAccess(req, permission = '') {
 
 async function requireOwnerAccess(req) {
   const decoded = await requireAdminAccess(req);
+  if (hasOwnerClaim(decoded)) return decoded;
   const email = String(decoded.email || '').trim().toLowerCase();
   if (ADMIN_EMAILS.has(email)) return decoded;
 

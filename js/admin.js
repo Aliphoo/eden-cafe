@@ -1,7 +1,7 @@
 import { auth, provider, db } from './firebase-config.js';
 import { getMemberTier, getTierBenefits } from './membership.js';
 import { BLOG_POSTS, SITE, getBlogUrl } from './blog-data.mjs';
-import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged, getIdTokenResult } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp, writeBatch, runTransaction, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const ADMIN_IMAGE_MAX_FILE_SIZE = 8 * 1024 * 1024;
@@ -295,7 +295,18 @@ const SALES_REPORT_LABELS = {
     taxes: 'ภาษี'
 };
 
-function buildBootstrapOwnerAccess(user) {
+async function hasOwnerTokenClaim(user) {
+    if (!user) return false;
+    try {
+        const token = await getIdTokenResult(user, true);
+        return token?.claims?.is_owner === true || String(token?.claims?.role || '').toUpperCase() === 'OWNER';
+    } catch (error) {
+        console.warn('Unable to read owner token claims:', error);
+        return false;
+    }
+}
+
+function buildBootstrapOwnerAccess(user, source = 'bootstrap') {
     return {
         uid: user.uid,
         email: normalizeEmail(user.email),
@@ -306,13 +317,14 @@ function buildBootstrapOwnerAccess(user) {
         branch_ids: ['BKK_MAIN'],
         primary_branch_id: 'BKK_MAIN',
         archery_role: 'OWNER',
-        source: 'bootstrap'
+        source
     };
 }
 
 async function loadAdminAccess(user) {
     if (!user) return null;
     if (isAdminUser(user)) return buildBootstrapOwnerAccess(user);
+    if (await hasOwnerTokenClaim(user)) return buildBootstrapOwnerAccess(user, 'owner_claim');
 
     let snap;
     try {
@@ -351,7 +363,7 @@ async function loadAdminAccess(user) {
 }
 
 async function ensureBootstrapOwnerRecord(user) {
-    if (!user || !isAdminUser(user)) return;
+    if (!user || (!isAdminUser(user) && !(await hasOwnerTokenClaim(user)))) return;
     try {
         await setDoc(doc(db, ADMIN_COLLECTION, user.uid), {
             uid: user.uid,
