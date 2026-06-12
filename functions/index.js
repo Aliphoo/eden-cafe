@@ -82,7 +82,7 @@ function setCors(req, res) {
     res.set('Vary', 'Origin');
   }
   res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  res.set('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Request-Id');
   res.set('Access-Control-Max-Age', '3600');
 }
 
