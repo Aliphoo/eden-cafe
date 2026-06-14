@@ -1,5 +1,5 @@
 import { db } from './firebase-config.js';
-import { collection, getDocs, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, getDocs, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const FALLBACK_PRODUCTS = [
     { id: 'p1_light', category: 'coffee', categoryNameTh: 'เมล็ดกาแฟ', categoryNameEn: 'Coffee Beans', nameTh: 'Light Roast Beans', nameEn: 'Light Roast Beans', descriptionTh: 'โทนผลไม้สดชื่น เหมาะกับดริปและอเมริกาโน่', descriptionEn: 'Bright fruity notes for pour-over and americano.', price: 450, imageUrl: 'https://images.unsplash.com/photo-1559525839-b184a4d698c7?auto=format&fit=crop&w=600&q=80', stock: 12 },
@@ -181,6 +181,42 @@ async function fetchProductsFromCloud() {
     return [...shopProducts, ...menuProductsForShop];
 }
 
+function normalizeShopSnapshot(shopCatSnap, shopProdSnap, menuCatSnap, menuProdSnap) {
+    const shopCategoryMap = {};
+    const menuCategoryMap = {};
+    shopCatSnap.forEach(docSnap => { shopCategoryMap[docSnap.id] = docSnap.data(); });
+    menuCatSnap.forEach(docSnap => { menuCategoryMap[docSnap.id] = docSnap.data(); });
+
+    const shopProducts = shopProdSnap.docs
+        .map(docSnap => normalizeProduct({ id: docSnap.id, source: 'shop', ...docSnap.data() }, shopCategoryMap))
+        .filter(product => product.availableForSale !== false);
+
+    const menuProductsForShop = menuProdSnap.docs
+        .map(docSnap => normalizeProduct({ id: docSnap.id, source: 'menu', ...docSnap.data() }, menuCategoryMap))
+        .filter(product => product.availableForSale !== false && product.showInShop);
+
+    return [...shopProducts, ...menuProductsForShop];
+}
+
+function subscribeProductsFromCloud(onResult, onError) {
+    if (!db) return () => {};
+    let latestShopCat = null;
+    let latestShopProd = null;
+    let latestMenuCat = null;
+    let latestMenuProd = null;
+    const emit = () => {
+        if (!latestShopCat || !latestShopProd || !latestMenuCat || !latestMenuProd) return;
+        onResult(normalizeShopSnapshot(latestShopCat, latestShopProd, latestMenuCat, latestMenuProd));
+    };
+    const stops = [
+        onSnapshot(query(collection(db, 'shop_categories')), snap => { latestShopCat = snap; emit(); }, onError),
+        onSnapshot(query(collection(db, 'shop_products')), snap => { latestShopProd = snap; emit(); }, onError),
+        onSnapshot(query(collection(db, 'categories')), snap => { latestMenuCat = snap; emit(); }, onError),
+        onSnapshot(query(collection(db, 'products')), snap => { latestMenuProd = snap; emit(); }, onError)
+    ];
+    return () => stops.forEach(stop => stop());
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     setupTabs();
 
@@ -191,12 +227,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     onlineShopContainer.innerHTML = `<div style="text-align:center; padding:40px;">${en ? 'Loading products...' : 'กำลังโหลดสินค้า...'}</div>`;
 
     try {
-        const products = await fetchProductsFromCloud();
-        if (products.length) {
-            renderProducts(onlineShopContainer, products);
-        } else {
-            renderProducts(onlineShopContainer, fallbackProducts(), en ? 'Showing sample products while the online catalog is empty.' : 'แสดงสินค้าตัวอย่างระหว่างรอข้อมูลจากหลังบ้าน');
-        }
+        subscribeProductsFromCloud((products) => {
+            if (products.length) {
+                renderProducts(onlineShopContainer, products);
+            } else {
+                renderProducts(onlineShopContainer, fallbackProducts(), en ? 'Showing sample products while the online catalog is empty.' : 'แสดงสินค้าตัวอย่างระหว่างรอข้อมูลจากหลังบ้าน');
+            }
+        }, (error) => {
+            console.error('Error listening to shop products:', error);
+            renderProducts(onlineShopContainer, fallbackProducts(), en ? 'Could not load live catalog. Showing fallback products.' : 'ไม่สามารถโหลดสินค้าจากหลังบ้านได้ จึงแสดงสินค้าสำรองไว้ก่อน');
+        });
     } catch (error) {
         console.error('Error loading shop products:', error);
         renderProducts(onlineShopContainer, fallbackProducts(), en ? 'Could not load live catalog. Showing fallback products.' : 'ไม่สามารถโหลดสินค้าจากหลังบ้านได้ จึงแสดงสินค้าสำรองไว้ก่อน');

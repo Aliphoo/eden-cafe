@@ -6845,6 +6845,35 @@ function productVariantsForDisplay(product = {}) {
     return optionVariants;
 }
 
+function productVariantPriceStats(product = {}) {
+    const basePrice = safeNumber(product.price);
+    const variants = productVariantsForDisplay(product);
+    const prices = variants
+        .map(variant => safeNumber(variant.price))
+        .filter(price => Number.isFinite(price));
+    const min = prices.length ? Math.min(...prices) : basePrice;
+    const max = prices.length ? Math.max(...prices) : basePrice;
+    const hasVariants = variants.length > 0;
+    const hasMismatch = hasVariants && prices.some(price => Math.abs(price - basePrice) > 0.0001);
+    const zeroCount = hasVariants ? prices.filter(price => basePrice > 0 && price <= 0).length : 0;
+    return { basePrice, variants, prices, min, max, hasVariants, hasMismatch, zeroCount };
+}
+
+function productVariantPriceLabel(product = {}) {
+    const stats = productVariantPriceStats(product);
+    const base = productMoney(stats.basePrice);
+    if (!stats.hasVariants) return `<strong>${base}</strong>`;
+    const range = stats.min === stats.max
+        ? productMoney(stats.min)
+        : `${productMoney(stats.min)} - ${productMoney(stats.max)}`;
+    const warning = stats.zeroCount
+        ? `<small class="menu-price-warning">มี variant ราคา 0 จำนวน ${stats.zeroCount}</small>`
+        : stats.hasMismatch
+            ? '<small class="menu-price-warning">ราคา variants ไม่ตรงกับราคาหลัก</small>'
+            : '<small class="menu-price-ok">ราคา variants ตรงกับราคาหลัก</small>';
+    return `<strong>${range}</strong><small class="menu-muted">ราคาหลัก ${base}</small>${warning}`;
+}
+
 function productVariantSummaryText(product = {}) {
     const variants = productVariantsForDisplay(product);
     return variants.length ? ` | ${variants.length} variants` : '';
@@ -7153,6 +7182,8 @@ function updateProductSelectionUI(pageRows = []) {
 function renderProductsTable() {
     const tbody = document.getElementById('products-table-body');
     if (!tbody) return;
+    mountProductPriceTools();
+    mountProductPriceAuditPanel();
     bindProductManagerControls();
     updateProductCategoryFilterOptions();
 
@@ -7196,7 +7227,7 @@ function renderProductsTable() {
                             ${productCategoryOptions(product.category || '')}
                         </select>
                     </td>
-                    <td>${productMoney(product.price)}</td>
+                    <td class="menu-price-cell">${productVariantPriceLabel(product)}</td>
                     <td>${productMoney(product.cost)}</td>
                     <td><span class="${margin.className}">${escapeHTML(margin.text)}</span></td>
                     <td><span class="${stock.className}">${escapeHTML(stock.text)}</span></td>
@@ -7221,6 +7252,7 @@ function renderProductsTable() {
     if (prev) prev.disabled = productCurrentPage <= 1;
     if (next) next.disabled = productCurrentPage >= totalPages;
     updateProductSelectionUI(pageRows);
+    updateProductPriceAuditPanel();
 }
 
 function bindProductManagerControls() {
@@ -7397,6 +7429,163 @@ function setupRealtimeProducts() {
 const productModal = document.getElementById('productModal');
 const productForm = document.getElementById('productForm');
 
+function mountProductPriceTools() {
+    if (!document.getElementById('product-price-sync-style')) {
+        const style = document.createElement('style');
+        style.id = 'product-price-sync-style';
+        style.textContent = `
+            .menu-price-cell strong,.menu-price-cell small{display:block}
+            .menu-price-warning{color:#c2410c;font-weight:700;margin-top:3px}
+            .menu-price-ok{color:#15803d;margin-top:3px}
+            .product-price-sync-box{border:1px solid #d8e5d8;background:#f8fcf7;border-radius:8px;padding:10px 12px;margin-top:8px}
+            .product-price-sync-box label{display:flex;align-items:flex-start;gap:8px;font-weight:700;color:#173f2c}
+            .product-price-sync-box small{display:block;color:#607466;margin:4px 0 8px 24px;line-height:1.35}
+            .product-price-sync-actions{display:flex;gap:8px;flex-wrap:wrap;margin-left:24px}
+            .product-price-sync-actions button{border:1px solid #14843f;background:#fff;color:#14843f;border-radius:999px;padding:6px 10px;font-weight:700;cursor:pointer}
+            .product-price-audit{border:1px solid #f3d39b;background:#fff8e9;color:#6b4a00;border-radius:8px;padding:10px 12px;margin:10px 0 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+            .product-price-audit button{border:0;background:#14843f;color:#fff;border-radius:999px;padding:8px 12px;font-weight:700;cursor:pointer}
+        `;
+        document.head.appendChild(style);
+    }
+
+    const priceInput = document.getElementById('productPrice');
+    const priceGroup = priceInput?.closest('.form-group');
+    if (priceGroup && !document.getElementById('product-price-sync-box')) {
+        priceGroup.insertAdjacentHTML('beforeend', `
+            <div id="product-price-sync-box" class="product-price-sync-box">
+                <label><input type="checkbox" id="productSyncVariantPrices"> อัปเดตราคา variants ทั้งหมดด้วยเมื่อบันทึก</label>
+                <small id="productVariantPriceNotice">เว็บและ POS ใช้ราคา variants เป็นราคาขายจริง หากแก้เฉพาะราคาหลัก ราคาในเว็บ/POS อาจไม่เปลี่ยน</small>
+                <div class="product-price-sync-actions">
+                    <button type="button" onclick="syncProductVariantPricesToBase()">ใช้ราคาหลักกับ variants</button>
+                    <button type="button" onclick="repairVisibleZeroVariantPrices()">ซ่อมเฉพาะ variant ราคา 0</button>
+                </div>
+            </div>
+        `);
+    }
+}
+
+function currentProductBasePrice() {
+    return getProductNumberValue('productPrice', 0);
+}
+
+function syncProductVariantPricesToBase(onlyZero = false) {
+    const basePrice = currentProductBasePrice();
+    document.querySelectorAll('#productVariantsBody .product-variant-price').forEach(input => {
+        const current = Number(input.value);
+        if (!onlyZero || !Number.isFinite(current) || current <= 0) {
+            input.value = String(basePrice);
+        }
+    });
+    updateProductVariantPriceNotice();
+}
+
+function repairVisibleZeroVariantPrices() {
+    syncProductVariantPricesToBase(true);
+}
+
+function updateProductVariantPriceNotice() {
+    const notice = document.getElementById('productVariantPriceNotice');
+    if (!notice) return;
+    const basePrice = currentProductBasePrice();
+    const prices = Array.from(document.querySelectorAll('#productVariantsBody .product-variant-price'))
+        .map(input => Number(input.value))
+        .filter(price => Number.isFinite(price));
+    const zeroCount = prices.filter(price => basePrice > 0 && price <= 0).length;
+    const mismatchCount = prices.filter(price => Math.abs(price - basePrice) > 0.0001).length;
+    if (!prices.length) {
+        notice.textContent = 'ยังไม่มี variants ระบบจะสร้างจากราคาหลักเมื่อบันทึก';
+    } else if (zeroCount) {
+        notice.textContent = `พบ variant ราคา 0 จำนวน ${zeroCount} รายการ ควรซ่อมก่อนแสดงบนเว็บ/POS`;
+    } else if (mismatchCount) {
+        notice.textContent = `มี variants ${mismatchCount} รายการที่ราคาต่างจากราคาหลัก ถ้าตั้งใจให้ต่างราคาไม่ต้อง sync`;
+    } else {
+        notice.textContent = 'ราคา variants ตรงกับราคาหลักแล้ว';
+    }
+}
+
+function shouldSyncVariantPricesOnSave() {
+    return !!document.getElementById('productSyncVariantPrices')?.checked;
+}
+
+function mountProductPriceAuditPanel() {
+    const tbody = document.getElementById('products-table-body');
+    const table = tbody?.closest('table');
+    const container = table?.parentElement;
+    if (!container || document.getElementById('product-price-audit-panel')) return;
+    container.insertAdjacentHTML('beforebegin', `
+        <div id="product-price-audit-panel" class="product-price-audit">
+            <span id="product-price-audit-text">กำลังตรวจราคา variants...</span>
+            <button type="button" onclick="backfillZeroVariantPrices()">ซ่อม variant ราคา 0</button>
+        </div>
+    `);
+}
+
+function updateProductPriceAuditPanel() {
+    mountProductPriceAuditPanel();
+    const text = document.getElementById('product-price-audit-text');
+    if (!text) return;
+    let mismatch = 0;
+    let zero = 0;
+    Object.values(productsData || {}).forEach(product => {
+        const stats = productVariantPriceStats(product);
+        if (stats.hasMismatch) mismatch++;
+        zero += stats.zeroCount;
+    });
+    text.textContent = zero
+        ? `พบ variant ราคา 0 จำนวน ${zero} รายการ และสินค้า base/variant ไม่ตรง ${mismatch} รายการ`
+        : mismatch
+            ? `สินค้า ${mismatch} รายการมีราคา variants ต่างจากราคาหลัก หากตั้งใจให้ต่างราคาไม่ต้องแก้`
+            : 'ราคา variants ปกติ ไม่พบ variant ราคา 0';
+}
+
+window.syncProductVariantPricesToBase = syncProductVariantPricesToBase;
+window.repairVisibleZeroVariantPrices = repairVisibleZeroVariantPrices;
+
+window.backfillZeroVariantPrices = async () => {
+    const fixes = Object.entries(productsData || {})
+        .map(([id, product]) => {
+            const basePrice = safeNumber(product.price);
+            const variants = Array.isArray(product.variants) && product.variants.length
+                ? product.variants.map((variant, index) => normalizeProductVariant(variant, index, product))
+                : productVariantsForDisplay(product);
+            if (!basePrice || !variants.length) return null;
+            let changed = false;
+            const nextVariants = variants.map(variant => {
+                const rawPrice = variant.price;
+                const price = safeNumber(rawPrice);
+                if (rawPrice === '' || rawPrice == null || price <= 0) {
+                    changed = true;
+                    return { ...variant, price: basePrice };
+                }
+                return variant;
+            });
+            return changed ? { id, product, variants: nextVariants } : null;
+        })
+        .filter(Boolean);
+
+    if (!fixes.length) {
+        alert('ไม่พบ variant ราคา 0 หรือค่าว่างที่ต้องซ่อม');
+        return;
+    }
+    if (!confirm(`ซ่อม variant ราคา 0/ค่าว่าง จำนวน ${fixes.length} สินค้าให้เท่ากับราคาหลัก ใช่ไหม?`)) return;
+    try {
+        for (const item of fixes) {
+            await updateDoc(doc(db, 'products', item.id), {
+                variants: item.variants,
+                updatedAt: new Date().toISOString(),
+                priceSyncRepair: {
+                    repairedZeroVariantPrices: true,
+                    repairedAt: new Date().toISOString()
+                }
+            });
+        }
+        alert(`ซ่อมราคา variants สำเร็จ ${fixes.length} สินค้า`);
+    } catch (error) {
+        console.error('Backfill zero variant prices failed:', error);
+        alert(safeAdminError('ซ่อมราคา variants ไม่สำเร็จ'));
+    }
+};
+
 function setProductInputValue(id, value = '') {
     const el = document.getElementById(id);
     if (el) el.value = value ?? '';
@@ -7487,6 +7676,7 @@ function renderProductVariantRows(variants = []) {
     if (!tbody) return;
     const rows = Array.isArray(variants) && variants.length ? variants : defaultProductVariants();
     tbody.innerHTML = rows.map((variant, index) => productVariantRowTemplate(variant, index)).join('');
+    updateProductVariantPriceNotice();
 }
 
 window.addProductVariantRow = (variant = {}) => {
@@ -7540,10 +7730,20 @@ if (productVariantsBody) {
         const removeBtn = event.target.closest('.variant-remove-btn');
         if (!removeBtn) return;
         removeBtn.closest('tr')?.remove();
+        updateProductVariantPriceNotice();
+    });
+    productVariantsBody.addEventListener('input', (event) => {
+        if (event.target.closest('.product-variant-price')) updateProductVariantPriceNotice();
     });
 }
 
+document.getElementById('productPrice')?.addEventListener('input', () => {
+    if (shouldSyncVariantPricesOnSave()) syncProductVariantPricesToBase();
+    else updateProductVariantPriceNotice();
+});
+
 window.openProductModal = () => {
+    mountProductPriceTools();
     productForm.reset();
     document.getElementById('productId').value = '';
     document.getElementById('productImageFile').value = '';
@@ -7561,6 +7761,7 @@ window.openProductModal = () => {
     setProductCheckboxValue('productShowOnPos', true);
     setProductCheckboxValue('productSignature', false);
     setProductCheckboxValue('productShowOnIndex', false);
+    setProductCheckboxValue('productSyncVariantPrices', true);
     renderProductVariantRows(defaultProductVariants());
     document.getElementById('modal-title').innerText = 'เพิ่มเมนูใหม่';
     productModal.style.display = 'block';
@@ -7571,6 +7772,7 @@ window.closeProductModal = () => {
 };
 
 window.editProduct = (id) => {
+    mountProductPriceTools();
     const product = productsData[id];
     if (!product) return;
     
@@ -7606,6 +7808,7 @@ window.editProduct = (id) => {
     setProductCheckboxValue('productShowOnPos', product.showOnPos !== false);
     document.getElementById('productSignature').checked = !!product.isSignature;
     setProductCheckboxValue('productShowOnIndex', !!(product.showOnIndex || product.isFeatured));
+    setProductCheckboxValue('productSyncVariantPrices', false);
     renderProductVariantRows(productVariantsForDisplay(product));
     
     document.getElementById('modal-title').innerText = 'แก้ไขเมนูสินค้า';
@@ -7649,16 +7852,20 @@ productForm.addEventListener('submit', async (e) => {
         }
 
         const optionList = collectProductOptionsFromForm();
-        const variantList = collectProductVariantsFromForm();
         const productName = document.getElementById('productName').value;
         const productHandle = getProductInputValue('productHandle') || slugifyMenuHandle(productName);
         const soldBy = getProductSelectValue('productSoldBy', 'each');
+        const productPrice = Number(document.getElementById('productPrice').value);
+        let variantList = collectProductVariantsFromForm();
+        if (shouldSyncVariantPricesOnSave()) {
+            variantList = variantList.map(variant => ({ ...variant, price: productPrice }));
+        }
         const productData = {
             handle: productHandle,
             sku: getProductInputValue('productSku'),
             name: productName,
             description: document.getElementById('productDesc').value,
-            price: Number(document.getElementById('productPrice').value),
+            price: productPrice,
             cost: getProductNumberValue('productCost', 0),
             stock: getProductNumberValue('productStock', 0),
             lowStock: getProductNumberValue('productLowStock', 0),

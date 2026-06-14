@@ -1,6 +1,6 @@
 import { auth, db } from './firebase-config.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { collection, doc, getDoc, getDocs, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, doc, getDoc, getDocs, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
 const ADMIN_ORDER_ROLES = ['owner', 'head_manager', 'manager'];
@@ -396,6 +396,42 @@ async function fetchMenuFromCloud() {
     return { items: sortMenuItems(items), categories };
 }
 
+function normalizeMenuSnapshot(categorySnap, productSnap) {
+    const categories = categorySnap.docs
+        .map(docSnap => normalizeMenuCategory(docSnap.id, { id: docSnap.id, ...docSnap.data() }))
+        .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+    const categoryMeta = categories.reduce((acc, category) => {
+        acc[category.id] = category;
+        return acc;
+    }, {});
+    const items = productSnap.docs
+        .map(docSnap => normalizeMenuItem({ id: docSnap.id, ...docSnap.data(), categoryMeta: categoryMeta[docSnap.data().category] }))
+        .filter(item => item.availableForSale && item.showOnWebsite);
+    return { items: sortMenuItems(items), categories };
+}
+
+function subscribeMenuFromCloud(onResult, onError) {
+    if (!db) return () => {};
+    let latestCategorySnap = null;
+    let latestProductSnap = null;
+    const emit = () => {
+        if (!latestCategorySnap || !latestProductSnap) return;
+        onResult(normalizeMenuSnapshot(latestCategorySnap, latestProductSnap));
+    };
+    const stopCategories = onSnapshot(query(collection(db, 'categories')), snap => {
+        latestCategorySnap = snap;
+        emit();
+    }, onError);
+    const stopProducts = onSnapshot(query(collection(db, 'products')), snap => {
+        latestProductSnap = snap;
+        emit();
+    }, onError);
+    return () => {
+        stopCategories();
+        stopProducts();
+    };
+}
+
 function renderMenu(container, items, note = '', categories = []) {
     const en = isEnglishPage();
     const fallbackMode = Boolean(note);
@@ -482,11 +518,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     container.innerHTML = '<div style="text-align:center; padding:40px;">' + (en ? 'Loading menu...' : '\u0e01\u0e33\u0e25\u0e31\u0e07\u0e42\u0e2b\u0e25\u0e14\u0e40\u0e21\u0e19\u0e39...') + '</div>';
 
     try {
-        const result = await fetchMenuFromCloud();
-        const items = Array.isArray(result) ? result : result.items;
-        const categories = Array.isArray(result?.categories) ? result.categories : [];
-        if (items.length) renderMenu(container, items, '', categories);
-        else renderMenu(container, fallbackMenu(), en ? 'Showing sample menu while the live menu is empty.' : '\u0e41\u0e2a\u0e14\u0e07\u0e40\u0e21\u0e19\u0e39\u0e15\u0e31\u0e27\u0e2d\u0e22\u0e48\u0e32\u0e07\u0e23\u0e30\u0e2b\u0e27\u0e48\u0e32\u0e07\u0e23\u0e2d\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e08\u0e32\u0e01\u0e2b\u0e25\u0e31\u0e07\u0e1a\u0e49\u0e32\u0e19');
+        subscribeMenuFromCloud((result) => {
+            const items = Array.isArray(result) ? result : result.items;
+            const categories = Array.isArray(result?.categories) ? result.categories : [];
+            if (items.length) renderMenu(container, items, '', categories);
+            else renderMenu(container, fallbackMenu(), en ? 'Showing sample menu while the live menu is empty.' : '\u0e41\u0e2a\u0e14\u0e07\u0e40\u0e21\u0e19\u0e39\u0e15\u0e31\u0e27\u0e2d\u0e22\u0e48\u0e32\u0e07\u0e23\u0e30\u0e2b\u0e27\u0e48\u0e32\u0e07\u0e23\u0e2d\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e08\u0e32\u0e01\u0e2b\u0e25\u0e31\u0e07\u0e1a\u0e49\u0e32\u0e19');
+        }, (error) => {
+            console.error('Error listening to menu:', error);
+            renderMenu(container, fallbackMenu(), en ? 'Could not load live menu. Showing fallback menu.' : '\u0e44\u0e21\u0e48\u0e2a\u0e32\u0e21\u0e32\u0e23\u0e16\u0e42\u0e2b\u0e25\u0e14\u0e40\u0e21\u0e19\u0e39\u0e08\u0e32\u0e01\u0e2b\u0e25\u0e31\u0e07\u0e1a\u0e49\u0e32\u0e19\u0e44\u0e14\u0e49');
+        });
     } catch (error) {
         console.error('Error loading menu:', error);
         renderMenu(container, fallbackMenu(), en ? 'Could not load live menu. Showing fallback menu.' : '\u0e44\u0e21\u0e48\u0e2a\u0e32\u0e21\u0e32\u0e23\u0e16\u0e42\u0e2b\u0e25\u0e14\u0e40\u0e21\u0e19\u0e39\u0e08\u0e32\u0e01\u0e2b\u0e25\u0e31\u0e07\u0e1a\u0e49\u0e32\u0e19\u0e44\u0e14\u0e49');
