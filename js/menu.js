@@ -171,7 +171,9 @@ function normalizeMenuOptions(item) {
 
 function normalizeMenuVariant(variant, index, item, basePrice) {
     const rawName = String(variant?.name ?? variant?.id ?? variant?.option ?? '').trim();
-    const price = Number(variant?.price ?? basePrice ?? 0);
+    const rawPrice = Number(variant?.price);
+    const fallbackPrice = Number(basePrice) || 0;
+    const price = Number.isFinite(rawPrice) && rawPrice > 0 ? rawPrice : fallbackPrice;
     const stock = Number(variant?.stock ?? variant?.inStock ?? 0);
     const trackStock = parseMenuBool(variant?.trackStock, false);
     const availableForSale = parseMenuBool(variant?.availableForSale, true);

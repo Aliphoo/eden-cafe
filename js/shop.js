@@ -55,6 +55,9 @@ function normalizeProduct(product, categoryMap = {}) {
     const en = isEnglishPage();
     const variants = Array.isArray(product.variants) ? product.variants : [];
     const activeVariant = variants.find(variant => parseShopBoolean(variant.availableForSale, true)) || variants[0] || null;
+    const basePrice = Number(product.price) || 0;
+    const variantPrice = Number(activeVariant?.price);
+    const displayPrice = Number.isFinite(variantPrice) && variantPrice > 0 ? variantPrice : basePrice;
     const trackStock = parseShopBoolean(product.trackStock, source === 'shop');
     const stock = Number(product.stock);
     return {
@@ -64,7 +67,7 @@ function normalizeProduct(product, categoryMap = {}) {
         categoryName: getShopCategoryName(product, category, categoryId),
         name: product.name || (en ? product.nameEn : product.nameTh) || 'Eden Product',
         description: product.description || (en ? product.descriptionEn : product.descriptionTh) || '',
-        price: Number(activeVariant?.price ?? product.price) || 0,
+        price: displayPrice,
         imageUrl: product.imageUrl || product.image || 'Images/Logo.webp',
         stock: trackStock ? (Number.isFinite(stock) ? stock : 0) : (Number.isFinite(stock) && stock > 0 ? stock : 99),
         availableForSale: parseShopBoolean(product.availableForSale, true),
