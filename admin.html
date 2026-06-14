@@ -633,6 +633,23 @@
         .footer-preview-social a:hover { background: rgba(255,255,255,0.4); }
         .footer-settings-full { grid-column: 1 / -1; }
         @media (max-width: 900px) { .footer-settings-grid { grid-template-columns: 1fr; } .footer-preview-grid { grid-template-columns: 1fr; } }
+        .index-settings-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 0.75fr); gap: 24px; align-items: start; }
+        .index-settings-card { background: #fbfff8; border: 1px solid #e0eadc; border-radius: 16px; padding: 22px 24px; }
+        .index-settings-card h3 { font-size: 1.1rem; color: var(--primary-color); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid #edf3ed; }
+        .index-settings-card .form-group { margin-bottom: 14px; }
+        .index-settings-card .form-group:last-child { margin-bottom: 0; }
+        .index-settings-card textarea { min-height: 110px; resize: vertical; }
+        .index-settings-preview { background: #fff; border: 1px solid #dfe8df; border-radius: 14px; overflow: hidden; box-shadow: 0 10px 26px rgba(34, 56, 42, 0.08); }
+        .index-preview-hero { min-height: 260px; display: grid; place-items: center; text-align: center; padding: 36px 24px; color: #fff; background: linear-gradient(rgba(19, 114, 52, 0.72), rgba(19, 114, 52, 0.86)), var(--index-preview-hero-image, url('Hero/Hero.webp')) center/cover; }
+        .index-preview-hero h3 { color: #fff; font-size: 2rem; margin: 0 0 12px; }
+        .index-preview-hero p { color: rgba(255,255,255,0.92); max-width: 620px; margin: 0 auto; }
+        .index-preview-about { padding: 34px 28px; text-align: center; }
+        .index-preview-about h3 { font-size: 1.55rem; margin-bottom: 14px; }
+        .index-preview-about p { color: #556; line-height: 1.75; margin: 0; }
+        .index-settings-actions { display: flex; justify-content: flex-end; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
+        .index-settings-status { min-height: 22px; color: #137234; font-weight: 700; margin-top: 12px; }
+        .index-settings-status.error { color: #b42318; }
+        @media (max-width: 1050px) { .index-settings-grid { grid-template-columns: 1fr; } }
 
         /* PromptPay Settings */
         .promptpay-admin-shell { position: relative; overflow: hidden; padding: 0; background: radial-gradient(circle at top left, rgba(255, 214, 102, 0.22), transparent 34%), linear-gradient(135deg, #ffffff 0%, #f6fff8 100%); }
@@ -766,6 +783,7 @@
             <li onclick="switchTab('blogs', this)">📝 จัดการบทความ (Blogs)</li>
             <li onclick="switchTab('faqs', this)">❓ คำถามที่พบบ่อย (FAQ)</li>
             <li onclick="switchTab('promptpay', this)">&#128184; &#x0E08;&#x0E31;&#x0E14;&#x0E01;&#x0E32;&#x0E23;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C; (PromptPay)</li>
+            <li data-title="จัดการ Index" onclick="switchTab('index-settings', this)">จัดการ Index</li>
             <li onclick="switchTab('footer-settings', this)">🦶 จัดการ Footer</li>
             <li onclick="switchTab('marketing-settings', this)">Marketing Tools</li>
         </ul>
@@ -2026,6 +2044,18 @@
                         <h3>Payment Panel</h3>
                         <div id="archery-payment-panel"></div>
                     </section>
+                    <section class="archery-panel">
+                        <h3>Payment Watch</h3>
+                        <div id="archery-payment-watch"></div>
+                    </section>
+                    <section class="archery-panel">
+                        <h3>Webhook Events</h3>
+                        <div id="archery-webhook-events"></div>
+                    </section>
+                    <section class="archery-panel">
+                        <h3>Reconciliation Queue</h3>
+                        <div id="archery-reconciliation-panel"></div>
+                    </section>
                     <section class="archery-panel" id="archery-audit-panel">
                         <h3>Audit Trail</h3>
                         <div id="archery-audit-trail"></div>
@@ -2637,6 +2667,91 @@
             </div>
         </div>
 
+        <!-- Index Settings Section -->
+        <div id="index-settings" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <div>
+                        <h2>จัดการ Index</h2>
+                        <p style="color:#667; margin-top:4px;">แก้ไขภาพ Hero และเนื้อหาเกี่ยวกับเราในหน้าแรก พร้อมข้อมูลภาษาไทยและอังกฤษ</p>
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button class="btn-action btn-view" type="button" onclick="loadIndexSettings()">โหลดข้อมูลปัจจุบัน</button>
+                    </div>
+                </div>
+
+                <form id="indexSettingsForm">
+                    <div class="index-settings-grid">
+                        <div class="index-settings-card">
+                            <h3>Hero หน้าแรก</h3>
+                            <div class="form-group">
+                                <label for="index-hero-image-url">Hero image URL</label>
+                                <input type="text" id="index-hero-image-url" maxlength="500" placeholder="/Hero/Hero.webp" oninput="updateIndexPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="index-hero-image-file">อัปโหลด Hero image ใหม่</label>
+                                <input type="file" id="index-hero-image-file" accept="image/*">
+                            </div>
+                            <div class="form-group">
+                                <label for="index-hero-title-th">หัวข้อ Hero (TH)</label>
+                                <input type="text" id="index-hero-title-th" maxlength="120" oninput="updateIndexPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="index-hero-subtitle-th">คำโปรย Hero (TH)</label>
+                                <textarea id="index-hero-subtitle-th" maxlength="320" oninput="updateIndexPreview()"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="index-hero-title-en">Hero title (EN)</label>
+                                <input type="text" id="index-hero-title-en" maxlength="120" oninput="updateIndexPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="index-hero-subtitle-en">Hero subtitle (EN)</label>
+                                <textarea id="index-hero-subtitle-en" maxlength="320" oninput="updateIndexPreview()"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="index-settings-preview" aria-label="Index live preview">
+                            <div class="index-preview-hero" id="index-preview-hero">
+                                <div>
+                                    <h3 id="index-preview-hero-title">จากใจเรา สู่มือคุณ</h3>
+                                    <p id="index-preview-hero-subtitle">ยินดีต้อนรับสู่ Eden Cafe</p>
+                                </div>
+                            </div>
+                            <div class="index-preview-about">
+                                <h3 id="index-preview-about-title">เรื่องราวของเรา</h3>
+                                <p id="index-preview-about-body">Eden Cafe เกิดขึ้นจากความหลงใหลในศิลปะการชงกาแฟและการสนับสนุนเกษตรกรไทย</p>
+                            </div>
+                        </div>
+
+                        <div class="index-settings-card">
+                            <h3>เกี่ยวกับเรา</h3>
+                            <div class="form-group">
+                                <label for="index-about-title-th">หัวข้อเกี่ยวกับเรา (TH)</label>
+                                <input type="text" id="index-about-title-th" maxlength="140" oninput="updateIndexPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="index-about-body-th">เนื้อหาเกี่ยวกับเรา (TH)</label>
+                                <textarea id="index-about-body-th" maxlength="900" oninput="updateIndexPreview()"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="index-about-title-en">About title (EN)</label>
+                                <input type="text" id="index-about-title-en" maxlength="140" oninput="updateIndexPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="index-about-body-en">About body (EN)</label>
+                                <textarea id="index-about-body-en" maxlength="900" oninput="updateIndexPreview()"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="index-settings-status" id="index-settings-status"></p>
+                    <div class="index-settings-actions">
+                        <button type="button" class="btn-action" style="background:#789; padding: 10px 24px;" onclick="loadIndexSettings()">ยกเลิก / โหลดใหม่</button>
+                        <button type="submit" class="btn-submit" style="width: auto; padding: 10px 32px; background: var(--accent-color);">บันทึกข้อมูล Index</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <!-- Footer Settings Section -->
         <div id="footer-settings" class="content-section">
             <div class="section-container">
@@ -3156,7 +3271,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=archery-hourly-start-1"></script>
+    <script type="module" src="js/admin.js?v=index-settings-1"></script>
     <script>
         function switchTab(tabId, el) {
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {
@@ -3174,7 +3289,7 @@
             if (target) target.classList.add('active');
 
             // Update Title
-            if (el) document.getElementById('page-title').innerText = el.innerText.split(' ').slice(1).join(' ');
+            if (el) document.getElementById('page-title').innerText = el.dataset.title || el.innerText.split(' ').slice(1).join(' ') || el.innerText;
 
             // Remember the current admin page so browser refresh returns here instead of Dashboard.
             try {

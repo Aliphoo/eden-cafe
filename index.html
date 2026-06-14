@@ -17,7 +17,7 @@
         content="สัมผัสประสบการณ์กาแฟพิเศษ (Specialty Coffee) ที่ Eden Cafe ประเทศไทย บรรยากาศร่มรื่นสไตล์มินิมอล พร้อมเมล็ดกาแฟคั่วสดใหม่จากยอดดอย">
     <meta name="keywords" content="Eden Cafe, Specialty Coffee Thailand, ร้านกาแฟ, คาเฟ่กรุงเทพ, กาแฟพิเศษ, กาแฟไทย">
 
-    <link rel="stylesheet" href="style.css?v=auth-phone-1">
+    <link rel="stylesheet" href="style.css?v=index-settings-1">
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -147,8 +147,8 @@
         <!-- Hero Section -->
         <section id="home" class="hero">
             <div class="hero-content">
-                <h1>จากใจเรา สู่มือคุณ</h1>
-                <p>ยินดีต้อนรับสู่ Eden Cafe - พื้นที่พักผ่อนที่เงียบสงบใจกลางเมือง
+                <h1 data-index-setting="hero-title">จากใจเรา สู่มือคุณ</h1>
+                <p data-index-setting="hero-subtitle">ยินดีต้อนรับสู่ Eden Cafe - พื้นที่พักผ่อนที่เงียบสงบใจกลางเมือง
                     สัมผัสประสบการณ์เมล็ดกาแฟที่ปลูกอย่างใส่ใจและคั่วอย่างพิถีพิถันจากเกษตรกรไทย</p>
             </div><a href="#about" class="scroll-down" aria-label="Scroll to About Section">
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -162,13 +162,31 @@
         <!-- About Section -->
         <section id="about" class="about">
             <div class="container">
-                <h2>เรื่องราวของเรา: จากยอดดอยสู่แก้วกาแฟของคุณ</h2>
-                <p>Eden Cafe เกิดขึ้นจากความหลงใหลในศิลปะการชงกาแฟและการสนับสนุนเกษตรกรไทย
+                <h2 data-index-setting="about-title">เรื่องราวของเรา: จากยอดดอยสู่แก้วกาแฟของคุณ</h2>
+                <p data-index-setting="about-body">Eden Cafe เกิดขึ้นจากความหลงใหลในศิลปะการชงกาแฟและการสนับสนุนเกษตรกรไทย
                     เราคัดสรรเมล็ดกาแฟจากแหล่งปลูกที่ดีที่สุดบนยอดดอยในประเทศไทย
                     คั่วด้วยเทคนิคพิเศษเพื่อให้ได้รสชาติที่เป็นเอกลักษณ์ ไม่เหมือนใคร
                     บรรยากาศร้านของเราออกแบบสไตล์มินิมอล อิงธรรมชาติ เพื่อให้คุณได้พักผ่อนอย่างแท้จริง</p>
             </div>
         </section>
+        <script>
+            (() => {
+                try {
+                    const cached = JSON.parse(localStorage.getItem('eden_index_settings_cache_v1') || 'null');
+                    if (!cached) return;
+                    const setText = (selector, value) => {
+                        const element = document.querySelector(selector);
+                        if (element && value) element.textContent = value;
+                    };
+                    setText('[data-index-setting="hero-title"]', cached.heroTitleTh);
+                    setText('[data-index-setting="hero-subtitle"]', cached.heroSubtitleTh);
+                    setText('[data-index-setting="about-title"]', cached.aboutTitleTh);
+                    setText('[data-index-setting="about-body"]', cached.aboutBodyTh);
+                    if (cached.heroImageUrl) document.querySelector('#home.hero')?.style.setProperty('--index-hero-image', `url("${cached.heroImageUrl}")`);
+                    document.documentElement.classList.add('index-settings-cache-applied');
+                } catch (_) {}
+            })();
+        </script>
 
         <!-- Featured products controlled from Eden Admin -->
         <section id="recommended-shop" class="products" style="background-color: var(--light-gray); padding: 80px 0;">
@@ -434,6 +452,7 @@
     <script type="module" src="js/faq.js?v=1"></script>
     <script type="module" src="js/auth.js?v=12"></script>
     <script type="module" src="js/home-featured-products.js?v=2"></script>
+    <script type="module" src="js/index-settings.js?v=index-settings-1"></script>
     <!-- Cookie Consent Banner -->
     <div id="cookie-consent"
         style="display: none; position: fixed; bottom: 20px; left: 20px; right: 20px; max-width: 600px; margin: 0 auto; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); padding: 20px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); z-index: 9999; border: 1px solid rgba(0,0,0,0.05); text-align: left;">
@@ -473,8 +492,6 @@
 </body>
 
 </html>
-
-
 
 
 

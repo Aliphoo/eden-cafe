@@ -142,6 +142,22 @@ p { margin-bottom: 1rem; color: #555; }
     gap: 7px;
 }
 
+.nav-dropdown::after {
+    content: "";
+    height: 16px;
+    left: 50%;
+    pointer-events: none;
+    position: absolute;
+    top: 100%;
+    transform: translateX(-50%);
+    width: 188px;
+}
+
+.nav-dropdown:hover::after,
+.nav-dropdown:focus-within::after {
+    pointer-events: auto;
+}
+
 .nav-dropdown-caret {
     border-bottom: 1.5px solid currentColor;
     border-right: 1.5px solid currentColor;
@@ -238,7 +254,7 @@ p { margin-bottom: 1rem; color: #555; }
     align-items: center;
     justify-content: center;
     text-align: center;
-    background: linear-gradient(rgba(19, 114, 52, 0.75), rgba(19, 114, 52, 0.85)), url('Hero/Hero.webp') center/cover;
+    background: linear-gradient(rgba(19, 114, 52, 0.75), rgba(19, 114, 52, 0.85)), var(--index-hero-image, url('Hero/Hero.webp')) center/cover;
     color: var(--white);
     padding: 120px 20px 80px; /* Added padding to prevent overlapping with navbar */
     margin-top: 0;
@@ -2475,6 +2491,9 @@ footer p {
         display: grid;
         justify-items: center;
         width: 100%;
+    }
+    .nav-dropdown::after {
+        display: none;
     }
     .nav-dropdown-toggle {
         justify-content: center;
