@@ -447,6 +447,20 @@ let memberSummariesUnsubscribe = null;
 let memberOrdersMetricsUnsubscribe = null;
 let memberBookingsMetricsUnsubscribe = null;
 let ordersUnsubscribe = null;
+let ordersData = [];
+let ordersFiltersBound = false;
+let ordersStyleMounted = false;
+const ordersFilterState = {
+    datePreset: 'today',
+    startKey: adminTodayISO(),
+    endKey: adminTodayISO(),
+    source: 'all',
+    status: 'all',
+    payment: 'all',
+    category: 'all',
+    search: '',
+    view: 'orders'
+};
 let bookingsUnsubscribe = null;
 let archeryBookingsUnsubscribe = null;
 let archeryAuditUnsubscribe = null;
@@ -3513,8 +3527,8 @@ window.retryPosLoyaltySale = async (orderId, receiptNo = '', button = null) => {
     }
 };
 
-// Real-time Orders Listener
-function setupRealtimeOrders() {
+// Legacy real-time Orders renderer kept for reference; setupRealtimeOrders below owns the live UI.
+function setupRealtimeOrdersLegacy() {
     if (ordersUnsubscribe) {
         ordersUnsubscribe();
         ordersUnsubscribe = null;
@@ -3591,6 +3605,581 @@ function setupRealtimeOrders() {
         if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:red;">ไม่มีสิทธิ์เข้าถึงข้อมูล หรือเกิดข้อผิดพลาด</td></tr>';
     });
 }
+
+function orderDateSource(order = {}) {
+    return order.paidAt || order.closedAt || order.timestamp || order.createdAt || order.date || order.businessDate;
+}
+
+function orderTimestampToDate(value) {
+    if (!value) return null;
+    if (value.toDate) return value.toDate();
+    if (typeof value === 'number') return new Date(value);
+    if (typeof value === 'string') {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+            return new Date(`${value}T00:00:00`);
+        }
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function orderDateKey(order = {}) {
+    const date = orderTimestampToDate(orderDateSource(order));
+    return date ? localDateKey(date) : '';
+}
+
+function orderDateLabelFromKey(key = '') {
+    if (!key) return '-';
+    const date = new Date(`${key}T00:00:00`);
+    return Number.isNaN(date.getTime())
+        ? key
+        : date.toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function orderStatusValue(order = {}) {
+    return String(order.status || 'pending').toLowerCase();
+}
+
+function orderPaymentStatusValue(order = {}) {
+    return String(order.paymentStatus || (order.source === 'pos' ? 'paid' : 'pending')).toLowerCase();
+}
+
+function orderSourceValue(order = {}) {
+    return String(order.source || 'online').toLowerCase();
+}
+
+function orderSourceLabel(order = {}) {
+    const source = orderSourceValue(order);
+    if (source === 'pos') return order.isTestOrder ? 'POS TEST' : 'POS';
+    return 'Online';
+}
+
+function orderDisplayId(order = {}) {
+    const id = order.firestoreId || order.id || '';
+    return order.receiptNo || order.orderNumber || (id ? id.substring(0, 8).toUpperCase() : '-');
+}
+
+function orderCustomerText(order = {}) {
+    return [
+        order.customerName || order.name || 'Customer',
+        order.phone || order.customerPhone || '',
+        orderSourceLabel(order)
+    ].filter(Boolean).join(' ');
+}
+
+function orderItemName(item = {}) {
+    return item.name || item.productName || item.title || item.label || item.sku || 'สินค้า';
+}
+
+function orderItemCategoryKey(item = {}) {
+    return String(item.category || item.categoryId || item.categoryKey || item.group || '').trim() || 'uncategorized';
+}
+
+function orderItemCategoryLabel(item = {}) {
+    const key = orderItemCategoryKey(item);
+    return item.categoryName
+        || item.categoryLabel
+        || shopCategoriesData[key]?.name
+        || categoriesData[key]?.name
+        || (key === 'uncategorized' ? 'ไม่ระบุหมวดหมู่' : key);
+}
+
+function orderCategories(order = {}) {
+    const map = new Map();
+    orderReportItems(order).forEach(item => {
+        const key = orderItemCategoryKey(item);
+        if (!map.has(key)) map.set(key, orderItemCategoryLabel(item));
+    });
+    if (!map.size) map.set('uncategorized', 'ไม่ระบุหมวดหมู่');
+    return Array.from(map, ([key, label]) => ({ key, label }));
+}
+
+function orderItemsSummaryHTML(order = {}) {
+    const items = orderReportItems(order);
+    if (!items.length) return '<span class="orders-muted">ไม่มีรายการสินค้า</span>';
+    const shown = items.slice(0, 3).map(item => {
+        const qty = Math.max(1, safeNumber(item.quantity, 1));
+        return `<span>${escapeHTML(orderItemName(item))}<small>x${escapeHTML(qty)}</small></span>`;
+    }).join('');
+    const more = items.length > 3 ? `<em>+${items.length - 3} รายการ</em>` : '';
+    const categories = orderCategories(order).slice(0, 2)
+        .map(cat => `<b>${escapeHTML(cat.label)}</b>`)
+        .join('');
+    return `<div class="orders-item-list">${shown}${more}</div><div class="orders-category-line">${categories}</div>`;
+}
+
+function orderSearchHaystack(order = {}) {
+    return [
+        orderDisplayId(order),
+        order.customerName,
+        order.name,
+        order.phone,
+        order.customerPhone,
+        order.email,
+        orderSourceLabel(order),
+        orderReportItems(order).map(item => `${orderItemName(item)} ${orderItemCategoryLabel(item)}`).join(' ')
+    ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function orderMatchesFilters(order = {}) {
+    const key = orderDateKey(order);
+    if (ordersFilterState.datePreset !== 'all') {
+        if (ordersFilterState.startKey && (!key || key < ordersFilterState.startKey)) return false;
+        if (ordersFilterState.endKey && (!key || key > ordersFilterState.endKey)) return false;
+    }
+    if (ordersFilterState.source !== 'all' && orderSourceValue(order) !== ordersFilterState.source) return false;
+    if (ordersFilterState.status !== 'all' && orderStatusValue(order) !== ordersFilterState.status) return false;
+    if (ordersFilterState.payment !== 'all' && orderPaymentStatusValue(order) !== ordersFilterState.payment) return false;
+    if (ordersFilterState.category !== 'all' && !orderCategories(order).some(cat => cat.key === ordersFilterState.category)) return false;
+    const search = String(ordersFilterState.search || '').trim().toLowerCase();
+    return !search || orderSearchHaystack(order).includes(search);
+}
+
+function ordersDateRangeForPreset(preset) {
+    const today = new Date();
+    const start = new Date(today);
+    const end = new Date(today);
+    if (preset === 'yesterday') {
+        start.setDate(today.getDate() - 1);
+        end.setDate(today.getDate() - 1);
+    } else if (preset === 'week') {
+        start.setDate(today.getDate() - 6);
+    } else if (preset === 'month') {
+        start.setDate(today.getDate() - 29);
+    } else if (preset === 'all') {
+        return { startKey: '', endKey: '' };
+    }
+    return { startKey: localDateKey(start), endKey: localDateKey(end) };
+}
+
+function setOrdersDatePreset(preset) {
+    ordersFilterState.datePreset = preset;
+    const range = ordersDateRangeForPreset(preset);
+    ordersFilterState.startKey = range.startKey;
+    ordersFilterState.endKey = range.endKey;
+    renderOrdersProView();
+}
+
+function setOrdersViewMode(mode) {
+    ordersFilterState.view = ['orders', 'category', 'date'].includes(mode) ? mode : 'orders';
+    renderOrdersProView();
+}
+
+function resetOrdersFilters() {
+    const range = ordersDateRangeForPreset('today');
+    Object.assign(ordersFilterState, {
+        datePreset: 'today',
+        startKey: range.startKey,
+        endKey: range.endKey,
+        source: 'all',
+        status: 'all',
+        payment: 'all',
+        category: 'all',
+        search: '',
+        view: 'orders'
+    });
+    renderOrdersProView();
+}
+
+function mountOrdersStyles() {
+    if (ordersStyleMounted || document.getElementById('orders-pro-style')) return;
+    const style = document.createElement('style');
+    style.id = 'orders-pro-style';
+    style.textContent = `
+        .orders-kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px;margin:16px 0}
+        .orders-kpi{border:1px solid #e5eadf;background:#fbfdf8;border-radius:8px;padding:14px 16px}
+        .orders-kpi span{display:block;color:#60706a;font-size:.85rem;margin-bottom:6px}
+        .orders-kpi strong{font-size:1.35rem;color:#0b3b2e}
+        .orders-pro-panel{border:1px solid #e5eadf;background:#fff;border-radius:8px;padding:14px;margin-bottom:16px}
+        .orders-toolbar{display:grid;grid-template-columns:1.3fr repeat(4,minmax(135px,1fr));gap:10px;align-items:end}
+        .orders-toolbar label{display:flex;flex-direction:column;gap:6px;color:#53665f;font-weight:700;font-size:.82rem}
+        .orders-toolbar input,.orders-toolbar select{height:38px;border:1px solid #d9e2d2;border-radius:7px;padding:0 10px;background:#fff;font:inherit}
+        .orders-segments{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+        .orders-segments button,.orders-reset-btn{border:1px solid #cfe0d0;background:#fff;color:#157a3b;border-radius:999px;padding:8px 12px;font-weight:700;cursor:pointer}
+        .orders-segments button.active{background:#0f7d3d;color:#fff;border-color:#0f7d3d}
+        .orders-date-range{display:flex;gap:8px}
+        .orders-actions-row{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap}
+        .orders-result-label{color:#60706a;font-weight:700}
+        .orders-table-wrap{overflow-x:auto;border:1px solid #edf1ea;border-radius:8px}
+        .orders-table-wrap table{min-width:1080px}
+        .orders-table-wrap th{white-space:nowrap}
+        .orders-item-list{display:flex;flex-direction:column;gap:3px;min-width:210px}
+        .orders-item-list span{display:flex;justify-content:space-between;gap:12px}
+        .orders-item-list small,.orders-item-list em,.orders-muted{color:#74827c;font-style:normal;font-size:.82rem}
+        .orders-category-line{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
+        .orders-category-line b{background:#eef7ef;color:#157a3b;border-radius:999px;padding:2px 7px;font-size:.76rem}
+        .orders-insight-panel{display:none;border:1px solid #e5eadf;background:#fbfdf8;border-radius:8px;margin:0 0 16px;padding:12px}
+        .orders-insight-panel.active{display:block}
+        .orders-insight-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}
+        .orders-insight-row{display:flex;justify-content:space-between;gap:10px;background:#fff;border:1px solid #edf1ea;border-radius:7px;padding:10px 12px}
+        .orders-insight-row small{display:block;color:#74827c;margin-top:3px}
+        .orders-source-chip{display:inline-flex;border-radius:999px;background:#eef4ff;color:#315f9f;padding:2px 8px;font-size:.78rem;font-weight:700;margin-top:4px}
+        @media(max-width:1100px){.orders-kpi-grid{grid-template-columns:repeat(2,1fr)}.orders-toolbar{grid-template-columns:1fr 1fr}}
+        @media(max-width:680px){.orders-kpi-grid,.orders-toolbar{grid-template-columns:1fr}.orders-date-range{flex-direction:column}}
+    `;
+    document.head.appendChild(style);
+    ordersStyleMounted = true;
+}
+
+function mountOrdersProScaffold() {
+    const section = document.getElementById('orders');
+    const tbody = document.getElementById('orders-table-body');
+    if (!section || !tbody) return;
+    mountOrdersStyles();
+    const table = tbody.closest('table');
+    const tableWrap = table?.parentElement;
+    if (tableWrap) tableWrap.classList.add('orders-table-wrap');
+    if (table && !table.dataset.ordersProHead) {
+        const thead = table.querySelector('thead');
+        if (thead) {
+            thead.innerHTML = `
+                <tr>
+                    <th>รหัสสั่งซื้อ</th>
+                    <th>ลูกค้า</th>
+                    <th>รายการ / หมวดหมู่</th>
+                    <th>ยอดรวม</th>
+                    <th>ชำระเงิน</th>
+                    <th>เวลา</th>
+                    <th>สถานะ</th>
+                    <th>จัดการ</th>
+                </tr>
+            `;
+        }
+        table.dataset.ordersProHead = '1';
+    }
+    if (section.querySelector('.orders-pro-panel')) return;
+    const controls = document.createElement('div');
+    controls.innerHTML = `
+        <div class="orders-kpi-grid">
+            <div class="orders-kpi"><span>ออเดอร์ที่แสดง</span><strong id="orders-summary-count">0</strong></div>
+            <div class="orders-kpi"><span>ยอดขายที่ชำระแล้ว</span><strong id="orders-summary-revenue">฿0</strong></div>
+            <div class="orders-kpi"><span>รอชำระ</span><strong id="orders-summary-pending">0</strong></div>
+            <div class="orders-kpi"><span>หมวดหมู่ในช่วงนี้</span><strong id="orders-summary-categories">0</strong></div>
+        </div>
+        <div class="orders-pro-panel">
+            <div class="orders-segments" aria-label="ช่วงวันที่">
+                <button type="button" data-orders-date-preset="today">วันนี้</button>
+                <button type="button" data-orders-date-preset="yesterday">เมื่อวาน</button>
+                <button type="button" data-orders-date-preset="week">7 วัน</button>
+                <button type="button" data-orders-date-preset="month">30 วัน</button>
+                <button type="button" data-orders-date-preset="all">ทั้งหมด</button>
+            </div>
+            <div class="orders-toolbar">
+                <label>ค้นหา
+                    <input id="orders-search" type="search" placeholder="รหัส, ลูกค้า, เบอร์, สินค้า">
+                </label>
+                <label>แหล่งที่มา
+                    <select id="orders-source-filter">
+                        <option value="all">ทุกช่องทาง</option>
+                        <option value="pos">POS</option>
+                        <option value="online">Online</option>
+                    </select>
+                </label>
+                <label>สถานะออเดอร์
+                    <select id="orders-status-filter">
+                        <option value="all">ทุกสถานะ</option>
+                        <option value="pending">รอดำเนินการ</option>
+                        <option value="processing">กำลังทำ</option>
+                        <option value="completed">เสร็จสิ้น</option>
+                        <option value="cancelled">ยกเลิก</option>
+                        <option value="refunded">คืนเงิน</option>
+                    </select>
+                </label>
+                <label>ชำระเงิน
+                    <select id="orders-payment-filter">
+                        <option value="all">ทุกสถานะ</option>
+                        <option value="paid">ชำระแล้ว</option>
+                        <option value="pending">รอชำระ</option>
+                        <option value="failed">ล้มเหลว</option>
+                        <option value="refunded">คืนเงิน</option>
+                    </select>
+                </label>
+                <label>หมวดหมู่
+                    <select id="orders-category-filter">
+                        <option value="all">ทุกหมวดหมู่</option>
+                    </select>
+                </label>
+                <label>วันที่เริ่ม
+                    <input id="orders-start-date" type="date">
+                </label>
+                <label>วันที่สิ้นสุด
+                    <input id="orders-end-date" type="date">
+                </label>
+            </div>
+            <div class="orders-actions-row">
+                <div class="orders-segments" aria-label="มุมมอง">
+                    <button type="button" data-orders-view="orders">รายการ</button>
+                    <button type="button" data-orders-view="category">ตามหมวดหมู่</button>
+                    <button type="button" data-orders-view="date">ตามวันที่</button>
+                </div>
+                <span id="orders-result-label" class="orders-result-label">กำลังโหลดข้อมูล...</span>
+                <button type="button" class="orders-reset-btn" id="orders-reset-filters">ล้างตัวกรอง</button>
+            </div>
+        </div>
+        <div id="orders-insight-panel" class="orders-insight-panel"></div>
+    `;
+    const sectionHeader = section.querySelector('.section-header');
+    sectionHeader?.insertAdjacentElement('afterend', controls);
+}
+
+function bindOrdersControls() {
+    if (ordersFiltersBound) return;
+    ordersFiltersBound = true;
+    document.addEventListener('input', event => {
+        if (event.target?.id === 'orders-search') {
+            ordersFilterState.search = event.target.value || '';
+            renderOrdersProView();
+        }
+        if (event.target?.id === 'orders-start-date') {
+            ordersFilterState.datePreset = 'custom';
+            ordersFilterState.startKey = event.target.value || '';
+            renderOrdersProView();
+        }
+        if (event.target?.id === 'orders-end-date') {
+            ordersFilterState.datePreset = 'custom';
+            ordersFilterState.endKey = event.target.value || '';
+            renderOrdersProView();
+        }
+    });
+    document.addEventListener('change', event => {
+        const target = event.target;
+        if (!target?.id) return;
+        if (target.id === 'orders-source-filter') ordersFilterState.source = target.value;
+        if (target.id === 'orders-status-filter') ordersFilterState.status = target.value;
+        if (target.id === 'orders-payment-filter') ordersFilterState.payment = target.value;
+        if (target.id === 'orders-category-filter') ordersFilterState.category = target.value;
+        if (target.id.startsWith('orders-') && target.id.endsWith('-filter')) renderOrdersProView();
+    });
+    document.addEventListener('click', event => {
+        const preset = event.target?.closest?.('[data-orders-date-preset]')?.dataset.ordersDatePreset;
+        if (preset) setOrdersDatePreset(preset);
+        const view = event.target?.closest?.('[data-orders-view]')?.dataset.ordersView;
+        if (view) setOrdersViewMode(view);
+        if (event.target?.id === 'orders-reset-filters') resetOrdersFilters();
+    });
+}
+
+function updateOrdersControls() {
+    const startInput = document.getElementById('orders-start-date');
+    const endInput = document.getElementById('orders-end-date');
+    const searchInput = document.getElementById('orders-search');
+    const sourceSelect = document.getElementById('orders-source-filter');
+    const statusSelect = document.getElementById('orders-status-filter');
+    const paymentSelect = document.getElementById('orders-payment-filter');
+    if (startInput) startInput.value = ordersFilterState.startKey || '';
+    if (endInput) endInput.value = ordersFilterState.endKey || '';
+    if (searchInput && searchInput.value !== ordersFilterState.search) searchInput.value = ordersFilterState.search || '';
+    if (sourceSelect) sourceSelect.value = ordersFilterState.source;
+    if (statusSelect) statusSelect.value = ordersFilterState.status;
+    if (paymentSelect) paymentSelect.value = ordersFilterState.payment;
+    document.querySelectorAll('[data-orders-date-preset]').forEach(button => {
+        button.classList.toggle('active', button.dataset.ordersDatePreset === ordersFilterState.datePreset);
+    });
+    document.querySelectorAll('[data-orders-view]').forEach(button => {
+        button.classList.toggle('active', button.dataset.ordersView === ordersFilterState.view);
+    });
+}
+
+function refreshOrdersCategoryFilter() {
+    const select = document.getElementById('orders-category-filter');
+    if (!select) return;
+    const categories = new Map();
+    ordersData.forEach(order => {
+        orderCategories(order).forEach(cat => categories.set(cat.key, cat.label));
+    });
+    Object.entries(shopCategoriesData || {}).forEach(([key, cat]) => categories.set(key, cat.name || key));
+    const current = ordersFilterState.category;
+    const options = Array.from(categories, ([key, label]) => ({ key, label }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'th'));
+    select.innerHTML = '<option value="all">ทุกหมวดหมู่</option>' + options
+        .map(cat => `<option value="${escapeHTML(cat.key)}">${escapeHTML(cat.label)}</option>`)
+        .join('');
+    if (current !== 'all' && !categories.has(current)) {
+        ordersFilterState.category = 'all';
+    }
+    select.value = ordersFilterState.category;
+}
+
+function renderOrdersSummary(orders) {
+    const paidOrders = orders.filter(order => orderPaymentStatusValue(order) === 'paid' || orderStatusValue(order) === 'completed');
+    const paidRevenue = paidOrders
+        .filter(order => orderStatusValue(order) !== 'cancelled' && !order.isTestOrder)
+        .reduce((sum, order) => sum + orderReportTotal(order), 0);
+    const pendingPayment = orders.filter(order => orderPaymentStatusValue(order) === 'pending').length;
+    const categories = new Set();
+    orders.forEach(order => orderCategories(order).forEach(cat => categories.add(cat.key)));
+    const values = {
+        'orders-summary-count': orders.length.toLocaleString('th-TH'),
+        'orders-summary-revenue': '฿' + paidRevenue.toLocaleString('th-TH'),
+        'orders-summary-pending': pendingPayment.toLocaleString('th-TH'),
+        'orders-summary-categories': categories.size.toLocaleString('th-TH')
+    };
+    Object.entries(values).forEach(([id, value]) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    });
+}
+
+function orderGroupRows(orders, mode) {
+    const rows = new Map();
+    const addRow = (key, label, amount, quantity, orderId) => {
+        const row = rows.get(key) || { key, label, amount: 0, quantity: 0, orders: new Set() };
+        row.amount += safeNumber(amount);
+        row.quantity += safeNumber(quantity, 1);
+        if (orderId) row.orders.add(orderId);
+        rows.set(key, row);
+    };
+    orders.forEach(order => {
+        if (mode === 'date') {
+            addRow(orderDateKey(order) || 'unknown', orderDateLabelFromKey(orderDateKey(order)), orderReportTotal(order), 1, order.firestoreId);
+            return;
+        }
+        const items = orderReportItems(order);
+        if (!items.length) {
+            addRow('uncategorized', 'ไม่ระบุหมวดหมู่', orderReportTotal(order), 1, order.firestoreId);
+            return;
+        }
+        items.forEach(item => {
+            addRow(orderItemCategoryKey(item), orderItemCategoryLabel(item), itemReportAmount(item), safeNumber(item.quantity, 1), order.firestoreId);
+        });
+    });
+    return Array.from(rows.values())
+        .map(row => ({ ...row, orderCount: row.orders.size }))
+        .sort((a, b) => mode === 'date' ? b.key.localeCompare(a.key) : b.amount - a.amount);
+}
+
+function renderOrdersInsight(orders) {
+    const panel = document.getElementById('orders-insight-panel');
+    if (!panel) return;
+    if (ordersFilterState.view === 'orders') {
+        panel.classList.remove('active');
+        panel.innerHTML = '';
+        return;
+    }
+    const rows = orderGroupRows(orders, ordersFilterState.view).slice(0, 12);
+    const title = ordersFilterState.view === 'category' ? 'สรุปตามหมวดหมู่' : 'สรุปตามวันที่';
+    panel.classList.add('active');
+    panel.innerHTML = `
+        <strong>${escapeHTML(title)}</strong>
+        <div class="orders-insight-grid">
+            ${rows.length ? rows.map(row => `
+                <div class="orders-insight-row">
+                    <div>
+                        <strong>${escapeHTML(row.label)}</strong>
+                        <small>${row.orderCount.toLocaleString('th-TH')} ออเดอร์ / ${safeNumber(row.quantity).toLocaleString('th-TH')} ชิ้น</small>
+                    </div>
+                    <strong>฿${safeNumber(row.amount).toLocaleString('th-TH')}</strong>
+                </div>
+            `).join('') : '<div class="orders-muted">ไม่มีข้อมูลในช่วงที่เลือก</div>'}
+        </div>
+    `;
+}
+
+function renderOrdersRows(orders) {
+    const tbody = document.getElementById('orders-table-body');
+    if (!tbody) return;
+    if (!orders.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">ไม่มีออเดอร์ตรงกับตัวกรอง</td></tr>';
+        return;
+    }
+    tbody.innerHTML = orders.map(order => {
+        const id = order.firestoreId || order.id || '';
+        const status = orderStatusValue(order);
+        const paymentStatus = orderPaymentStatusValue(order);
+        const paymentLabel = order.paymentLabel || order.paymentMethod || '-';
+        const canVoidPos = orderSourceValue(order) === 'pos' && status !== 'cancelled';
+        return `
+            <tr>
+                <td style="font-family: monospace;">${escapeHTML(orderDisplayId(order))}</td>
+                <td>
+                    <strong>${escapeHTML(order.customerName || order.name || 'Customer')}</strong><br>
+                    <small style="color:#888;">${escapeHTML(order.phone || order.customerPhone || '-')}</small><br>
+                    <span class="orders-source-chip">${escapeHTML(orderSourceLabel(order))}</span>
+                </td>
+                <td>${orderItemsSummaryHTML(order)}</td>
+                <td style="font-weight: 700;">฿${orderReportTotal(order).toLocaleString('th-TH')}</td>
+                <td>${getPaymentStatusBadgeHTML(paymentStatus)}<br><small style="color:#888;">${escapeHTML(paymentLabel)}</small></td>
+                <td>${formatDate(order.paidAt || order.closedAt || order.timestamp || order.createdAt)}</td>
+                <td>${getStatusBadgeHTML(status, 'order')}</td>
+                <td>
+                    <select onchange="updateOrderStatus('${escapeJSString(id)}', this.value)" style="padding: 5px; border-radius: 5px; border: 1px solid #ddd;">
+                        <option value="pending" ${status === 'pending' ? 'selected' : ''}>รอดำเนินการ</option>
+                        <option value="processing" ${status === 'processing' ? 'selected' : ''}>กำลังทำ</option>
+                        <option value="completed" ${status === 'completed' ? 'selected' : ''}>เสร็จสิ้น</option>
+                        <option value="cancelled" ${status === 'cancelled' ? 'selected' : ''}>ยกเลิก</option>
+                    </select>
+                    ${canVoidPos ? `<button class="btn-action btn-delete" type="button" style="margin-left:6px;" onclick="voidPosOrder('${escapeJSString(id)}')">Void</button>` : ''}
+                    ${posLoyaltyRetryActionHTML(order, id)}
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function renderOrdersProView() {
+    mountOrdersProScaffold();
+    bindOrdersControls();
+    refreshOrdersCategoryFilter();
+    updateOrdersControls();
+    const filtered = ordersData.filter(orderMatchesFilters);
+    renderOrdersSummary(filtered);
+    renderOrdersInsight(filtered);
+    renderOrdersRows(filtered);
+    const label = document.getElementById('orders-result-label');
+    if (label) {
+        const range = ordersFilterState.datePreset === 'all'
+            ? 'ทุกวัน'
+            : `${ordersFilterState.startKey || '-'} ถึง ${ordersFilterState.endKey || '-'}`;
+        label.textContent = `แสดง ${filtered.length.toLocaleString('th-TH')} จาก ${ordersData.length.toLocaleString('th-TH')} ออเดอร์ / ${range}`;
+    }
+}
+
+// Real-time Orders Listener - enhanced professional view
+function setupRealtimeOrders() {
+    if (ordersUnsubscribe) {
+        ordersUnsubscribe();
+        ordersUnsubscribe = null;
+    }
+    mountOrdersProScaffold();
+    const q = query(collection(db, "orders"), orderBy("timestamp", "desc"));
+    ordersUnsubscribe = onSnapshot(q, (snapshot) => {
+        let todayOrders = 0;
+        let todayRevenue = 0;
+        const reportOrders = [];
+        const todayKey = localDateKey(new Date());
+
+        snapshot.forEach((docSnap) => {
+            const order = { ...docSnap.data(), firestoreId: docSnap.id };
+            reportOrders.push(order);
+            const status = orderStatusValue(order);
+            const paymentStatus = orderPaymentStatusValue(order);
+            const isRevenueOrder = paymentStatus === 'paid' || status === 'completed';
+            if (!order.isTestOrder && isRevenueOrder && status !== 'cancelled' && orderDateKey(order) === todayKey) {
+                todayOrders++;
+                todayRevenue += orderReportTotal(order);
+            }
+        });
+
+        ordersData = reportOrders;
+        dashboardOrdersData = reportOrders;
+        renderDashboardSalesReport();
+        const statOrders = document.getElementById('stat-orders');
+        const statRevenue = document.getElementById('stat-revenue');
+        if (statOrders) statOrders.innerText = todayOrders;
+        if (statRevenue) statRevenue.innerText = '฿' + todayRevenue.toLocaleString('th-TH');
+        renderOrdersProView();
+    }, (error) => {
+        console.error("Error listening to orders:", error);
+        const tbody = document.getElementById('orders-table-body');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:red;">ไม่มีสิทธิ์เข้าถึงข้อมูล หรือเกิดข้อผิดพลาด</td></tr>';
+    });
+}
+
+window.setOrdersDatePreset = setOrdersDatePreset;
+window.setOrdersViewMode = setOrdersViewMode;
+window.resetOrdersFilters = resetOrdersFilters;
 
 function adminTodayISO() {
     const now = new Date();
