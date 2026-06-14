@@ -450,6 +450,7 @@ let ordersUnsubscribe = null;
 let ordersData = [];
 let ordersFiltersBound = false;
 let ordersStyleMounted = false;
+const ORDERS_PRO_VIEW_VERSION = 'orders-pro-view-3';
 const ordersFilterState = {
     datePreset: 'today',
     startKey: adminTodayISO(),
