@@ -1,7 +1,7 @@
 import { auth, provider, db } from './firebase-config.js';
 import { getMemberTier, getTierBenefits } from './membership.js';
 import { BLOG_POSTS, SITE, getBlogUrl } from './blog-data.mjs';
-import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged, getIdTokenResult } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp, writeBatch, runTransaction, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const ADMIN_IMAGE_MAX_FILE_SIZE = 8 * 1024 * 1024;
@@ -174,8 +174,8 @@ const ADMIN_PERMISSION_LABELS = {
     faqs: 'FAQ',
     promptpay: '\u0e08\u0e31\u0e14\u0e01\u0e32\u0e23\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e40\u0e1e\u0e22\u0e4c',
     marketing: 'Marketing Tools',
-    footer: 'Footer',
-    adminAccess: 'Admin Access'
+    index: '\u0e08\u0e31\u0e14\u0e01\u0e32\u0e23 Index',
+    footer: 'Footer'
 };
 const ADMIN_PERMISSION_HELP = {
     pos: 'อนุญาตให้ล็อกอิน Eden POS APK และซิงค์บิล/ใบเสร็จหน้าร้าน'
@@ -207,6 +207,7 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
         faqs: false,
         promptpay: false,
         marketing: false,
+        index: false,
         footer: false
     }
 };
@@ -232,6 +233,7 @@ const ADMIN_TAB_PERMISSIONS = {
     blogs: 'blogs',
     faqs: 'faqs',
     promptpay: 'promptpay',
+    'index-settings': 'index',
     'marketing-settings': 'marketing',
     'footer-settings': 'footer'
 };
@@ -296,31 +298,7 @@ const SALES_REPORT_LABELS = {
     taxes: 'ภาษี'
 };
 
-async function hasOwnerTokenClaim(user) {
-    if (!user) return false;
-    try {
-        const token = await getIdTokenResult(user, true);
-        return token?.claims?.is_owner === true || String(token?.claims?.role || '').toUpperCase() === 'OWNER';
-    } catch (error) {
-        console.warn('Unable to read owner token claims:', error);
-        return false;
-    }
-}
-
-async function hasOwnerUserProfile(user) {
-    if (!user) return false;
-    try {
-        const snap = await getDoc(doc(db, 'users', user.uid));
-        if (!snap.exists()) return false;
-        const profile = snap.data() || {};
-        return profile.is_owner === true || String(profile.role || '').toUpperCase() === 'OWNER';
-    } catch (error) {
-        console.warn('Unable to read owner user profile:', error);
-        return false;
-    }
-}
-
-function buildBootstrapOwnerAccess(user, source = 'bootstrap') {
+function buildBootstrapOwnerAccess(user) {
     return {
         uid: user.uid,
         email: normalizeEmail(user.email),
@@ -331,15 +309,13 @@ function buildBootstrapOwnerAccess(user, source = 'bootstrap') {
         branch_ids: ['BKK_MAIN'],
         primary_branch_id: 'BKK_MAIN',
         archery_role: 'OWNER',
-        source
+        source: 'bootstrap'
     };
 }
 
 async function loadAdminAccess(user) {
     if (!user) return null;
     if (isAdminUser(user)) return buildBootstrapOwnerAccess(user);
-    if (await hasOwnerTokenClaim(user)) return buildBootstrapOwnerAccess(user, 'owner_claim');
-    if (await hasOwnerUserProfile(user)) return buildBootstrapOwnerAccess(user, 'owner_profile');
 
     let snap;
     try {
@@ -378,7 +354,7 @@ async function loadAdminAccess(user) {
 }
 
 async function ensureBootstrapOwnerRecord(user) {
-    if (!user || (!isAdminUser(user) && !(await hasOwnerTokenClaim(user)) && !(await hasOwnerUserProfile(user)))) return;
+    if (!user || !isAdminUser(user)) return;
     try {
         await setDoc(doc(db, ADMIN_COLLECTION, user.uid), {
             uid: user.uid,
@@ -396,14 +372,13 @@ async function ensureBootstrapOwnerRecord(user) {
 }
 
 function isOwnerAccess(access = currentAdminAccess) {
-    return !!access
-        && access.status === 'active'
-        && (access.role === 'owner' || access.permissions?.adminAccess === true);
+    return !!access && access.status === 'active' && access.role === 'owner';
 }
 
 function canAdmin(permission) {
     if (!currentAdminAccess || currentAdminAccess.status !== 'active') return false;
     if (currentAdminAccess.role === 'owner') return true;
+    if (permission === 'adminAccess') return false;
     if (currentAdminAccess.role === 'head_manager') return true;
     return currentAdminAccess.permissions?.[permission] === true;
 }
@@ -450,7 +425,7 @@ let ordersUnsubscribe = null;
 let ordersData = [];
 let ordersFiltersBound = false;
 let ordersStyleMounted = false;
-const ORDERS_PRO_VIEW_VERSION = 'orders-pro-view-3';
+const ORDERS_PRO_VIEW_VERSION = 'orders-pro-view-4';
 const ordersFilterState = {
     datePreset: 'today',
     startKey: adminTodayISO(),
@@ -465,8 +440,14 @@ const ordersFilterState = {
 let bookingsUnsubscribe = null;
 let archeryBookingsUnsubscribe = null;
 let archeryAuditUnsubscribe = null;
+let archeryPaymentsUnsubscribe = null;
+let archeryWebhookEventsUnsubscribe = null;
+let archeryReconciliationUnsubscribe = null;
 let archeryBookingsData = [];
 let archeryAuditLogsData = [];
+let archeryPaymentsData = [];
+let archeryWebhookEventsData = [];
+let archeryReconciliationData = [];
 let archeryPageSettingsData = null;
 const archeryActionLoading = new Set();
 let archeryAdminControlsBound = false;
@@ -1142,6 +1123,7 @@ function initializeAdminModules() {
     if (canAdmin('loyalty')) setupRealtimeLoyalty();
     if (canAdmin('pos')) setupRealtimePosApkUpdates();
     if (canAdmin('promptpay') && typeof window.loadPromptPaySettings === 'function') window.loadPromptPaySettings();
+    if (canAdmin('index') && typeof window.loadIndexSettings === 'function') window.loadIndexSettings();
     if (canAdmin('marketing') && typeof window.loadMarketingSettings === 'function') window.loadMarketingSettings();
     if (isOwnerAccess()) setupRealtimeAdminAccess();
     initXLSXTools();
@@ -1294,6 +1276,9 @@ window.refreshAdminSection = async (tabId, button = null) => {
                 break;
             case 'promptpay':
                 if (typeof window.loadPromptPaySettings === 'function') await window.loadPromptPaySettings();
+                break;
+            case 'index-settings':
+                if (typeof window.loadIndexSettings === 'function') await window.loadIndexSettings();
                 break;
             case 'marketing-settings':
                 if (typeof window.loadMarketingSettings === 'function') await window.loadMarketingSettings();
@@ -3616,9 +3601,7 @@ function orderTimestampToDate(value) {
     if (value.toDate) return value.toDate();
     if (typeof value === 'number') return new Date(value);
     if (typeof value === 'string') {
-        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-            return new Date(`${value}T00:00:00`);
-        }
+        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date(`${value}T00:00:00`);
         const date = new Date(value);
         return Number.isNaN(date.getTime()) ? null : date;
     }
@@ -3634,9 +3617,7 @@ function orderDateKey(order = {}) {
 function orderDateLabelFromKey(key = '') {
     if (!key) return '-';
     const date = new Date(`${key}T00:00:00`);
-    return Number.isNaN(date.getTime())
-        ? key
-        : date.toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' });
+    return Number.isNaN(date.getTime()) ? key : date.toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 function orderStatusValue(order = {}) {
@@ -3660,14 +3641,6 @@ function orderSourceLabel(order = {}) {
 function orderDisplayId(order = {}) {
     const id = order.firestoreId || order.id || '';
     return order.receiptNo || order.orderNumber || (id ? id.substring(0, 8).toUpperCase() : '-');
-}
-
-function orderCustomerText(order = {}) {
-    return [
-        order.customerName || order.name || 'Customer',
-        order.phone || order.customerPhone || '',
-        orderSourceLabel(order)
-    ].filter(Boolean).join(' ');
 }
 
 function orderItemName(item = {}) {
@@ -3705,9 +3678,7 @@ function orderItemsSummaryHTML(order = {}) {
         return `<span>${escapeHTML(orderItemName(item))}<small>x${escapeHTML(qty)}</small></span>`;
     }).join('');
     const more = items.length > 3 ? `<em>+${items.length - 3} รายการ</em>` : '';
-    const categories = orderCategories(order).slice(0, 2)
-        .map(cat => `<b>${escapeHTML(cat.label)}</b>`)
-        .join('');
+    const categories = orderCategories(order).slice(0, 2).map(cat => `<b>${escapeHTML(cat.label)}</b>`).join('');
     return `<div class="orders-item-list">${shown}${more}</div><div class="orders-category-line">${categories}</div>`;
 }
 
@@ -3757,9 +3728,7 @@ function ordersDateRangeForPreset(preset) {
 
 function setOrdersDatePreset(preset) {
     ordersFilterState.datePreset = preset;
-    const range = ordersDateRangeForPreset(preset);
-    ordersFilterState.startKey = range.startKey;
-    ordersFilterState.endKey = range.endKey;
+    Object.assign(ordersFilterState, ordersDateRangeForPreset(preset));
     renderOrdersProView();
 }
 
@@ -3769,11 +3738,9 @@ function setOrdersViewMode(mode) {
 }
 
 function resetOrdersFilters() {
-    const range = ordersDateRangeForPreset('today');
     Object.assign(ordersFilterState, {
         datePreset: 'today',
-        startKey: range.startKey,
-        endKey: range.endKey,
+        ...ordersDateRangeForPreset('today'),
         source: 'all',
         status: 'all',
         payment: 'all',
@@ -3800,7 +3767,6 @@ function mountOrdersStyles() {
         .orders-segments{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
         .orders-segments button,.orders-reset-btn{border:1px solid #cfe0d0;background:#fff;color:#157a3b;border-radius:999px;padding:8px 12px;font-weight:700;cursor:pointer}
         .orders-segments button.active{background:#0f7d3d;color:#fff;border-color:#0f7d3d}
-        .orders-date-range{display:flex;gap:8px}
         .orders-actions-row{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap}
         .orders-result-label{color:#60706a;font-weight:700}
         .orders-table-wrap{overflow-x:auto;border:1px solid #edf1ea;border-radius:8px}
@@ -3818,7 +3784,7 @@ function mountOrdersStyles() {
         .orders-insight-row small{display:block;color:#74827c;margin-top:3px}
         .orders-source-chip{display:inline-flex;border-radius:999px;background:#eef4ff;color:#315f9f;padding:2px 8px;font-size:.78rem;font-weight:700;margin-top:4px}
         @media(max-width:1100px){.orders-kpi-grid{grid-template-columns:repeat(2,1fr)}.orders-toolbar{grid-template-columns:1fr 1fr}}
-        @media(max-width:680px){.orders-kpi-grid,.orders-toolbar{grid-template-columns:1fr}.orders-date-range{flex-direction:column}}
+        @media(max-width:680px){.orders-kpi-grid,.orders-toolbar{grid-template-columns:1fr}}
     `;
     document.head.appendChild(style);
     ordersStyleMounted = true;
@@ -3921,8 +3887,7 @@ function mountOrdersProScaffold() {
         </div>
         <div id="orders-insight-panel" class="orders-insight-panel"></div>
     `;
-    const sectionHeader = section.querySelector('.section-header');
-    sectionHeader?.insertAdjacentElement('afterend', controls);
+    section.querySelector('.section-header')?.insertAdjacentElement('afterend', controls);
 }
 
 function bindOrdersControls() {
@@ -3963,18 +3928,19 @@ function bindOrdersControls() {
 }
 
 function updateOrdersControls() {
-    const startInput = document.getElementById('orders-start-date');
-    const endInput = document.getElementById('orders-end-date');
+    const values = {
+        'orders-start-date': ordersFilterState.startKey || '',
+        'orders-end-date': ordersFilterState.endKey || '',
+        'orders-source-filter': ordersFilterState.source,
+        'orders-status-filter': ordersFilterState.status,
+        'orders-payment-filter': ordersFilterState.payment
+    };
+    Object.entries(values).forEach(([id, value]) => {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+    });
     const searchInput = document.getElementById('orders-search');
-    const sourceSelect = document.getElementById('orders-source-filter');
-    const statusSelect = document.getElementById('orders-status-filter');
-    const paymentSelect = document.getElementById('orders-payment-filter');
-    if (startInput) startInput.value = ordersFilterState.startKey || '';
-    if (endInput) endInput.value = ordersFilterState.endKey || '';
     if (searchInput && searchInput.value !== ordersFilterState.search) searchInput.value = ordersFilterState.search || '';
-    if (sourceSelect) sourceSelect.value = ordersFilterState.source;
-    if (statusSelect) statusSelect.value = ordersFilterState.status;
-    if (paymentSelect) paymentSelect.value = ordersFilterState.payment;
     document.querySelectorAll('[data-orders-date-preset]').forEach(button => {
         button.classList.toggle('active', button.dataset.ordersDatePreset === ordersFilterState.datePreset);
     });
@@ -3987,34 +3953,25 @@ function refreshOrdersCategoryFilter() {
     const select = document.getElementById('orders-category-filter');
     if (!select) return;
     const categories = new Map();
-    ordersData.forEach(order => {
-        orderCategories(order).forEach(cat => categories.set(cat.key, cat.label));
-    });
+    ordersData.forEach(order => orderCategories(order).forEach(cat => categories.set(cat.key, cat.label)));
     Object.entries(shopCategoriesData || {}).forEach(([key, cat]) => categories.set(key, cat.name || key));
     const current = ordersFilterState.category;
-    const options = Array.from(categories, ([key, label]) => ({ key, label }))
-        .sort((a, b) => a.label.localeCompare(b.label, 'th'));
-    select.innerHTML = '<option value="all">ทุกหมวดหมู่</option>' + options
-        .map(cat => `<option value="${escapeHTML(cat.key)}">${escapeHTML(cat.label)}</option>`)
-        .join('');
-    if (current !== 'all' && !categories.has(current)) {
-        ordersFilterState.category = 'all';
-    }
+    const options = Array.from(categories, ([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label, 'th'));
+    select.innerHTML = '<option value="all">ทุกหมวดหมู่</option>' + options.map(cat => `<option value="${escapeHTML(cat.key)}">${escapeHTML(cat.label)}</option>`).join('');
+    if (current !== 'all' && !categories.has(current)) ordersFilterState.category = 'all';
     select.value = ordersFilterState.category;
 }
 
 function renderOrdersSummary(orders) {
-    const paidOrders = orders.filter(order => orderPaymentStatusValue(order) === 'paid' || orderStatusValue(order) === 'completed');
-    const paidRevenue = paidOrders
-        .filter(order => orderStatusValue(order) !== 'cancelled' && !order.isTestOrder)
+    const paidRevenue = orders
+        .filter(order => (orderPaymentStatusValue(order) === 'paid' || orderStatusValue(order) === 'completed') && orderStatusValue(order) !== 'cancelled' && !order.isTestOrder)
         .reduce((sum, order) => sum + orderReportTotal(order), 0);
-    const pendingPayment = orders.filter(order => orderPaymentStatusValue(order) === 'pending').length;
     const categories = new Set();
     orders.forEach(order => orderCategories(order).forEach(cat => categories.add(cat.key)));
     const values = {
         'orders-summary-count': orders.length.toLocaleString('th-TH'),
         'orders-summary-revenue': '฿' + paidRevenue.toLocaleString('th-TH'),
-        'orders-summary-pending': pendingPayment.toLocaleString('th-TH'),
+        'orders-summary-pending': orders.filter(order => orderPaymentStatusValue(order) === 'pending').length.toLocaleString('th-TH'),
         'orders-summary-categories': categories.size.toLocaleString('th-TH')
     };
     Object.entries(values).forEach(([id, value]) => {
@@ -4034,7 +3991,8 @@ function orderGroupRows(orders, mode) {
     };
     orders.forEach(order => {
         if (mode === 'date') {
-            addRow(orderDateKey(order) || 'unknown', orderDateLabelFromKey(orderDateKey(order)), orderReportTotal(order), 1, order.firestoreId);
+            const key = orderDateKey(order) || 'unknown';
+            addRow(key, orderDateLabelFromKey(key), orderReportTotal(order), 1, order.firestoreId);
             return;
         }
         const items = orderReportItems(order);
@@ -4042,13 +4000,9 @@ function orderGroupRows(orders, mode) {
             addRow('uncategorized', 'ไม่ระบุหมวดหมู่', orderReportTotal(order), 1, order.firestoreId);
             return;
         }
-        items.forEach(item => {
-            addRow(orderItemCategoryKey(item), orderItemCategoryLabel(item), itemReportAmount(item), safeNumber(item.quantity, 1), order.firestoreId);
-        });
+        items.forEach(item => addRow(orderItemCategoryKey(item), orderItemCategoryLabel(item), itemReportAmount(item), safeNumber(item.quantity, 1), order.firestoreId));
     });
-    return Array.from(rows.values())
-        .map(row => ({ ...row, orderCount: row.orders.size }))
-        .sort((a, b) => mode === 'date' ? b.key.localeCompare(a.key) : b.amount - a.amount);
+    return Array.from(rows.values()).map(row => ({ ...row, orderCount: row.orders.size })).sort((a, b) => mode === 'date' ? b.key.localeCompare(a.key) : b.amount - a.amount);
 }
 
 function renderOrdersInsight(orders) {
@@ -4067,10 +4021,7 @@ function renderOrdersInsight(orders) {
         <div class="orders-insight-grid">
             ${rows.length ? rows.map(row => `
                 <div class="orders-insight-row">
-                    <div>
-                        <strong>${escapeHTML(row.label)}</strong>
-                        <small>${row.orderCount.toLocaleString('th-TH')} ออเดอร์ / ${safeNumber(row.quantity).toLocaleString('th-TH')} ชิ้น</small>
-                    </div>
+                    <div><strong>${escapeHTML(row.label)}</strong><small>${row.orderCount.toLocaleString('th-TH')} ออเดอร์ / ${safeNumber(row.quantity).toLocaleString('th-TH')} ชิ้น</small></div>
                     <strong>฿${safeNumber(row.amount).toLocaleString('th-TH')}</strong>
                 </div>
             `).join('') : '<div class="orders-muted">ไม่มีข้อมูลในช่วงที่เลือก</div>'}
@@ -4089,19 +4040,14 @@ function renderOrdersRows(orders) {
         const id = order.firestoreId || order.id || '';
         const status = orderStatusValue(order);
         const paymentStatus = orderPaymentStatusValue(order);
-        const paymentLabel = order.paymentLabel || order.paymentMethod || '-';
         const canVoidPos = orderSourceValue(order) === 'pos' && status !== 'cancelled';
         return `
             <tr>
                 <td style="font-family: monospace;">${escapeHTML(orderDisplayId(order))}</td>
-                <td>
-                    <strong>${escapeHTML(order.customerName || order.name || 'Customer')}</strong><br>
-                    <small style="color:#888;">${escapeHTML(order.phone || order.customerPhone || '-')}</small><br>
-                    <span class="orders-source-chip">${escapeHTML(orderSourceLabel(order))}</span>
-                </td>
+                <td><strong>${escapeHTML(order.customerName || order.name || 'Customer')}</strong><br><small style="color:#888;">${escapeHTML(order.phone || order.customerPhone || '-')}</small><br><span class="orders-source-chip">${escapeHTML(orderSourceLabel(order))}</span></td>
                 <td>${orderItemsSummaryHTML(order)}</td>
                 <td style="font-weight: 700;">฿${orderReportTotal(order).toLocaleString('th-TH')}</td>
-                <td>${getPaymentStatusBadgeHTML(paymentStatus)}<br><small style="color:#888;">${escapeHTML(paymentLabel)}</small></td>
+                <td>${getPaymentStatusBadgeHTML(paymentStatus)}<br><small style="color:#888;">${escapeHTML(order.paymentLabel || order.paymentMethod || '-')}</small></td>
                 <td>${formatDate(order.paidAt || order.closedAt || order.timestamp || order.createdAt)}</td>
                 <td>${getStatusBadgeHTML(status, 'order')}</td>
                 <td>
@@ -4130,14 +4076,11 @@ function renderOrdersProView() {
     renderOrdersRows(filtered);
     const label = document.getElementById('orders-result-label');
     if (label) {
-        const range = ordersFilterState.datePreset === 'all'
-            ? 'ทุกวัน'
-            : `${ordersFilterState.startKey || '-'} ถึง ${ordersFilterState.endKey || '-'}`;
+        const range = ordersFilterState.datePreset === 'all' ? 'ทุกวัน' : `${ordersFilterState.startKey || '-'} ถึง ${ordersFilterState.endKey || '-'}`;
         label.textContent = `แสดง ${filtered.length.toLocaleString('th-TH')} จาก ${ordersData.length.toLocaleString('th-TH')} ออเดอร์ / ${range}`;
     }
 }
 
-// Real-time Orders Listener - enhanced professional view
 function setupRealtimeOrders() {
     if (ordersUnsubscribe) {
         ordersUnsubscribe();
@@ -4220,6 +4163,7 @@ function adminFillArcheryTimeOptions() {
 
 const ARCHERY_BRANCH_FALLBACK = 'BKK_MAIN';
 const ARCHERY_PAID_STATUSES = new Set(['PAID_ONLINE', 'PAID_COUNTER', 'PAID', 'REFUNDED']);
+const ARCHERY_PENDING_PAYMENT_STATUSES = new Set(['PENDING', 'UNPAID', 'PAID_PENDING_REVIEW', 'REVIEW_REQUIRED']);
 const ARCHERY_CLOSED_STATUSES = new Set(['CANCELLED', 'COMPLETED', 'NO_SHOW', 'EXPIRED']);
 const ARCHERY_AUDIT_ACTIONS = new Set([
     'createWalkInArcheryBooking',
@@ -5089,6 +5033,9 @@ function renderArcheryAdmin(bookings = []) {
         .sort((a, b) => archeryBookingStartTime(a).localeCompare(archeryBookingStartTime(b)));
     renderArcherySchedule(archeryBookings);
     renderArcheryPaymentPanel(archeryBookings);
+    renderArcheryPaymentWatch(archeryBookings);
+    renderArcheryWebhookEvents();
+    renderArcheryReconciliationPanel();
     renderArcheryAuditTrail();
 
     const tbody = document.getElementById('archery-bookings-table-body');
@@ -5139,6 +5086,120 @@ function renderArcheryPaymentPanel(bookings = []) {
                 </div>
                 <div class="archery-action-buttons">
                     ${canRecord ? archeryActionButton('Paid Counter', 'archeryAdminPayment', id, 'recordCounterPayment') : '<span>-</span>'}
+                </div>
+            </div>
+        `;
+    }).join('')}</div>`;
+}
+
+function archeryPaymentForBooking(bookingId = '') {
+    const id = String(bookingId || '');
+    return (archeryPaymentsData || [])
+        .filter(payment => String(payment.booking_id || payment.bookingId || '') === id)
+        .sort((a, b) => adminTimestampMillis(b.updated_at || b.updatedAt || b.created_at || b.createdAt) - adminTimestampMillis(a.updated_at || a.updatedAt || a.created_at || a.createdAt))[0] || null;
+}
+
+function archeryPaymentWatchAgeLabel(booking = {}, payment = null) {
+    const startedAt = adminTimestampMillis(payment?.created_at || payment?.createdAt || booking.updated_at || booking.updatedAt || booking.created_at || booking.createdAt);
+    if (!startedAt) return '-';
+    const minutes = Math.max(0, Math.floor((Date.now() - startedAt) / 60000));
+    return minutes < 1 ? 'just now' : `${minutes} min`;
+}
+
+function renderArcheryPaymentWatch(bookings = []) {
+    const panel = document.getElementById('archery-payment-watch');
+    if (!panel) return;
+    if (!archeryCan('viewPaymentStatus')) {
+        panel.innerHTML = '<p class="archery-status error">บัญชีนี้ไม่มีสิทธิ์ดูสถานะชำระเงิน</p>';
+        return;
+    }
+    const rows = (bookings || [])
+        .filter(booking => archeryBookingIsActive(booking))
+        .map(booking => {
+            const bookingId = String(booking.id || booking.firestoreId || booking.booking_id || '');
+            const payment = archeryPaymentForBooking(bookingId);
+            const paymentStatus = String(booking.payment_status || payment?.payment_status || payment?.status || 'UNPAID').toUpperCase();
+            return { booking, bookingId, payment, paymentStatus };
+        })
+        .filter(row => ARCHERY_PENDING_PAYMENT_STATUSES.has(row.paymentStatus) || row.paymentStatus === '')
+        .sort((a, b) => adminTimestampMillis(b.payment?.updated_at || b.booking.updated_at || b.booking.created_at) - adminTimestampMillis(a.payment?.updated_at || a.booking.updated_at || a.booking.created_at))
+        .slice(0, 12);
+    if (!rows.length) {
+        panel.innerHTML = '<p class="archery-status success">No pending online payments.</p>';
+        return;
+    }
+    panel.innerHTML = `<div class="archery-panel-list">${rows.map(row => {
+        const booking = row.booking;
+        const payment = row.payment || {};
+        const link = payment.payment_link_url ? `<a href="${escapeHTML(payment.payment_link_url)}" target="_blank" rel="noopener noreferrer">Beam link</a>` : '';
+        return `
+            <div class="archery-panel-row">
+                <div>
+                    <strong>${escapeHTML(row.paymentStatus || 'PENDING')} / ${escapeHTML(row.bookingId)}</strong>
+                    <small>${escapeHTML(booking.customerName || booking.customer_name || booking.name || booking.member_id || 'Member')} / ${escapeHTML(archeryBookingDate(booking))} ${escapeHTML(archeryBookingStartTime(booking))} / ${escapeHTML(archeryAmountLabel(booking))}</small>
+                    <small>${escapeHTML(payment.provider || 'BEAM')} ${escapeHTML(payment.provider_ref || payment.beam_payment_link_id || '-')} / age ${escapeHTML(archeryPaymentWatchAgeLabel(booking, payment))}</small>
+                    ${link ? `<small>${link}</small>` : ''}
+                </div>
+                <small>${escapeHTML(adminTimestampText(payment.updated_at || payment.updatedAt || payment.created_at || payment.createdAt || booking.updated_at || booking.created_at))}</small>
+            </div>
+        `;
+    }).join('')}</div>`;
+}
+
+function renderArcheryWebhookEvents() {
+    const panel = document.getElementById('archery-webhook-events');
+    if (!panel) return;
+    if (!['OWNER', 'MANAGER'].includes(archeryAdminRole())) {
+        panel.innerHTML = '<p class="archery-status">Owner/Manager only.</p>';
+        return;
+    }
+    const rows = (archeryWebhookEventsData || [])
+        .slice()
+        .sort((a, b) => adminTimestampMillis(b.updated_at || b.created_at) - adminTimestampMillis(a.updated_at || a.created_at))
+        .slice(0, 12);
+    if (!rows.length) {
+        panel.innerHTML = '<p class="archery-status">No Beam webhook events loaded.</p>';
+        return;
+    }
+    panel.innerHTML = `<div class="archery-panel-list">${rows.map(row => `
+        <div class="archery-panel-row">
+            <div>
+                <strong>${escapeHTML(row.status || '-')} / ${escapeHTML(row.event_type || '-')}</strong>
+                <small>${escapeHTML(row.booking_id || '-')} / ${escapeHTML(row.provider_ref || '-')}</small>
+                ${row.reconciliation_id ? `<small>Reconciliation: ${escapeHTML(row.reconciliation_id)}</small>` : ''}
+            </div>
+            <small>${escapeHTML(adminTimestampText(row.updated_at || row.created_at))}</small>
+        </div>
+    `).join('')}</div>`;
+}
+
+function renderArcheryReconciliationPanel() {
+    const panel = document.getElementById('archery-reconciliation-panel');
+    if (!panel) return;
+    if (!['OWNER', 'MANAGER'].includes(archeryAdminRole())) {
+        panel.innerHTML = '<p class="archery-status">Owner/Manager only.</p>';
+        return;
+    }
+    const rows = (archeryReconciliationData || [])
+        .slice()
+        .sort((a, b) => adminTimestampMillis(b.updated_at || b.created_at) - adminTimestampMillis(a.updated_at || a.created_at))
+        .slice(0, 12);
+    if (!rows.length) {
+        panel.innerHTML = '<p class="archery-status success">No reconciliation items.</p>';
+        return;
+    }
+    panel.innerHTML = `<div class="archery-panel-list">${rows.map(row => {
+        const id = String(row.id || row.reconciliation_id || '');
+        const open = String(row.status || '').toUpperCase() === 'OPEN';
+        return `
+            <div class="archery-panel-row">
+                <div>
+                    <strong>${escapeHTML(row.status || '-')} / ${escapeHTML(row.booking_id || '-')}</strong>
+                    <small>${escapeHTML(row.reason || '-')} / ${escapeHTML(archeryMoney(row.amount || 0))} / ${escapeHTML(row.provider_ref || '-')}</small>
+                    <small>${escapeHTML(adminTimestampText(row.updated_at || row.created_at))}</small>
+                </div>
+                <div class="archery-action-buttons">
+                    ${open && archeryCan('refund') ? `<button type="button" onclick="archeryReviewReconciliation('${escapeJSString(id)}','MARK_REVIEWED')">Reviewed</button><button class="danger" type="button" onclick="archeryReviewReconciliation('${escapeJSString(id)}','MARK_REFUND_REQUIRED')">Refund required</button>` : '<span>-</span>'}
                 </div>
             </div>
         `;
@@ -5522,6 +5583,34 @@ window.archeryAdminRefund = async (bookingId) => {
     }
 };
 
+window.archeryReviewReconciliation = async (reconciliationId, action = 'MARK_REVIEWED') => {
+    if (!['OWNER', 'MANAGER'].includes(archeryAdminRole())) {
+        alert('Owner/Manager permission is required');
+        return;
+    }
+    if (!reconciliationId) return;
+    const confirmed = confirm(action === 'MARK_REFUND_REQUIRED'
+        ? 'Mark this late payment as refund required?'
+        : 'Mark this reconciliation item reviewed?');
+    if (!confirmed) return;
+    const loadingKey = `archeryReviewReconciliation:${reconciliationId}`;
+    if (archeryActionLoading.has(loadingKey)) return;
+    archeryActionLoading.add(loadingKey);
+    renderArcheryReconciliationPanel();
+    try {
+        await callAdminFunction('reconcileBeamLatePayment', archeryMutationPayload('reconcileBeamLatePayment', '', {
+            reconciliation_id: reconciliationId,
+            action
+        }));
+        refreshArcheryAdmin();
+    } catch (error) {
+        alert(error.message || safeAdminError('Reconciliation update failed'));
+    } finally {
+        archeryActionLoading.delete(loadingKey);
+        renderArcheryReconciliationPanel();
+    }
+};
+
 function setupRealtimeArcheryBookings() {
     bindArcheryAdminControls();
     if (archeryBookingsUnsubscribe) {
@@ -5549,6 +5638,101 @@ function setupRealtimeArcheryBookings() {
         renderArcheryAdmin([]);
         const tbody = document.getElementById('archery-bookings-table-body');
         if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#c62828;">${escapeHTML(adminFunctionErrorMessage({ code: error.code, message: error.message }))}</td></tr>`;
+    });
+}
+
+function setupRealtimeArcheryPayments() {
+    if (archeryPaymentsUnsubscribe) {
+        archeryPaymentsUnsubscribe();
+        archeryPaymentsUnsubscribe = null;
+    }
+    if (!archeryCan('viewPaymentStatus')) {
+        archeryPaymentsData = [];
+        renderArcheryPaymentWatch(archeryBookingsData);
+        return;
+    }
+    if (!['OWNER', 'MANAGER', 'CASHIER'].includes(archeryAdminRole())) {
+        archeryPaymentsData = [];
+        renderArcheryPaymentWatch(archeryBookingsData);
+        return;
+    }
+    const q = query(
+        collection(db, 'payments'),
+        where('branch_id', '==', archeryBranchId()),
+        limit(120)
+    );
+    archeryPaymentsUnsubscribe = onSnapshot(q, (snapshot) => {
+        archeryPaymentsData = [];
+        snapshot.forEach(docSnap => {
+            const data = docSnap.data() || {};
+            if (String(data.service_type || data.serviceType || '').toUpperCase() === 'ARCHERY') {
+                archeryPaymentsData.push({ id: docSnap.id, ...data });
+            }
+        });
+        renderArcheryPaymentWatch(archeryBookingsData);
+    }, (error) => {
+        console.error('Error listening to archery payments:', error);
+        archeryPaymentsData = [];
+        const panel = document.getElementById('archery-payment-watch');
+        if (panel) panel.innerHTML = `<p class="archery-status error">${escapeHTML(adminFunctionErrorMessage({ code: error.code, message: error.message }))}</p>`;
+    });
+}
+
+function setupRealtimeArcheryWebhookEvents() {
+    if (archeryWebhookEventsUnsubscribe) {
+        archeryWebhookEventsUnsubscribe();
+        archeryWebhookEventsUnsubscribe = null;
+    }
+    if (!['OWNER', 'MANAGER'].includes(archeryAdminRole())) {
+        archeryWebhookEventsData = [];
+        renderArcheryWebhookEvents();
+        return;
+    }
+    const q = query(
+        collection(db, 'payment_webhook_events'),
+        where('branch_id', '==', archeryBranchId()),
+        limit(80)
+    );
+    archeryWebhookEventsUnsubscribe = onSnapshot(q, (snapshot) => {
+        archeryWebhookEventsData = [];
+        snapshot.forEach(docSnap => {
+            archeryWebhookEventsData.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        renderArcheryWebhookEvents();
+    }, (error) => {
+        console.error('Error listening to archery webhook events:', error);
+        archeryWebhookEventsData = [];
+        const panel = document.getElementById('archery-webhook-events');
+        if (panel) panel.innerHTML = `<p class="archery-status error">${escapeHTML(adminFunctionErrorMessage({ code: error.code, message: error.message }))}</p>`;
+    });
+}
+
+function setupRealtimeArcheryReconciliation() {
+    if (archeryReconciliationUnsubscribe) {
+        archeryReconciliationUnsubscribe();
+        archeryReconciliationUnsubscribe = null;
+    }
+    if (!['OWNER', 'MANAGER'].includes(archeryAdminRole())) {
+        archeryReconciliationData = [];
+        renderArcheryReconciliationPanel();
+        return;
+    }
+    const q = query(
+        collection(db, 'payment_reconciliation_queue'),
+        where('branch_id', '==', archeryBranchId()),
+        limit(80)
+    );
+    archeryReconciliationUnsubscribe = onSnapshot(q, (snapshot) => {
+        archeryReconciliationData = [];
+        snapshot.forEach(docSnap => {
+            archeryReconciliationData.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        renderArcheryReconciliationPanel();
+    }, (error) => {
+        console.error('Error listening to archery reconciliation queue:', error);
+        archeryReconciliationData = [];
+        const panel = document.getElementById('archery-reconciliation-panel');
+        if (panel) panel.innerHTML = `<p class="archery-status error">${escapeHTML(adminFunctionErrorMessage({ code: error.code, message: error.message }))}</p>`;
     });
 }
 
@@ -5584,6 +5768,9 @@ function setupRealtimeArcheryAdminData() {
     updateArcheryRoleVisibility();
     loadArcheryPageSettings();
     setupRealtimeArcheryBookings();
+    setupRealtimeArcheryPayments();
+    setupRealtimeArcheryWebhookEvents();
+    setupRealtimeArcheryReconciliation();
     setupRealtimeArcheryAuditLogs();
 }
 
@@ -8749,7 +8936,7 @@ async function saveAdminAccessFromForm() {
         resetAdminAccessForm();
     } catch (error) {
         console.error('Unable to save admin access:', error);
-        alert(error.message || safeAdminError("บันทึกสิทธิ์ผู้จัดการไม่สำเร็จ"));
+        alert(safeAdminError("บันทึกสิทธิ์ผู้จัดการไม่สำเร็จ"));
     }
 }
 
@@ -10230,6 +10417,7 @@ setFaqFormData(null);
 onAuthStateChanged(auth, (user) => {
     if (user) {
         if (typeof fetchFaqsFromCloud === 'function') fetchFaqsFromCloud();
+        if (typeof loadIndexSettings === 'function') loadIndexSettings();
         if (typeof loadFooterSettings === 'function') loadFooterSettings();
     }
 });
@@ -10724,6 +10912,159 @@ marketingSettingsForm?.addEventListener('submit', async (event) => {
         updateMarketingPreview();
     } catch (error) {
         alert(safeAdminError('Unable to save marketing settings'));
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+        }
+    }
+});
+
+// ==========================================
+// Index Settings Management Logic
+// ==========================================
+
+const INDEX_SETTINGS_REF = () => doc(db, 'site_settings', 'index');
+const DEFAULT_INDEX_SETTINGS = {
+    heroImageUrl: '/Hero/Hero.webp',
+    heroTitleTh: 'จากใจเรา สู่มือคุณ',
+    heroSubtitleTh: 'ยินดีต้อนรับสู่ Eden Cafe - พื้นที่พักผ่อนที่เงียบสงบใจกลางเมือง สัมผัสประสบการณ์เมล็ดกาแฟที่ปลูกอย่างใส่ใจและคั่วอย่างพิถีพิถันจากเกษตรกรไทย',
+    heroTitleEn: 'Discover the True Taste of Thai Specialty Coffee',
+    heroSubtitleEn: 'Welcome to Eden Cafe - Your serene escape in the heart of Thailand. Experience locally-sourced, ethically-grown coffee beans roasted to perfection.',
+    aboutTitleTh: 'เรื่องราวของเรา: จากยอดดอยสู่แก้วกาแฟของคุณ',
+    aboutBodyTh: 'Eden Cafe เกิดขึ้นจากความหลงใหลในศิลปะการชงกาแฟและการสนับสนุนเกษตรกรไทย เราคัดสรรเมล็ดกาแฟจากแหล่งปลูกที่ดีที่สุดบนยอดดอยในประเทศไทย คั่วด้วยเทคนิคพิเศษเพื่อให้ได้รสชาติที่เป็นเอกลักษณ์ ไม่เหมือนใคร บรรยากาศร้านของเราออกแบบสไตล์มินิมอล อิงธรรมชาติ เพื่อให้คุณได้พักผ่อนอย่างแท้จริง',
+    aboutTitleEn: 'Our Story: From Thai Mountains to Your Cup',
+    aboutBodyEn: 'Eden Cafe was born out of a passion for the art of coffee brewing and supporting Thai farmers. We carefully select coffee beans from the best high-altitude farms in Thailand, roasted with special techniques to achieve a unique flavor. Our minimalist, nature-inspired design offers a true sanctuary for relaxation.'
+};
+
+const indexSettingsForm = document.getElementById('indexSettingsForm');
+
+function normalizeIndexSettings(data = {}) {
+    const pick = (key, max) => String(data[key] || DEFAULT_INDEX_SETTINGS[key] || '').trim().slice(0, max);
+    return {
+        heroImageUrl: safeImageURL(data.heroImageUrl || data.hero_image_url || DEFAULT_INDEX_SETTINGS.heroImageUrl, DEFAULT_INDEX_SETTINGS.heroImageUrl),
+        heroTitleTh: pick('heroTitleTh', 120),
+        heroSubtitleTh: pick('heroSubtitleTh', 320),
+        heroTitleEn: pick('heroTitleEn', 120),
+        heroSubtitleEn: pick('heroSubtitleEn', 320),
+        aboutTitleTh: pick('aboutTitleTh', 140),
+        aboutBodyTh: pick('aboutBodyTh', 900),
+        aboutTitleEn: pick('aboutTitleEn', 140),
+        aboutBodyEn: pick('aboutBodyEn', 900)
+    };
+}
+
+function setIndexStatus(message = '', tone = '') {
+    const status = document.getElementById('index-settings-status');
+    if (!status) return;
+    status.textContent = message;
+    status.className = 'index-settings-status' + (tone ? ' ' + tone : '');
+}
+
+function indexField(id) {
+    return document.getElementById(id);
+}
+
+function setIndexField(id, value) {
+    const field = indexField(id);
+    if (field) field.value = value || '';
+}
+
+function readIndexSettingsForm() {
+    return normalizeIndexSettings({
+        heroImageUrl: indexField('index-hero-image-url')?.value || '',
+        heroTitleTh: indexField('index-hero-title-th')?.value || '',
+        heroSubtitleTh: indexField('index-hero-subtitle-th')?.value || '',
+        heroTitleEn: indexField('index-hero-title-en')?.value || '',
+        heroSubtitleEn: indexField('index-hero-subtitle-en')?.value || '',
+        aboutTitleTh: indexField('index-about-title-th')?.value || '',
+        aboutBodyTh: indexField('index-about-body-th')?.value || '',
+        aboutTitleEn: indexField('index-about-title-en')?.value || '',
+        aboutBodyEn: indexField('index-about-body-en')?.value || ''
+    });
+}
+
+function fillIndexSettingsForm(settings = DEFAULT_INDEX_SETTINGS) {
+    const normalized = normalizeIndexSettings(settings);
+    setIndexField('index-hero-image-url', normalized.heroImageUrl);
+    setIndexField('index-hero-title-th', normalized.heroTitleTh);
+    setIndexField('index-hero-subtitle-th', normalized.heroSubtitleTh);
+    setIndexField('index-hero-title-en', normalized.heroTitleEn);
+    setIndexField('index-hero-subtitle-en', normalized.heroSubtitleEn);
+    setIndexField('index-about-title-th', normalized.aboutTitleTh);
+    setIndexField('index-about-body-th', normalized.aboutBodyTh);
+    setIndexField('index-about-title-en', normalized.aboutTitleEn);
+    setIndexField('index-about-body-en', normalized.aboutBodyEn);
+    window.updateIndexPreview();
+}
+
+window.updateIndexPreview = function() {
+    const settings = readIndexSettingsForm();
+    const previewHero = document.getElementById('index-preview-hero');
+    const setText = (id, value) => {
+        const element = document.getElementById(id);
+        if (element) element.textContent = value || '';
+    };
+    if (previewHero) previewHero.style.setProperty('--index-preview-hero-image', `url("${settings.heroImageUrl}")`);
+    setText('index-preview-hero-title', settings.heroTitleTh);
+    setText('index-preview-hero-subtitle', settings.heroSubtitleTh);
+    setText('index-preview-about-title', settings.aboutTitleTh);
+    setText('index-preview-about-body', settings.aboutBodyTh);
+};
+
+window.loadIndexSettings = async function() {
+    try {
+        setIndexStatus('\u0e01\u0e33\u0e25\u0e31\u0e07\u0e42\u0e2b\u0e25\u0e14\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25...');
+        const snap = await getDoc(INDEX_SETTINGS_REF());
+        fillIndexSettingsForm(snap.exists() ? snap.data() : DEFAULT_INDEX_SETTINGS);
+        setIndexStatus('\u0e42\u0e2b\u0e25\u0e14\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25 Index \u0e41\u0e25\u0e49\u0e27');
+    } catch (error) {
+        console.error('Error loading index settings:', error);
+        fillIndexSettingsForm(DEFAULT_INDEX_SETTINGS);
+        setIndexStatus('\u0e42\u0e2b\u0e25\u0e14 Index \u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08 \u0e41\u0e2a\u0e14\u0e07\u0e04\u0e48\u0e32 fallback \u0e41\u0e17\u0e19', 'error');
+    }
+};
+
+indexField('index-hero-image-file')?.addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+        setIndexStatus('\u0e01\u0e33\u0e25\u0e31\u0e07\u0e2d\u0e31\u0e1b\u0e42\u0e2b\u0e25\u0e14 Hero image...');
+        const blob = await compressToWebP(file, 0.84);
+        const safeName = (file.name || 'index-hero.webp').replace(/\.[^.]+$/, '') + '.webp';
+        const url = await uploadAdminImage(blob, 'index', safeName);
+        setIndexField('index-hero-image-url', url);
+        window.updateIndexPreview();
+        setIndexStatus('\u0e2d\u0e31\u0e1b\u0e42\u0e2b\u0e25\u0e14 Hero image \u0e41\u0e25\u0e49\u0e27');
+    } catch (error) {
+        console.error('Unable to upload index hero image:', error);
+        setIndexStatus(error.message || '\u0e2d\u0e31\u0e1b\u0e42\u0e2b\u0e25\u0e14\u0e20\u0e32\u0e1e\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08', 'error');
+    }
+});
+
+indexSettingsForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const submitBtn = indexSettingsForm.querySelector('button[type="submit"]');
+    const originalText = submitBtn?.textContent;
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = '\u0e01\u0e33\u0e25\u0e31\u0e07\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01...';
+    }
+
+    try {
+        const settings = readIndexSettingsForm();
+        await setDoc(INDEX_SETTINGS_REF(), {
+            ...settings,
+            updatedAt: serverTimestamp(),
+            updatedBy: auth.currentUser?.uid || '',
+            updatedByEmail: auth.currentUser?.email || ''
+        }, { merge: true });
+        setIndexStatus('\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01 Index \u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08');
+        alert('\u2705 \u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01 Index \u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08');
+    } catch (error) {
+        console.error('Unable to save index settings:', error);
+        setIndexStatus(safeAdminError('\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01 Index \u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08'), 'error');
+        alert(safeAdminError('\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01 Index \u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08'));
     } finally {
         if (submitBtn) {
             submitBtn.disabled = false;
