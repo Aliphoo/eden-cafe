@@ -1091,6 +1091,7 @@ function normalizeAdminPermissions(role, raw = {}) {
     'faqs',
     'promptpay',
     'marketing',
+    'index',
     'footer',
   ];
   const all = Object.fromEntries(allowed.map(key => [key, true]));
