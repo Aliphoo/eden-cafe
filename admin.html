@@ -778,8 +778,6 @@
             <li onclick="switchTab('rooms', this)">🛋️ จัดการห้องรับรอง (Rooms)</li>
             <li onclick="switchTab('products', this)">🍽️ จัดการเมนู (Menu)</li>
             <li onclick="switchTab('categories', this)">📂 หมวดหมู่เมนู (Categories)</li>
-            <li onclick="switchTab('shop-products', this)">🛒 จัดการสินค้า Shop</li>
-            <li onclick="switchTab('shop-categories', this)">📦 หมวดหมู่ Shop</li>
             <li onclick="switchTab('blogs', this)">📝 จัดการบทความ (Blogs)</li>
             <li onclick="switchTab('faqs', this)">❓ คำถามที่พบบ่อย (FAQ)</li>
             <li onclick="switchTab('promptpay', this)">&#128184; &#x0E08;&#x0E31;&#x0E14;&#x0E01;&#x0E32;&#x0E23;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C; (PromptPay)</li>
@@ -2325,56 +2323,6 @@
             </div>
         </div>
 
-        <!-- Shop Products Section -->
-        <div id="shop-products" class="content-section">
-            <div class="section-container">
-                <div class="section-header">
-                    <h2>รายการสินค้า Shopทั้งหมด</h2>
-                    <button class="btn-action" onclick="openShopProductModal()">+ เพิ่มสินค้า Shop</button>
-                </div>
-                <div style="overflow-x: auto;">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>รูปภาพ</th>
-                                <th>ชื่อสินค้า</th>
-                                <th>หมวดหมู่</th>
-                                <th>ราคา</th>
-                                <th>สต็อก</th>
-                                <th>แนะนำ</th>
-                                <th>จัดการ</th>
-                            </tr>
-                        </thead>
-                        <tbody id="shop-products-table-body">
-                            <tr><td colspan="7" style="text-align: center;">กำลังโหลดข้อมูล...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- Shop Categories Section -->
-        <div id="shop-categories" class="content-section">
-            <div class="section-container">
-                <div class="section-header">
-                    <h2>หมวดหมู่สินค้า Shop</h2>
-                    <button class="btn-action" onclick="openShopCategoryModal()">+ เพิ่มหมวดหมู่ใหม่</button>
-                </div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>ชื่อหมวดหมู่</th>
-                            <th>วันที่สร้าง</th>
-                            <th>จัดการ</th>
-                        </tr>
-                    </thead>
-                    <tbody id="shop-categories-table-body">
-                        <!-- Data injected via JS -->
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
         <!-- Blogs Section -->
         <div id="blogs" class="content-section">
             <div class="section-container">
@@ -3142,76 +3090,6 @@
         </div>
     </div>
 
-    <!-- Shop Product Modal -->
-    <div id="shopProductModal" class="modal">
-        <div class="modal-content">
-            <span class="close-modal" onclick="closeShopProductModal()">&times;</span>
-            <h2 id="shop-modal-title" style="margin-bottom: 20px;">เพิ่มสินค้า Shop</h2>
-            <form id="shopProductForm">
-                <input type="hidden" id="shopProductId">
-                <div class="form-group">
-                    <label>ชื่อสินค้า</label>
-                    <input type="text" id="shopProductName" required>
-                </div>
-                <div class="form-group">
-                    <label>คำอธิบาย</label>
-                    <textarea id="shopProductDesc" required></textarea>
-                </div>
-                <div class="form-group">
-                    <label>ราคา (บาท)</label>
-                    <input type="number" id="shopProductPrice" required>
-                </div>
-                <div class="form-group">
-                    <label>จำนวนสต็อก (Stock)</label>
-                    <input type="number" id="shopProductStock" value="0" required>
-                </div>
-                <div class="form-group">
-                    <label for="shopProductImageFile">อัปโหลดรูปภาพ (Image File)</label>
-                    <input type="file" id="shopProductImageFile" accept="image/*">
-                    <small>หรือใส่ลิงก์รูปภาพ (Image URL): <input type="text" id="shopProductImage" placeholder="Images/Logo.webp / https://..." inputmode="url" style="margin-top: 5px; width: 100%; box-sizing: border-box;"></small>
-                </div>
-                <div class="form-group">
-                    <label>หมวดหมู่</label>
-                    <select id="shopProductCategory" required>
-                        <option value="">-- เลือกหมวดหมู่ --</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="shopProductFeatured"> เป็นสินค้าแนะนำ (isFeatured)
-                    </label>
-                </div>
-                <button type="submit" class="btn-submit">บันทึกข้อมูล</button>
-            </form>
-        </div>
-    </div>
-
-    <!-- Shop Category Modal -->
-    <div id="shopCategoryModal" class="modal">
-        <div class="modal-content" style="max-width: 400px;">
-            <span class="close-modal" onclick="closeShopCategoryModal()">&times;</span>
-            <h2 id="shop-cat-modal-title" style="margin-bottom: 20px;">เพิ่มหมวดหมู่ Shop</h2>
-            <form id="shopCategoryForm">
-                <input type="hidden" id="shopCategoryId">
-                <div class="form-group">
-                    <label>รหัสหมวดหมู่ (ภาษาอังกฤษตัวเล็ก เช่น coffee_bean)</label>
-                    <input type="text" id="shopCatIdInput" required>
-                </div>
-                <div class="form-group">
-                    <label>ชื่อหมวดหมู่ (เช่น เมล็ดกาแฟ)</label>
-                    <input type="text" id="shopCatNameInput" required>
-                </div>
-                <div class="form-group">
-                    <label>หมวดหมู่หลัก (Parent Category) - เลือกได้</label>
-                    <select id="shopCatParentInput">
-                        <option value="">-- ไม่มีหมวดหมู่หลัก --</option>
-                    </select>
-                </div>
-                <button type="submit" class="btn-submit">บันทึกหมวดหมู่</button>
-            </form>
-        </div>
-    </div>
-
     <!-- Blog Modal -->
     <div id="blogModal" class="modal">
         <div class="modal-content" style="max-width: 800px; width: 90%;">
@@ -3271,9 +3149,42 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=price-sync-1"></script>
+    <script type="module" src="js/admin.js?v=shop-unified-2"></script>
     <script>
+        (function cleanRemovedAdminHash() {
+            const rawHash = String(window.location.hash || '').replace(/^#/, '');
+            let hash = rawHash;
+            try {
+                hash = typeof window.decodeURIComponent === 'function' ? window.decodeURIComponent(rawHash) : rawHash;
+            } catch (error) {
+                hash = rawHash;
+            }
+            hash = hash.replace(/^tab=/, '');
+            if (hash && !document.getElementById(hash)) {
+                try {
+                    if (localStorage.getItem('edenAdminActiveTab') === hash) {
+                        localStorage.removeItem('edenAdminActiveTab');
+                    }
+                    const url = new URL(window.location.href);
+                    url.hash = 'dashboard';
+                    window.history.replaceState(null, '', url.toString());
+                } catch (error) {
+                }
+            }
+        })();
+
         function switchTab(tabId, el) {
+            const target = document.getElementById(tabId);
+            if (!target) {
+                const fallbackMenu = Array.from(document.querySelectorAll('.sidebar-menu li'))
+                    .find(li => li.style.display !== 'none' && /switchTab\('([^']+)'/.test(String(li.getAttribute('onclick') || '')));
+                const fallbackMatch = String(fallbackMenu?.getAttribute('onclick') || '').match(/switchTab\('([^']+)'/);
+                if (fallbackMenu && fallbackMatch) {
+                    switchTab(fallbackMatch[1], fallbackMenu);
+                }
+                return;
+            }
+
             if (window.canAccessAdminTab && !window.canAccessAdminTab(tabId)) {
                 alert('บัญชีนี้ไม่มีสิทธิ์เข้าถึงส่วนนี้');
                 return;
@@ -3285,8 +3196,7 @@
             
             // Update Content
             document.querySelectorAll('.content-section').forEach(sec => sec.classList.remove('active'));
-            const target = document.getElementById(tabId);
-            if (target) target.classList.add('active');
+            target.classList.add('active');
 
             // Update Title
             if (el) document.getElementById('page-title').innerText = el.dataset.title || el.innerText.split(' ').slice(1).join(' ') || el.innerText;
