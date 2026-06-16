@@ -169,7 +169,6 @@ const ADMIN_PERMISSION_LABELS = {
     tables: 'จัดการโต๊ะ/โซน',
     rooms: 'จัดการห้องรับรอง',
     products: 'เมนูและหมวดหมู่',
-    shop: 'สินค้าออนไลน์',
     blogs: 'บทความ',
     faqs: 'FAQ',
     promptpay: '\u0e08\u0e31\u0e14\u0e01\u0e32\u0e23\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e40\u0e1e\u0e22\u0e4c',
@@ -202,7 +201,6 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
         tables: false,
         rooms: false,
         products: false,
-        shop: false,
         blogs: false,
         faqs: false,
         promptpay: false,
@@ -228,8 +226,6 @@ const ADMIN_TAB_PERMISSIONS = {
     rooms: 'rooms',
     products: 'products',
     categories: 'products',
-    'shop-products': 'shop',
-    'shop-categories': 'shop',
     blogs: 'blogs',
     faqs: 'faqs',
     promptpay: 'promptpay',
@@ -404,8 +400,6 @@ let posApkFormBound = false;
 const selectedProductIds = new Set();
 const expandedProductIds = new Set();
 let categoriesData = {};
-let shopProductsData = {};
-let shopCategoriesData = {};
 let roomsData = {};
 let tablesData = {};
 let tableMapCurrentPage = 1;
@@ -442,8 +436,6 @@ let categoriesUnsubscribe = null;
 let productsUnsubscribe = null;
 let tablesUnsubscribe = null;
 let roomsUnsubscribe = null;
-let shopCategoriesUnsubscribe = null;
-let shopProductsUnsubscribe = null;
 let blogsUnsubscribe = null;
 let faqsUnsubscribe = null;
 let memberFiltersBound = false;
@@ -729,24 +721,6 @@ const XLSX_CATEGORY_CONFIG = {
         booleanFields: [],
         arrayFields: [],
         template: { id: 'coffee', name: 'กาแฟ', nameEn: 'Coffee', order: 1 }
-    },
-    shop_products: {
-        label: 'สินค้าออนไลน์ (shop_products)',
-        collection: 'shop_products',
-        permission: 'shop',
-        numberFields: ['price', 'stock', 'order'],
-        booleanFields: ['isFeatured'],
-        arrayFields: [],
-        template: { id: 'eden-beans-01', name: 'Eden House Blend', description: 'Medium roast', category: 'coffee_bean', price: 490, stock: 20, imageUrl: 'https://example.com/beans.webp', isFeatured: true, order: 1 }
-    },
-    shop_categories: {
-        label: 'หมวดสินค้าออนไลน์ (shop_categories)',
-        collection: 'shop_categories',
-        permission: 'shop',
-        numberFields: ['order'],
-        booleanFields: [],
-        arrayFields: [],
-        template: { id: 'coffee_bean', name: 'เมล็ดกาแฟ', parent: '', order: 1 }
     },
     rooms: {
         label: 'ห้องรับรอง (rooms)',
@@ -1099,10 +1073,6 @@ function initializeAdminModules() {
     }
     if (canAdmin('tables')) setupRealtimeTables();
     if (canAdmin('rooms')) setupRealtimeRooms();
-    if (canAdmin('shop')) {
-        setupRealtimeShopCategories();
-        setupRealtimeShopProducts();
-    }
     if (canAdmin('members') || canAdmin('loyalty')) setupRealtimeMembers();
     if (canAdmin('discounts')) setupRealtimeDiscounts();
     if (canAdmin('loyalty')) setupRealtimeLoyalty();
@@ -1127,15 +1097,26 @@ function adminMenuItemForTab(tabId) {
         .find(li => adminTabIdFromMenuItem(li) === tabId && li.style.display !== 'none');
 }
 
+function decodeAdminTabId(value = '') {
+    const raw = String(value || '').replace(/^#/, '');
+    let decoded = raw;
+    try {
+        decoded = typeof window.decodeURIComponent === 'function' ? window.decodeURIComponent(raw) : raw;
+    } catch (error) {
+        decoded = raw;
+    }
+    return decoded.replace(/^tab=/, '');
+}
+
 function getPreferredAdminTabId() {
     if (hasLoyverseImportMode()) return 'dashboard';
 
     if (String(window.location.pathname || '').replace(/\/+$/, '') === '/admin/archery') return 'archery';
 
-    const hash = decodeURIComponent(String(window.location.hash || '').replace(/^#/, '')).replace(/^tab=/, '');
+    const hash = decodeAdminTabId(window.location.hash || '');
     if (hash && document.getElementById(hash)) return hash;
 
-    const fromQuery = new URLSearchParams(window.location.search).get('tab');
+    const fromQuery = decodeAdminTabId(new URLSearchParams(window.location.search).get('tab') || '');
     if (fromQuery && document.getElementById(fromQuery)) return fromQuery;
 
     try {
@@ -1245,13 +1226,6 @@ window.refreshAdminSection = async (tabId, button = null) => {
             case 'categories':
                 if (!categoriesUnsubscribe) setupRealtimeCategories();
                 await refreshCategoriesOnce();
-                break;
-            case 'shop-products':
-                setupRealtimeShopCategories();
-                setupRealtimeShopProducts();
-                break;
-            case 'shop-categories':
-                setupRealtimeShopCategories();
                 break;
             case 'blogs':
                 if (typeof window.fetchBlogsFromCloud === 'function') window.fetchBlogsFromCloud();
@@ -7175,12 +7149,6 @@ window.onclick = function(event) {
     if (event.target == categoryModal) {
         closeCategoryModal();
     }
-    if (event.target == shopProductModal) {
-        closeShopProductModal();
-    }
-    if (event.target == shopCategoryModal) {
-        closeShopCategoryModal();
-    }
 }
 
 // Global functions for inline HTML execution
@@ -7578,306 +7546,189 @@ async function migrateProducts() {
                 { name: "Homemade Butter Croissant", description: "ครัวซองต์เนยสด กรอบนอกนุ่มใน อบใหม่ทุกเช้า ทานคู่กับกาแฟแก้วโปรดได้อย่างลงตัว", price: 65, imageUrl: "https://images.unsplash.com/photo-1549996647-190b679b33d7?auto=format&fit=crop&w=600&q=80", category: "bakery", isSignature: true },
                 { name: "Matcha Yuzu Sparkling", description: "มัทฉะเกรดพรีเมียมผสมผสานความเปรี้ยวอมหวานของส้มยูซุ เพิ่มความสดชื่นด้วยโซดา", price: 110, imageUrl: "https://images.unsplash.com/photo-1536935338788-846bb9981813?auto=format&fit=crop&w=600&q=80", category: "tea", isSignature: true }
             ];
-            for (const p of initialProducts) { await addDoc(collection(db, "products"), p); }         // Migrate Shop Categories
-        const shopCatQ = query(collection(db, "shop_categories"));
-        const shopCatSnap = await getDocs(shopCatQ);
-        if (shopCatSnap.empty) {
-            console.log("Migrating initial shop categories...");
-            await setDoc(doc(db, "shop_categories", "cat-1"), { name: "เมล็ดกาแฟและสารกาแฟ", parentId: null });
-            await setDoc(doc(db, "shop_categories", "cat-2"), { name: "ชาและวัตถุดิบ", parentId: null });
-            await setDoc(doc(db, "shop_categories", "cat-3"), { name: "เบเกอรี่", parentId: null });
-            await setDoc(doc(db, "shop_categories", "cat-4"), { name: "ของพรีเมี่ยม", parentId: null });
-        }
-
-        // Migrate Shop Products
-        const shopProdQ = query(collection(db, "shop_products"));
-        const shopProdSnap = await getDocs(shopProdQ);
-        if (shopProdSnap.empty) {
-            console.log("Migrating initial shop products...");
-            const initialShopProducts = [
-                { name: "เมล็ดกาแฟคั่วอ่อน", description: "โทนผลไม้ ดอกไม้ สดชื่น เหมาะสำหรับดริปหรืออเมริกาโน่", price: 450, stock: 10, imageUrl: "https://images.unsplash.com/photo-1559525839-b184a4d698c7?auto=format&fit=crop&w=600&q=80", category: "cat-1", isFeatured: true },
-                { name: "เมล็ดกาแฟ House Blend", description: "สูตรเบลนด์พิเศษเฉพาะของ Eden Cafe ชงเมนูไหนก็ลงตัว", price: 490, stock: 20, imageUrl: "https://images.unsplash.com/photo-1541167760496-1628856ab772?auto=format&fit=crop&w=600&q=80", category: "cat-1", isFeatured: true },
-                { name: "ใบชาแห้งและผงมัทฉะแท้", description: "ชาไทย ชาเขียวเชียงใหม่ และผงมัทฉะแท้ 100% สำหรับชงดื่ม", price: 250, stock: 15, imageUrl: "https://images.unsplash.com/photo-1582793988951-9aed5509eb97?auto=format&fit=crop&w=600&q=80", category: "cat-2", isFeatured: false },
-                { name: "ซอฟต์คุกกี้ (Soft Cookies)", description: "รสช็อกโกแลตชิป และมัทฉะไวท์ช็อก ทานคู่กับกาแฟอร่อยลงตัว", price: 85, stock: 30, imageUrl: "https://images.unsplash.com/photo-1499636136210-6f4ee915583e?auto=format&fit=crop&w=600&q=80", category: "cat-3", isFeatured: true },
-                { name: "แก้วเก็บความเย็น (Tumbler)", description: "สกรีนโลโก้ร้าน Eden เก็บความเย็น 12 ชม. สไตล์มินิมอล", price: 890, stock: 5, imageUrl: "https://images.unsplash.com/photo-1517256064527-09c73fc73e38?auto=format&fit=crop&w=600&q=80", category: "cat-4", isFeatured: true }
-            ];
-            for (const p of initialShopProducts) {
-                p.createdAt = new Date().toISOString();
-                await addDoc(collection(db, "shop_products"), p);
-            }
-        }
+            for (const p of initialProducts) { await addDoc(collection(db, "products"), p); }
         }
     } catch (e) { console.error("Migrate failed", e); }
 }
 
-// --- Shop Management Logic ---
-function setupRealtimeShopCategories() {
-    if (shopCategoriesUnsubscribe) {
-        shopCategoriesUnsubscribe();
-        shopCategoriesUnsubscribe = null;
-    }
-    const q = query(collection(db, "shop_categories"));
-    shopCategoriesUnsubscribe = onSnapshot(q, (snapshot) => {
-        const tbody = document.getElementById('shop-categories-table-body');
-        const selectCat = document.getElementById('shopProductCategory');
-        const selectParent = document.getElementById('shopCatParentInput');
-        tbody.innerHTML = '';
-        selectCat.innerHTML = '<option value="">--  --</option>';
-        selectParent.innerHTML = '<option value="">--  --</option>';
-        shopCategoriesData = {};
-        
-        if (snapshot.empty) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;"> Shop</td></tr>';
-            return;
-        }
-
-        snapshot.forEach((docSnap) => {
-            const cat = docSnap.data();
-            const id = docSnap.id;
-            shopCategoriesData[id] = cat;
-            
-            const createdAt = cat.createdAt ? formatDate(cat.createdAt) : '-';
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td><strong>${escapeHTML(cat.name)}</strong><br><small style="color:#888;">${escapeHTML(id)}</small></td>
-                <td>${createdAt}</td>
-                <td>
-                    <button class="btn-action btn-edit" onclick="editShopCategory('${escapeJSString(id)}')">แก้ไข</button>
-                    <button class="btn-action btn-delete" onclick="deleteShopCategory('${escapeJSString(id)}')">ลบ</button>
-                </td>
-            `;
-            tbody.appendChild(tr);
-
-            const opt = document.createElement('option');
-            opt.value = id;
-            opt.innerText = cat.name;
-            selectCat.appendChild(opt);
-
-            const optParent = document.createElement('option');
-            optParent.value = id;
-            optParent.innerText = cat.name;
-            selectParent.appendChild(optParent);
-        });
-    }, (error) => {
-        console.error("Error listening to shop categories:", error);
-    });
-}
-
-function setupRealtimeShopProducts() {
-    if (shopProductsUnsubscribe) {
-        shopProductsUnsubscribe();
-        shopProductsUnsubscribe = null;
-    }
-    const q = query(collection(db, "shop_products"));
-    shopProductsUnsubscribe = onSnapshot(q, (snapshot) => {
-        const tbody = document.getElementById('shop-products-table-body');
-        tbody.innerHTML = '';
-        shopProductsData = {};
-        
-        if (snapshot.empty) {
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;"> Shop</td></tr>';
-            return;
-        }
-
-        snapshot.forEach((docSnap) => {
-            const product = docSnap.data();
-            const id = docSnap.id;
-            shopProductsData[id] = product;
-            
-            let catName = product.category;
-            if (shopCategoriesData[product.category]) {
-                catName = shopCategoriesData[product.category].name;
-            }
-
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td><img loading="lazy" src="${safeImageURL(product.imageUrl)}" alt="${escapeHTML(product.name)}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 5px;"></td>
-                <td><strong>${escapeHTML(product.name)}</strong></td>
-                <td>${escapeHTML(catName)}</td>
-                <td>${escapeHTML(product.price)}</td>
-                <td>${escapeHTML(product.stock || 0)}</td>
-                <td>${product.isFeatured ? '<span style="color: green;"> </span>' : '-'}</td>
-                <td>
-                    <button class="btn-action btn-edit" onclick="editShopProduct('${escapeJSString(id)}')">แก้ไข</button>
-                    <button class="btn-action btn-delete" onclick="deleteShopProduct('${escapeJSString(id)}')">ลบ</button>
-                </td>
-            `;
-            tbody.appendChild(tr);
-        });
-    }, (error) => {
-        console.error("Error listening to shop products:", error);
-    });
-}
-
-// Shop Category Modal Logic
-const shopCategoryModal = document.getElementById('shopCategoryModal');
-const shopCategoryForm = document.getElementById('shopCategoryForm');
-
-window.openShopCategoryModal = () => {
-    shopCategoryForm.reset();
-    document.getElementById('shopCategoryId').value = '';
-    document.getElementById('shopCatIdInput').disabled = false;
-    document.getElementById('shop-cat-modal-title').innerText = 'เพิ่มหมวดหมู่ Shop';
-    shopCategoryModal.style.display = 'block';
-};
-
-window.closeShopCategoryModal = () => {
-    shopCategoryModal.style.display = 'none';
-};
-
-window.editShopCategory = (id) => {
-    const cat = shopCategoriesData[id];
-    if (!cat) return;
-    
-    document.getElementById('shopCategoryId').value = id;
-    document.getElementById('shopCatIdInput').value = id;
-    document.getElementById('shopCatIdInput').disabled = true;
-    document.getElementById('shopCatNameInput').value = cat.name || '';
-    document.getElementById('shopCatParentInput').value = cat.parentId || '';
-    
-    document.getElementById('shop-cat-modal-title').innerText = ' Shop';
-    shopCategoryModal.style.display = 'block';
-};
-
-window.deleteShopCategory = async (id) => {
-    if (confirm(" Shop ?")) {
-        try {
-            await deleteDoc(doc(db, "shop_categories", id));
-        } catch (e) {
-            alert("ลบไม่สำเร็จ: " + e.message);
-        }
-    }
-};
-
-shopCategoryForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    
-    const hiddenId = document.getElementById('shopCategoryId').value;
-    const inputId = document.getElementById('shopCatIdInput').value.trim().toLowerCase();
-    const catName = document.getElementById('shopCatNameInput').value.trim();
-    const parentId = document.getElementById('shopCatParentInput').value;
-    
-    if (!inputId) return alert("กรุณาระบุรหัสหมวดหมู่");
-    if (!catName) return alert("กรุณาระบุชื่อหมวดหมู่");
-    
-    const submitBtn = shopCategoryForm.querySelector('button[type="submit"]');
-    submitBtn.disabled = true;
-    submitBtn.innerText = 'กำลังบันทึก...';
-    
-    try {
-        const docRef = doc(db, "shop_categories", inputId);
-        const data = { name: catName, parentId: parentId || null };
-        if (!hiddenId) {
-            data.createdAt = serverTimestamp();
-        }
-        await setDoc(docRef, data, { merge: true });
-        closeShopCategoryModal();
-        alert('บันทึกหมวดหมู่สำเร็จ!');
-    } catch (error) {
-        console.error('Error saving shop category:', error);
-        alert(safeAdminError("บันทึกไม่สำเร็จ"));
-    } finally {
-        submitBtn.disabled = false;
-        submitBtn.innerText = 'บันทึกหมวดหมู่';
-    }
+const LEGACY_SHOP_CATEGORY_MAP = Object.freeze({
+    'cat-1': 'coffee',
+    'cat-2': 'tea',
+    'cat-3': 'bakery',
+    'cat-4': 'merch',
+    coffee_bean: 'coffee',
+    beans: 'coffee',
+    coffee: 'coffee',
+    tea: 'tea',
+    bakery: 'bakery',
+    merch: 'merch',
+    merchandise: 'merch'
 });
 
-// Shop Product Modal Logic
-const shopProductModal = document.getElementById('shopProductModal');
-const shopProductForm = document.getElementById('shopProductForm');
+const LEGACY_SHOP_CATEGORY_DEFAULTS = Object.freeze({
+    coffee: { name: 'กาแฟ', nameEn: 'Coffee', order: 10 },
+    tea: { name: 'ชา', nameEn: 'Tea', order: 20 },
+    bakery: { name: 'เบเกอรี่', nameEn: 'Bakery', order: 30 },
+    merch: { name: 'ของพรีเมี่ยม', nameEn: 'Merchandise', order: 90 },
+    other: { name: 'อื่นๆ', nameEn: 'Other', order: 999 }
+});
 
-window.openShopProductModal = () => {
-    shopProductForm.reset();
-    document.getElementById('shopProductId').value = '';
-    document.getElementById('shopProductImageFile').value = '';
-    document.getElementById('shop-modal-title').innerText = 'เพิ่มสินค้า Shop';
-    shopProductModal.style.display = 'block';
-};
+function legacyShopTargetCategory(categoryId = '', shopCategoryMap = {}) {
+    const cleanId = String(categoryId || '').trim();
+    const mapped = LEGACY_SHOP_CATEGORY_MAP[cleanId.toLowerCase()];
+    if (mapped) return mapped;
 
-window.closeShopProductModal = () => {
-    shopProductModal.style.display = 'none';
-};
+    const sourceCategory = shopCategoryMap[cleanId] || {};
+    const fromName = slugifyMenuHandle(sourceCategory.name || sourceCategory.nameEn || cleanId);
+    return fromName || 'other';
+}
 
-window.editShopProduct = (id) => {
-    const product = shopProductsData[id];
-    if (!product) return;
-    
-    document.getElementById('shopProductId').value = id;
-    document.getElementById('shopProductName').value = product.name || '';
-    document.getElementById('shopProductDesc').value = product.description || '';
-    document.getElementById('shopProductPrice').value = product.price || 0;
-    document.getElementById('shopProductStock').value = product.stock || 0;
-    document.getElementById('shopProductImage').value = product.imageUrl || '';
-    document.getElementById('shopProductCategory').value = product.category || '';
-    document.getElementById('shopProductFeatured').checked = !!product.isFeatured;
-    
-    document.getElementById('shop-modal-title').innerText = ' Shop';
-    shopProductModal.style.display = 'block';
-};
+function legacyShopCategoryPayload(targetId, sourceCategory = {}) {
+    const defaults = LEGACY_SHOP_CATEGORY_DEFAULTS[targetId] || {};
+    return {
+        name: sourceCategory.name || defaults.name || targetId,
+        nameEn: sourceCategory.nameEn || defaults.nameEn || '',
+        order: Number(sourceCategory.order || defaults.order || 999)
+    };
+}
 
-window.deleteShopProduct = async (id) => {
-    if (confirm("?")) {
-        try {
-            await deleteDoc(doc(db, "shop_products", id));
-        } catch (e) {
-            alert("ลบไม่สำเร็จ: " + e.message);
+function legacyShopProductTargetId(sourceId, product = {}) {
+    const cleanSourceId = slugifyMenuHandle(sourceId);
+    return `shop-${cleanSourceId || slugifyMenuHandle(product.handle || product.name) || Date.now()}`;
+}
+
+function legacyShopProductPayload(sourceId, product = {}, targetCategory = 'other') {
+    const featured = parseMenuBoolean(product.showOnIndex ?? product.isFeatured, false);
+    const availableForSale = parseMenuBoolean(product.availableForSale, true);
+    const handle = slugifyMenuHandle(product.handle || product.name || sourceId);
+    const stock = safeNumber(product.stock ?? product.inStock, 0);
+    const payload = {
+        handle: handle || legacyShopProductTargetId(sourceId, product),
+        sku: product.sku || '',
+        name: product.name || product.nameTh || product.nameEn || sourceId,
+        description: product.description || product.descriptionTh || product.descriptionEn || '',
+        price: safeNumber(product.price, 0),
+        cost: safeNumber(product.cost, 0),
+        stock,
+        lowStock: safeNumber(product.lowStock, 0),
+        imageUrl: product.imageUrl || product.image || 'Images/Logo.webp',
+        category: targetCategory,
+        soldBy: product.soldBy || 'each',
+        soldByWeight: parseMenuBoolean(product.soldByWeight, false),
+        trackStock: parseMenuBoolean(product.trackStock, true),
+        availableForSale,
+        showOnWebsite: parseMenuBoolean(product.showOnWebsite, false),
+        showInShop: true,
+        showOnPos: parseMenuBoolean(product.showOnPos, false),
+        showOnIndex: featured,
+        isFeatured: featured,
+        taxName: product.taxName || 'eden cafe',
+        taxRate: safeNumber(product.taxRate, 7),
+        taxEnabled: parseMenuBoolean(product.taxEnabled, true),
+        variants: Array.isArray(product.variants) ? product.variants : [],
+        migratedFromCollection: 'shop_products',
+        migratedFromId: sourceId,
+        legacyShopCategory: product.category || product.categoryId || '',
+        updatedAt: new Date().toISOString()
+    };
+    if (product.createdAt) payload.createdAt = product.createdAt;
+    Object.keys(payload).forEach(key => {
+        if (payload[key] === undefined) delete payload[key];
+        if (Array.isArray(payload[key]) && !payload[key].length) delete payload[key];
+    });
+    return payload;
+}
+
+async function loadLegacyShopMigrationSnapshot() {
+    const [shopCategoriesSnap, shopProductsSnap, categoriesSnap, productsSnap] = await Promise.all([
+        getDocs(query(collection(db, 'shop_categories'))),
+        getDocs(query(collection(db, 'shop_products'))),
+        getDocs(query(collection(db, 'categories'))),
+        getDocs(query(collection(db, 'products')))
+    ]);
+    const shopCategories = shopCategoriesSnap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+    const shopProducts = shopProductsSnap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+    const categories = categoriesSnap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+    const products = productsSnap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+    return { shopCategories, shopProducts, categories, products };
+}
+
+function buildLegacyShopMigrationPlan(snapshot) {
+    const shopCategoryMap = Object.fromEntries(snapshot.shopCategories.map(category => [category.id, category]));
+    const existingCategoryIds = new Set(snapshot.categories.map(category => category.id));
+    const categoriesByTarget = new Map();
+
+    const products = snapshot.shopProducts.map(product => {
+        const targetCategory = legacyShopTargetCategory(product.category || product.categoryId, shopCategoryMap);
+        if (!existingCategoryIds.has(targetCategory) && !categoriesByTarget.has(targetCategory)) {
+            categoriesByTarget.set(targetCategory, legacyShopCategoryPayload(targetCategory, shopCategoryMap[product.category || product.categoryId]));
         }
-    }
-};
-
-shopProductForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    
-    const id = document.getElementById('shopProductId').value;
-    const submitBtn = shopProductForm.querySelector('button[type="submit"]');
-    const originalText = submitBtn.innerText;
-    
-    try {
-        submitBtn.disabled = true;
-        submitBtn.innerText = 'กำลังบันทึก...';
-        
-        let finalImageUrl = document.getElementById('shopProductImage').value;
-        const imageFile = document.getElementById('shopProductImageFile').files[0];
-        
-        if (imageFile) {
-            submitBtn.innerText = 'กำลังแปลงรูปภาพ...';
-            const webpBlob = await compressToWebP(imageFile, 0.8);
-            submitBtn.innerText = 'กำลังอัปโหลดรูปภาพ...';
-            finalImageUrl = await uploadAdminImage(webpBlob, 'shop_products', Date.now() + '_image.webp');
-        }
-
-        if (!finalImageUrl) {
-            throw new Error("กรุณาอัปโหลดรูปภาพ หรือใส่ลิงก์รูปภาพ");
-        }
-
-        const productData = {
-            name: document.getElementById('shopProductName').value,
-            description: document.getElementById('shopProductDesc').value,
-            price: Number(document.getElementById('shopProductPrice').value),
-            stock: Number(document.getElementById('shopProductStock').value),
-            imageUrl: finalImageUrl,
-            category: document.getElementById('shopProductCategory').value,
-            isFeatured: document.getElementById('shopProductFeatured').checked,
-            createdAt: new Date().toISOString()
+        const targetId = legacyShopProductTargetId(product.id, product);
+        return {
+            sourceId: product.id,
+            targetId,
+            targetCategory,
+            payload: legacyShopProductPayload(product.id, product, targetCategory)
         };
-        
-        if (id) {
-            delete productData.createdAt; // Prevent overwriting creation time
-            await updateDoc(doc(db, "shop_products", id), productData);
-        } else {
-            await addDoc(collection(db, "shop_products"), productData);
-        }
-        closeShopProductModal();
-        alert('บันทึกข้อมูลสำเร็จ!');
-    } catch (error) {
-        console.error('Error saving shop product:', error);
-        alert(safeAdminError("บันทึกไม่สำเร็จ"));
-    } finally {
-        submitBtn.disabled = false;
-        submitBtn.innerText = originalText;
-    }
-});
+    });
 
+    return {
+        categoriesToCreate: Array.from(categoriesByTarget, ([id, payload]) => ({ id, payload })),
+        productsToUpsert: products
+    };
+}
+
+window.auditLegacyShopCollections = async () => {
+    const snapshot = await loadLegacyShopMigrationSnapshot();
+    const plan = buildLegacyShopMigrationPlan(snapshot);
+    const report = {
+        legacyShopProducts: snapshot.shopProducts.length,
+        legacyShopCategories: snapshot.shopCategories.length,
+        productsTotal: snapshot.products.length,
+        productsShowInShop: snapshot.products.filter(product => product.showInShop === true).length,
+        productsShowOnIndex: snapshot.products.filter(product => product.showOnIndex === true || product.isFeatured === true).length,
+        categoriesTotal: snapshot.categories.length,
+        categoriesToCreate: plan.categoriesToCreate.map(item => item.id),
+        productsToUpsert: plan.productsToUpsert.map(item => ({ sourceId: item.sourceId, targetId: item.targetId, category: item.targetCategory }))
+    };
+    console.log('Legacy shop audit:', report);
+    return report;
+};
+
+window.migrateLegacyShopToProducts = async ({ dryRun = true } = {}) => {
+    const snapshot = await loadLegacyShopMigrationSnapshot();
+    const plan = buildLegacyShopMigrationPlan(snapshot);
+    const result = {
+        dryRun,
+        categoriesToCreate: plan.categoriesToCreate,
+        productsToUpsert: plan.productsToUpsert.map(item => ({ sourceId: item.sourceId, targetId: item.targetId, targetCategory: item.targetCategory }))
+    };
+
+    if (dryRun) {
+        console.log('Legacy shop migration dry run:', result);
+        return result;
+    }
+    if (!canAdmin('products')) {
+        throw new Error('This account needs products permission to migrate legacy shop data.');
+    }
+
+    for (const category of plan.categoriesToCreate) {
+        await setDoc(doc(db, 'categories', category.id), {
+            ...category.payload,
+            migratedFromCollection: 'shop_categories',
+            updatedAt: new Date().toISOString()
+        }, { merge: true });
+    }
+    for (const product of plan.productsToUpsert) {
+        await setDoc(doc(db, 'products', product.targetId), {
+            ...product.payload,
+            migratedAt: serverTimestamp()
+        }, { merge: true });
+    }
+
+    console.log('Legacy shop migration completed:', result);
+    return result;
+};
 
 window.syncMembersFromAuth = async () => {
     if (!canAdmin('members')) {

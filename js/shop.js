@@ -48,7 +48,7 @@ function getShopCategoryName(product, category, categoryId) {
 }
 
 function normalizeProduct(product, categoryMap = {}) {
-    const source = product.source || 'shop';
+    const source = product.source || 'menu';
     const rawId = product.id || product.slug || product.name || crypto.randomUUID?.() || String(Date.now());
     const categoryId = product.category || product.categoryId || 'other';
     const category = categoryMap[categoryId] || {};
@@ -159,26 +159,16 @@ function setupTabs() {
 async function fetchProductsFromCloud() {
     if (!db) return [];
 
-    const [shopCatSnap, shopProdSnap, menuCatSnap, menuProdSnap] = await Promise.all([
-        getDocs(query(collection(db, 'shop_categories'))),
-        getDocs(query(collection(db, 'shop_products'))),
+    const [menuCatSnap, menuProdSnap] = await Promise.all([
         getDocs(query(collection(db, 'categories'))),
         getDocs(query(collection(db, 'products')))
     ]);
-    const shopCategoryMap = {};
     const menuCategoryMap = {};
-    shopCatSnap.forEach(docSnap => { shopCategoryMap[docSnap.id] = docSnap.data(); });
     menuCatSnap.forEach(docSnap => { menuCategoryMap[docSnap.id] = docSnap.data(); });
 
-    const shopProducts = shopProdSnap.docs
-        .map(docSnap => normalizeProduct({ id: docSnap.id, source: 'shop', ...docSnap.data() }, shopCategoryMap))
-        .filter(product => product.availableForSale !== false);
-
-    const menuProductsForShop = menuProdSnap.docs
+    return menuProdSnap.docs
         .map(docSnap => normalizeProduct({ id: docSnap.id, source: 'menu', ...docSnap.data() }, menuCategoryMap))
         .filter(product => product.availableForSale !== false && product.showInShop);
-
-    return [...shopProducts, ...menuProductsForShop];
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
