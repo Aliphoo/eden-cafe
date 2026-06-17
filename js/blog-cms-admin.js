@@ -136,10 +136,17 @@ function nowIso() {
 function waitForAuthReady() {
     if (auth.currentUser) return Promise.resolve(auth.currentUser);
     return new Promise((resolve) => {
-        const unsubscribe = onAuthStateChanged(auth, (user) => {
+        let done = false;
+        let unsubscribe = () => {};
+        const finish = (user) => {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
             unsubscribe();
             resolve(user);
-        });
+        };
+        const timer = setTimeout(() => finish(auth.currentUser || null), 2500);
+        unsubscribe = onAuthStateChanged(auth, finish);
     });
 }
 
@@ -246,25 +253,42 @@ function installStyles() {
     const style = document.createElement('style');
     style.id = 'blog-cms-admin-style';
     style.textContent = `
-        .blog-cms-admin-root{display:grid;gap:18px;color:#17231d}
-        .blog-cms-topbar{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
-        .blog-cms-topbar h2{font-size:1.8rem;margin:0;color:#173522}.blog-cms-topbar p{margin-top:4px;color:#617067}
-        .blog-cms-tabs{display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid #e1ebe3;padding-bottom:10px}
-        .blog-cms-tabs button{border:1px solid #dce7df;background:#fff;color:#2f4037;border-radius:999px;padding:9px 13px;font-weight:700;cursor:pointer}
-        .blog-cms-tabs button.active{background:#17452f;color:#fff;border-color:#17452f}
-        .blog-cms-card{background:#fff;border:1px solid #dfe8e2;border-radius:10px;padding:16px;box-shadow:0 8px 22px rgba(25,42,32,.06)}
-        .blog-cms-kpis{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:10px}.blog-cms-kpi strong{display:block;font-size:1.8rem}.blog-cms-kpi span{color:#66746c;font-weight:700}
-        .blog-cms-toolbar{display:grid;grid-template-columns:minmax(220px,1fr)160px 180px 170px 160px;gap:10px}.blog-cms-toolbar input,.blog-cms-toolbar select,.blog-cms-form input,.blog-cms-form select,.blog-cms-form textarea{width:100%;min-height:42px;border:1px solid #d8e5da;border-radius:8px;padding:9px 11px;font:inherit;background:#fff}
-        .blog-cms-form textarea{min-height:96px;resize:vertical}.blog-cms-table-wrap{overflow:auto}.blog-cms-table{min-width:980px;width:100%;border-collapse:collapse}.blog-cms-table th,.blog-cms-table td{border-bottom:1px solid #edf1ed;padding:11px;text-align:left;vertical-align:top}.blog-cms-table th{background:#f8fbf8;color:#536159}
-        .blog-cms-status{display:inline-flex;border-radius:999px;padding:4px 9px;font-size:.78rem;font-weight:800}.blog-cms-status.published{background:#e5f6eb;color:#176b45}.blog-cms-status.draft{background:#fff3d8;color:#8a5a10}.blog-cms-status.scheduled{background:#e6f0ff;color:#25598f}.blog-cms-status.archived{background:#ffe7e7;color:#a12d2d}
-        .blog-cms-editor-grid{display:grid;grid-template-columns:minmax(0,1fr)360px;gap:16px}.blog-cms-editor-main,.blog-cms-sidebar{display:grid;gap:12px;align-content:start}
-        .blog-cms-title-input{font-size:1.55rem;font-weight:800}.blog-cms-rich-toolbar{display:flex;gap:7px;flex-wrap:wrap}.blog-cms-rich-toolbar button,.blog-cms-btn{border:0;border-radius:8px;background:#17452f;color:#fff;padding:9px 12px;font-weight:800;cursor:pointer}.blog-cms-btn.secondary,.blog-cms-rich-toolbar button{border:1px solid #d8e5da;background:#fff;color:#26382f}.blog-cms-btn.danger{background:#b83232}
-        .blog-cms-editor{min-height:420px;border:1px solid #d8e5da;border-radius:10px;padding:18px;background:#fff;line-height:1.8;outline:none;overflow:auto}.blog-cms-editor:empty:before{content:attr(data-placeholder);color:#88958e}
-        .blog-cms-preview{border:1px solid #d8e5da;border-radius:10px;background:#fff;padding:18px;line-height:1.8}.blog-cms-preview.mobile{max-width:390px;margin:auto}
-        .blog-cms-check{display:grid;gap:8px}.blog-cms-check div{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #edf1ed;padding-bottom:7px}
-        .blog-cms-chip-list{display:flex;gap:8px;flex-wrap:wrap}.blog-cms-chip{border:1px solid #d8e5da;background:#fff;border-radius:999px;padding:7px 10px;font-weight:700;cursor:pointer}.blog-cms-chip.active{background:#e5f6eb;color:#176b45;border-color:#9cd5ad}
-        .blog-cms-media-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.blog-cms-media-card img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:8px;background:#edf1ed}.blog-cms-muted{color:#66746c}.blog-cms-alert{border:1px solid #ffd6a6;background:#fff8e7;color:#7a4d0b;border-radius:10px;padding:12px;font-weight:700}
-        @media(max-width:1180px){.blog-cms-editor-grid,.blog-cms-toolbar{grid-template-columns:1fr}.blog-cms-kpis{grid-template-columns:repeat(2,minmax(130px,1fr))}.blog-cms-media-grid{grid-template-columns:repeat(2,minmax(150px,1fr))}}
+        .blog-cms-admin-root{
+            --cms-bg:#f6f7f4;--cms-panel:#ffffff;--cms-panel-soft:#fbfcfa;--cms-line:#d9e2dc;
+            --cms-text:#14231b;--cms-muted:#66736c;--cms-green:#17633f;--cms-green-dark:#103e2b;
+            --cms-green-soft:#e7f3ec;--cms-blue:#285b83;--cms-blue-soft:#e7f0f7;
+            --cms-amber:#966310;--cms-amber-soft:#fff2d7;--cms-red:#a13a3a;--cms-red-soft:#fde8e8;
+            display:grid;gap:16px;color:var(--cms-text);background:var(--cms-bg);padding:2px 0 18px;
+        }
+        .blog-cms-topbar{display:grid;grid-template-columns:minmax(280px,1fr)auto;gap:18px;align-items:center;padding:18px 20px;border:1px solid #d2ded6;border-radius:8px;background:linear-gradient(135deg,#123925,#1c5f3d);color:#fff;box-shadow:0 18px 32px rgba(20,45,31,.14)}
+        .blog-cms-topbar h2{font-size:1.75rem;line-height:1.1;margin:3px 0 0;color:#fff}.blog-cms-eyebrow{display:block;font-size:.75rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#bfe3cc}
+        .blog-cms-topbar-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}.blog-cms-topbar-meta span{border:1px solid rgba(255,255,255,.26);background:rgba(255,255,255,.1);border-radius:999px;padding:6px 10px;font-weight:800;font-size:.82rem}
+        .blog-cms-topbar-actions{display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap}.blog-cms-admin-root button,.blog-cms-admin-root input,.blog-cms-admin-root select,.blog-cms-admin-root textarea{font:inherit}
+        .blog-cms-tabs{display:flex;gap:4px;align-items:center;overflow-x:auto;border:1px solid var(--cms-line);border-radius:8px;background:var(--cms-panel);padding:6px;box-shadow:0 10px 24px rgba(31,51,39,.05)}
+        .blog-cms-tabs button{white-space:nowrap;border:0;background:transparent;color:#385044;border-radius:6px;padding:9px 12px;font-weight:800;cursor:pointer}
+        .blog-cms-tabs button:hover{background:#f0f5f1}.blog-cms-tabs button.active{background:var(--cms-green-dark);color:#fff}
+        .blog-cms-card{background:var(--cms-panel);border:1px solid var(--cms-line);border-radius:8px;padding:16px;box-shadow:0 10px 24px rgba(22,41,29,.055)}
+        .blog-cms-card h3{margin:0 0 12px;color:#17291f;font-size:1rem;line-height:1.3}.blog-cms-muted{color:var(--cms-muted)}
+        .blog-cms-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:38px;border:1px solid var(--cms-green-dark);border-radius:7px;background:var(--cms-green-dark);color:#fff;padding:8px 12px;font-weight:850;text-decoration:none;cursor:pointer;line-height:1}
+        .blog-cms-btn:hover{filter:brightness(.98);transform:translateY(-1px)}.blog-cms-btn.secondary{border-color:#cbd8d0;background:#fff;color:#20362a}.blog-cms-btn.ghost{border-color:transparent;background:transparent;color:#284238}.blog-cms-btn.danger{border-color:#b84a4a;background:#b84a4a;color:#fff}
+        .blog-cms-btn:disabled{opacity:.48;cursor:not-allowed;transform:none}.blog-cms-icon-btn{min-width:48px;padding:0 9px}.blog-cms-action-stack{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+        .blog-cms-chip-list{display:flex;gap:8px;flex-wrap:wrap}.blog-cms-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid #cbd8d0;background:#fff;border-radius:999px;padding:7px 10px;font-weight:800;color:#33483d;cursor:pointer}.blog-cms-chip.active{background:var(--cms-green-soft);color:var(--cms-green);border-color:#a7d2b8}
+        .blog-cms-kpis{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:10px}.blog-cms-kpi{display:grid;gap:6px;min-height:104px}.blog-cms-kpi strong{font-size:1.95rem;line-height:1;color:#14231b}.blog-cms-kpi span{color:var(--cms-muted);font-weight:850}.blog-cms-kpi small{color:#7a8780;font-weight:700}
+        .blog-cms-dashboard-grid{display:grid;grid-template-columns:minmax(0,1.45fr)minmax(280px,.75fr);gap:14px}.blog-cms-attention{display:grid;gap:10px}.blog-cms-attention-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;border:1px solid #edf1ed;border-radius:8px;padding:11px 12px;background:#fbfcfb}.blog-cms-attention-row strong{font-size:1.25rem}.blog-cms-attention-row.warn strong{color:var(--cms-amber)}.blog-cms-attention-row.danger strong{color:var(--cms-red)}.blog-cms-attention-row.info strong{color:var(--cms-blue)}
+        .blog-cms-pipeline{display:grid;gap:10px}.blog-cms-pipeline-row{display:grid;grid-template-columns:100px 1fr 42px;gap:10px;align-items:center;font-weight:800;color:#3c5146}.blog-cms-bar{height:9px;background:#edf2ee;border-radius:999px;overflow:hidden}.blog-cms-bar span{display:block;height:100%;background:var(--cms-green);border-radius:999px}.blog-cms-bar.draft span{background:var(--cms-amber)}.blog-cms-bar.scheduled span{background:var(--cms-blue)}.blog-cms-bar.archived span{background:var(--cms-red)}
+        .blog-cms-toolbar{display:grid;grid-template-columns:minmax(260px,1fr)150px 170px 160px 150px;gap:10px;align-items:end}.blog-cms-toolbar input,.blog-cms-toolbar select,.blog-cms-form input,.blog-cms-form select,.blog-cms-form textarea{width:100%;min-height:42px;border:1px solid #cfdcd4;border-radius:7px;padding:9px 11px;background:#fff;color:var(--cms-text);outline:none}.blog-cms-toolbar input:focus,.blog-cms-toolbar select:focus,.blog-cms-form input:focus,.blog-cms-form select:focus,.blog-cms-form textarea:focus{border-color:#78af8b;box-shadow:0 0 0 3px rgba(23,99,63,.12)}
+        .blog-cms-field-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:10px}.blog-cms-form label{display:grid;gap:6px;color:#43564c;font-weight:850;font-size:.84rem}.blog-cms-form label span{display:flex;align-items:center;gap:8px}.blog-cms-form textarea{min-height:96px;resize:vertical}
+        .blog-cms-table-wrap{overflow:auto}.blog-cms-table{min-width:980px;width:100%;border-collapse:separate;border-spacing:0}.blog-cms-table th,.blog-cms-table td{border-bottom:1px solid #edf1ed;padding:12px 11px;text-align:left;vertical-align:middle}.blog-cms-table th{position:sticky;top:0;background:#f8faf8;color:#536159;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;z-index:1}.blog-cms-table tr:hover td{background:#fbfcfa}.blog-cms-post-title{display:grid;gap:4px}.blog-cms-post-title strong{line-height:1.35}.blog-cms-post-title small{color:#6d7a72}.blog-cms-cover-thumb{width:72px;height:52px;object-fit:cover;border-radius:7px;background:#edf2ee;border:1px solid #dfe8e2}.blog-cms-cover-empty{width:72px;height:52px;border-radius:7px;border:1px dashed #c7d5cc;background:#f4f7f4;color:#84918a;display:grid;place-items:center;font-weight:850}
+        .blog-cms-status{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:.76rem;font-weight:900;text-transform:capitalize}.blog-cms-status.published{background:var(--cms-green-soft);color:var(--cms-green)}.blog-cms-status.draft{background:var(--cms-amber-soft);color:var(--cms-amber)}.blog-cms-status.scheduled{background:var(--cms-blue-soft);color:var(--cms-blue)}.blog-cms-status.archived{background:var(--cms-red-soft);color:var(--cms-red)}
+        .blog-cms-score{display:grid;gap:5px;min-width:92px}.blog-cms-score-line{height:7px;border-radius:999px;background:#e9eee9;overflow:hidden}.blog-cms-score-line span{display:block;height:100%;background:var(--cms-green)}.blog-cms-score small{font-weight:850;color:#51645a}
+        .blog-cms-editor-grid{display:grid;grid-template-columns:minmax(0,1fr)340px;gap:14px;align-items:start}.blog-cms-editor-main,.blog-cms-sidebar{display:grid;gap:12px;align-content:start}.blog-cms-editor-main{min-width:0}.blog-cms-sidebar{position:sticky;top:14px}
+        .blog-cms-editor-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.blog-cms-editor-toolbar h3{margin:0}.blog-cms-card>.blog-cms-editor-toolbar{margin-bottom:12px}.blog-cms-title-input{font-size:1.6rem;font-weight:900;line-height:1.2}.blog-cms-rich-toolbar{display:flex;gap:6px;flex-wrap:wrap;border:1px solid #dfe8e2;background:#f8faf8;border-radius:8px;padding:8px}.blog-cms-rich-toolbar button{border:1px solid transparent;background:#fff;color:#26382f;border-radius:6px;padding:7px 9px;font-weight:850;cursor:pointer}.blog-cms-rich-toolbar button:hover{border-color:#bcd0c3}
+        .blog-cms-editor{min-height:470px;border:1px solid #cfdcd4;border-radius:8px;padding:22px;background:#fff;line-height:1.82;outline:none;overflow:auto;font-size:1rem}.blog-cms-editor:focus{border-color:#78af8b;box-shadow:0 0 0 3px rgba(23,99,63,.1)}.blog-cms-editor:empty:before{content:attr(data-placeholder);color:#88958e}
+        .blog-cms-preview{border:1px solid #dfe8e2;border-radius:8px;background:#fff;padding:20px;line-height:1.8}.blog-cms-preview.mobile{max-width:390px;margin:auto}.blog-cms-preview img{max-width:100%;height:auto}
+        .blog-cms-check{display:grid;gap:8px}.blog-cms-check div{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;border:1px solid #edf1ed;border-radius:7px;padding:8px 10px}.blog-cms-check strong{border-radius:999px;padding:4px 8px;font-size:.75rem}.blog-cms-check .pass strong{background:var(--cms-green-soft);color:var(--cms-green)}.blog-cms-check .warn strong{background:var(--cms-amber-soft);color:var(--cms-amber)}.blog-cms-check .missing strong{background:var(--cms-red-soft);color:var(--cms-red)}
+        .blog-cms-media-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.blog-cms-media-card img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:7px;background:#edf1ed}.blog-cms-alert{border:1px solid #ffd6a6;background:#fff8e7;color:#7a4d0b;border-radius:8px;padding:12px;font-weight:800}.blog-cms-alert.success{border-color:#b7dfc1;background:#edf8f0;color:#17633f}.blog-cms-alert.error{border-color:#f0b7b7;background:#fff0f0;color:#9b2f2f}
+        @media(max-width:1180px){.blog-cms-topbar,.blog-cms-editor-grid,.blog-cms-dashboard-grid,.blog-cms-toolbar,.blog-cms-field-grid{grid-template-columns:1fr}.blog-cms-sidebar{position:static}.blog-cms-kpis{grid-template-columns:repeat(2,minmax(130px,1fr))}.blog-cms-media-grid{grid-template-columns:repeat(2,minmax(150px,1fr))}.blog-cms-topbar-actions{justify-content:flex-start}}
+        @media(max-width:640px){.blog-cms-admin-root{padding-bottom:10px}.blog-cms-topbar{padding:15px}.blog-cms-kpis{grid-template-columns:1fr}.blog-cms-action-stack,.blog-cms-topbar-actions{width:100%}.blog-cms-btn{width:100%}.blog-cms-icon-btn{width:auto}.blog-cms-table{min-width:760px}}
     `;
     document.head.appendChild(style);
 }
@@ -283,27 +307,36 @@ function setStatus(message, type = 'info') {
 
 function navHTML() {
     const tabs = [
-        ['overview', 'ภาพรวม'],
-        ['posts', 'บทความทั้งหมด'],
-        ['editor', state.editingId ? 'แก้ไขบทความ' : 'เพิ่มบทความใหม่'],
+        ['overview', 'Dashboard'],
+        ['posts', 'Posts'],
+        ['editor', state.editingId ? 'Editor' : 'New Post'],
         ['categories', 'หมวดหมู่'],
         ['tags', 'Tags'],
-        ['media', 'Media Library'],
-        ['seo', 'SEO Settings'],
+        ['media', 'Media'],
+        ['seo', 'SEO'],
         ['authors', 'ผู้เขียน'],
-        ['settings', 'ตั้งค่า Blog'],
-        ['assistant', 'AI Assistant']
+        ['settings', 'Settings'],
+        ['assistant', 'Assistant']
     ];
-    return `<div class="blog-cms-tabs">${tabs.map(([id, label]) => `<button type="button" data-blog-cms-tab="${id}" class="${state.tab === id ? 'active' : ''}">${label}</button>`).join('')}</div>`;
+    return `<nav class="blog-cms-tabs" aria-label="Blog CMS sections">${tabs.map(([id, label]) => `<button type="button" data-blog-cms-tab="${id}" class="${state.tab === id ? 'active' : ''}">${label}</button>`).join('')}</nav>`;
 }
 
 function layoutHTML(content) {
+    const published = state.posts.filter((post) => post.status === 'published').length;
     return `
         <div class="blog-cms-topbar">
-            <div><h2>Blog CMS</h2><p>ระบบเขียน จัดการ และเผยแพร่บทความ SEO/AEO/GEO จาก Firestore จริง</p></div>
-            <div class="blog-cms-chip-list">
-                <span class="blog-cms-chip">Role: ${escapeHTML(state.currentUser?.role || 'writer')}</span>
-                <button class="blog-cms-btn" type="button" data-blog-action="new">+ เพิ่มบทความ</button>
+            <div>
+                <span class="blog-cms-eyebrow">Content Operations</span>
+                <h2>Blog CMS</h2>
+                <div class="blog-cms-topbar-meta">
+                    <span>${state.posts.length} posts</span>
+                    <span>${published} published</span>
+                    <span>Role: ${escapeHTML(state.currentUser?.role || 'writer')}</span>
+                </div>
+            </div>
+            <div class="blog-cms-topbar-actions">
+                <a class="blog-cms-btn secondary" href="/blog" target="_blank" rel="noopener">ดูหน้าบล็อก</a>
+                <button class="blog-cms-btn" type="button" data-blog-action="new">New Post</button>
                 <button class="blog-cms-btn secondary" type="button" data-blog-action="seed">Seed Data</button>
             </div>
         </div>
@@ -313,37 +346,80 @@ function layoutHTML(content) {
     `;
 }
 
+function checklistStats(post) {
+    const items = seoChecklist(post);
+    const passed = items.filter((item) => item.state === 'ผ่าน').length;
+    return { items, passed, total: items.length, percent: items.length ? Math.round((passed / items.length) * 100) : 0 };
+}
+
+function checklistTone(item) {
+    if (item.state === 'ผ่าน') return 'pass';
+    return item.state === 'ควรปรับปรุง' ? 'warn' : 'missing';
+}
+
+function kpiCard(label, value, caption = '') {
+    return `<div class="blog-cms-card blog-cms-kpi"><strong>${value}</strong><span>${label}</span>${caption ? `<small>${caption}</small>` : ''}</div>`;
+}
+
 function statCards() {
-    const missingSeo = state.posts.filter((post) => seoChecklist(post).some((item) => item.state !== 'ผ่าน')).length;
+    const missingSeo = state.posts.filter((post) => checklistStats(post).passed < 9).length;
     const missingCover = state.posts.filter((post) => !post.cover_image_url).length;
     const missingMeta = state.posts.filter((post) => !post.seo_description).length;
-    const stats = [
-        ['บทความทั้งหมด', state.posts.length],
-        ['Draft', state.posts.filter((post) => post.status === 'draft').length],
-        ['Published', state.posts.filter((post) => post.status === 'published').length],
-        ['Scheduled', state.posts.filter((post) => post.status === 'scheduled').length],
-        ['หมวดหมู่', state.categories.length]
-    ];
+    const lastUpdated = state.posts[0]?.updated_at || state.posts[0]?.created_at;
     return `
-        <div class="blog-cms-kpis">${stats.map(([label, value]) => `<div class="blog-cms-card blog-cms-kpi"><strong>${value}</strong><span>${label}</span></div>`).join('')}</div>
-        <div class="blog-cms-card">
-            <h3>งานที่ควรตรวจ</h3>
-            <p>SEO ยังไม่ครบ: <strong>${missingSeo}</strong> บทความ</p>
-            <p>ไม่มี Cover Image: <strong>${missingCover}</strong> บทความ</p>
-            <p>ไม่มี Meta Description: <strong>${missingMeta}</strong> บทความ</p>
+        <div class="blog-cms-kpis">
+            ${kpiCard('บทความทั้งหมด', state.posts.length, lastUpdated ? `อัปเดตล่าสุด ${formatDate(lastUpdated)}` : 'ยังไม่มีข้อมูล')}
+            ${kpiCard('Published', state.posts.filter((post) => post.status === 'published').length, 'แสดงบนหน้าบ้าน')}
+            ${kpiCard('Draft', state.posts.filter((post) => post.status === 'draft').length, 'รอตรวจ/เขียนต่อ')}
+            ${kpiCard('Scheduled', state.posts.filter((post) => post.status === 'scheduled').length, 'ตั้งเวลาเผยแพร่')}
+            ${kpiCard('หมวดหมู่', state.categories.length, `${state.tags.length} tags`)}
+        </div>
+        <div class="blog-cms-dashboard-grid">
+            <div class="blog-cms-card">
+                <h3>Publishing Pipeline</h3>
+                <div class="blog-cms-pipeline">
+                    ${pipelineRow('Published', state.posts.filter((post) => post.status === 'published').length, state.posts.length, 'published')}
+                    ${pipelineRow('Draft', state.posts.filter((post) => post.status === 'draft').length, state.posts.length, 'draft')}
+                    ${pipelineRow('Scheduled', state.posts.filter((post) => post.status === 'scheduled').length, state.posts.length, 'scheduled')}
+                    ${pipelineRow('Archived', state.posts.filter((post) => post.status === 'archived').length, state.posts.length, 'archived')}
+                </div>
+            </div>
+            <div class="blog-cms-card">
+                <h3>ต้องตรวจวันนี้</h3>
+                <div class="blog-cms-attention">
+                    ${attentionRow('SEO score ต่ำ', missingSeo, 'danger')}
+                    ${attentionRow('ไม่มี Cover Image', missingCover, 'warn')}
+                    ${attentionRow('ไม่มี Meta Description', missingMeta, 'info')}
+                </div>
+            </div>
         </div>
     `;
+}
+
+function pipelineRow(label, count, total, tone) {
+    const pct = total ? Math.round((count / total) * 100) : 0;
+    return `<div class="blog-cms-pipeline-row"><span>${label}</span><div class="blog-cms-bar ${tone}"><span style="width:${pct}%"></span></div><strong>${count}</strong></div>`;
+}
+
+function attentionRow(label, count, tone) {
+    return `<div class="blog-cms-attention-row ${tone}"><span>${label}</span><strong>${count}</strong></div>`;
 }
 
 function overviewHTML() {
     return `
         ${statCards()}
         <div class="blog-cms-card">
-            <h3>บทความล่าสุด</h3>
+            <div class="blog-cms-editor-toolbar">
+                <h3>บทความล่าสุด</h3>
+                <button class="blog-cms-btn secondary" type="button" data-blog-cms-tab="posts">ดูทั้งหมด</button>
+            </div>
             <div class="blog-cms-table-wrap">
                 <table class="blog-cms-table">
-                    <thead><tr><th>Title</th><th>Status</th><th>Category</th><th>SEO</th><th>Updated</th></tr></thead>
-                    <tbody>${state.posts.slice(0, 8).map((post) => `<tr><td><strong>${escapeHTML(post.title || '-')}</strong><br><small>/${escapeHTML(post.slug)}</small></td><td>${statusBadge(post.status)}</td><td>${escapeHTML(post.category_name || '-')}</td><td>${seoChecklist(post).filter((item) => item.state === 'ผ่าน').length}/12</td><td>${formatDate(post.updated_at || post.created_at)}</td></tr>`).join('') || `<tr><td colspan="5">ยังไม่มีบทความ</td></tr>`}</tbody>
+                    <thead><tr><th>Title</th><th>Status</th><th>Category</th><th>SEO</th><th>Updated</th><th></th></tr></thead>
+                    <tbody>${state.posts.slice(0, 8).map((post) => {
+                        const score = checklistStats(post);
+                        return `<tr><td><div class="blog-cms-post-title"><strong>${escapeHTML(post.title || '-')}</strong><small>/${escapeHTML(post.slug)}</small></div></td><td>${statusBadge(post.status)}</td><td>${escapeHTML(post.category_name || '-')}</td><td>${scoreHTML(score)}</td><td>${formatDate(post.updated_at || post.created_at)}</td><td><button class="blog-cms-btn secondary" type="button" data-blog-action="edit" data-id="${escapeHTML(post.id)}">Edit</button></td></tr>`;
+                    }).join('') || `<tr><td colspan="6">ยังไม่มีบทความ</td></tr>`}</tbody>
                 </table>
             </div>
         </div>
@@ -366,10 +442,15 @@ function filteredPosts() {
 
 function postListHTML() {
     const authors = [...new Set(state.posts.map((post) => post.author_id || post.author_name).filter(Boolean))];
+    const rows = filteredPosts();
     return `
         <div class="blog-cms-card">
+            <div class="blog-cms-editor-toolbar">
+                <h3>Post Library</h3>
+                <button class="blog-cms-btn" type="button" data-blog-action="new">New Post</button>
+            </div>
             <div class="blog-cms-toolbar">
-                <input id="blog-cms-search" type="search" placeholder="ค้นหาบทความ" value="${escapeHTML(state.search)}">
+                <input id="blog-cms-search" type="search" placeholder="ค้นหาจากชื่อ, excerpt, tag" value="${escapeHTML(state.search)}">
                 <select id="blog-cms-filter-status"><option value="all">ทุกสถานะ</option>${['draft','published','scheduled','archived'].map((item) => `<option value="${item}" ${state.filterStatus === item ? 'selected' : ''}>${item}</option>`).join('')}</select>
                 <select id="blog-cms-filter-category"><option value="all">ทุกหมวดหมู่</option>${state.categories.map((item) => `<option value="${escapeHTML(item.id)}" ${state.filterCategory === item.id ? 'selected' : ''}>${escapeHTML(item.name)}</option>`).join('')}</select>
                 <select id="blog-cms-filter-author"><option value="all">ทุกผู้เขียน</option>${authors.map((item) => `<option value="${escapeHTML(item)}" ${state.filterAuthor === item ? 'selected' : ''}>${escapeHTML(item)}</option>`).join('')}</select>
@@ -378,29 +459,34 @@ function postListHTML() {
         </div>
         <div class="blog-cms-card blog-cms-table-wrap">
             <table class="blog-cms-table">
-                <thead><tr><th>Cover</th><th>Title</th><th>Status</th><th>Category</th><th>Author</th><th>Published</th><th>Actions</th></tr></thead>
-                <tbody>${filteredPosts().map(postRowHTML).join('') || '<tr><td colspan="7">ไม่พบบทความ</td></tr>'}</tbody>
+                <thead><tr><th>Cover</th><th>Title</th><th>Status</th><th>Category</th><th>SEO</th><th>Updated</th><th>Actions</th></tr></thead>
+                <tbody>${rows.map(postRowHTML).join('') || '<tr><td colspan="7">ไม่พบบทความ</td></tr>'}</tbody>
             </table>
         </div>
     `;
 }
 
+function scoreHTML(score) {
+    return `<div class="blog-cms-score"><div class="blog-cms-score-line"><span style="width:${score.percent}%"></span></div><small>${score.passed}/${score.total}</small></div>`;
+}
+
 function postRowHTML(post) {
-    const cover = post.cover_image_url ? `<img src="${escapeHTML(post.cover_image_url)}" alt="" style="width:64px;height:48px;object-fit:cover;border-radius:8px">` : '-';
+    const cover = post.cover_image_url ? `<img class="blog-cms-cover-thumb" src="${escapeHTML(post.cover_image_url)}" alt="">` : '<div class="blog-cms-cover-empty">IMG</div>';
+    const score = checklistStats(post);
     return `<tr>
         <td>${cover}</td>
-        <td><strong>${escapeHTML(post.title)}</strong><br><small>/${escapeHTML(post.slug)}</small></td>
+        <td><div class="blog-cms-post-title"><strong>${escapeHTML(post.title || 'Untitled')}</strong><small>/${escapeHTML(post.slug || '-')} · ${escapeHTML(post.author_name || 'No author')}</small></div></td>
         <td>${statusBadge(post.status)}</td>
         <td>${escapeHTML(post.category_name || post.category_id || '-')}</td>
-        <td>${escapeHTML(post.author_name || '-')}</td>
-        <td>${formatDate(post.published_at)}</td>
+        <td>${scoreHTML(score)}</td>
+        <td>${formatDate(post.updated_at || post.published_at || post.created_at)}</td>
         <td>
-            <div class="blog-cms-chip-list">
+            <div class="blog-cms-action-stack">
                 <button class="blog-cms-btn secondary" type="button" data-blog-action="edit" data-id="${escapeHTML(post.id)}">Edit</button>
-                <a class="blog-cms-btn secondary" href="/blog/${encodeURIComponent(post.slug)}" target="_blank">Preview</a>
-                <button class="blog-cms-btn secondary" type="button" data-blog-action="duplicate" data-id="${escapeHTML(post.id)}">Duplicate</button>
-                <button class="blog-cms-btn secondary" type="button" data-blog-action="archive" data-id="${escapeHTML(post.id)}">Archive</button>
-                <button class="blog-cms-btn danger" type="button" data-blog-action="delete" data-id="${escapeHTML(post.id)}">Delete</button>
+                <a class="blog-cms-btn secondary" href="/blog/${encodeURIComponent(post.slug)}" target="_blank" rel="noopener">Preview</a>
+                <button class="blog-cms-btn ghost blog-cms-icon-btn" type="button" title="Duplicate" data-blog-action="duplicate" data-id="${escapeHTML(post.id)}">Copy</button>
+                <button class="blog-cms-btn ghost blog-cms-icon-btn" type="button" title="Archive" data-blog-action="archive" data-id="${escapeHTML(post.id)}">Arc</button>
+                <button class="blog-cms-btn danger blog-cms-icon-btn" type="button" title="Delete" data-blog-action="delete" data-id="${escapeHTML(post.id)}">Del</button>
             </div>
         </td>
     </tr>`;
@@ -413,32 +499,51 @@ function currentPost() {
 function editorHTML() {
     const post = currentPost();
     const tags = new Set(post.tag_ids || []);
+    const score = checklistStats(post);
     return `
         <div class="blog-cms-editor-grid">
             <div class="blog-cms-editor-main">
                 <div class="blog-cms-card blog-cms-form">
-                    <div class="blog-cms-chip-list" style="justify-content:space-between">
-                        <div>${statusBadge(post.status || 'draft')} <span class="blog-cms-muted">${state.lastSaved ? `บันทึกล่าสุดเมื่อ ${state.lastSaved}` : 'Autosave ทุก 12 วินาที'}</span></div>
+                    <div class="blog-cms-editor-toolbar">
                         <div class="blog-cms-chip-list">
+                            ${statusBadge(post.status || 'draft')}
+                            <span class="blog-cms-chip">SEO ${score.passed}/${score.total}</span>
+                            <span class="blog-cms-muted">${state.lastSaved ? `บันทึกล่าสุด ${state.lastSaved}` : 'Autosave ทุก 12 วินาที'}</span>
+                        </div>
+                        <div class="blog-cms-action-stack">
                             <button class="blog-cms-btn secondary" type="button" data-blog-action="preview-mode">${state.previewMode === 'desktop' ? 'Preview Mobile' : 'Preview Desktop'}</button>
                             <button class="blog-cms-btn secondary" type="button" data-blog-action="save-draft">Save Draft</button>
                             <button class="blog-cms-btn" type="button" data-blog-action="publish" ${canPublish() ? '' : 'disabled'}>Publish</button>
                             <button class="blog-cms-btn secondary" type="button" data-blog-action="schedule" ${canPublish() ? '' : 'disabled'}>Schedule</button>
                         </div>
                     </div>
-                    <input id="blog-title" class="blog-cms-title-input" value="${escapeHTML(post.title)}" placeholder="ชื่อบทความ">
-                    <input id="blog-slug" value="${escapeHTML(post.slug)}" placeholder="url-slug">
-                    <textarea id="blog-excerpt" placeholder="Excerpt">${escapeHTML(post.excerpt)}</textarea>
+                    <div class="blog-cms-field-grid">
+                        <label>Title
+                            <input id="blog-title" class="blog-cms-title-input" value="${escapeHTML(post.title)}" placeholder="ชื่อบทความ">
+                        </label>
+                        <label>Slug
+                            <input id="blog-slug" value="${escapeHTML(post.slug)}" placeholder="url-slug">
+                        </label>
+                    </div>
+                    <label>Excerpt
+                        <textarea id="blog-excerpt" placeholder="สรุปสั้นสำหรับหน้ารวมบทความและ meta">${escapeHTML(post.excerpt)}</textarea>
+                    </label>
                 </div>
                 <div class="blog-cms-card">
+                    <div class="blog-cms-editor-toolbar">
+                        <h3>Content</h3>
+                        <span class="blog-cms-muted"><span id="blog-word-count">${post.word_count || 0}</span> words · <span id="blog-reading-time">${post.reading_time || 1}</span> นาทีอ่าน</span>
+                    </div>
                     <div class="blog-cms-rich-toolbar">
                         ${[['h2','H2'],['h3','H3'],['h4','H4'],['p','Paragraph'],['ul','Bullet'],['ol','Number'],['quote','Quote'],['image','Image'],['gallery','Gallery'],['divider','Divider'],['cta','CTA'],['table','Table'],['faq','FAQ'],['youtube','YouTube'],['html','HTML'],['internal','Internal Link'],['related','Related Posts']].map(([cmd,label]) => `<button type="button" data-blog-insert="${cmd}">${label}</button>`).join('')}
                     </div>
                     <div id="blog-content-editor" class="blog-cms-editor" contenteditable="true" data-placeholder="เขียนบทความ วางจาก Google Docs หรือเพิ่ม block จาก toolbar ได้ที่นี่">${post.content || ''}</div>
-                    <div class="blog-cms-muted"><span id="blog-word-count">${post.word_count || 0}</span> words · <span id="blog-reading-time">${post.reading_time || 1}</span> นาทีอ่าน · TOC จาก H2/H3 อัตโนมัติ</div>
                 </div>
                 <div class="blog-cms-card">
-                    <h3>Preview</h3>
+                    <div class="blog-cms-editor-toolbar">
+                        <h3>Preview</h3>
+                        <span class="blog-cms-muted">${state.previewMode === 'desktop' ? 'Desktop' : 'Mobile'}</span>
+                    </div>
                     <article id="blog-preview" class="blog-cms-preview ${state.previewMode}"></article>
                 </div>
             </div>
@@ -453,43 +558,87 @@ function sidebarHTML(post, selectedTags) {
     return `
         <div class="blog-cms-card blog-cms-form">
             <h3>Publish Settings</h3>
-            <select id="blog-status"><option value="draft">Draft</option><option value="published" ${post.status === 'published' ? 'selected' : ''}>Published</option><option value="scheduled" ${post.status === 'scheduled' ? 'selected' : ''}>Scheduled</option><option value="archived" ${post.status === 'archived' ? 'selected' : ''}>Archived</option></select>
-            <input id="blog-published-at" type="datetime-local" value="${toLocalInput(post.published_at)}">
-            <input id="blog-scheduled-at" type="datetime-local" value="${toLocalInput(post.scheduled_at)}">
-            <input id="blog-author-name" value="${escapeHTML(post.author_name)}" placeholder="Author">
-            <label><input id="blog-robots-index" type="checkbox" ${post.robots_index !== false ? 'checked' : ''}> Allow Indexing</label>
-            <label><input id="blog-featured" type="checkbox" ${post.is_featured ? 'checked' : ''}> Featured Post</label>
+            <label>Status
+                <select id="blog-status"><option value="draft">Draft</option><option value="published" ${post.status === 'published' ? 'selected' : ''}>Published</option><option value="scheduled" ${post.status === 'scheduled' ? 'selected' : ''}>Scheduled</option><option value="archived" ${post.status === 'archived' ? 'selected' : ''}>Archived</option></select>
+            </label>
+            <label>Published At
+                <input id="blog-published-at" type="datetime-local" value="${toLocalInput(post.published_at)}">
+            </label>
+            <label>Scheduled At
+                <input id="blog-scheduled-at" type="datetime-local" value="${toLocalInput(post.scheduled_at)}">
+            </label>
+            <label>Author
+                <input id="blog-author-name" value="${escapeHTML(post.author_name)}" placeholder="Author">
+            </label>
+            <label><span><input id="blog-robots-index" type="checkbox" ${post.robots_index !== false ? 'checked' : ''}> Allow Indexing</span></label>
+            <label><span><input id="blog-featured" type="checkbox" ${post.is_featured ? 'checked' : ''}> Featured Post</span></label>
         </div>
         <div class="blog-cms-card blog-cms-form">
             <h3>Category & Tags</h3>
-            <select id="blog-category"><option value="">เลือกหมวดหมู่</option>${state.categories.map((item) => `<option value="${escapeHTML(item.id)}" ${post.category_id === item.id ? 'selected' : ''}>${escapeHTML(item.name)}</option>`).join('')}</select>
+            <label>Category
+                <select id="blog-category"><option value="">เลือกหมวดหมู่</option>${state.categories.map((item) => `<option value="${escapeHTML(item.id)}" ${post.category_id === item.id ? 'selected' : ''}>${escapeHTML(item.name)}</option>`).join('')}</select>
+            </label>
             <div class="blog-cms-chip-list">${state.tags.map((tag) => `<button type="button" class="blog-cms-chip ${selectedTags.has(tag.id) ? 'active' : ''}" data-blog-tag="${escapeHTML(tag.id)}">${escapeHTML(tag.name)}</button>`).join('')}</div>
-            <div class="blog-cms-chip-list"><input id="blog-new-category" placeholder="เพิ่ม Category"><button class="blog-cms-btn secondary" type="button" data-blog-action="add-category">Add</button></div>
-            <div class="blog-cms-chip-list"><input id="blog-new-tag" placeholder="เพิ่ม Tag"><button class="blog-cms-btn secondary" type="button" data-blog-action="add-tag">Add</button></div>
+            <div class="blog-cms-field-grid"><input id="blog-new-category" placeholder="เพิ่ม Category"><button class="blog-cms-btn secondary" type="button" data-blog-action="add-category">Add</button></div>
+            <div class="blog-cms-field-grid"><input id="blog-new-tag" placeholder="เพิ่ม Tag"><button class="blog-cms-btn secondary" type="button" data-blog-action="add-tag">Add</button></div>
         </div>
         <div class="blog-cms-card blog-cms-form">
             <h3>Cover Image</h3>
             ${post.cover_image_url ? `<img src="${escapeHTML(post.cover_image_url)}" alt="" style="width:100%;border-radius:8px;aspect-ratio:16/9;object-fit:cover">` : ''}
-            <input id="blog-cover-upload" type="file" accept="image/*">
-            <input id="blog-cover-url" value="${escapeHTML(post.cover_image_url)}" placeholder="Cover Image URL">
-            <input id="blog-cover-alt" value="${escapeHTML(post.cover_image_alt)}" placeholder="Alt Text">
-            <input id="blog-cover-caption" value="${escapeHTML(post.cover_image_caption || '')}" placeholder="Caption">
+            <label>Upload Image
+                <input id="blog-cover-upload" type="file" accept="image/*">
+            </label>
+            <label>Image URL
+                <input id="blog-cover-url" value="${escapeHTML(post.cover_image_url)}" placeholder="Cover Image URL">
+            </label>
+            <label>Alt Text
+                <input id="blog-cover-alt" value="${escapeHTML(post.cover_image_alt)}" placeholder="Alt Text">
+            </label>
+            <label>Caption
+                <input id="blog-cover-caption" value="${escapeHTML(post.cover_image_caption || '')}" placeholder="Caption">
+            </label>
         </div>
         <div class="blog-cms-card blog-cms-form">
             <h3>SEO / AEO / GEO</h3>
-            <input id="blog-focus-keyword" value="${escapeHTML(post.focus_keyword)}" placeholder="Focus Keyword">
-            <input id="blog-seo-title" value="${escapeHTML(post.seo_title)}" placeholder="SEO Title">
-            <textarea id="blog-seo-description" placeholder="Meta Description">${escapeHTML(post.seo_description)}</textarea>
-            <input id="blog-canonical-url" value="${escapeHTML(post.canonical_url)}" placeholder="Canonical URL">
-            <input id="blog-og-title" value="${escapeHTML(post.og_title || '')}" placeholder="OG Title">
-            <textarea id="blog-og-description" placeholder="OG Description">${escapeHTML(post.og_description || '')}</textarea>
-            <input id="blog-og-image" value="${escapeHTML(post.og_image_url || '')}" placeholder="OG Image">
-            <input id="blog-twitter-title" value="${escapeHTML(post.twitter_title || '')}" placeholder="Twitter Title">
-            <textarea id="blog-twitter-description" placeholder="Twitter Description">${escapeHTML(post.twitter_description || '')}</textarea>
-            <input id="blog-twitter-image" value="${escapeHTML(post.twitter_image_url || '')}" placeholder="Twitter Image">
-            <select id="blog-schema-type">${['Article','BlogPosting','FAQPage','BreadcrumbList','LocalBusiness','Organization','Product'].map((type) => `<option ${post.schema_type === type ? 'selected' : ''}>${type}</option>`).join('')}</select>
-            <textarea id="blog-brand-context" placeholder="Brand Context">${escapeHTML(post.brand_context || '')}</textarea>
-            <textarea id="blog-business-context" placeholder="ข้อมูลธุรกิจ Local GEO">${escapeHTML(post.business_context || '')}</textarea>
+            <label>Focus Keyword
+                <input id="blog-focus-keyword" value="${escapeHTML(post.focus_keyword)}" placeholder="Focus Keyword">
+            </label>
+            <label>SEO Title
+                <input id="blog-seo-title" value="${escapeHTML(post.seo_title)}" placeholder="SEO Title">
+            </label>
+            <label>Meta Description
+                <textarea id="blog-seo-description" placeholder="Meta Description">${escapeHTML(post.seo_description)}</textarea>
+            </label>
+            <label>Canonical URL
+                <input id="blog-canonical-url" value="${escapeHTML(post.canonical_url)}" placeholder="Canonical URL">
+            </label>
+            <label>OG Title
+                <input id="blog-og-title" value="${escapeHTML(post.og_title || '')}" placeholder="OG Title">
+            </label>
+            <label>OG Description
+                <textarea id="blog-og-description" placeholder="OG Description">${escapeHTML(post.og_description || '')}</textarea>
+            </label>
+            <label>OG Image
+                <input id="blog-og-image" value="${escapeHTML(post.og_image_url || '')}" placeholder="OG Image">
+            </label>
+            <label>Twitter Title
+                <input id="blog-twitter-title" value="${escapeHTML(post.twitter_title || '')}" placeholder="Twitter Title">
+            </label>
+            <label>Twitter Description
+                <textarea id="blog-twitter-description" placeholder="Twitter Description">${escapeHTML(post.twitter_description || '')}</textarea>
+            </label>
+            <label>Twitter Image
+                <input id="blog-twitter-image" value="${escapeHTML(post.twitter_image_url || '')}" placeholder="Twitter Image">
+            </label>
+            <label>Schema Type
+                <select id="blog-schema-type">${['Article','BlogPosting','FAQPage','BreadcrumbList','LocalBusiness','Organization','Product'].map((type) => `<option ${post.schema_type === type ? 'selected' : ''}>${type}</option>`).join('')}</select>
+            </label>
+            <label>Brand Context
+                <textarea id="blog-brand-context" placeholder="Brand Context">${escapeHTML(post.brand_context || '')}</textarea>
+            </label>
+            <label>Local GEO
+                <textarea id="blog-business-context" placeholder="ข้อมูลธุรกิจ Local GEO">${escapeHTML(post.business_context || '')}</textarea>
+            </label>
             <button class="blog-cms-btn secondary" type="button" data-blog-action="add-faq">+ FAQ Block</button>
         </div>
         <div class="blog-cms-card"><h3>SEO Checklist</h3><div class="blog-cms-check" id="blog-seo-checklist"></div></div>
@@ -587,7 +736,7 @@ function updateEditorStats() {
     }
     const checklist = $('#blog-seo-checklist');
     if (checklist) {
-        checklist.innerHTML = seoChecklist(post).map((item) => `<div><span>${escapeHTML(item.label)}</span><strong>${escapeHTML(item.state)}</strong></div>`).join('');
+        checklist.innerHTML = seoChecklist(post).map((item) => `<div class="${checklistTone(item)}"><span>${escapeHTML(item.label)}</span><strong>${escapeHTML(item.state)}</strong></div>`).join('');
     }
 }
 
