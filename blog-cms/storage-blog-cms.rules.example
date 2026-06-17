@@ -1,0 +1,24 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function blogUser() {
+      return firestore.get(/databases/(default)/documents/blog_users/$(request.auth.uid)).data;
+    }
+
+    function hasRole(roles) {
+      return signedIn() && blogUser().role in roles;
+    }
+
+    match /blogs/{fileName=**} {
+      allow read: if true;
+      allow write: if hasRole(['admin', 'editor', 'writer'])
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if hasRole(['admin', 'editor']);
+    }
+  }
+}
