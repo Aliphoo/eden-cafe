@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function blogUser() {
+      return get(/databases/$(database)/documents/blog_users/$(request.auth.uid)).data;
+    }
+
+    function hasRole(roles) {
+      return signedIn() && blogUser().role in roles;
+    }
+
+    match /blogs/{postId} {
+      allow read: if resource.data.status == 'published' || hasRole(['admin', 'editor', 'writer']);
+      allow create: if hasRole(['admin', 'editor', 'writer'])
+        && (request.resource.data.status in ['draft', 'archived']
+          || hasRole(['admin', 'editor']));
+      allow update: if hasRole(['admin', 'editor', 'writer'])
+        && (request.resource.data.status in ['draft', 'archived']
+          || hasRole(['admin', 'editor']));
+      allow delete: if hasRole(['admin']);
+    }
+
+    match /blog_categories/{id} {
+      allow read: if true;
+      allow write: if hasRole(['admin', 'editor']);
+    }
+
+    match /blog_tags/{id} {
+      allow read: if true;
+      allow write: if hasRole(['admin', 'editor', 'writer']);
+    }
+
+    match /blog_media_assets/{id} {
+      allow read: if true;
+      allow create: if hasRole(['admin', 'editor', 'writer']);
+      allow update: if hasRole(['admin', 'editor']);
+      allow delete: if hasRole(['admin', 'editor']);
+    }
+
+    match /blog_revisions/{id} {
+      allow read: if hasRole(['admin', 'editor', 'writer']);
+      allow create: if hasRole(['admin', 'editor', 'writer']);
+      allow update, delete: if false;
+    }
+
+    match /blog_users/{uid} {
+      allow read: if hasRole(['admin']) || (signedIn() && request.auth.uid == uid);
+      allow create, update, delete: if hasRole(['admin']);
+    }
+
+    match /blog_settings/{id} {
+      allow read: if true;
+      allow write: if hasRole(['admin']);
+    }
+  }
+}

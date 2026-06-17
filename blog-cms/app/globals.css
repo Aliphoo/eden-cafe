@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --background: #f5f7f4;
+  --foreground: #17211b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, "Noto Sans Thai", sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.cms-prose h2 {
+  margin-top: 1.9rem;
+  font-size: 1.55rem;
+  font-weight: 800;
+}
+
+.cms-prose h3 {
+  margin-top: 1.5rem;
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.cms-prose p,
+.cms-prose li {
+  line-height: 1.8;
+  color: #35423a;
+}
+
+.cms-prose blockquote {
+  border-left: 4px solid #176b45;
+  margin: 1.2rem 0;
+  padding: 0.8rem 1rem;
+  background: #f7faf6;
+}
+
+.cms-prose img {
+  border-radius: 8px;
+  max-width: 100%;
+}
+
+.ProseMirror {
+  min-height: 420px;
+  outline: none;
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  color: #91a196;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
