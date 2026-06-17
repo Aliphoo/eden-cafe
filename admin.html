@@ -268,6 +268,19 @@
         .section-container { background: var(--white); padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); margin-bottom: 30px; }
         .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         .blog-admin-actions { display: flex; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+        .blog-cms-upgrade-card {
+            display: grid; gap: 14px; margin-bottom: 20px; padding: 18px;
+            border: 1px solid #d9efdc; border-left: 5px solid var(--accent-color);
+            border-radius: 12px; background: linear-gradient(135deg, #f7fff8, #ffffff);
+            box-shadow: 0 10px 24px rgba(46, 125, 50, 0.08);
+        }
+        .blog-cms-upgrade-card h3 { color: #173d29; margin: 0; font-size: 1.18rem; }
+        .blog-cms-upgrade-card p { color: #536159; line-height: 1.65; margin: 0; }
+        .blog-cms-feature-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; }
+        .blog-cms-feature-grid span { background: #eef8f0; color: #245c39; border-radius: 999px; padding: 8px 12px; font-size: 0.86rem; font-weight: 700; text-align: center; }
+        .blog-cms-note { border-radius: 10px; background: #fff8e7; color: #7a4d0b; padding: 11px 13px; font-size: 0.9rem; font-weight: 600; }
+        @media (max-width: 900px) { .blog-cms-feature-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); } }
+        @media (max-width: 560px) { .blog-cms-feature-grid { grid-template-columns: 1fr; } }
         .data-tools {
             background: #fbfff8;
             border: 1px solid #e0eadc;
@@ -2386,6 +2399,23 @@
                         <button class="btn-action btn-edit" id="seed-seo-blogs-btn" onclick="seedSeoBlogPosts()">นำเข้า/อัปเดต SEO Blog 6 บทความ</button>
                         <button class="btn-action" onclick="openBlogModal()">+ เพิ่มบทความใหม่</button>
                     </div>
+                </div>
+                <div class="blog-cms-upgrade-card">
+                    <div>
+                        <h3>Blog CMS ใหม่ถูกเพิ่มเข้า repository แล้ว</h3>
+                        <p>ระบบใหม่อยู่ในโฟลเดอร์ <strong>blog-cms/</strong> เป็น Next.js + TypeScript พร้อม Firebase Auth, Firestore, Media Library, SEO/AEO/GEO editor, role Admin/Editor/Writer, seed data และ public blog routes.</p>
+                    </div>
+                    <div class="blog-cms-feature-grid" aria-label="Blog CMS features">
+                        <span>Dashboard CMS</span>
+                        <span>Rich Text Editor</span>
+                        <span>SEO Checklist</span>
+                        <span>Media Library</span>
+                        <span>Categories & Tags</span>
+                        <span>Preview Pages</span>
+                        <span>Role Permission</span>
+                        <span>JSON-LD Schema</span>
+                    </div>
+                    <div class="blog-cms-note">หมายเหตุ: หน้า Admin นี้เป็น static cPanel เดิม ส่วน Blog CMS ใหม่เป็น Next.js app จึงต้องต่อ Next-capable hosting/runtime ก่อนจึงจะเปิดเป็นหน้า CMS เต็มรูปแบบบนโดเมนได้</div>
                 </div>
                 <table>
                     <thead>
