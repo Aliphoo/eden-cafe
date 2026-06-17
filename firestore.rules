@@ -403,6 +403,28 @@ service cloud.firestore {
       allow read: if true;
       allow write: if hasAdminPermission('blogs');
     }
+    match /blog_categories/{docId} {
+      allow read: if true;
+      allow write: if hasAdminPermission('blogs');
+    }
+    match /blog_tags/{docId} {
+      allow read: if true;
+      allow write: if hasAdminPermission('blogs');
+    }
+    match /blog_media_assets/{docId} {
+      allow read: if true;
+      allow write: if hasAdminPermission('blogs');
+    }
+    match /blog_revisions/{docId} {
+      allow read, write: if hasAdminPermission('blogs');
+    }
+    match /blog_users/{docId} {
+      allow read, write: if hasAdminPermission('blogs');
+    }
+    match /blog_settings/{docId} {
+      allow read: if true;
+      allow write: if hasAdminPermission('blogs');
+    }
     match /faqs/{docId} {
       allow read: if true;
       allow write: if hasAdminPermission('faqs');
