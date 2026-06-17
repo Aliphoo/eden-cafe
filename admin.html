@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Eden Cafe - Admin Dashboard</title>
     <link rel="icon" href="Images/Logo.webp" type="image/webp">
-    <link rel="stylesheet" href="archery.css?v=archery-admin-ux-1">
+    <link rel="stylesheet" href="archery.css?v=archery-admin-ux-2">
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
     <!-- Chart.js -->
@@ -1829,15 +1829,115 @@
                     <button class="btn-action" onclick="refreshArcheryAdmin()">Refresh</button>
                 </div>
 
-                <div class="archery-admin-grid">
-                    <form id="archery-walkin-form" class="archery-panel">
+                <div class="archery-admin-tabs" role="tablist" aria-label="Archery admin sections">
+                    <button type="button" class="archery-admin-tab is-active" data-archery-admin-tab="today">วันนี้ / เลน</button>
+                    <button type="button" class="archery-admin-tab" data-archery-admin-tab="walkin">สร้าง Walk-in</button>
+                    <button type="button" class="archery-admin-tab" data-archery-admin-tab="payments">ชำระเงิน</button>
+                    <button type="button" class="archery-admin-tab" data-archery-admin-tab="settings">ตั้งค่า</button>
+                    <button type="button" class="archery-admin-tab" data-archery-admin-tab="diagnostics">ตรวจสอบระบบ</button>
+                </div>
+
+                <section class="archery-admin-tab-panel is-active" data-archery-admin-panel="today">
+                    <div class="archery-ops-summary" id="archery-ops-summary">
+                        <div><span>Bookings today</span><strong>-</strong><small>รายการทั้งหมด</small></div>
+                        <div><span>Need payment</span><strong>-</strong><small>ยังไม่ชำระ</small></div>
+                        <div><span>Checked-in</span><strong>-</strong><small>กำลังใช้บริการ</small></div>
+                        <div><span>Cancel request</span><strong>-</strong><small>ต้องตรวจสอบ</small></div>
+                        <div><span>Busy lanes now</span><strong>-</strong><small>เลนที่ใช้งานอยู่</small></div>
+                    </div>
+
+                    <div class="archery-board-shell">
+                        <div class="archery-admin-toolbar archery-admin-toolbar-primary">
+                            <input type="date" id="archery-admin-board-date">
+                            <select id="archery-admin-board-status">
+                                <option value="active">Active</option>
+                                <option value="all">All statuses</option>
+                                <option value="HELD">Held</option>
+                                <option value="CONFIRMED">Confirmed</option>
+                                <option value="CHECKED_IN">Checked-in</option>
+                                <option value="COMPLETED">Completed</option>
+                                <option value="NO_SHOW">No-show</option>
+                                <option value="CANCEL_REQUESTED">Cancel requested</option>
+                                <option value="CANCELLED">Cancelled</option>
+                            </select>
+                            <select id="archery-admin-board-source">
+                                <option value="all">Online + Walk-in</option>
+                                <option value="online">Online booking</option>
+                                <option value="walk_in">Walk-in booking</option>
+                            </select>
+                            <select id="archery-admin-board-payment">
+                                <option value="all">All payments</option>
+                                <option value="UNPAID">Unpaid</option>
+                                <option value="PAID_ONLINE">Paid Online</option>
+                                <option value="PAID_COUNTER">Paid Counter</option>
+                                <option value="REFUNDED">Refunded</option>
+                            </select>
+                            <input type="text" id="archery-admin-board-member" placeholder="Member / phone / email">
+                            <select id="archery-admin-board-lane">
+                                <option value="all">All lanes</option>
+                                <option value="1">Lane 1</option>
+                                <option value="2">Lane 2</option>
+                                <option value="3">Lane 3</option>
+                                <option value="4">Lane 4</option>
+                                <option value="5">Lane 5</option>
+                                <option value="6">Lane 6</option>
+                                <option value="7">Lane 7</option>
+                                <option value="8">Lane 8</option>
+                                <option value="9">Lane 9</option>
+                                <option value="10">Lane 10</option>
+                            </select>
+                            <select id="archery-admin-board-package">
+                                <option value="all">All packages</option>
+                                <option value="60">60 min</option>
+                                <option value="120">120 min</option>
+                                <option value="180">180 min</option>
+                            </select>
+                            <button class="btn-action" id="archery-admin-today" type="button">Today</button>
+                            <button class="btn-action btn-view" onclick="refreshArcheryAdmin()" type="button">Refresh</button>
+                        </div>
+                        <div class="archery-board-legend" aria-label="Lane board legend">
+                            <span><i class="available"></i> Available</span>
+                            <span><i class="busy"></i> Booked</span>
+                            <span><i class="held"></i> Held</span>
+                            <span><i class="checked-in"></i> Checked-in</span>
+                            <span><i class="warning"></i> Cancel / No-show</span>
+                            <button class="archery-inline-action" type="button" data-archery-admin-tab="walkin">+ Walk-in</button>
+                        </div>
+                        <div class="archery-schedule-wrap">
+                            <table class="archery-schedule" id="archery-schedule-table"></table>
+                        </div>
+                    </div>
+
+                    <div class="archery-table-wrap archery-booking-list">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Booking</th>
+                                    <th>Member</th>
+                                    <th>Lane / Time</th>
+                                    <th>Source</th>
+                                    <th>Payment</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="archery-bookings-table-body">
+                                <tr><td colspan="7" style="text-align:center;">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="archery-admin-tab-panel" data-archery-admin-panel="walkin" hidden>
+                    <form id="archery-walkin-form" class="archery-panel archery-walkin-panel">
                         <div class="archery-panel-title">
                             <span class="archery-step-badge">1</span>
                             <div>
-                                <h3>Create Walk-in Booking</h3>
-                                <p>Search a member, choose time, then review the total before creating.</p>
+                                <h3>สร้าง Walk-in Booking</h3>
+                                <p>ค้นหาสมาชิก เลือกเวลาและแพ็กเกจ แล้วตรวจยอดก่อนสร้างรายการ</p>
                             </div>
                         </div>
+                        <p class="archery-status success" id="archery-walkin-prefill-note"></p>
                         <div class="archery-form-grid">
                             <label class="archery-field full">
                                 Search member
@@ -1910,7 +2010,22 @@
                         <p class="archery-status" id="archery-admin-form-status"></p>
                         <button class="btn-action" type="submit">Create Walk-in Booking</button>
                     </form>
+                </section>
 
+                <section class="archery-admin-tab-panel" data-archery-admin-panel="payments" hidden>
+                    <div class="archery-admin-grid archery-admin-panels">
+                        <section class="archery-panel">
+                            <h3>Payment Panel</h3>
+                            <div id="archery-payment-panel"></div>
+                        </section>
+                        <section class="archery-panel">
+                            <h3>Payment Watch</h3>
+                            <div id="archery-payment-watch"></div>
+                        </section>
+                    </div>
+                </section>
+
+                <section class="archery-admin-tab-panel" data-archery-admin-panel="settings" hidden>
                     <form id="archery-page-settings-form" class="archery-panel">
                         <div class="archery-panel-title">
                             <span class="archery-step-badge">2</span>
@@ -1962,102 +2077,41 @@
                         <p class="archery-status" id="archery-page-settings-status"></p>
                         <button class="btn-action" type="submit">Save Archery Page</button>
                     </form>
+                </section>
 
-                    <div>
-                        <div class="archery-admin-toolbar">
-                            <input type="date" id="archery-admin-board-date">
-                            <select id="archery-admin-board-status">
-                                <option value="active">Active</option>
-                                <option value="all">All statuses</option>
-                                <option value="HELD">Held</option>
-                                <option value="CONFIRMED">Confirmed</option>
-                                <option value="CHECKED_IN">Checked-in</option>
-                                <option value="COMPLETED">Completed</option>
-                                <option value="NO_SHOW">No-show</option>
-                                <option value="CANCEL_REQUESTED">Cancel requested</option>
-                                <option value="CANCELLED">Cancelled</option>
-                            </select>
-                            <select id="archery-admin-board-source">
-                                <option value="all">Online + Walk-in</option>
-                                <option value="online">Online booking</option>
-                                <option value="walk_in">Walk-in booking</option>
-                            </select>
-                            <select id="archery-admin-board-payment">
-                                <option value="all">All payments</option>
-                                <option value="UNPAID">Unpaid</option>
-                                <option value="PAID_ONLINE">Paid Online</option>
-                                <option value="PAID_COUNTER">Paid Counter</option>
-                                <option value="REFUNDED">Refunded</option>
-                            </select>
-                            <input type="text" id="archery-admin-board-member" placeholder="Member / phone / email">
-                            <select id="archery-admin-board-lane">
-                                <option value="all">All lanes</option>
-                                <option value="1">Lane 1</option>
-                                <option value="2">Lane 2</option>
-                                <option value="3">Lane 3</option>
-                                <option value="4">Lane 4</option>
-                                <option value="5">Lane 5</option>
-                                <option value="6">Lane 6</option>
-                                <option value="7">Lane 7</option>
-                                <option value="8">Lane 8</option>
-                                <option value="9">Lane 9</option>
-                                <option value="10">Lane 10</option>
-                            </select>
-                            <select id="archery-admin-board-package">
-                                <option value="all">All packages</option>
-                                <option value="60">60 min</option>
-                                <option value="120">120 min</option>
-                                <option value="180">180 min</option>
-                            </select>
-                            <button class="btn-action" id="archery-admin-today" type="button">Today</button>
-                            <button class="btn-action btn-view" onclick="refreshArcheryAdmin()" type="button">Refresh</button>
-                        </div>
-                        <div class="archery-schedule-wrap">
-                            <table class="archery-schedule" id="archery-schedule-table"></table>
-                        </div>
+                <section class="archery-admin-tab-panel" data-archery-admin-panel="diagnostics" hidden>
+                    <div class="archery-admin-grid archery-admin-panels">
+                        <section class="archery-panel">
+                            <h3>Webhook Events</h3>
+                            <div id="archery-webhook-events"></div>
+                        </section>
+                        <section class="archery-panel">
+                            <h3>Reconciliation Queue</h3>
+                            <div id="archery-reconciliation-panel"></div>
+                        </section>
+                        <section class="archery-panel" id="archery-audit-panel">
+                            <h3>Audit Trail</h3>
+                            <div id="archery-audit-trail"></div>
+                        </section>
                     </div>
-                </div>
+                </section>
 
-                <div class="archery-table-wrap" style="margin-top:18px;">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Booking</th>
-                                <th>Member</th>
-                                <th>Lane / Time</th>
-                                <th>Source</th>
-                                <th>Payment</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="archery-bookings-table-body">
-                            <tr><td colspan="7" style="text-align:center;">Loading...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-
-                <div class="archery-admin-grid archery-admin-panels">
-                    <section class="archery-panel">
-                        <h3>Payment Panel</h3>
-                        <div id="archery-payment-panel"></div>
-                    </section>
-                    <section class="archery-panel">
-                        <h3>Payment Watch</h3>
-                        <div id="archery-payment-watch"></div>
-                    </section>
-                    <section class="archery-panel">
-                        <h3>Webhook Events</h3>
-                        <div id="archery-webhook-events"></div>
-                    </section>
-                    <section class="archery-panel">
-                        <h3>Reconciliation Queue</h3>
-                        <div id="archery-reconciliation-panel"></div>
-                    </section>
-                    <section class="archery-panel" id="archery-audit-panel">
-                        <h3>Audit Trail</h3>
-                        <div id="archery-audit-trail"></div>
-                    </section>
+                <div id="archery-admin-action-modal" class="modal archery-action-modal">
+                    <div class="modal-content archery-action-modal-content">
+                        <span class="close-modal" onclick="closeArcheryActionModal()">&times;</span>
+                        <h2 id="archery-action-modal-title">Archery Action</h2>
+                        <div id="archery-action-modal-summary" class="archery-action-summary"></div>
+                        <form id="archery-action-modal-form">
+                            <input type="hidden" id="archery-action-modal-kind">
+                            <input type="hidden" id="archery-action-modal-booking-id">
+                            <div id="archery-action-modal-fields" class="archery-form-grid"></div>
+                            <p class="archery-status" id="archery-action-modal-status"></p>
+                            <div class="archery-modal-actions">
+                                <button class="btn-action btn-view" type="button" onclick="closeArcheryActionModal()">Cancel</button>
+                                <button class="btn-action" id="archery-action-modal-submit" type="submit">Confirm</button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             </div>
         </div>
@@ -3149,7 +3203,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=shop-unified-1"></script>
+    <script type="module" src="js/admin.js?v=archery-admin-ux-2"></script>
     <script>
         (function cleanRemovedAdminHash() {
             const rawHash = String(window.location.hash || '').replace(/^#/, '');

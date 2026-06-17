@@ -431,6 +431,8 @@ let archeryPageSettingsData = null;
 const archeryActionLoading = new Set();
 let archeryAdminControlsBound = false;
 let archeryPageSettingsBound = false;
+let archeryActiveAdminTab = 'today';
+let archeryPendingAction = null;
 let allBookingsControlsBound = false;
 let categoriesUnsubscribe = null;
 let productsUnsubscribe = null;
@@ -3828,7 +3830,7 @@ function renderArcheryPricingEditor(pricing = DEFAULT_ARCHERY_PRICING) {
 }
 
 function readArcheryPagePackageRows() {
-    return Array.from(document.querySelectorAll('.archery-page-package-row')).map((row, index) => {
+    return Array.from(document.querySelectorAll('#archery-page-package-list .archery-page-package-row')).map((row, index) => {
         const value = field => row.querySelector(`[data-page-package-field="${field}"]`)?.value || '';
         return normalizeArcheryPagePackage({
             durationMinutes: value('durationMinutes'),
@@ -4190,13 +4192,295 @@ function renderAdminWalkinPricingOptions() {
 function updateArcheryRoleVisibility() {
     const form = document.getElementById('archery-walkin-form');
     if (form) form.hidden = !archeryCan('createWalkIn');
+    const walkinTab = document.querySelector('[data-archery-admin-tab="walkin"]');
+    if (walkinTab) walkinTab.hidden = !archeryCan('createWalkIn');
     const auditPanel = document.getElementById('archery-audit-panel');
     if (auditPanel) auditPanel.hidden = !archeryCan('viewAuditTrail');
+    if (!archeryCan('createWalkIn') && archeryActiveAdminTab === 'walkin') {
+        setArcheryAdminTab('today');
+    }
+}
+
+function setArcheryAdminTab(tabId = 'today') {
+    const target = document.querySelector(`[data-archery-admin-panel="${tabId}"]`);
+    if (!target) return;
+    archeryActiveAdminTab = tabId;
+    document.querySelectorAll('[data-archery-admin-tab]').forEach(button => {
+        button.classList.toggle('is-active', button.dataset.archeryAdminTab === tabId);
+        if (button.getAttribute('role') === 'tab') {
+            button.setAttribute('aria-selected', button.dataset.archeryAdminTab === tabId ? 'true' : 'false');
+        }
+    });
+    document.querySelectorAll('[data-archery-admin-panel]').forEach(panel => {
+        const active = panel.dataset.archeryAdminPanel === tabId;
+        panel.hidden = !active;
+        panel.classList.toggle('is-active', active);
+    });
+}
+
+function bindArcheryAdminTabs() {
+    document.querySelectorAll('[data-archery-admin-tab]').forEach(button => {
+        if (button.dataset.archeryTabBound === 'true') return;
+        button.dataset.archeryTabBound = 'true';
+        if (button.classList.contains('archery-admin-tab')) {
+            button.setAttribute('role', 'tab');
+            button.setAttribute('aria-selected', button.classList.contains('is-active') ? 'true' : 'false');
+        }
+        button.addEventListener('click', () => setArcheryAdminTab(button.dataset.archeryAdminTab || 'today'));
+    });
+}
+
+function archeryWalkInPrefillMessage(message = '') {
+    const note = document.getElementById('archery-walkin-prefill-note');
+    if (note) note.textContent = message;
+}
+
+function prefillArcheryWalkInFromSlot({ date = '', time = '', lane = '' } = {}) {
+    const dateEl = document.getElementById('archery-admin-date');
+    const startEl = document.getElementById('archery-admin-start');
+    if (dateEl && date) dateEl.value = date;
+    if (startEl && time && Array.from(startEl.options).some(option => option.value === time)) {
+        startEl.value = time;
+    }
+    archeryWalkInPrefillMessage(
+        lane
+            ? `Prefilled from Lane ${lane} at ${time}. Final lane assignment is still checked by the backend.`
+            : ''
+    );
+    setArcheryAdminTab('walkin');
+    document.getElementById('archery-admin-member-search')?.focus();
+}
+
+function bindArcheryActionModal() {
+    const form = document.getElementById('archery-action-modal-form');
+    if (form && form.dataset.bound !== 'true') {
+        form.dataset.bound = 'true';
+        form.addEventListener('submit', submitArcheryActionModal);
+    }
+}
+
+function archerySetActionModalStatus(message = '', tone = '') {
+    const status = document.getElementById('archery-action-modal-status');
+    if (!status) return;
+    status.textContent = message;
+    status.className = 'archery-status' + (tone ? ' ' + tone : '');
+}
+
+function archeryActionFieldValue(name = '') {
+    return document.querySelector(`[data-archery-action-field="${name}"]`)?.value || '';
+}
+
+function archeryActionBookingSummary(booking = {}, fallbackId = '') {
+    const bookingId = booking.id || booking.firestoreId || fallbackId || '-';
+    const customer = booking.customerName || booking.customer_name || booking.name || booking.member_id || 'Member';
+    return `
+        <strong>${escapeHTML(customer)} / ${escapeHTML(bookingId)}</strong>
+        <small>${escapeHTML(archeryBookingDate(booking) || '-')} ${escapeHTML(archeryBookingStartTime(booking) || '-')} - ${escapeHTML(archeryBookingEndTime(booking) || '-')} / ${escapeHTML(archeryLanesLabel(booking))}</small>
+        <small>${escapeHTML(archeryPaymentLabel(booking))} / ${escapeHTML(archeryStatusLabel(booking))} / ${escapeHTML(archeryAmountLabel(booking))}</small>
+    `;
+}
+
+function archeryActionLaneOptions(selected = '') {
+    return Array.from({ length: 10 }, (_, index) => {
+        const lane = String(index + 1);
+        return `<option value="${lane}" ${String(selected) === lane ? 'selected' : ''}>Lane ${lane}</option>`;
+    }).join('');
+}
+
+function archeryActionConfig(kind = '', booking = {}, extra = {}) {
+    const amount = Number(booking.amount_total || booking.amountTotal || booking.amount || 0) || 0;
+    const currentEnd = archeryBookingEndTime(booking) || archeryBookingStartTime(booking) || '10:00';
+    const nextEnd = adminTimeFromMinutes(Math.min(20 * 60, adminMinutesFromTime(currentEnd) + 30));
+    const paymentId = booking.payment_id || booking.paymentId || '';
+    const multiLane = archeryPartySizeFromBooking(booking) > 1 || archeryLaneNumbersFromBooking(booking).length > 1;
+    const configs = {
+        checkIn: {
+            title: 'Check-in booking',
+            submitLabel: 'Check-in',
+            functionName: 'adminCheckInBooking',
+            permission: 'checkIn',
+            primary: true
+        },
+        complete: {
+            title: 'Complete booking',
+            submitLabel: 'Complete',
+            functionName: 'adminCompleteBooking',
+            permission: 'complete',
+            primary: true
+        },
+        noShow: {
+            title: 'Mark no-show',
+            submitLabel: 'Mark no-show',
+            functionName: 'adminMarkNoShow',
+            permission: 'markNoShow',
+            danger: true,
+            fields: '<label class="archery-field full">Reason<textarea data-archery-action-field="reason" required maxlength="300"></textarea></label>',
+            extra: () => ({ reason: archeryActionFieldValue('reason').trim() })
+        },
+        extend: {
+            title: 'Extend time',
+            submitLabel: 'Extend booking',
+            functionName: 'adminExtendBooking',
+            permission: 'extendTime',
+            fields: `<label class="archery-field full">New end time<input type="time" data-archery-action-field="newEndTime" value="${escapeHTML(nextEnd)}" required></label>`,
+            extra: () => ({ new_end_time: archeryActionFieldValue('newEndTime') })
+        },
+        move: {
+            title: 'Move lane',
+            submitLabel: 'Move lane',
+            functionName: 'adminMoveBookingLane',
+            permission: 'moveLane',
+            disabledReason: multiLane ? 'Bookings using multiple lanes cannot be moved from this quick action.' : '',
+            fields: `<label class="archery-field full">Target lane<select data-archery-action-field="lane" required>${archeryActionLaneOptions(archeryLaneNumberFromBooking(booking))}</select></label>`,
+            extra: () => ({ target_resource_id: archeryResourceIdFromLaneNumber(archeryActionFieldValue('lane')) })
+        },
+        cancel: {
+            title: 'Request cancellation',
+            submitLabel: 'Request cancel',
+            functionName: 'requestCancelBooking',
+            permission: 'requestCancel',
+            danger: true,
+            fields: '<label class="archery-field full">Cancel reason<textarea data-archery-action-field="reason" required maxlength="300"></textarea></label>',
+            extra: () => ({ reason: archeryActionFieldValue('reason').trim() })
+        },
+        payment: {
+            title: 'Record counter payment',
+            submitLabel: 'Record payment',
+            functionName: 'recordCounterPayment',
+            permission: 'recordCounterPayment',
+            primary: true,
+            disabledReason: ARCHERY_PAID_STATUSES.has(String(booking.payment_status || booking.paymentStatus || '').toUpperCase()) ? 'This booking is already marked as paid.' : '',
+            fields: `
+                <label class="archery-field full">Receipt / reference<input type="text" data-archery-action-field="receiptRef" value="${escapeHTML('counter-' + (booking.id || booking.firestoreId || '') + '-' + Date.now())}" required maxlength="120"></label>
+                <label class="archery-field full">Amount (THB)<input type="number" min="0" step="1" data-archery-action-field="amount" value="${escapeHTML(amount)}" required></label>
+            `,
+            extra: (bookingId) => {
+                const receiptRef = archeryActionFieldValue('receiptRef').trim();
+                return {
+                    idempotency_key: `counter-${bookingId}-${receiptRef}`,
+                    amount: Number(archeryActionFieldValue('amount') || 0) || 0,
+                    method: 'COUNTER'
+                };
+            }
+        },
+        approveCancel: {
+            title: 'Approve cancellation',
+            submitLabel: 'Approve cancel',
+            functionName: 'approveCancelBooking',
+            permission: 'approveCancel',
+            danger: true,
+            fields: '<label class="archery-field full">Approval reason<textarea data-archery-action-field="reason" required maxlength="300"></textarea></label>',
+            extra: () => ({ reason: archeryActionFieldValue('reason').trim() })
+        },
+        refund: {
+            title: 'Refund payment',
+            submitLabel: 'Refund',
+            functionName: 'refundPayment',
+            permission: 'refund',
+            danger: true,
+            disabledReason: paymentId ? '' : 'This booking does not have a payment id to refund.',
+            fields: `
+                <label class="archery-field full">Refund reason<textarea data-archery-action-field="reason" required maxlength="300"></textarea></label>
+                <label class="archery-field full">Refund amount (THB)<input type="number" min="0" step="1" data-archery-action-field="amount" value="${escapeHTML(amount)}" required></label>
+            `,
+            extra: () => ({
+                payment_id: paymentId,
+                amount: Number(archeryActionFieldValue('amount') || 0) || 0,
+                reason: archeryActionFieldValue('reason').trim()
+            })
+        },
+        reconciliation: {
+            title: extra.reconciliationAction === 'MARK_REFUND_REQUIRED' ? 'Mark refund required' : 'Mark reviewed',
+            submitLabel: extra.reconciliationAction === 'MARK_REFUND_REQUIRED' ? 'Refund required' : 'Reviewed',
+            functionName: 'reconcileBeamLatePayment',
+            permission: 'refund',
+            danger: extra.reconciliationAction === 'MARK_REFUND_REQUIRED',
+            summary: `<strong>${escapeHTML(extra.reconciliationAction || 'MARK_REVIEWED')}</strong><small>${escapeHTML(extra.reconciliationId || '')}</small>`,
+            extra: () => ({
+                reconciliation_id: extra.reconciliationId || '',
+                action: extra.reconciliationAction || 'MARK_REVIEWED'
+            })
+        }
+    };
+    return configs[kind] || null;
+}
+
+function openArcheryActionModal(kind, bookingId = '', extra = {}) {
+    const booking = bookingId ? archeryBookingById(bookingId) : {};
+    const config = archeryActionConfig(kind, booking, extra);
+    const modal = document.getElementById('archery-admin-action-modal');
+    if (!config || !modal) return;
+    archeryPendingAction = { kind, bookingId, extra };
+    document.getElementById('archery-action-modal-kind').value = kind;
+    document.getElementById('archery-action-modal-booking-id').value = bookingId;
+    document.getElementById('archery-action-modal-title').textContent = config.title;
+    document.getElementById('archery-action-modal-summary').innerHTML = config.summary || archeryActionBookingSummary(booking, bookingId);
+    document.getElementById('archery-action-modal-fields').innerHTML = config.fields || '';
+    const submit = document.getElementById('archery-action-modal-submit');
+    if (submit) {
+        submit.textContent = config.submitLabel || 'Confirm';
+        submit.classList.toggle('btn-delete', !!config.danger);
+        submit.disabled = !!config.disabledReason || (config.permission && !archeryCan(config.permission));
+    }
+    if (config.permission && !archeryCan(config.permission)) {
+        archerySetActionModalStatus('This admin account cannot perform this action.', 'error');
+    } else if (config.disabledReason) {
+        archerySetActionModalStatus(config.disabledReason, 'error');
+    } else {
+        archerySetActionModalStatus('Review the booking details before confirming.');
+    }
+    modal.style.display = 'block';
+}
+
+window.closeArcheryActionModal = () => {
+    const modal = document.getElementById('archery-admin-action-modal');
+    if (modal) modal.style.display = 'none';
+    archeryPendingAction = null;
+    archerySetActionModalStatus('');
+};
+
+async function submitArcheryActionModal(event) {
+    event.preventDefault();
+    if (!archeryPendingAction) return;
+    const { kind, bookingId, extra } = archeryPendingAction;
+    const booking = bookingId ? archeryBookingById(bookingId) : {};
+    const config = archeryActionConfig(kind, booking, extra);
+    if (!config) return;
+    if (config.permission && !archeryCan(config.permission)) {
+        archerySetActionModalStatus('This admin account cannot perform this action.', 'error');
+        return;
+    }
+    if (config.disabledReason) {
+        archerySetActionModalStatus(config.disabledReason, 'error');
+        return;
+    }
+    const submit = document.getElementById('archery-action-modal-submit');
+    const loadingKey = kind === 'reconciliation'
+        ? `archeryReviewReconciliation:${extra.reconciliationId || ''}`
+        : `${config.functionName}:${bookingId}`;
+    if (archeryActionLoading.has(loadingKey)) return;
+    archeryActionLoading.add(loadingKey);
+    if (submit) submit.disabled = true;
+    archerySetActionModalStatus('Saving...');
+    try {
+        const actionExtra = typeof config.extra === 'function' ? config.extra(bookingId) : {};
+        await callAdminFunction(config.functionName, archeryMutationPayload(config.functionName, bookingId, actionExtra));
+        window.closeArcheryActionModal();
+        refreshArcheryAdmin();
+    } catch (error) {
+        archerySetActionModalStatus(error.message || safeAdminError('Archery action failed'), 'error');
+    } finally {
+        archeryActionLoading.delete(loadingKey);
+        if (submit) submit.disabled = false;
+        renderArcheryAdmin(archeryBookingsData);
+    }
 }
 
 function bindArcheryAdminControls() {
     if (archeryAdminControlsBound) return;
     archeryAdminControlsBound = true;
+    bindArcheryAdminTabs();
+    bindArcheryActionModal();
     const date = adminTodayISO();
     ['archery-admin-date', 'archery-admin-board-date'].forEach(id => {
         const el = document.getElementById(id);
@@ -4219,6 +4503,15 @@ function bindArcheryAdminControls() {
     ].forEach(id => document.getElementById(id)?.addEventListener('change', () => renderArcheryAdmin(archeryBookingsData)));
     document.getElementById('archery-admin-board-member')?.addEventListener('input', () => renderArcheryAdmin(archeryBookingsData));
     document.getElementById('archery-admin-member-search')?.addEventListener('change', applyArcheryMemberSearch);
+    document.getElementById('archery-schedule-table')?.addEventListener('click', event => {
+        const slot = event.target.closest('[data-archery-slot-time]');
+        if (!slot) return;
+        prefillArcheryWalkInFromSlot({
+            date: document.getElementById('archery-admin-board-date')?.value || adminTodayISO(),
+            time: slot.dataset.archerySlotTime || '',
+            lane: slot.dataset.archerySlotLane || ''
+        });
+    });
     document.getElementById('archery-admin-today')?.addEventListener('click', () => {
         const boardDate = document.getElementById('archery-admin-board-date');
         if (boardDate) boardDate.value = adminTodayISO();
@@ -4359,6 +4652,44 @@ function archeryBookingAtSlot(bookings, laneNumber, minute) {
     });
 }
 
+function renderArcheryOpsSummary(bookings = [], boardDate = adminTodayISO()) {
+    const el = document.getElementById('archery-ops-summary');
+    if (!el) return;
+    const active = bookings.filter(archeryBookingIsActive);
+    const needPayment = active.filter(booking => {
+        const payment = String(booking.payment_status || booking.paymentStatus || '').toUpperCase();
+        return !ARCHERY_PAID_STATUSES.has(payment);
+    }).length;
+    const checkedIn = bookings.filter(booking => archeryBookingStatus(booking) === 'CHECKED_IN').length;
+    const cancelRequests = bookings.filter(booking => archeryBookingStatus(booking) === 'CANCEL_REQUESTED').length;
+    const busyLanes = new Set();
+    if (boardDate === adminTodayISO()) {
+        const now = new Date();
+        const currentMinute = now.getHours() * 60 + now.getMinutes();
+        active.forEach(booking => {
+            const start = adminMinutesFromTime(archeryBookingStartTime(booking));
+            const end = adminMinutesFromTime(archeryBookingEndTime(booking));
+            if (start <= currentMinute && currentMinute < end) {
+                archeryLaneNumbersFromBooking(booking).forEach(lane => busyLanes.add(lane));
+            }
+        });
+    }
+    const items = [
+        ['Bookings today', bookings.length, 'รายการทั้งหมด'],
+        ['Need payment', needPayment, 'ยังไม่ชำระ'],
+        ['Checked-in', checkedIn, 'กำลังใช้บริการ'],
+        ['Cancel request', cancelRequests, 'ต้องตรวจสอบ'],
+        ['Busy lanes now', busyLanes.size, 'เลนที่ใช้งานอยู่']
+    ];
+    el.innerHTML = items.map(([label, value, helper]) => `
+        <div>
+            <span>${escapeHTML(label)}</span>
+            <strong>${escapeHTML(value)}</strong>
+            <small>${escapeHTML(helper)}</small>
+        </div>
+    `).join('');
+}
+
 function archerySlotClass(booking = {}) {
     const status = archeryBookingStatus(booking);
     if (status === 'HELD') return 'held';
@@ -4381,7 +4712,13 @@ function renderArcherySchedule(bookings = []) {
         lanes.forEach(lane => {
             const booking = archeryBookingAtSlot(bookings, lane, minute);
             if (!booking) {
-                rows.push('<td><span class="archery-slot-chip">Available</span></td>');
+                rows.push(canAdmin('bookings') && archeryCan('createWalkIn') ? `
+                    <td>
+                        <button class="archery-slot-chip available" type="button" data-archery-slot-time="${escapeHTML(adminTimeFromMinutes(minute))}" data-archery-slot-lane="${escapeHTML(lane)}">
+                            + Walk-in
+                        </button>
+                    </td>
+                ` : '<td><span class="archery-slot-chip available">Available</span></td>');
                 return;
             }
             rows.push(`
@@ -4408,8 +4745,9 @@ function archeryActionButton(label, handler, bookingId, permission, options = {}
     if (!archeryCan(permission)) return '';
     const loadingKey = `${handler}:${bookingId}`;
     const disabled = archeryActionLoading.has(loadingKey) ? ' disabled' : '';
-    const danger = options.danger ? ' class="danger"' : '';
-    return `<button${danger} type="button"${disabled} onclick="${handler}('${escapeJSString(bookingId)}')">${escapeHTML(label)}</button>`;
+    const classes = [options.danger ? 'danger' : '', options.primary ? 'primary' : ''].filter(Boolean).join(' ');
+    const classAttr = classes ? ` class="${classes}"` : '';
+    return `<button${classAttr} type="button"${disabled} onclick="${handler}('${escapeJSString(bookingId)}')">${escapeHTML(label)}</button>`;
 }
 
 function archeryActionButtons(booking = {}) {
@@ -4422,11 +4760,11 @@ function archeryActionButtons(booking = {}) {
     const hasCancelRequest = booking.cancel_requested === true && String(booking.cancel_request_status || '').toUpperCase() === 'PENDING';
     const paymentId = booking.payment_id || booking.paymentId || '';
     const buttons = [];
-    if (!closed && status === 'CONFIRMED' && archeryCan('checkIn')) buttons.push(`<button type="button" onclick="archeryAdminAction('adminCheckInBooking','${safeId}')">Check-in</button>`);
+    if (!closed && status === 'CONFIRMED' && archeryCan('checkIn')) buttons.push(`<button class="primary" type="button" onclick="archeryAdminAction('adminCheckInBooking','${safeId}')">Check-in</button>`);
     if (!closed && ['CONFIRMED', 'CHECKED_IN'].includes(status) && archeryCan('extendTime')) buttons.push(archeryActionButton('Extend', 'archeryAdminExtend', id, 'extendTime'));
     if (!closed && ['CONFIRMED', 'CHECKED_IN'].includes(status) && archeryCan('moveLane')) buttons.push(archeryActionButton('Move', 'archeryAdminMove', id, 'moveLane'));
-    if (!closed && !paid && archeryCan('recordCounterPayment')) buttons.push(archeryActionButton('Paid Counter', 'archeryAdminPayment', id, 'recordCounterPayment'));
-    if (!closed && ['CONFIRMED', 'CHECKED_IN'].includes(status) && archeryCan('complete')) buttons.push(`<button type="button" onclick="archeryAdminAction('adminCompleteBooking','${safeId}')">Complete</button>`);
+    if (!closed && !paid && archeryCan('recordCounterPayment')) buttons.push(archeryActionButton('Paid Counter', 'archeryAdminPayment', id, 'recordCounterPayment', { primary: true }));
+    if (!closed && ['CONFIRMED', 'CHECKED_IN'].includes(status) && archeryCan('complete')) buttons.push(`<button class="primary" type="button" onclick="archeryAdminAction('adminCompleteBooking','${safeId}')">Complete</button>`);
     if (!closed && status === 'CONFIRMED' && archeryCan('markNoShow')) buttons.push(`<button class="danger" type="button" onclick="archeryAdminAction('adminMarkNoShow','${safeId}')">No Show</button>`);
     if (!closed && !hasCancelRequest && archeryCan('requestCancel')) buttons.push(archeryActionButton('Request Cancel', 'archeryAdminCancel', id, 'requestCancel', { danger: true }));
     if (!closed && hasCancelRequest && archeryCan('approveCancel')) buttons.push(archeryActionButton('Approve Cancel', 'archeryApproveCancel', id, 'approveCancel', { danger: true }));
@@ -4452,9 +4790,11 @@ function renderArcheryAdmin(bookings = []) {
     const boardDateEl = document.getElementById('archery-admin-board-date');
     if (boardDateEl && !boardDateEl.value) boardDateEl.value = adminTodayISO();
     const boardDate = boardDateEl?.value || adminTodayISO();
-    const archeryBookings = (bookings || [])
+    const dayArcheryBookings = (bookings || [])
         .filter(isArcheryBooking)
-        .filter(booking => archeryBookingDate(booking) === boardDate)
+        .filter(booking => archeryBookingDate(booking) === boardDate);
+    renderArcheryOpsSummary(dayArcheryBookings, boardDate);
+    const archeryBookings = dayArcheryBookings
         .filter(archeryBookingMatchesBoardFilters)
         .sort((a, b) => archeryBookingStartTime(a).localeCompare(archeryBookingStartTime(b)));
     renderArcherySchedule(archeryBookings);
@@ -4811,230 +5151,33 @@ async function createArcheryWalkInFromAdmin(event) {
 }
 
 window.archeryAdminAction = async (functionName, bookingId) => {
-    if (!bookingId) return;
-    if (!confirm('Confirm action for booking ' + bookingId + '?')) return;
-    const actionPermission = {
+    const kind = {
         adminCheckInBooking: 'checkIn',
         adminCompleteBooking: 'complete',
-        adminMarkNoShow: 'markNoShow'
+        adminMarkNoShow: 'noShow'
     }[functionName];
-    if (actionPermission && !archeryCan(actionPermission)) {
-        alert('บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้');
-        return;
-    }
-    const extra = {};
-    if (functionName === 'adminMarkNoShow') {
-        const reason = prompt('No-show reason');
-        if (!reason) return;
-        extra.reason = reason;
-    }
-    const loadingKey = `${functionName}:${bookingId}`;
-    if (archeryActionLoading.has(loadingKey)) return;
-    archeryActionLoading.add(loadingKey);
-    renderArcheryAdmin(archeryBookingsData);
-    try {
-        await callAdminFunction(functionName, archeryMutationPayload(functionName, bookingId, extra));
-        refreshArcheryAdmin();
-    } catch (error) {
-        alert(error.message || safeAdminError('Archery action failed'));
-    } finally {
-        archeryActionLoading.delete(loadingKey);
-        renderArcheryAdmin(archeryBookingsData);
-    }
+    if (!kind || !bookingId) return;
+    openArcheryActionModal(kind, bookingId);
 };
 
-window.archeryAdminExtend = async (bookingId) => {
-    const newEndTime = prompt('New end time (HH:mm), e.g. 14:30');
-    if (!newEndTime) return;
-    if (!archeryCan('extendTime')) {
-        alert('บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้');
-        return;
-    }
-    const loadingKey = `archeryAdminExtend:${bookingId}`;
-    if (archeryActionLoading.has(loadingKey)) return;
-    archeryActionLoading.add(loadingKey);
-    renderArcheryAdmin(archeryBookingsData);
-    try {
-        await callAdminFunction('adminExtendBooking', archeryMutationPayload('adminExtendBooking', bookingId, { new_end_time: newEndTime }));
-        refreshArcheryAdmin();
-    } catch (error) {
-        alert(error.message || safeAdminError('Extend failed'));
-    } finally {
-        archeryActionLoading.delete(loadingKey);
-        renderArcheryAdmin(archeryBookingsData);
-    }
-};
+window.archeryAdminExtend = async (bookingId) => openArcheryActionModal('extend', bookingId);
 
-window.archeryAdminMove = async (bookingId) => {
-    const booking = archeryBookingById(bookingId);
-    if (archeryPartySizeFromBooking(booking) > 1 || archeryLaneNumbersFromBooking(booking).length > 1) {
-        alert('Move lane is not supported for bookings that use multiple lanes.');
-        return;
-    }
-    const lane = prompt('New lane number 1-10');
-    if (!lane) return;
-    if (!archeryCan('moveLane')) {
-        alert('บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้');
-        return;
-    }
-    const targetResourceId = archeryResourceIdFromLaneNumber(lane);
-    if (!targetResourceId) {
-        alert('Lane must be 1-10');
-        return;
-    }
-    const loadingKey = `archeryAdminMove:${bookingId}`;
-    if (archeryActionLoading.has(loadingKey)) return;
-    archeryActionLoading.add(loadingKey);
-    renderArcheryAdmin(archeryBookingsData);
-    try {
-        await callAdminFunction('adminMoveBookingLane', archeryMutationPayload('adminMoveBookingLane', bookingId, { target_resource_id: targetResourceId }));
-        refreshArcheryAdmin();
-    } catch (error) {
-        alert(error.message || safeAdminError('Move lane failed'));
-    } finally {
-        archeryActionLoading.delete(loadingKey);
-        renderArcheryAdmin(archeryBookingsData);
-    }
-};
+window.archeryAdminMove = async (bookingId) => openArcheryActionModal('move', bookingId);
 
-window.archeryAdminCancel = async (bookingId) => {
-    const reason = prompt('Cancel reason');
-    if (!reason) return;
-    if (!archeryCan('requestCancel')) {
-        alert('บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้');
-        return;
-    }
-    const loadingKey = `archeryAdminCancel:${bookingId}`;
-    if (archeryActionLoading.has(loadingKey)) return;
-    archeryActionLoading.add(loadingKey);
-    renderArcheryAdmin(archeryBookingsData);
-    try {
-        await callAdminFunction('requestCancelBooking', archeryMutationPayload('requestCancelBooking', bookingId, { reason }));
-        refreshArcheryAdmin();
-    } catch (error) {
-        alert(error.message || safeAdminError('Cancel failed'));
-    } finally {
-        archeryActionLoading.delete(loadingKey);
-        renderArcheryAdmin(archeryBookingsData);
-    }
-};
+window.archeryAdminCancel = async (bookingId) => openArcheryActionModal('cancel', bookingId);
 
-window.archeryAdminPayment = async (bookingId) => {
-    const booking = archeryBookingById(bookingId);
-    const payment = String(booking.payment_status || booking.paymentStatus || '').toUpperCase();
-    if (ARCHERY_PAID_STATUSES.has(payment)) {
-        alert('รายการนี้มีการชำระเงินแล้ว');
-        return;
-    }
-    if (!archeryCan('recordCounterPayment')) {
-        alert('บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้');
-        return;
-    }
-    const receiptRef = prompt('Payment reference / receipt id', 'counter-' + bookingId + '-' + Date.now());
-    if (!receiptRef) return;
-    const amountInput = prompt('Amount (THB)', String(booking.amount_total || booking.amount || 0));
-    if (amountInput === null) return;
-    const loadingKey = `archeryAdminPayment:${bookingId}`;
-    if (archeryActionLoading.has(loadingKey)) return;
-    archeryActionLoading.add(loadingKey);
-    renderArcheryAdmin(archeryBookingsData);
-    try {
-        await callAdminFunction('recordCounterPayment', archeryMutationPayload('recordCounterPayment', bookingId, {
-            idempotency_key: `counter-${bookingId}-${receiptRef}`,
-            amount: Number(amountInput || 0) || 0,
-            method: 'COUNTER'
-        }));
-        refreshArcheryAdmin();
-    } catch (error) {
-        alert(error.message || safeAdminError('Payment failed'));
-    } finally {
-        archeryActionLoading.delete(loadingKey);
-        renderArcheryAdmin(archeryBookingsData);
-    }
-};
+window.archeryAdminPayment = async (bookingId) => openArcheryActionModal('payment', bookingId);
 
-window.archeryApproveCancel = async (bookingId) => {
-    const reason = prompt('Approve cancel reason');
-    if (!reason) return;
-    if (!archeryCan('approveCancel')) {
-        alert('บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้');
-        return;
-    }
-    const loadingKey = `archeryApproveCancel:${bookingId}`;
-    if (archeryActionLoading.has(loadingKey)) return;
-    archeryActionLoading.add(loadingKey);
-    renderArcheryAdmin(archeryBookingsData);
-    try {
-        await callAdminFunction('approveCancelBooking', archeryMutationPayload('approveCancelBooking', bookingId, { reason }));
-        refreshArcheryAdmin();
-    } catch (error) {
-        alert(error.message || safeAdminError('Approve cancel failed'));
-    } finally {
-        archeryActionLoading.delete(loadingKey);
-        renderArcheryAdmin(archeryBookingsData);
-    }
-};
+window.archeryApproveCancel = async (bookingId) => openArcheryActionModal('approveCancel', bookingId);
 
-window.archeryAdminRefund = async (bookingId) => {
-    const booking = archeryBookingById(bookingId);
-    const paymentId = booking.payment_id || booking.paymentId || '';
-    if (!paymentId) {
-        alert('ไม่พบข้อมูลการชำระเงินของรายการนี้');
-        return;
-    }
-    const reason = prompt('Refund reason');
-    if (!reason) return;
-    if (!archeryCan('refund')) {
-        alert('บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้');
-        return;
-    }
-    const amountInput = prompt('Refund amount (THB)', String(booking.amount_total || booking.amount || 0));
-    if (amountInput === null) return;
-    const loadingKey = `archeryAdminRefund:${bookingId}`;
-    if (archeryActionLoading.has(loadingKey)) return;
-    archeryActionLoading.add(loadingKey);
-    renderArcheryAdmin(archeryBookingsData);
-    try {
-        await callAdminFunction('refundPayment', archeryMutationPayload('refundPayment', bookingId, {
-            payment_id: paymentId,
-            amount: Number(amountInput || 0) || 0,
-            reason
-        }));
-        refreshArcheryAdmin();
-    } catch (error) {
-        alert(error.message || safeAdminError('Refund failed'));
-    } finally {
-        archeryActionLoading.delete(loadingKey);
-        renderArcheryAdmin(archeryBookingsData);
-    }
-};
+window.archeryAdminRefund = async (bookingId) => openArcheryActionModal('refund', bookingId);
 
 window.archeryReviewReconciliation = async (reconciliationId, action = 'MARK_REVIEWED') => {
-    if (!['OWNER', 'MANAGER'].includes(archeryAdminRole())) {
-        alert('Owner/Manager permission is required');
-        return;
-    }
     if (!reconciliationId) return;
-    const confirmed = confirm(action === 'MARK_REFUND_REQUIRED'
-        ? 'Mark this late payment as refund required?'
-        : 'Mark this reconciliation item reviewed?');
-    if (!confirmed) return;
-    const loadingKey = `archeryReviewReconciliation:${reconciliationId}`;
-    if (archeryActionLoading.has(loadingKey)) return;
-    archeryActionLoading.add(loadingKey);
-    renderArcheryReconciliationPanel();
-    try {
-        await callAdminFunction('reconcileBeamLatePayment', archeryMutationPayload('reconcileBeamLatePayment', '', {
-            reconciliation_id: reconciliationId,
-            action
-        }));
-        refreshArcheryAdmin();
-    } catch (error) {
-        alert(error.message || safeAdminError('Reconciliation update failed'));
-    } finally {
-        archeryActionLoading.delete(loadingKey);
-        renderArcheryReconciliationPanel();
-    }
+    openArcheryActionModal('reconciliation', '', {
+        reconciliationId,
+        reconciliationAction: action
+    });
 };
 
 function setupRealtimeArcheryBookings() {
@@ -7499,6 +7642,10 @@ window.onclick = function(event) {
     const memberModalEl = document.getElementById('memberModal');
     if (memberModalEl && event.target == memberModalEl) {
         closeMemberModal();
+    }
+    const archeryActionModalEl = document.getElementById('archery-admin-action-modal');
+    if (archeryActionModalEl && event.target == archeryActionModalEl) {
+        window.closeArcheryActionModal();
     }
 };
 
