@@ -85,7 +85,7 @@ function setCors(req, res) {
     res.set('Vary', 'Origin');
   }
   res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Request-Id');
+  res.set('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Request-Id,X-Eden-System-Key');
   res.set('Access-Control-Max-Age', '3600');
 }
 
@@ -548,16 +548,16 @@ function normalizeAdminPermissions(role, raw = {}) {
     'loyalty',
     'orders',
     'bookings',
+    'archery',
     'tables',
     'rooms',
     'products',
-    'shop',
     'blogs',
     'faqs',
     'promptpay',
     'marketing',
+    'index',
     'footer',
-    'adminAccess',
   ];
   const all = Object.fromEntries(allowed.map(key => [key, true]));
   if (role === 'owner' || role === 'head_manager') return all;
