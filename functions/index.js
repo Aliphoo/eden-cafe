@@ -38,6 +38,9 @@ const ADMIN_EMAILS = new Set([
   'phoo1236@gmail.com',
   'sonsawan.1231@gmail.com',
 ]);
+const ADMIN_PERMISSION_FALLBACKS = {
+  archery: ['bookings'],
+};
 const IMAGE_REMOTE_ROOT = 'Images/uploads';
 const IMAGE_PUBLIC_BASE_URL = 'https://www.edencafe.co/Images/uploads';
 const SPACESHIP_FTP_FALLBACK_HOSTS = [
@@ -384,11 +387,18 @@ async function requireAdminAccess(req, permission = '') {
     throw error;
   }
   if (access.role === 'owner' || access.role === 'head_manager') return decoded;
-  if (permission && access.permissions && access.permissions[permission] === true) return decoded;
+  if (hasAdminAccessPermission(access, permission)) return decoded;
 
   const error = new Error('Admin permission required');
   error.statusCode = 403;
   throw error;
+}
+
+function hasAdminAccessPermission(access = {}, permission = '') {
+  if (!permission) return true;
+  if (access.permissions && access.permissions[permission] === true) return true;
+  if (Object.prototype.hasOwnProperty.call(access.permissions || {}, permission)) return false;
+  return (ADMIN_PERMISSION_FALLBACKS[permission] || []).some(fallback => access.permissions?.[fallback] === true);
 }
 
 async function requireOwnerAccess(req) {
@@ -840,6 +850,7 @@ function permissionFromImageFolder(folder) {
   if (value === 'shop_products') return 'shop';
   if (value === 'blogs') return 'blogs';
   if (value === 'rooms') return 'rooms';
+  if (value === 'archery') return 'archery';
   return 'products';
 }
 

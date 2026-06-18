@@ -166,6 +166,7 @@ const ADMIN_PERMISSION_LABELS = {
     loyalty: 'จัดการแต้มสมาชิก',
     orders: 'ออเดอร์สินค้า',
     bookings: 'คิวจองโต๊ะ/ห้อง',
+    archery: 'Eden Archery',
     tables: 'จัดการโต๊ะ/โซน',
     rooms: 'จัดการห้องรับรอง',
     products: 'เมนูและหมวดหมู่',
@@ -177,7 +178,8 @@ const ADMIN_PERMISSION_LABELS = {
     footer: 'Footer'
 };
 const ADMIN_PERMISSION_HELP = {
-    pos: 'อนุญาตให้ล็อกอิน Eden POS APK และซิงค์บิล/ใบเสร็จหน้าร้าน'
+    pos: 'อนุญาตให้ล็อกอิน Eden POS APK และซิงค์บิล/ใบเสร็จหน้าร้าน',
+    archery: 'Manage Eden Archery lanes, walk-ins, payments, page settings, and operation logs.'
 };
 const ADMIN_ROLE_LABELS = {
     owner: 'Owner',
@@ -198,6 +200,7 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
         loyalty: false,
         orders: true,
         bookings: true,
+        archery: false,
         tables: false,
         rooms: false,
         products: false,
@@ -220,7 +223,7 @@ const ADMIN_TAB_PERMISSIONS = {
     orders: 'orders',
     bookings: 'bookings',
     'room-bookings': 'bookings',
-    archery: 'bookings',
+    archery: 'archery',
     'all-bookings': 'bookings',
     tables: 'tables',
     rooms: 'rooms',
@@ -232,6 +235,9 @@ const ADMIN_TAB_PERMISSIONS = {
     'index-settings': 'index',
     'marketing-settings': 'marketing',
     'footer-settings': 'footer'
+};
+const ADMIN_PERMISSION_FALLBACKS = {
+    archery: ['bookings']
 };
 
 function normalizeEmail(value) {
@@ -341,6 +347,7 @@ async function loadAdminAccess(user) {
         role,
         status: data.status,
         permissions: { ...adminRoleDefaults(role), ...(data.permissions || {}) },
+        explicit_permissions: data.permissions || {},
         branch_ids: Array.isArray(data.branch_ids) ? data.branch_ids.map(String) : [],
         primary_branch_id: data.primary_branch_id || data.branch_id || '',
         archery_role: data.archery_role || data.archeryRole || data.role || '',
@@ -376,7 +383,9 @@ function canAdmin(permission) {
     if (currentAdminAccess.role === 'owner') return true;
     if (permission === 'adminAccess') return false;
     if (currentAdminAccess.role === 'head_manager') return true;
-    return currentAdminAccess.permissions?.[permission] === true;
+    if (currentAdminAccess.permissions?.[permission] === true) return true;
+    if (Object.prototype.hasOwnProperty.call(currentAdminAccess.explicit_permissions || {}, permission)) return false;
+    return (ADMIN_PERMISSION_FALLBACKS[permission] || []).some(fallback => currentAdminAccess.permissions?.[fallback] === true);
 }
 
 window.canAccessAdminTab = (tabId) => {
@@ -1077,10 +1086,14 @@ function initializeAdminModules() {
         if (!categoriesUnsubscribe) setupRealtimeCategories();
     }
     if (canAdmin('orders') || canAdmin('pos')) setupRealtimeOrders();
-    if (canAdmin('bookings')) {
-        bindArcheryAdminControls();
+    const hasBookingAccess = canAdmin('bookings');
+    const hasArcheryAccess = canAdmin('archery');
+    if (hasBookingAccess) {
         bindAllBookingsControls();
         setupRealtimeBookings();
+    }
+    if (hasArcheryAccess) {
+        bindArcheryAdminControls();
         setupRealtimeArcheryAdminData();
     }
     if (canAdmin('products')) {
@@ -4458,7 +4471,7 @@ function bindArcheryPageSettingsControls() {
 
 async function loadArcheryPageSettings() {
     bindArcheryPageSettingsControls();
-    if (!canAdmin('bookings')) return;
+    if (!canAdmin('archery')) return;
     archeryPageSettingsStatus('Loading page settings...');
     try {
         const snap = await getDoc(ARCHERY_PAGE_SETTINGS_REF());
@@ -4482,7 +4495,7 @@ async function loadArcheryPageSettings() {
 
 async function saveArcheryPageSettings(event) {
     event.preventDefault();
-    if (!canAdmin('bookings')) {
+    if (!canAdmin('archery')) {
         archeryPageSettingsStatus('This admin account cannot edit Archery page settings.', 'error');
         return;
     }
@@ -4545,7 +4558,7 @@ function archeryAdminRole() {
     if (legacy === 'head_manager' || legacy === 'manager') return 'MANAGER';
     if (legacy === 'cashier') return 'CASHIER';
     if (legacy === 'staff') return 'ARCHERY_STAFF';
-    return canAdmin('bookings') ? 'ARCHERY_STAFF' : 'CUSTOMER';
+    return canAdmin('archery') ? 'ARCHERY_STAFF' : 'CUSTOMER';
 }
 
 function archeryCan(action) {
@@ -5260,7 +5273,7 @@ function renderArcherySchedule(bookings = []) {
         lanes.forEach(lane => {
             const booking = archeryBookingAtSlot(bookings, lane, minute);
             if (!booking) {
-                rows.push(canAdmin('bookings') && archeryCan('createWalkIn') ? `
+                rows.push(canAdmin('archery') && archeryCan('createWalkIn') ? `
                     <td>
                         <button class="archery-slot-chip available" type="button" data-archery-slot-time="${escapeHTML(adminTimeFromMinutes(minute))}" data-archery-slot-lane="${escapeHTML(lane)}">
                             + Walk-in
@@ -5734,7 +5747,7 @@ function setupRealtimeArcheryBookings() {
         archeryBookingsUnsubscribe();
         archeryBookingsUnsubscribe = null;
     }
-    if (!canAdmin('bookings')) return;
+    if (!canAdmin('archery')) return;
     const branchId = archeryBranchId();
     const q = query(
         collection(db, 'bookings'),
@@ -5776,6 +5789,7 @@ function setupRealtimeArcheryPayments() {
     const q = query(
         collection(db, 'payments'),
         where('branch_id', '==', archeryBranchId()),
+        where('service_type', '==', 'ARCHERY'),
         limit(120)
     );
     archeryPaymentsUnsubscribe = onSnapshot(q, (snapshot) => {
