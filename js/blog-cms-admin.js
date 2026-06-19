@@ -460,8 +460,8 @@ function installStyles() {
         .blog-cms-score{display:grid;gap:5px;min-width:92px}.blog-cms-score-line{height:7px;border-radius:999px;background:#e9eee9;overflow:hidden}.blog-cms-score-line span{display:block;height:100%;background:var(--cms-green)}.blog-cms-score small{font-weight:850;color:#51645a}
         .blog-cms-editor-grid{display:grid;grid-template-columns:minmax(0,1fr)340px;gap:14px;align-items:start}.blog-cms-editor-main,.blog-cms-sidebar{display:grid;gap:12px;align-content:start}.blog-cms-editor-main{min-width:0}.blog-cms-sidebar{position:sticky;top:14px}
         .blog-cms-editor-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.blog-cms-editor-toolbar h3{margin:0}.blog-cms-card>.blog-cms-editor-toolbar{margin-bottom:12px}.blog-cms-title-input{font-size:1.6rem;font-weight:900;line-height:1.2}.blog-cms-content-header{border-bottom:1px solid #edf1ed;padding-bottom:10px}.blog-cms-editor-tabs{display:inline-flex;gap:4px;align-items:center;border:1px solid var(--cms-line);border-radius:8px;background:#f8faf8;padding:4px}.blog-cms-editor-tabs button{min-height:34px;border:0;background:transparent;color:#3a5146;border-radius:6px;padding:7px 12px;font-weight:900;cursor:pointer}.blog-cms-editor-tabs button.active{background:var(--cms-green-dark);color:#fff}.blog-cms-rich-toolbar{position:sticky;top:0;z-index:4;display:grid;gap:8px;border:1px solid #dfe8e2;background:#f8faf8;border-radius:8px;padding:8px;box-shadow:0 10px 18px rgba(20,45,31,.07)}.blog-cms-toolbar-group{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.blog-cms-toolbar-label{color:#6b7a72;font-size:.76rem;font-weight:900;text-transform:uppercase}.blog-cms-rich-toolbar button,.blog-cms-preview-actions button{border:1px solid transparent;background:#fff;color:#26382f;border-radius:6px;padding:7px 9px;font-weight:850;cursor:pointer}.blog-cms-rich-toolbar button:hover,.blog-cms-preview-actions button:hover{border-color:#bcd0c3}.blog-cms-tool-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px}.blog-cms-tool-btn.icon-only{width:40px;min-width:40px;padding:0}.blog-cms-tool-icon{display:inline-grid;place-items:center;min-width:18px;font-size:1rem;line-height:1}.blog-cms-tool-label{max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.84rem;line-height:1}.blog-cms-tool-btn[data-blog-insert="bold"] .blog-cms-tool-icon{font-weight:950}.blog-cms-tool-btn[data-blog-insert="italic"] .blog-cms-tool-icon{font-style:italic}.blog-cms-tool-btn[data-blog-insert="underline"] .blog-cms-tool-icon{text-decoration:underline}.blog-cms-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.blog-cms-preview-actions{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}.blog-cms-preview-actions button.active{background:var(--cms-green-dark);color:#fff}
-        .blog-cms-editor{height:clamp(440px,calc(100vh - 360px),700px);min-height:440px;border:1px solid #cfdcd4;border-radius:8px;padding:22px;background:#fff;line-height:1.82;outline:none;overflow-y:auto;scrollbar-gutter:stable;font-size:1rem}.blog-cms-editor:focus{border-color:#78af8b;box-shadow:0 0 0 3px rgba(23,99,63,.1)}.blog-cms-editor:empty:before{content:attr(data-placeholder);color:#88958e}.blog-cms-editor-pane-preview .blog-cms-rich-toolbar,.blog-cms-editor-pane-preview .blog-cms-editor{display:none}
-        .blog-cms-preview,.blog-cms-preview-actions{display:none}.blog-cms-preview.active{display:block}.blog-cms-preview-actions.active{display:flex}.blog-cms-preview{border:1px solid #dfe8e2;border-radius:8px;background:#fff;padding:20px;line-height:1.8}.blog-cms-preview.mobile{max-width:390px;margin:auto}.blog-cms-preview img{max-width:100%;height:auto}
+        .blog-cms-editor{height:clamp(440px,calc(100vh - 360px),700px);min-height:440px;border:1px solid #cfdcd4;border-radius:8px;padding:22px;background:#fff;line-height:1.82;outline:none;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;font-size:1rem}.blog-cms-editor:focus{border-color:#78af8b;box-shadow:0 0 0 3px rgba(23,99,63,.1)}.blog-cms-editor:empty:before{content:attr(data-placeholder);color:#88958e}.blog-cms-editor-pane-preview .blog-cms-rich-toolbar,.blog-cms-editor-pane-preview .blog-cms-editor{display:none}
+        .blog-cms-preview,.blog-cms-preview-actions{display:none}.blog-cms-preview.active{display:block}.blog-cms-preview-actions.active{display:flex}.blog-cms-preview{border:1px solid #dfe8e2;border-radius:8px;background:#fff;padding:20px;line-height:1.8}.blog-cms-preview.mobile{max-width:390px;margin:auto}.blog-cms-editor img,.blog-cms-preview img{max-width:100%;height:auto;display:block}.blog-cms-editor figure,.blog-cms-preview figure{max-width:100%;margin:0 0 14px}.blog-cms-editor figure img,.blog-cms-preview figure img{border-radius:8px}.blog-cms-editor iframe,.blog-cms-preview iframe{width:100%;max-width:100%;aspect-ratio:16/9;border:0}.blog-cms-editor table,.blog-cms-preview table{width:100%;max-width:100%;border-collapse:collapse;overflow-wrap:anywhere}.blog-cms-cover-preview{width:100%;display:block;border-radius:8px;aspect-ratio:16/9;object-fit:cover;background:#edf1ed}
         .blog-cms-check{display:grid;gap:8px}.blog-cms-check div{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;border:1px solid #edf1ed;border-radius:7px;padding:8px 10px}.blog-cms-check strong{border-radius:999px;padding:4px 8px;font-size:.75rem}.blog-cms-check .pass strong{background:var(--cms-green-soft);color:var(--cms-green)}.blog-cms-check .warn strong{background:var(--cms-amber-soft);color:var(--cms-amber)}.blog-cms-check .missing strong{background:var(--cms-red-soft);color:var(--cms-red)}
         .blog-cms-media-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.blog-cms-media-card img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:7px;background:#edf1ed}.blog-cms-alert{border:1px solid #c8dcff;background:#eef5ff;color:#285b83;border-radius:8px;padding:12px;font-weight:800}.blog-cms-alert.success{border-color:#b7dfc1;background:#edf8f0;color:#17633f}.blog-cms-alert.warning{border-color:#e3c16f;background:#fff7df;color:#7a4f08}.blog-cms-alert.error{border-color:#f0b7b7;background:#fff0f0;color:#9b2f2f}
         @media(max-width:1180px){.blog-cms-topbar,.blog-cms-editor-grid,.blog-cms-dashboard-grid,.blog-cms-toolbar,.blog-cms-field-grid{grid-template-columns:1fr}.blog-cms-sidebar{position:static}.blog-cms-kpis{grid-template-columns:repeat(2,minmax(130px,1fr))}.blog-cms-media-grid{grid-template-columns:repeat(2,minmax(150px,1fr))}.blog-cms-topbar-actions{justify-content:flex-start}}
@@ -811,9 +811,9 @@ function editorHTML() {
                 <div class="blog-cms-card blog-cms-form">
                     <div class="blog-cms-editor-toolbar">
                         <div class="blog-cms-chip-list">
-                            ${statusBadge(post.status || 'draft')}
+                            <span id="blog-editor-status-wrap">${statusBadge(post.status || 'draft')}</span>
                             <span class="blog-cms-chip">SEO ${score.passed}/${score.total}</span>
-                            <span class="blog-cms-muted">${state.lastSaved ? `บันทึกล่าสุด ${state.lastSaved}` : 'Autosave ทุก 12 วินาที'}</span>
+                            <span id="blog-autosave-state" class="blog-cms-muted">${state.lastSaved ? `บันทึกล่าสุด ${state.lastSaved}` : 'Autosave ทุก 12 วินาที'}</span>
                         </div>
                         <div class="blog-cms-action-stack">
                             <button class="blog-cms-btn secondary" type="button" data-blog-action="save-draft">Save Draft</button>
@@ -899,7 +899,7 @@ function sidebarHTML(post, selectedTags) {
         </div>
         <div class="blog-cms-card blog-cms-form">
             <h3>Cover Image</h3>
-            ${post.cover_image_url ? `<img src="${escapeHTML(post.cover_image_url)}" alt="" style="width:100%;border-radius:8px;aspect-ratio:16/9;object-fit:cover">` : ''}
+            <div id="blog-cover-preview-wrap">${post.cover_image_url ? `<img class="blog-cms-cover-preview" src="${escapeHTML(post.cover_image_url)}" alt="${escapeHTML(post.cover_image_alt || '')}">` : ''}</div>
             <label>Upload Image
                 <input id="blog-cover-upload" type="file" accept="image/*">
             </label>
@@ -1070,6 +1070,33 @@ function updateEditorStats() {
     }
 }
 
+function refreshCoverPreview() {
+    const wrap = $('#blog-cover-preview-wrap');
+    if (!wrap) return;
+    const url = text($('#blog-cover-url')?.value);
+    if (!url) {
+        wrap.innerHTML = '';
+        return;
+    }
+    const alt = text($('#blog-cover-alt')?.value);
+    wrap.innerHTML = `<img class="blog-cms-cover-preview" src="${escapeHTML(url)}" alt="${escapeHTML(alt)}">`;
+}
+
+function syncSavedEditorState(savedPost) {
+    const saved = { ...savedPost, id: state.editingId };
+    const index = state.posts.findIndex((item) => item.id === state.editingId);
+    if (index >= 0) state.posts[index] = { ...state.posts[index], ...saved };
+    else if (state.editingId) state.posts.unshift(saved);
+    state.editorDraft = saved;
+    const savedEl = $('#blog-autosave-state');
+    if (savedEl && state.lastSaved) savedEl.textContent = `บันทึกล่าสุด ${state.lastSaved}`;
+    const statusWrap = $('#blog-editor-status-wrap');
+    if (statusWrap) statusWrap.innerHTML = statusBadge(saved.status || 'draft');
+    const statusInput = $('#blog-status');
+    if (statusInput) statusInput.value = saved.status || 'draft';
+    updateEditorStats();
+}
+
 function actionNameForStatus(status) {
     if (status === 'published') return 'Publish';
     if (status === 'scheduled') return 'Schedule';
@@ -1115,10 +1142,15 @@ async function savePost(statusOverride = '', options = {}) {
         revisionWarning = await writeRevisionLog({ post_id: state.editingId, title: payload.title, content: payload.content, edited_by: auth.currentUser?.uid || '', created_at: nowIso() });
     }
     state.lastSaved = new Date().toLocaleTimeString('th-TH');
-    state.editorDraft = null;
+    state.editorDraft = { ...payload, id: state.editingId };
     persistCmsState();
     await refreshData();
-    render();
+    if (state.tab === 'editor' && options.rerender !== true) {
+        syncSavedEditorState(payload);
+    } else {
+        state.editorDraft = null;
+        render();
+    }
     if (revisionWarning) {
         setStatus(`บันทึกบทความสำเร็จ แต่บันทึก revision log ไม่สำเร็จ: ${revisionWarning}`, 'warning');
         return false;
@@ -1146,8 +1178,15 @@ async function uploadMediaFile(file, meta = {}) {
         uploaded_by: auth.currentUser?.uid || '',
         created_at: nowIso()
     };
-    const created = await runFirestoreStep('blog_media_assets.create', () => addDoc(collection(db, collections.media), payload));
-    return { id: created.id, ...payload };
+    let createdId = '';
+    let metadataWarning = '';
+    try {
+        const created = await runFirestoreStep('blog_media_assets.create', () => addDoc(collection(db, collections.media), payload));
+        createdId = created.id;
+    } catch (error) {
+        metadataWarning = error.message || String(error);
+    }
+    return { id: createdId, ...payload, metadata_warning: metadataWarning };
 }
 
 function categoriesHTML() {
@@ -1217,8 +1256,12 @@ function bindEvents() {
         input.addEventListener('input', () => {
             if (input.id === 'blog-title' && !$('#blog-slug')?.value) $('#blog-slug').value = slugify(input.value);
             updateEditorStats();
+            if (input.id === 'blog-cover-url' || input.id === 'blog-cover-alt') refreshCoverPreview();
         });
-        input.addEventListener('change', updateEditorStats);
+        input.addEventListener('change', () => {
+            updateEditorStats();
+            if (input.id === 'blog-cover-url' || input.id === 'blog-cover-alt') refreshCoverPreview();
+        });
     });
     $('#blog-cover-upload')?.addEventListener('change', async (event) => {
         const file = event.target.files?.[0];
@@ -1226,12 +1269,71 @@ function bindEvents() {
         await runAction(event.target, 'upload-cover', async () => {
             const asset = await uploadMediaFile(file, { alt_text: $('#blog-cover-alt')?.value || $('#blog-title')?.value });
             $('#blog-cover-url').value = asset.url;
+            refreshCoverPreview();
             updateEditorStats();
+            if (asset.metadata_warning) {
+                setStatus(`Cover uploaded, but media library save failed: ${asset.metadata_warning}`, 'warning');
+                return false;
+            }
         });
     });
 }
 
-function insertBlock(command) {
+function pickEditorImageFile() {
+    return new Promise((resolve) => {
+        const input = document.createElement('input');
+        let settled = false;
+        const done = (file = null) => {
+            if (settled) return;
+            settled = true;
+            window.removeEventListener('focus', onFocus);
+            input.remove();
+            resolve(file);
+        };
+        const onFocus = () => {
+            setTimeout(() => {
+                if (!input.files?.length) done(null);
+            }, 350);
+        };
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.style.display = 'none';
+        input.addEventListener('change', () => done(input.files?.[0] || null), { once: true });
+        input.addEventListener('cancel', () => done(null), { once: true });
+        document.body.appendChild(input);
+        setTimeout(() => window.addEventListener('focus', onFocus, { once: true }), 0);
+        input.click();
+    });
+}
+
+function insertImageHTML(editor, url, alt = '') {
+    const cleanUrl = text(url);
+    if (!cleanUrl) return;
+    editor.focus();
+    document.execCommand('insertHTML', false, `<figure><img src="${escapeHTML(cleanUrl)}" alt="${escapeHTML(text(alt))}"><figcaption>Caption</figcaption></figure><p></p>`);
+    updateEditorStats();
+}
+
+async function insertImageBlock(editor) {
+    const file = await pickEditorImageFile();
+    if (file) {
+        try {
+            setStatus('Uploading image...', 'info');
+            const asset = await uploadMediaFile(file, { alt_text: $('#blog-title')?.value || file.name });
+            insertImageHTML(editor, asset.url, asset.alt_text || file.name.replace(/\.[^.]+$/, ''));
+            if (asset.metadata_warning) setStatus(`Image inserted, but media library save failed: ${asset.metadata_warning}`, 'warning');
+            else setStatus('Image inserted', 'success');
+            return;
+        } catch (error) {
+            setStatus(error.message || 'Image upload failed', 'error');
+        }
+    }
+    const url = prompt('Image URL (optional)');
+    if (!url) return;
+    insertImageHTML(editor, url, prompt('Alt text', '') || '');
+}
+
+async function insertBlock(command) {
     const editor = $('#blog-content-editor');
     if (!editor) return;
     editor.focus();
@@ -1259,6 +1361,10 @@ function insertBlock(command) {
         updateEditorStats();
         return;
     }
+    if (command === 'image') {
+        await insertImageBlock(editor);
+        return;
+    }
 
     const blocks = {
         h2: '<h2>หัวข้อ H2</h2>',
@@ -1268,8 +1374,7 @@ function insertBlock(command) {
         ul: '<ul><li>Bullet answer</li><li>ประเด็นสำคัญ</li></ul>',
         ol: '<ol><li>ขั้นตอนที่ 1</li><li>ขั้นตอนที่ 2</li></ol>',
         quote: '<blockquote>Quote หรือข้อมูลสำคัญ</blockquote>',
-        image: '<figure><img src="/Hero/Hero.webp" alt="อธิบายรูปภาพ"><figcaption>Caption รูปภาพ</figcaption></figure>',
-        gallery: '<div class="blog-gallery"><figure><img src="/Hero/Hero.webp" alt="Gallery image"><figcaption>Gallery caption</figcaption></figure></div>',
+        gallery: '<div class="blog-gallery"><p>Gallery block: add images here.</p></div>',
         divider: '<hr>',
         cta: '<p><a class="btn" href="/booking">จองบริการกับ Eden Cafe</a></p>',
         table: '<table><thead><tr><th>หัวข้อ</th><th>รายละเอียด</th></tr></thead><tbody><tr><td>ข้อมูล</td><td>คำอธิบาย</td></tr></tbody></table>',
