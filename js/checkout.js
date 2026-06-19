@@ -2,6 +2,9 @@
     const SHIPPING_FEE = 50;
     const CART_KEY = 'eden_cart';
     const FULFILLMENT_KEY = 'eden_checkout_fulfillment';
+    const CHECKOUT_PAYMENT_STATE_KEY = 'eden_checkout_payment_state';
+    const PENDING_ORDER_KEY = 'eden_pending_order';
+    const BRANCH_ID = 'BKK_MAIN';
     let discount = 0;
     let latestTotal = 0;
 
@@ -37,6 +40,38 @@
 
     function saveCart(cart) {
         localStorage.setItem(CART_KEY, JSON.stringify(cart));
+    }
+
+    function readLocalJSON(key, fallback = null) {
+        try {
+            const value = JSON.parse(localStorage.getItem(key) || 'null');
+            return value == null ? fallback : value;
+        } catch (_) {
+            return fallback;
+        }
+    }
+
+    function randomId(prefix = 'checkout') {
+        const cryptoId = window.crypto?.randomUUID?.();
+        if (cryptoId) return `${prefix}_${cryptoId}`;
+        return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    }
+
+    function checkoutPayloadSignature(payload) {
+        return JSON.stringify(payload);
+    }
+
+    function checkoutIdempotencyKey(signature) {
+        const state = readLocalJSON(CHECKOUT_PAYMENT_STATE_KEY, null);
+        if (state?.signature === signature && state.key) return state.key;
+        const key = randomId('shop_checkout');
+        localStorage.setItem(CHECKOUT_PAYMENT_STATE_KEY, JSON.stringify({ key, signature }));
+        return key;
+    }
+
+    function clearCheckoutPendingState() {
+        localStorage.removeItem(CHECKOUT_PAYMENT_STATE_KEY);
+        localStorage.removeItem(PENDING_ORDER_KEY);
     }
 
     function getUser() {
@@ -159,40 +194,6 @@
     }
 
     function renderCheckout() {
-        const params = new URLSearchParams(location.search);
-        if (params.get('paid') === '1') {
-            const pendingOrder = (() => {
-                try {
-                    return JSON.parse(localStorage.getItem('eden_pending_order') || 'null');
-                } catch (_) {
-                    return null;
-                }
-            })();
-            if (pendingOrder) {
-                pendingOrder.status = 'paid';
-                pendingOrder.paymentStatus = 'paid';
-                pendingOrder.paidAt = new Date().toISOString();
-                const history = (() => {
-                    try {
-                        const value = JSON.parse(localStorage.getItem('eden_order_history') || '[]');
-                        return Array.isArray(value) ? value : [];
-                    } catch (_) {
-                        return [];
-                    }
-                })();
-                const nextHistory = [pendingOrder, ...history.filter(order => order.id !== pendingOrder.id)].slice(0, 20);
-                localStorage.setItem('eden_order_history', JSON.stringify(nextHistory));
-            }
-            const modal = document.getElementById('success-modal');
-            const orderIdEl = document.getElementById('order-id');
-            if (orderIdEl && params.get('order')) orderIdEl.textContent = params.get('order');
-            if (modal) modal.style.display = 'flex';
-            localStorage.removeItem(CART_KEY);
-            localStorage.removeItem('eden_pending_order');
-            if (typeof window.updateGlobalCartBadge === 'function') window.updateGlobalCartBadge();
-            return;
-        }
-
         const cart = readCart();
         const container = document.getElementById('checkout-items');
         const subtotalEl = document.getElementById('subtotal');
@@ -249,12 +250,85 @@
         renderCheckout();
     }
 
-    async function waitForSaveOrder() {
+    function appliedPromoCode() {
+        const code = String(document.getElementById('promo-code-input')?.value || '').trim().toUpperCase();
+        return discount > 0 && code === 'EDEN10' ? code : '';
+    }
+
+    function currentReturnUrl() {
+        const url = new URL(location.href);
+        url.search = '';
+        url.hash = '';
+        return url.toString();
+    }
+
+    function clearPaymentReturnParams() {
+        const url = new URL(location.href);
+        ['payment_id', 'source_id', 'payment_return', 'status'].forEach(key => url.searchParams.delete(key));
+        history.replaceState(null, '', url.pathname + (url.search ? url.search : '') + url.hash);
+    }
+
+    async function waitForPaymentApi() {
         for (let i = 0; i < 80; i += 1) {
-            if (typeof window.saveOrderToCloud === 'function') return window.saveOrderToCloud;
+            if (window.EdenApi?.createShopOrderDraft && window.EdenApi?.createPaymentIntent) return window.EdenApi;
             await new Promise(resolve => setTimeout(resolve, 100));
         }
         return null;
+    }
+
+    function paymentStatusFromResult(result = {}) {
+        return String(result.source?.payment_status || result.payment?.payment_status || result.payment?.status || '').toUpperCase();
+    }
+
+    function isPaidPaymentStatus(status) {
+        return status === 'PAID_ONLINE' || status === 'PAID';
+    }
+
+    async function handlePaymentReturn() {
+        const params = new URLSearchParams(location.search);
+        const pendingOrder = readLocalJSON(PENDING_ORDER_KEY, null);
+        const paymentId = params.get('payment_id') || pendingOrder?.payment_id || '';
+        const sourceId = params.get('source_id') || pendingOrder?.source_id || pendingOrder?.firestoreId || '';
+        const isBeamReturn = params.has('payment_id') || params.has('source_id') || params.has('payment_return');
+        if (!paymentId && !sourceId) return false;
+
+        const api = await waitForPaymentApi();
+        if (!api?.getPaymentStatus) return false;
+
+        try {
+            const statusRequest = { branch_id: pendingOrder?.branch_id || BRANCH_ID };
+            if (paymentId) {
+                statusRequest.payment_id = paymentId;
+            } else {
+                statusRequest.source_type = 'SHOP_ORDER';
+                statusRequest.source_id = sourceId;
+                statusRequest.provider = 'BEAM';
+            }
+
+            const statusResult = await api.getPaymentStatus(statusRequest);
+            const status = paymentStatusFromResult(statusResult);
+            if (isPaidPaymentStatus(status)) {
+                const modal = document.getElementById('success-modal');
+                const orderIdEl = document.getElementById('order-id');
+                if (orderIdEl) orderIdEl.textContent = pendingOrder?.id || pendingOrder?.order_id || sourceId;
+                if (modal) modal.style.display = 'flex';
+                localStorage.removeItem(CART_KEY);
+                clearCheckoutPendingState();
+                if (typeof window.updateGlobalCartBadge === 'function') window.updateGlobalCartBadge();
+                clearPaymentReturnParams();
+                return true;
+            }
+
+            if (isBeamReturn && (status === 'FAILED' || status === 'CANCELLED')) {
+                alert(t('Payment was not completed. Your cart is still available.', 'Payment was not completed. Your cart is still available.'));
+                clearPaymentReturnParams();
+            } else if (isBeamReturn) {
+                clearPaymentReturnParams();
+            }
+        } catch (error) {
+            console.warn('Payment status check failed:', error);
+        }
+        return false;
     }
 
     async function confirmOrder(event) {
@@ -301,37 +375,54 @@
             button.textContent = t('กำลังสร้างคำสั่งซื้อ...', 'Creating order...');
         }
 
-        const orderId = '#ED' + Date.now().toString().slice(-8);
-        const sub = subtotal(cart);
-        const fee = shippingFee();
-        const orderData = {
-            id: orderId,
-            date: new Date().toISOString(),
-            items: cart.map(item => ({ id: item.id, name: item.name, price: Number(item.price) || 0, quantity: Number(item.quantity) || 0 })),
-            subtotal: sub,
-            discount,
-            shippingFee: fee,
-            totalAmount: latestTotal,
-            total: latestTotal,
-            uid: user.uid,
-            customerName: name,
-            phone,
-            address: addressText,
-            fulfillmentMethod,
-            source: 'online',
-            orderType: 'shop',
-            paymentMethod: 'other',
-            paymentLabel: 'Feelfreepay',
-            paymentStatus: 'pending',
-            status: 'pending'
-        };
-
         try {
-            const saveOrder = await waitForSaveOrder();
-            if (!saveOrder) throw new Error('Order service is not ready');
-            const firestoreId = await saveOrder(orderData);
-            localStorage.setItem('eden_pending_order', JSON.stringify({ ...orderData, firestoreId }));
-            location.href = '/feelfreepay?amount=' + encodeURIComponent(latestTotal) + '&order=' + encodeURIComponent(orderId) + '&lang=' + (isEnglishPage() ? 'en' : 'th');
+            const api = await waitForPaymentApi();
+            if (!api) throw new Error('Payment service is not ready');
+
+            const promoCode = appliedPromoCode();
+            const draftPayload = {
+                branch_id: BRANCH_ID,
+                items: cart.map(item => ({ id: item.id, name: item.name, quantity: Number(item.quantity) || 0 })),
+                customer_name: name,
+                phone,
+                address: addressText,
+                fulfillment_method: fulfillmentMethod,
+                promo_code: promoCode
+            };
+            const idempotencyKey = checkoutIdempotencyKey(checkoutPayloadSignature(draftPayload));
+            const draft = await api.createShopOrderDraft({
+                ...draftPayload,
+                idempotency_key: idempotencyKey
+            });
+
+            if (button) button.textContent = t('Opening Beam...', 'Opening Beam...');
+            const payment = await api.createPaymentIntent({
+                branch_id: draft.branch_id || BRANCH_ID,
+                source_type: 'SHOP_ORDER',
+                source_id: draft.source_id,
+                provider: 'BEAM',
+                idempotency_key: `${idempotencyKey}_beam`,
+                return_url: currentReturnUrl()
+            });
+
+            if (!payment.payment_link_url) throw new Error('Beam payment link was not returned');
+            localStorage.setItem(PENDING_ORDER_KEY, JSON.stringify({
+                id: draft.order_id,
+                order_id: draft.order_id,
+                source_id: draft.source_id,
+                firestoreId: draft.source_id,
+                branch_id: draft.branch_id || BRANCH_ID,
+                payment_id: payment.payment_id,
+                paymentStatus: payment.payment_status || payment.status || 'PENDING',
+                status: 'pending',
+                totalAmount: draft.amount,
+                fulfillmentMethod,
+                source: 'online',
+                orderType: 'shop',
+                paymentMethod: 'beam',
+                paymentLabel: 'Beam'
+            }));
+            location.href = payment.payment_link_url;
         } catch (error) {
             console.error('Order create failed:', error);
             alert(t('ไม่สามารถสร้างคำสั่งซื้อได้ กรุณาลองใหม่', 'Could not create order. Please try again.'));
@@ -355,9 +446,10 @@
     window.applyPromoCode = applyPromoCode;
     window.confirmOrder = confirmOrder;
 
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
         injectFulfillmentUI();
         updateFulfillmentFormUI();
+        await handlePaymentReturn();
         renderCheckout();
     });
 })();

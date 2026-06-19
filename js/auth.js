@@ -1,6 +1,6 @@
 import { auth, db } from './firebase-config.js';
 import { signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { collection, addDoc, doc, setDoc, getDoc, serverTimestamp, getDocs, query, where, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, doc, setDoc, getDoc, serverTimestamp, getDocs, query, where, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net';
 const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
@@ -64,6 +64,18 @@ window.EdenApi = {
     },
     getArcheryPaymentStatus(params = {}) {
         return edenApiRequest('/getArcheryPaymentStatus', { method: 'POST', body: params });
+    },
+    createShopOrderDraft(orderData) {
+        return edenApiRequest('/createShopOrderDraft', { method: 'POST', body: orderData });
+    },
+    createPaymentIntent(paymentData) {
+        return edenApiRequest('/createPaymentIntent', { method: 'POST', body: paymentData });
+    },
+    getPaymentStatus(params = {}) {
+        return edenApiRequest('/getPaymentStatus', { method: 'POST', body: params });
+    },
+    cancelPendingPayment(paymentData) {
+        return edenApiRequest('/cancelPendingPayment', { method: 'POST', body: paymentData });
     }
 };
 
@@ -358,22 +370,6 @@ function updateGlobalCartBadge() {
     badge.textContent = String(totalItems);
 }
 
-async function saveOrderToCloud(orderData) {
-    if (!db) {
-        return 'mock_order_id';
-    }
-
-    try {
-        const docRef = await addDoc(collection(db, 'orders'), {
-            ...orderData,
-            timestamp: serverTimestamp()
-        });
-        return docRef.id;
-    } catch (error) {
-        throw error;
-    }
-}
-
 async function saveBookingToCloud(bookingData) {
     try {
         const result = await window.EdenApi.createBooking(bookingData);
@@ -502,7 +498,6 @@ window.startPhoneLogin = startPhoneLogin;
 window.logout = logout;
 window.toggleDropdown = toggleDropdown;
 window.updateGlobalCartBadge = updateGlobalCartBadge;
-window.saveOrderToCloud = saveOrderToCloud;
 window.saveBookingToCloud = saveBookingToCloud;
 window.fetchRoomsFromCloud = fetchRoomsFromCloud;
 window.fetchTablesFromCloud = fetchTablesFromCloud;
