@@ -53,6 +53,7 @@ let state = {
 
 const cmsStateKey = 'edenBlogCmsAdminState';
 const cmsTabs = new Set(['overview', 'posts', 'editor', 'categories', 'tags', 'media', 'seo', 'authors', 'settings', 'assistant']);
+let saveQueue = Promise.resolve();
 
 function readStoredCmsState() {
     try {
@@ -1161,7 +1162,20 @@ function syncSavedEditorState(savedPost) {
     if (statusWrap) statusWrap.innerHTML = statusBadge(saved.status || 'draft');
     const statusInput = $('#blog-status');
     if (statusInput) statusInput.value = saved.status || 'draft';
+    const publishedInput = $('#blog-published-at');
+    if (publishedInput) publishedInput.value = toLocalInput(saved.published_at);
+    const scheduledInput = $('#blog-scheduled-at');
+    if (scheduledInput) scheduledInput.value = toLocalInput(saved.scheduled_at);
     updateEditorStats();
+}
+
+async function verifySavedPostStatus(postId, expectedStatus) {
+    if (!postId || !expectedStatus) return;
+    const snap = await runFirestoreStep('blogs.status-readback', () => getDoc(doc(db, collections.posts, postId)));
+    const actual = snap?.exists() ? text(snap.data().status || '').toLowerCase() : '';
+    if (actual && actual !== expectedStatus) {
+        throw new Error(`Saved status mismatch: expected ${expectedStatus}, got ${actual}`);
+    }
 }
 
 function actionNameForStatus(status) {
@@ -1187,7 +1201,14 @@ async function validatePost(post) {
 }
 
 async function savePost(statusOverride = '', options = {}) {
+    const queuedSave = saveQueue.catch(() => null).then(() => savePostNow(statusOverride, options));
+    saveQueue = queuedSave.catch(() => null);
+    return queuedSave;
+}
+
+async function savePostNow(statusOverride = '', options = {}) {
     const post = readEditorPost(statusOverride);
+    if (options.source === 'autosave' && post.status !== 'draft') return true;
     await validatePost(post);
     let revisionWarning = '';
     const payload = {
@@ -1208,6 +1229,7 @@ async function savePost(statusOverride = '', options = {}) {
         await runFirestoreStep('blogs.update', () => setDoc(doc(db, collections.posts, state.editingId), payload, { merge: true }));
         revisionWarning = await writeRevisionLog({ post_id: state.editingId, title: payload.title, content: payload.content, edited_by: auth.currentUser?.uid || '', created_at: nowIso() });
     }
+    if (options.source !== 'autosave') await verifySavedPostStatus(state.editingId, payload.status);
     state.lastSaved = new Date().toLocaleTimeString('th-TH');
     state.editorDraft = { ...payload, id: state.editingId };
     persistCmsState();
@@ -1487,9 +1509,9 @@ async function handleAction(event) {
     if (action === 'prompt') return promptTemplate(actionEl.dataset.prompt);
 
     return runAction(actionEl, action, async () => {
-        if (action === 'save-draft') return savePost('draft', { silent: true });
-        if (action === 'publish') return savePost('published', { silent: true });
-        if (action === 'schedule') return savePost('scheduled', { silent: true });
+        if (action === 'save-draft') return savePost('draft', { silent: true, source: 'manual' });
+        if (action === 'publish') return savePost('published', { silent: true, source: 'manual' });
+        if (action === 'schedule') return savePost('scheduled', { silent: true, source: 'manual' });
         if (action === 'duplicate') return duplicatePost(actionEl.dataset.id);
         if (action === 'archive') return archivePost(actionEl.dataset.id);
         if (action === 'delete') return deletePostById(actionEl.dataset.id);
@@ -1509,10 +1531,11 @@ function bindEditorAutosave() {
     if (state.autosaveTimer) clearInterval(state.autosaveTimer);
     state.autosaveTimer = setInterval(async () => {
         if (state.tab !== 'editor') return;
-        const post = readEditorPost('draft');
+        const post = readEditorPost();
         if (!post.title || !htmlToText(post.content)) return;
+        if (post.status !== 'draft') return;
         try {
-            await savePost('draft', { silent: true });
+            await savePost('', { silent: true, source: 'autosave' });
         } catch (error) {
         }
     }, 12000);
