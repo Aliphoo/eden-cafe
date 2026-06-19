@@ -564,11 +564,19 @@ function safeReturnUrl(input, config) {
 }
 
 function webReferenceId(context, paymentId) {
-  return `EDENWEB|${context.source_type}|${context.source_id}|${paymentId}`;
+  return `WEBPAY:${paymentId}`;
 }
 
 function parseWebReferenceId(referenceId = '') {
-  const parts = cleanString(referenceId, 500).split('|');
+  const ref = cleanString(referenceId, 500);
+  if (ref.startsWith('WEBPAY:')) {
+    return {
+      source_type: '',
+      source_id: '',
+      payment_id: cleanString(ref.slice('WEBPAY:'.length), 180),
+    };
+  }
+  const parts = ref.split('|');
   if (parts.length === 4 && parts[0] === 'EDENWEB') {
     return {
       source_type: normalizeSourceType(parts[1]),
@@ -1706,8 +1714,8 @@ async function findPaymentForWebhook(transaction, db, parsedRef, providerRef) {
         : matches[0];
       const payment = selected || matches[0];
       const parsedSourceMismatch = parsedRef && (
-        cleanString(payment.data.source_type || payment.data.service_type, 80).toUpperCase() !== parsedRef.source_type
-        || cleanString(payment.data.source_id || payment.data.booking_id || payment.data.order_id, 180) !== parsedRef.source_id
+        (parsedRef.source_type && cleanString(payment.data.source_type || payment.data.service_type, 80).toUpperCase() !== parsedRef.source_type)
+        || (parsedRef.source_id && cleanString(payment.data.source_id || payment.data.booking_id || payment.data.order_id, 180) !== parsedRef.source_id)
       );
       return {
         ...payment,
