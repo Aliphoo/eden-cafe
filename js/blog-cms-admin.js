@@ -11,12 +11,11 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import {
     deleteObject,
-    getDownloadURL,
-    ref,
-    uploadBytes
+    ref
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js';
 
 const rootId = 'blog-cms-admin-root';
+const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net';
 const collections = {
     posts: 'blogs',
     categories: 'blog_categories',
@@ -1169,6 +1168,45 @@ function syncSavedEditorState(savedPost) {
     updateEditorStats();
 }
 
+function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+        reader.onerror = (error) => reject(error);
+        reader.readAsDataURL(blob);
+    });
+}
+
+function extensionFromMime(type = '') {
+    if (/jpe?g/i.test(type)) return 'jpg';
+    if (/png/i.test(type)) return 'png';
+    if (/gif/i.test(type)) return 'gif';
+    return 'webp';
+}
+
+async function uploadBlogImageToHosting(file) {
+    const token = await auth.currentUser?.getIdToken(true);
+    if (!token) throw new Error('Please sign in as admin before uploading images');
+    const baseName = slugify(String(file.name || '').replace(/\.[^.]+$/, '')) || 'blog-image';
+    const fileName = `${baseName}-${Date.now()}.${extensionFromMime(file.type)}`;
+    const response = await fetch(`${FUNCTIONS_BASE_URL}/uploadSpaceshipImage`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            folder: 'blogs',
+            fileName,
+            mimeType: file.type || 'image/webp',
+            imageBase64: await blobToBase64(file)
+        })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.url) throw new Error(result.error || 'Spaceship image upload failed');
+    return result;
+}
+
 async function verifySavedPostStatus(postId, expectedStatus) {
     if (!postId || !expectedStatus) return;
     const snap = await runFirestoreStep('blogs.status-readback', () => getDoc(doc(db, collections.posts, postId)));
@@ -1250,16 +1288,14 @@ async function savePostNow(statusOverride = '', options = {}) {
 
 async function uploadMediaFile(file, meta = {}) {
     if (!file) return null;
-    if (!/^image\//i.test(file.type)) throw new Error('กรุณาเลือกไฟล์รูปภาพ');
-    if (file.size > 5 * 1024 * 1024) throw new Error('รูปต้องไม่เกิน 5MB');
-    const safeName = `${Date.now()}-${slugify(file.name) || 'image'}`;
-    const storageRef = ref(storage, `blogs/${safeName}`);
-    await runFirestoreStep('storage.blogs.upload', () => uploadBytes(storageRef, file, { contentType: file.type }));
-    const url = await runFirestoreStep('storage.blogs.url', () => getDownloadURL(storageRef));
+    if (!/^image\/(webp|jpeg|jpg|png|gif)/i.test(file.type)) throw new Error('กรุณาเลือกไฟล์รูปภาพ webp, jpg, png หรือ gif');
+    if (file.size > 10 * 1024 * 1024) throw new Error('รูปต้องไม่เกิน 10MB');
+    const uploaded = await runFirestoreStep('spaceship.blogs.upload', () => uploadBlogImageToHosting(file));
     const payload = {
         filename: file.name,
-        url,
-        storage_path: `blogs/${safeName}`,
+        url: uploaded.url,
+        hosting_path: uploaded.path || '',
+        provider: uploaded.provider || 'spaceship_hosting',
         alt_text: meta.alt_text || '',
         caption: meta.caption || '',
         size: file.size,
