@@ -47,6 +47,7 @@ let state = {
     lastSaved: '',
     statusMessage: '',
     statusType: 'info',
+    loadErrors: {},
     adminAccess: null
 };
 
@@ -367,6 +368,17 @@ async function listCollection(name) {
     return snap.docs.map((item) => ({ id: item.id, ...item.data() }));
 }
 
+async function listOptionalCollection(name, key, label) {
+    try {
+        return await listCollection(name);
+    } catch (error) {
+        const message = formatActionError(error, `load-${key}`);
+        console.warn(`Blog CMS failed to load ${name}:`, error);
+        state.loadErrors[key] = `${label} load failed: ${message}`;
+        return [];
+    }
+}
+
 async function getBlogRole() {
     const user = auth.currentUser;
     if (!user) return null;
@@ -410,15 +422,16 @@ function canManage() {
 
 async function refreshData() {
     state.currentUser = await getBlogRole();
+    state.loadErrors = {};
     const [posts, categories, tags, media, users] = await Promise.all([
         listCollection(collections.posts),
-        listCollection(collections.categories).catch(() => []),
-        listCollection(collections.tags).catch(() => []),
-        listCollection(collections.media).catch(() => []),
-        listCollection(collections.users).catch(() => [])
+        listOptionalCollection(collections.categories, 'categories', 'Category'),
+        listOptionalCollection(collections.tags, 'tags', 'Tag'),
+        listOptionalCollection(collections.media, 'media', 'Media'),
+        listOptionalCollection(collections.users, 'users', 'User')
     ]);
     state.posts = posts.map((item) => normalizePost(item.id, item)).sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')));
-    state.categories = categories.map((item) => ({ id: item.id, name: text(item.name), slug: slugify(item.slug || item.id || item.name), description: text(item.description), seo_title: text(item.seo_title), seo_description: text(item.seo_description), is_active: item.is_active !== false }));
+    state.categories = categories.map(normalizedCategory).filter((item) => item.id && item.name).sort((a, b) => a.name.localeCompare(b.name, 'th'));
     state.tags = tags.map((item) => ({ id: item.id, name: text(item.name), slug: slugify(item.slug || item.id || item.name) }));
     state.media = media.map((item) => ({ id: item.id, ...item })).sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
     state.users = users.map((item) => ({ id: item.id, ...item }));
@@ -519,6 +532,9 @@ function formatActionError(error, action = '') {
     const raw = text(error?.message || error);
     const code = text(error?.code);
     if (code.includes('permission-denied') || /missing or insufficient permissions|permission denied|403/i.test(raw)) {
+        if (action === 'load-categories') {
+            return 'Cannot load blog_categories from Firestore: Firestore rules are blocking category reads';
+        }
         if (['add-category', 'save-category'].includes(action)) {
             return 'Firebase ปฏิเสธสิทธิ์: สิทธิ์ collection หมวดหมู่ยังไม่พร้อมหรือบัญชีนี้ไม่มีสิทธิ์จัดการ Category';
         }
@@ -766,6 +782,52 @@ function currentPost() {
     return base;
 }
 
+function normalizedCategory(category) {
+    const name = text(category?.name || category?.category_name || category?.id);
+    const id = text(category?.id || category?.category_id || slugify(name));
+    return {
+        id,
+        name,
+        slug: slugify(category?.slug || id || name),
+        description: text(category?.description),
+        seo_title: text(category?.seo_title),
+        seo_description: text(category?.seo_description),
+        is_active: category?.is_active !== false
+    };
+}
+
+function upsertCategoryInState(category) {
+    const normalized = normalizedCategory(category);
+    if (!normalized.id || !normalized.name) return null;
+    const index = state.categories.findIndex((item) => item.id === normalized.id);
+    if (index >= 0) state.categories[index] = { ...state.categories[index], ...normalized };
+    else state.categories.push(normalized);
+    state.categories.sort((a, b) => a.name.localeCompare(b.name, 'th'));
+    return normalized;
+}
+
+function categoryOptionsForPost(post) {
+    const options = [...state.categories];
+    if (post.category_id && !options.some((item) => item.id === post.category_id)) {
+        options.push(normalizedCategory({ id: post.category_id, name: post.category_name || post.category_id }));
+    }
+    return options.filter((item) => item.id && item.name);
+}
+
+function syncCategorySelect(category) {
+    const normalized = normalizedCategory(category);
+    const select = $('#blog-category');
+    if (!select || !normalized.id || !normalized.name) return;
+    let option = Array.from(select.options).find((item) => item.value === normalized.id);
+    if (!option) {
+        option = document.createElement('option');
+        option.value = normalized.id;
+        select.appendChild(option);
+    }
+    option.textContent = normalized.name;
+    select.value = normalized.id;
+}
+
 function toolbarButton(tool, mode = 'label') {
     const label = escapeHTML(tool.label);
     const icon = escapeHTML(tool.icon || tool.short || tool.label);
@@ -870,6 +932,8 @@ function editorHTML() {
 }
 
 function sidebarHTML(post, selectedTags) {
+    const categoryOptions = categoryOptionsForPost(post);
+    const categoryWarning = state.loadErrors.categories ? `<div class="blog-cms-alert warning">${escapeHTML(state.loadErrors.categories)}</div>` : '';
     return `
         <div class="blog-cms-card blog-cms-form">
             <h3>Publish Settings</h3>
@@ -890,8 +954,9 @@ function sidebarHTML(post, selectedTags) {
         </div>
         <div class="blog-cms-card blog-cms-form">
             <h3>Category & Tags</h3>
+            ${categoryWarning}
             <label>Category
-                <select id="blog-category"><option value="">เลือกหมวดหมู่</option>${state.categories.map((item) => `<option value="${escapeHTML(item.id)}" ${post.category_id === item.id ? 'selected' : ''}>${escapeHTML(item.name)}</option>`).join('')}</select>
+                <select id="blog-category"><option value="">เลือกหมวดหมู่</option>${categoryOptions.map((item) => `<option value="${escapeHTML(item.id)}" ${post.category_id === item.id ? 'selected' : ''}>${escapeHTML(item.name)}</option>`).join('')}</select>
             </label>
             <div class="blog-cms-chip-list">${state.tags.map((tag) => `<button type="button" class="blog-cms-chip ${selectedTags.has(tag.id) ? 'active' : ''}" data-blog-tag="${escapeHTML(tag.id)}">${escapeHTML(tag.name)}</button>`).join('')}</div>
             <div class="blog-cms-field-grid"><input id="blog-new-category" placeholder="เพิ่ม Category"><button class="blog-cms-btn secondary" type="button" data-blog-action="add-category">Add</button></div>
@@ -978,7 +1043,9 @@ function readEditorPost(statusOverride = '') {
     const editor = $('#blog-content-editor');
     const content = editor ? editor.innerHTML : existing.content || '';
     const words = countWords(content);
-    const category = state.categories.find((item) => item.id === $('#blog-category')?.value);
+    const selectedCategoryId = text($('#blog-category')?.value);
+    const category = state.categories.find((item) => item.id === selectedCategoryId)
+        || (selectedCategoryId && existing.category_id === selectedCategoryId ? normalizedCategory({ id: selectedCategoryId, name: existing.category_name || selectedCategoryId }) : null);
     const selectedTags = $all('[data-blog-tag].active').map((item) => item.dataset.blogTag);
     const tagNames = selectedTags.map((id) => state.tags.find((tag) => tag.id === id)?.name || id);
     return {
@@ -990,8 +1057,8 @@ function readEditorPost(statusOverride = '') {
         status: statusOverride || $('#blog-status')?.value || 'draft',
         author_id: existing.author_id || auth.currentUser?.uid || '',
         author_name: text($('#blog-author-name')?.value || auth.currentUser?.displayName || auth.currentUser?.email),
-        category_id: category?.id || '',
-        category_name: category?.name || '',
+        category_id: category?.id || selectedCategoryId || '',
+        category_name: category?.name || (selectedCategoryId === existing.category_id ? existing.category_name : '') || '',
         tag_ids: selectedTags,
         tags: tagNames,
         cover_image_url: text($('#blog-cover-url')?.value),
@@ -1190,7 +1257,8 @@ async function uploadMediaFile(file, meta = {}) {
 }
 
 function categoriesHTML() {
-    return `<div class="blog-cms-card blog-cms-form"><h3>Category Manager</h3><div class="blog-cms-toolbar"><input id="category-name" placeholder="ชื่อหมวดหมู่"><input id="category-description" placeholder="Description"><input id="category-seo-title" placeholder="SEO Title"><input id="category-seo-description" placeholder="SEO Description"><button class="blog-cms-btn" type="button" data-blog-action="save-category">บันทึก</button></div></div><div class="blog-cms-card blog-cms-table-wrap"><table class="blog-cms-table"><thead><tr><th>ชื่อ</th><th>Slug</th><th>Description</th><th>จำนวนบทความ</th></tr></thead><tbody>${state.categories.map((cat) => `<tr><td>${escapeHTML(cat.name)}</td><td>${escapeHTML(cat.slug)}</td><td>${escapeHTML(cat.description || '-')}</td><td>${state.posts.filter((post) => post.category_id === cat.id).length}</td></tr>`).join('') || '<tr><td colspan="4">ยังไม่มีหมวดหมู่</td></tr>'}</tbody></table></div>`;
+    const warning = state.loadErrors.categories ? `<div class="blog-cms-alert warning">${escapeHTML(state.loadErrors.categories)}</div>` : '';
+    return `${warning}<div class="blog-cms-card blog-cms-form"><h3>Category Manager</h3><div class="blog-cms-toolbar"><input id="category-name" placeholder="ชื่อหมวดหมู่"><input id="category-description" placeholder="Description"><input id="category-seo-title" placeholder="SEO Title"><input id="category-seo-description" placeholder="SEO Description"><button class="blog-cms-btn" type="button" data-blog-action="save-category">บันทึก</button></div></div><div class="blog-cms-card blog-cms-table-wrap"><table class="blog-cms-table"><thead><tr><th>ชื่อ</th><th>Slug</th><th>Description</th><th>จำนวนบทความ</th></tr></thead><tbody>${state.categories.map((cat) => `<tr><td>${escapeHTML(cat.name)}</td><td>${escapeHTML(cat.slug)}</td><td>${escapeHTML(cat.description || '-')}</td><td>${state.posts.filter((post) => post.category_id === cat.id).length}</td></tr>`).join('') || '<tr><td colspan="4">ยังไม่มีหมวดหมู่</td></tr>'}</tbody></table></div>`;
 }
 
 function tagsHTML() {
@@ -1478,9 +1546,16 @@ async function addCategoryFromEditor() {
     const name = text($('#blog-new-category')?.value);
     if (!name) throw new BlogValidationError('เพิ่ม Category ไม่สำเร็จ ยังขาด: ชื่อ Category', ['ชื่อ Category']);
     const id = slugify(name);
-    await runFirestoreStep('blog_categories.write', () => setDoc(doc(db, collections.categories, id), { name, slug: id, is_active: true, created_at: nowIso(), updated_at: nowIso() }, { merge: true }));
+    const draft = readEditorPost();
+    const category = { id, name, slug: id, is_active: true, created_at: nowIso(), updated_at: nowIso() };
+    await runFirestoreStep('blog_categories.write', () => setDoc(doc(db, collections.categories, id), category, { merge: true }));
     await refreshData();
-    render();
+    const savedCategory = upsertCategoryInState(category);
+    state.editorDraft = { ...draft, category_id: id, category_name: name };
+    syncCategorySelect(savedCategory);
+    const input = $('#blog-new-category');
+    if (input) input.value = '';
+    updateEditorStats();
     return true;
 }
 
@@ -1498,8 +1573,10 @@ async function saveCategoryManager() {
     const name = text($('#category-name')?.value);
     if (!name) throw new Error('กรุณาใส่ชื่อหมวดหมู่');
     const id = slugify(name);
-    await runFirestoreStep('blog_categories.write', () => setDoc(doc(db, collections.categories, id), { name, slug: id, description: text($('#category-description')?.value), seo_title: text($('#category-seo-title')?.value), seo_description: text($('#category-seo-description')?.value), is_active: true, created_at: nowIso(), updated_at: nowIso() }, { merge: true }));
+    const category = { id, name, slug: id, description: text($('#category-description')?.value), seo_title: text($('#category-seo-title')?.value), seo_description: text($('#category-seo-description')?.value), is_active: true, created_at: nowIso(), updated_at: nowIso() };
+    await runFirestoreStep('blog_categories.write', () => setDoc(doc(db, collections.categories, id), category, { merge: true }));
     await refreshData();
+    upsertCategoryInState(category);
     render();
 }
 
