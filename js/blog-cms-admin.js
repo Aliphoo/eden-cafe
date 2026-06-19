@@ -28,7 +28,7 @@ const collections = {
 };
 
 let state = {
-    tab: 'overview',
+    tab: 'posts',
     posts: [],
     categories: [],
     tags: [],
@@ -46,6 +46,35 @@ let state = {
     statusMessage: '',
     statusType: 'info'
 };
+
+const cmsStateKey = 'edenBlogCmsAdminState';
+const cmsTabs = new Set(['overview', 'posts', 'editor', 'categories', 'tags', 'media', 'seo', 'authors', 'settings', 'assistant']);
+
+function readStoredCmsState() {
+    try {
+        return JSON.parse(localStorage.getItem(cmsStateKey) || '{}') || {};
+    } catch (error) {
+        return {};
+    }
+}
+
+function persistCmsState() {
+    try {
+        localStorage.setItem(cmsStateKey, JSON.stringify({
+            tab: state.tab,
+            editingId: state.editingId,
+            previewMode: state.previewMode
+        }));
+    } catch (error) {
+    }
+}
+
+function restoreCmsState() {
+    const saved = readStoredCmsState();
+    if (cmsTabs.has(saved.tab)) state.tab = saved.tab;
+    if (typeof saved.editingId === 'string') state.editingId = saved.editingId;
+    if (saved.previewMode === 'mobile' || saved.previewMode === 'desktop') state.previewMode = saved.previewMode;
+}
 
 const actionTypes = Object.freeze({
     new: 'navigation',
@@ -484,7 +513,7 @@ function layoutHTML(content) {
     return `
         <div class="blog-cms-topbar">
             <div>
-                <span class="blog-cms-eyebrow">Content Operations</span>
+                <span class="blog-cms-eyebrow">Blog Management</span>
                 <h2>Blog CMS</h2>
                 <div class="blog-cms-topbar-meta">
                     <span>${state.posts.length} posts</span>
@@ -495,7 +524,6 @@ function layoutHTML(content) {
             <div class="blog-cms-topbar-actions">
                 <a class="blog-cms-btn secondary" href="/blog" target="_blank" rel="noopener">ดูหน้าบล็อก</a>
                 <button class="blog-cms-btn" type="button" data-blog-action="new">New Post</button>
-                <button class="blog-cms-btn secondary" type="button" data-blog-action="seed">Seed Data</button>
             </div>
         </div>
         <div id="blog-cms-admin-status" class="blog-cms-alert ${escapeHTML(state.statusType || 'info')}" style="${state.statusMessage ? '' : 'display:none'}" role="${state.statusType === 'error' ? 'alert' : 'status'}" aria-live="${state.statusType === 'error' ? 'assertive' : 'polite'}">${escapeHTML(state.statusMessage || '')}</div>
@@ -942,6 +970,7 @@ async function savePost(statusOverride = '', options = {}) {
         await addDoc(collection(db, collections.revisions), { post_id: state.editingId, title: payload.title, content: payload.content, edited_by: auth.currentUser?.uid || '', created_at: nowIso() });
     }
     state.lastSaved = new Date().toLocaleTimeString('th-TH');
+    persistCmsState();
     await refreshData();
     render();
     if (!options.silent) setStatus('บันทึกบทความสำเร็จ');
@@ -1023,6 +1052,7 @@ function bindEvents() {
     $all('[data-blog-cms-tab]', el).forEach((button) => button.addEventListener('click', () => {
         state.tab = button.dataset.blogCmsTab;
         if (state.tab === 'editor' && !state.editingId) state.editingId = '';
+        persistCmsState();
         render();
     }));
     $('#blog-cms-search')?.addEventListener('input', (event) => { state.search = event.target.value; render(); });
@@ -1086,9 +1116,9 @@ async function handleAction(event) {
         updateEditorStats();
         return;
     }
-    if (action === 'new') { state.editingId = ''; state.tab = 'editor'; render(); return; }
-    if (action === 'edit') { state.editingId = actionEl.dataset.id; state.tab = 'editor'; render(); return; }
-    if (action === 'preview-mode') { state.previewMode = state.previewMode === 'desktop' ? 'mobile' : 'desktop'; render(); return; }
+    if (action === 'new') { state.editingId = ''; state.tab = 'editor'; persistCmsState(); render(); return; }
+    if (action === 'edit') { state.editingId = actionEl.dataset.id; state.tab = 'editor'; persistCmsState(); render(); return; }
+    if (action === 'preview-mode') { state.previewMode = state.previewMode === 'desktop' ? 'mobile' : 'desktop'; persistCmsState(); render(); return; }
     if (action === 'add-faq') return addFaqToEditor();
     if (action === 'prompt') return promptTemplate(actionEl.dataset.prompt);
 
@@ -1257,12 +1287,14 @@ window.fetchBlogsFromCloud = async () => {
 window.openBlogModal = () => {
     state.editingId = '';
     state.tab = 'editor';
+    persistCmsState();
     render();
 };
 window.closeBlogModal = () => {};
 window.editBlog = (id) => {
     state.editingId = id || '';
     state.tab = 'editor';
+    persistCmsState();
     render();
 };
 window.deleteBlog = deletePostById;
@@ -1281,6 +1313,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
         await waitForAuthReady();
         await refreshData();
+        restoreCmsState();
         render();
     } catch (error) {
         el.innerHTML = `<div class="blog-cms-alert">โหลด Blog CMS ไม่สำเร็จ: ${escapeHTML(error.message || error)}</div>`;
