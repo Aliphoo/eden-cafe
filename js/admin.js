@@ -636,7 +636,7 @@ function normalizeMenuTemplateRow(row) {
         showOnPos: parseMenuBoolean(row[MENU_SHOW_POS_COLUMN] ?? row.showOnPos, true),
         showOnWebsite: parseMenuBoolean(row[MENU_SHOW_WEBSITE_COLUMN] ?? row.showOnWebsite, true),
         showInShop: parseMenuBoolean(row[MENU_SHOW_SHOP_COLUMN] ?? row.showInShop, false),
-        showOnIndex: parseMenuBoolean(row[MENU_SHOW_INDEX_COLUMN] ?? row.showOnIndex ?? row.isFeatured, false),
+        showOnIndex: parseMenuBoolean(row[MENU_SHOW_INDEX_COLUMN] ?? row.showOnIndex, false),
         price,
         stock,
         lowStock,
@@ -653,8 +653,6 @@ function normalizeMenuTemplateRow(row) {
     if (includedQty !== undefined) normalized.includedItemQuantity = includedQty;
     if (row.imageUrl || row.Image || row.image) normalized.imageUrl = cleanMenuCell(row.imageUrl ?? row.Image ?? row.image);
     if (row.isSignature !== undefined) normalized.isSignature = parseMenuBoolean(row.isSignature);
-    normalized.isFeatured = normalized.showOnIndex;
-
     Object.keys(normalized).forEach((key) => {
         if (normalized[key] === undefined || normalized[key] === '') delete normalized[key];
         if (Array.isArray(normalized[key]) && !normalized[key].length) delete normalized[key];
@@ -696,7 +694,7 @@ function menuProductToTemplateRow(product = {}) {
         [MENU_SHOW_POS_COLUMN]: boolToMenuText(product.showOnPos),
         [MENU_SHOW_WEBSITE_COLUMN]: boolToMenuText(product.showOnWebsite),
         [MENU_SHOW_SHOP_COLUMN]: boolToMenuText(product.showInShop),
-        [MENU_SHOW_INDEX_COLUMN]: boolToMenuText(product.showOnIndex === true || product.isFeatured === true),
+        [MENU_SHOW_INDEX_COLUMN]: boolToMenuText(product.showOnIndex === true),
         Color: product.color || '',
         Shape: product.shape || '',
         [MENU_VARIANTS_COLUMN]: variants.length ? JSON.stringify(variants) : ''
@@ -709,7 +707,7 @@ const XLSX_CATEGORY_CONFIG = {
         collection: 'products',
         permission: 'products',
         numberFields: ['price', 'order', 'cost', 'stock', 'lowStock', 'includedItemQuantity', 'taxRate'],
-        booleanFields: ['isSignature', 'isFeatured', 'soldByWeight', 'trackStock', 'availableForSale', 'taxEnabled', 'showOnPos', 'showOnWebsite', 'showInShop', 'showOnIndex'],
+        booleanFields: ['isSignature', 'soldByWeight', 'trackStock', 'availableForSale', 'taxEnabled', 'showOnPos', 'showOnWebsite', 'showInShop', 'showOnIndex'],
         arrayFields: [],
         template: MENU_TEMPLATE_ROW,
         importRow: normalizeMenuTemplateRow,
@@ -6429,7 +6427,7 @@ function renderProductVariantDetailRow(id, product = {}) {
     const visibility = [
         product.showOnWebsite !== false ? 'แสดงในเมนูเว็บ' : 'ซ่อนจากเมนูเว็บ',
         product.showInShop ? 'แสดงในร้านค้า' : 'ไม่แสดงในร้านค้า',
-        product.showOnIndex || product.isFeatured ? 'สินค้าแนะนำหน้าแรก' : 'ไม่แสดงหน้าแรก',
+        product.showOnIndex ? 'สินค้าแนะนำหน้าแรก' : 'ไม่แสดงหน้าแรก',
         product.showOnPos !== false ? 'แสดงบน POS' : 'ซ่อนจาก POS',
         product.taxEnabled !== false ? 'ภาษี 7%' : 'ไม่คิดภาษี'
     ].join(' · ');
@@ -6744,7 +6742,7 @@ function renderProductsTable() {
             const hiddenNotes = [
                 available ? '' : 'Hidden from sale',
                 product.showOnWebsite === false ? 'Hidden from website' : '',
-                product.showOnIndex || product.isFeatured ? 'Featured on Index' : '',
+                product.showOnIndex ? 'Featured on Index' : '',
                 product.showOnPos === false ? 'Hidden from POS' : ''
             ].filter(Boolean).join(' | ');
             const mainRow = `
@@ -7174,7 +7172,7 @@ window.editProduct = (id) => {
     setProductCheckboxValue('productShowInShop', !!product.showInShop);
     setProductCheckboxValue('productShowOnPos', product.showOnPos !== false);
     document.getElementById('productSignature').checked = !!product.isSignature;
-    setProductCheckboxValue('productShowOnIndex', !!(product.showOnIndex || product.isFeatured));
+    setProductCheckboxValue('productShowOnIndex', !!product.showOnIndex);
     renderProductVariantRows(productVariantsForDisplay(product));
     
     document.getElementById('modal-title').innerText = 'แก้ไขเมนูสินค้า';
@@ -7257,7 +7255,6 @@ productForm.addEventListener('submit', async (e) => {
             includedItemSku: getProductInputValue('productIncludedItemSku'),
             includedItemQuantity: getProductNumberValue('productIncludedItemQuantity', 1),
             isSignature: document.getElementById('productSignature').checked,
-            isFeatured: getProductCheckboxValue('productShowOnIndex', false),
             variants: variantList,
             updatedAt: new Date().toISOString()
         };
@@ -7745,7 +7742,7 @@ function legacyShopProductTargetId(sourceId, product = {}) {
 }
 
 function legacyShopProductPayload(sourceId, product = {}, targetCategory = 'other') {
-    const featured = parseMenuBoolean(product.showOnIndex ?? product.isFeatured, false);
+    const featured = parseMenuBoolean(product.showOnIndex, false);
     const availableForSale = parseMenuBoolean(product.availableForSale, true);
     const handle = slugifyMenuHandle(product.handle || product.name || sourceId);
     const stock = safeNumber(product.stock ?? product.inStock, 0);
@@ -7768,7 +7765,6 @@ function legacyShopProductPayload(sourceId, product = {}, targetCategory = 'othe
         showInShop: true,
         showOnPos: parseMenuBoolean(product.showOnPos, false),
         showOnIndex: featured,
-        isFeatured: featured,
         taxName: product.taxName || 'eden cafe',
         taxRate: safeNumber(product.taxRate, 7),
         taxEnabled: parseMenuBoolean(product.taxEnabled, true),
@@ -7833,7 +7829,7 @@ window.auditLegacyShopCollections = async () => {
         legacyShopCategories: snapshot.shopCategories.length,
         productsTotal: snapshot.products.length,
         productsShowInShop: snapshot.products.filter(product => product.showInShop === true).length,
-        productsShowOnIndex: snapshot.products.filter(product => product.showOnIndex === true || product.isFeatured === true).length,
+        productsShowOnIndex: snapshot.products.filter(product => product.showOnIndex === true).length,
         categoriesTotal: snapshot.categories.length,
         categoriesToCreate: plan.categoriesToCreate.map(item => item.id),
         productsToUpsert: plan.productsToUpsert.map(item => ({ sourceId: item.sourceId, targetId: item.targetId, category: item.targetCategory }))

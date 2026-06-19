@@ -64,7 +64,7 @@ function hasSellableStock(product = {}) {
 function shouldShowFeatured(product = {}) {
     return parseBool(product.availableForSale, true)
         && (parseBool(product.showOnWebsite, true) || parseBool(product.showInShop, false))
-        && parseBool(product.showOnIndex ?? product.isFeatured, false)
+        && parseBool(product.showOnIndex, false)
         && hasSellableStock(product);
 }
 
