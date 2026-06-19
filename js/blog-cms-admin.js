@@ -144,7 +144,7 @@ const actionProgressMessages = Object.freeze({
 
 const actionSuccessMessages = Object.freeze({
     'save-draft': 'บันทึก Draft สำเร็จ',
-    publish: 'Publish บทความสำเร็จ',
+    publish: 'Published and verified in Firestore',
     schedule: 'ตั้งเวลาเผยแพร่สำเร็จ',
     duplicate: 'คัดลอกบทความสำเร็จ',
     archive: 'Archive บทความสำเร็จ',
@@ -167,6 +167,27 @@ class BlogValidationError extends Error {
         this.missing = missing;
         this.isValidationError = true;
     }
+}
+
+const editorFieldSelectors = Object.freeze({
+    title: '#blog-title',
+    slug: '#blog-slug',
+    category: '#blog-category',
+    content: '#blog-content-editor',
+    role: '#blog-status',
+    scheduled_at: '#blog-scheduled-at'
+});
+
+function missingField(field, label = field) {
+    return {
+        field,
+        label,
+        selector: editorFieldSelectors[field] || ''
+    };
+}
+
+function missingFieldLabels(missing = []) {
+    return missing.map((item) => (typeof item === 'string' ? item : item?.label || item?.field)).filter(Boolean);
 }
 
 const blankPost = () => ({
@@ -469,7 +490,7 @@ function installStyles() {
         .blog-cms-dashboard-grid{display:grid;grid-template-columns:minmax(0,1.45fr)minmax(280px,.75fr);gap:14px}.blog-cms-attention{display:grid;gap:10px}.blog-cms-attention-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;border:1px solid #edf1ed;border-radius:8px;padding:11px 12px;background:#fbfcfb}.blog-cms-attention-row strong{font-size:1.25rem}.blog-cms-attention-row.warn strong{color:var(--cms-amber)}.blog-cms-attention-row.danger strong{color:var(--cms-red)}.blog-cms-attention-row.info strong{color:var(--cms-blue)}
         .blog-cms-pipeline{display:grid;gap:10px}.blog-cms-pipeline-row{display:grid;grid-template-columns:100px 1fr 42px;gap:10px;align-items:center;font-weight:800;color:#3c5146}.blog-cms-bar{height:9px;background:#edf2ee;border-radius:999px;overflow:hidden}.blog-cms-bar span{display:block;height:100%;background:var(--cms-green);border-radius:999px}.blog-cms-bar.draft span{background:var(--cms-amber)}.blog-cms-bar.scheduled span{background:var(--cms-blue)}.blog-cms-bar.archived span{background:var(--cms-red)}
         .blog-cms-toolbar{display:grid;grid-template-columns:minmax(260px,1fr)150px 170px 160px 150px;gap:10px;align-items:end}.blog-cms-toolbar input,.blog-cms-toolbar select,.blog-cms-form input,.blog-cms-form select,.blog-cms-form textarea{width:100%;min-height:42px;border:1px solid #cfdcd4;border-radius:7px;padding:9px 11px;background:#fff;color:var(--cms-text);outline:none}.blog-cms-toolbar input:focus,.blog-cms-toolbar select:focus,.blog-cms-form input:focus,.blog-cms-form select:focus,.blog-cms-form textarea:focus{border-color:#78af8b;box-shadow:0 0 0 3px rgba(23,99,63,.12)}
-        .blog-cms-field-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:10px}.blog-cms-form label{display:grid;gap:6px;color:#43564c;font-weight:850;font-size:.84rem}.blog-cms-form label span{display:flex;align-items:center;gap:8px}.blog-cms-form textarea{min-height:96px;resize:vertical}
+        .blog-cms-field-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:10px}.blog-cms-form label{display:grid;gap:6px;color:#43564c;font-weight:850;font-size:.84rem}.blog-cms-form label span{display:flex;align-items:center;gap:8px}.blog-cms-form textarea{min-height:96px;resize:vertical}.blog-cms-field-error{border-color:var(--cms-red)!important;box-shadow:0 0 0 3px rgba(161,58,58,.14)!important;background:#fffafa!important}
         .blog-cms-table-wrap{overflow:auto}.blog-cms-table{min-width:980px;width:100%;border-collapse:separate;border-spacing:0}.blog-cms-table th,.blog-cms-table td{border-bottom:1px solid #edf1ed;padding:12px 11px;text-align:left;vertical-align:middle}.blog-cms-table th{position:sticky;top:0;background:#f8faf8;color:#536159;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;z-index:1}.blog-cms-table tr:hover td{background:#fbfcfa}.blog-cms-post-title{display:grid;gap:4px}.blog-cms-post-title strong{line-height:1.35}.blog-cms-post-title small{color:#6d7a72}.blog-cms-cover-thumb{width:72px;height:52px;object-fit:cover;border-radius:7px;background:#edf2ee;border:1px solid #dfe8e2}.blog-cms-cover-empty{width:72px;height:52px;border-radius:7px;border:1px dashed #c7d5cc;background:#f4f7f4;color:#84918a;display:grid;place-items:center;font-weight:850}
         .blog-cms-status{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:.76rem;font-weight:900;text-transform:capitalize}.blog-cms-status.published{background:var(--cms-green-soft);color:var(--cms-green)}.blog-cms-status.draft{background:var(--cms-amber-soft);color:var(--cms-amber)}.blog-cms-status.scheduled{background:var(--cms-blue-soft);color:var(--cms-blue)}.blog-cms-status.archived{background:var(--cms-red-soft);color:var(--cms-red)}
         .blog-cms-score{display:grid;gap:5px;min-width:92px}.blog-cms-score-line{height:7px;border-radius:999px;background:#e9eee9;overflow:hidden}.blog-cms-score-line span{display:block;height:100%;background:var(--cms-green)}.blog-cms-score small{font-weight:850;color:#51645a}
@@ -499,6 +520,30 @@ function setStatus(message, type = 'info') {
         el.style.display = state.statusMessage ? 'block' : 'none';
         el.setAttribute('role', state.statusType === 'error' ? 'alert' : 'status');
         el.setAttribute('aria-live', state.statusType === 'error' ? 'assertive' : 'polite');
+    }
+}
+
+function clearFieldErrors(rootEl = document) {
+    $all('.blog-cms-field-error', rootEl).forEach((input) => {
+        input.classList.remove('blog-cms-field-error');
+        input.removeAttribute('aria-invalid');
+    });
+}
+
+function markMissingFields(missing = []) {
+    clearFieldErrors();
+    const targets = missing
+        .map((item) => (typeof item === 'string' ? null : item?.selector))
+        .filter(Boolean)
+        .map((selector) => $(selector))
+        .filter(Boolean);
+    targets.forEach((input) => {
+        input.classList.add('blog-cms-field-error');
+        input.setAttribute('aria-invalid', 'true');
+    });
+    if (targets[0]) {
+        targets[0].scrollIntoView({ block: 'center', behavior: 'smooth' });
+        if (typeof targets[0].focus === 'function') targets[0].focus({ preventScroll: true });
     }
 }
 
@@ -575,6 +620,7 @@ async function runAction(actionEl, action, work) {
     if (restore === null) return null;
     if (actionNeedsBusy(action)) setStatus(actionProgressMessages[action] || 'กำลังดำเนินการ...', 'info');
     try {
+        if (action === 'publish' || action === 'schedule' || action === 'save-draft') clearFieldErrors();
         const result = await work();
         if (actionNeedsBusy(action) && result !== false) {
             setStatus(actionSuccessMessages[action] || 'ดำเนินการสำเร็จ', 'success');
@@ -583,6 +629,7 @@ async function runAction(actionEl, action, work) {
     } catch (error) {
         const step = text(error?.blogStep || '');
         const message = formatActionError(error, action);
+        if (error?.isValidationError) markMissingFields(error.missing);
         setStatus(step ? `${message} (${step})` : message, 'error');
         return null;
     } finally {
@@ -1312,6 +1359,62 @@ async function persistContentImage(url) {
     return verifyPostFieldIncludes(state.editingId, 'content', cleanUrl, 'blogs.content-image-readback');
 }
 
+function imageUrlsFromHTML(html = '') {
+    const htmlString = String(html || '');
+    const urls = [];
+    try {
+        const template = document.createElement('template');
+        template.innerHTML = htmlString;
+        template.content.querySelectorAll('img[src]').forEach((image) => urls.push(text(image.getAttribute('src'))));
+    } catch (error) {
+        const matches = htmlString.matchAll(/<img\b[^>]*\bsrc=["']([^"']+)["']/gi);
+        for (const match of matches) urls.push(text(match[1]));
+    }
+    return [...new Set(urls.filter(Boolean))];
+}
+
+function verifyExpectedContentImages(savedContent, expectedContent, step) {
+    const saved = String(savedContent || '');
+    imageUrlsFromHTML(expectedContent).forEach((url) => {
+        if (!saved.includes(url) && !saved.includes(escapeHTML(url))) {
+            readbackError(step, `Publish readback mismatch: content is missing image URL "${url}"`);
+        }
+    });
+}
+
+async function verifyPublishedPostReadback(postId, expectedPost) {
+    const step = 'blogs.publish-readback';
+    const data = await readBackPost(postId, step);
+    const status = text(data.status).toLowerCase();
+    if (status !== 'published') readbackError(step, `Publish readback mismatch: expected status "published", got "${status || 'empty'}"`);
+
+    const expectedCategoryId = text(expectedPost.category_id);
+    const actualCategoryId = text(data.category_id || data.categoryId);
+    if (!actualCategoryId) readbackError(step, 'Publish readback mismatch: category_id is empty');
+    if (expectedCategoryId && actualCategoryId !== expectedCategoryId) {
+        readbackError(step, `Publish readback mismatch: expected category_id "${expectedCategoryId}", got "${actualCategoryId}"`);
+    }
+
+    const expectedCoverUrl = text(expectedPost.cover_image_url || expectedPost.coverImageUrl || expectedPost.imageUrl);
+    if (expectedCoverUrl) {
+        const coverFields = {
+            cover_image_url: text(data.cover_image_url),
+            coverImageUrl: text(data.coverImageUrl),
+            imageUrl: text(data.imageUrl)
+        };
+        Object.entries(coverFields).forEach(([field, actual]) => {
+            if (actual !== expectedCoverUrl) {
+                readbackError(step, `Publish readback mismatch: expected ${field} "${expectedCoverUrl}", got "${actual || 'empty'}"`);
+            }
+        });
+    }
+
+    const savedContent = String(data.content || '');
+    if (!htmlToText(savedContent)) readbackError(step, 'Publish readback mismatch: content is empty');
+    verifyExpectedContentImages(savedContent, expectedPost.content, step);
+    return data;
+}
+
 function actionNameForStatus(status) {
     if (status === 'published') return 'Publish';
     if (status === 'scheduled') return 'Schedule';
@@ -1321,17 +1424,17 @@ function actionNameForStatus(status) {
 async function validatePost(post) {
     const isPublishFlow = post.status === 'published' || post.status === 'scheduled';
     const missing = [];
-    if (!post.title) missing.push('Title');
-    if (!post.slug) missing.push('Slug');
-    if (isPublishFlow && !canPublish()) missing.push('user role เป็น admin หรือ editor');
-    if (isPublishFlow && !post.category_id) missing.push('Category');
-    if (isPublishFlow && !htmlToText(post.content)) missing.push('เนื้อหาใน editor');
-    if (post.status === 'scheduled' && !post.scheduled_at) missing.push('วันและเวลา Schedule');
+    if (!post.title) missing.push(missingField('title', 'Title'));
+    if (!post.slug) missing.push(missingField('slug', 'Slug'));
+    if (isPublishFlow && !canPublish()) missing.push(missingField('role', 'user role เป็น admin หรือ editor'));
+    if (isPublishFlow && !post.category_id) missing.push(missingField('category', 'Category'));
+    if (isPublishFlow && !htmlToText(post.content)) missing.push(missingField('content', 'เนื้อหาใน editor'));
+    if (post.status === 'scheduled' && !post.scheduled_at) missing.push(missingField('scheduled_at', 'วันและเวลา Schedule'));
     if (missing.length) {
-        throw new BlogValidationError(`${actionNameForStatus(post.status)} ไม่สำเร็จ ยังขาด: ${missing.join(', ')}`, missing);
+        throw new BlogValidationError(`${actionNameForStatus(post.status)} ไม่สำเร็จ ยังขาด: ${missingFieldLabels(missing).join(', ')}`, missing);
     }
     const duplicate = state.posts.find((item) => item.slug === post.slug && item.id !== post.id);
-    if (duplicate) throw new BlogValidationError(`${actionNameForStatus(post.status)} ไม่สำเร็จ: Slug ซ้ำ`, ['Slug ซ้ำ']);
+    if (duplicate) throw new BlogValidationError(`${actionNameForStatus(post.status)} ไม่สำเร็จ: Slug ซ้ำ`, [missingField('slug', 'Slug ซ้ำ')]);
 }
 
 async function savePost(statusOverride = '', options = {}) {
@@ -1345,6 +1448,7 @@ async function savePostNow(statusOverride = '', options = {}) {
     if (options.source === 'autosave' && post.status !== 'draft') return true;
     await validatePost(post);
     let revisionWarning = '';
+    let verifiedReadback = null;
     const payload = {
         ...post,
         status: statusOverride || post.status,
@@ -1363,13 +1467,17 @@ async function savePostNow(statusOverride = '', options = {}) {
         await runFirestoreStep('blogs.update', () => setDoc(doc(db, collections.posts, state.editingId), payload, { merge: true }));
         revisionWarning = await writeRevisionLog({ post_id: state.editingId, title: payload.title, content: payload.content, edited_by: auth.currentUser?.uid || '', created_at: nowIso() });
     }
-    if (options.source !== 'autosave') await verifySavedPostStatus(state.editingId, payload.status);
+    if (options.source !== 'autosave') {
+        if (payload.status === 'published') verifiedReadback = await verifyPublishedPostReadback(state.editingId, payload);
+        else await verifySavedPostStatus(state.editingId, payload.status);
+    }
+    const savedPayload = verifiedReadback ? { ...payload, ...verifiedReadback, id: state.editingId } : { ...payload, id: state.editingId };
     state.lastSaved = new Date().toLocaleTimeString('th-TH');
-    state.editorDraft = { ...payload, id: state.editingId };
+    state.editorDraft = savedPayload;
     persistCmsState();
     await refreshData();
     if (state.tab === 'editor' && options.rerender !== true) {
-        syncSavedEditorState(payload);
+        syncSavedEditorState(savedPayload);
     } else {
         state.editorDraft = null;
         render();
@@ -1476,11 +1584,15 @@ function bindEvents() {
     el.addEventListener('click', handleAction);
     $all('#blog-title,#blog-slug,#blog-excerpt,#blog-content-editor,#blog-status,#blog-published-at,#blog-scheduled-at,#blog-author-name,#blog-category,#blog-cover-url,#blog-cover-alt,#blog-cover-caption,#blog-focus-keyword,#blog-seo-title,#blog-seo-description,#blog-canonical-url,#blog-og-title,#blog-og-description,#blog-og-image,#blog-twitter-title,#blog-twitter-description,#blog-twitter-image,#blog-schema-type,#blog-brand-context,#blog-business-context', el).forEach((input) => {
         input.addEventListener('input', () => {
+            input.classList.remove('blog-cms-field-error');
+            input.removeAttribute('aria-invalid');
             if (input.id === 'blog-title' && !$('#blog-slug')?.value) $('#blog-slug').value = slugify(input.value);
             updateEditorStats();
             if (input.id === 'blog-cover-url' || input.id === 'blog-cover-alt') refreshCoverPreview();
         });
         input.addEventListener('change', () => {
+            input.classList.remove('blog-cms-field-error');
+            input.removeAttribute('aria-invalid');
             updateEditorStats();
             if (input.id === 'blog-cover-url' || input.id === 'blog-cover-alt') refreshCoverPreview();
         });
