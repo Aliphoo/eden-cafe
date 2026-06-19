@@ -1484,3 +1484,10 @@ body.pos-ready .pos-app { opacity: 1; transform: none; }
     .pos-grid { grid-template-columns: 1fr; max-height: 590px; }
     .login-box { padding: 24px; }
 }
+
+/* Codex POS mobile UX deploy overrides 2026-06-19 */
+.email-login-btn,.google-btn,.top-link,.logout-btn,.btn-action,.pos-clear-btn,.pos-print-btn,.pos-hero-actions a,.pos-hero-actions button,.pos-receipt-preview-head button,.pos-overview-open-actions button,.pos-category-btn,.pos-add-btn,.pos-open-bills-head button,.pos-open-bill-actions button,.pos-printer-profile button,.pos-printer-mini-btn{align-items:center;display:inline-flex;justify-content:center;min-height:44px}
+.pos-receipt-date-field input,.pos-cart input,.pos-cart select,.pos-cart textarea{min-height:44px}
+.pos-promptpay-qr-wrap img[hidden]{display:none}
+.pos-qty button{height:44px;min-width:44px;width:44px}
+.pos-remove-btn{align-items:center;display:inline-flex;justify-content:center;min-height:44px;padding:6px 12px}

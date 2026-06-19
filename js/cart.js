@@ -140,6 +140,7 @@
                 return;
             }
             addToCart(addButton.dataset.id || addButton.dataset.name, addButton.dataset.name, addButton.dataset.price);
+            openCart();
             const original = addButton.textContent;
             addButton.textContent = isEnglishPage() ? 'Added ✓' : 'เพิ่มแล้ว ✓';
             setTimeout(() => { addButton.textContent = original; }, 1200);

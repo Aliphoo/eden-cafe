@@ -1227,7 +1227,10 @@ async function renderPosPromptPayQr(totals = posCartTotals()) {
     if (idEl) idEl.textContent = settings.promptPayId;
     if (amountEl) amountEl.textContent = posMoney(amount);
     if (payloadEl) payloadEl.value = '';
-    if (qrImg) qrImg.removeAttribute('src');
+    if (qrImg) {
+        qrImg.hidden = true;
+        qrImg.src = POS_QR_PLACEHOLDER_SRC;
+    }
 
     if (settings.enabled === false) {
         setPromptPayStatus('\u0e1b\u0e34\u0e14\u0e01\u0e32\u0e23\u0e43\u0e0a\u0e49 QR PromptPay \u0e08\u0e32\u0e01\u0e2b\u0e25\u0e31\u0e07\u0e1a\u0e49\u0e32\u0e19', 'warning');
@@ -1247,7 +1250,10 @@ async function renderPosPromptPayQr(totals = posCartTotals()) {
     try {
         const dataUrl = await createQrDataUrl(payload);
         if (token !== posPromptPayRenderToken) return;
-        if (qrImg) qrImg.src = dataUrl;
+        if (qrImg) {
+            qrImg.src = dataUrl;
+            qrImg.hidden = false;
+        }
         setPromptPayStatus('\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e2a\u0e41\u0e01\u0e19\u0e0a\u0e33\u0e23\u0e30\u0e1c\u0e48\u0e32\u0e19 PromptPay ' + settings.promptPayId, 'ready');
     } catch (error) {
         console.error('PromptPay QR generation failed:', error);

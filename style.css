@@ -2473,8 +2473,8 @@ footer p {
     .checkout-grid {
         grid-template-columns: 1fr;
     }
-    .nav-links { 
-        display: none; 
+    .nav-links {
+        display: none;
         width: 100%;
         flex-direction: column;
         align-items: center;
@@ -2545,7 +2545,7 @@ footer p {
     .lang-switcher {
         font-size: 0.85rem;
     }
-    
+
     /* Hamburger Animation */
     .menu-toggle.is-active .bar:nth-child(2) {
         opacity: 0;
@@ -2557,15 +2557,15 @@ footer p {
         transform: translateY(-8px) rotate(-45deg);
     }
 
-    .hero h1 { 
+    .hero h1 {
         font-size: 1.8rem; /* Smaller font to fit mobile screens */
         line-height: 1.35;
     }
-    .hero p { 
-        font-size: 1.05rem; 
+    .hero p {
+        font-size: 1.05rem;
         padding: 0 10px; /* Extra breathing room */
     }
-    
+
     /* Mobile Hero Reviews 1:1 Centered */
     .hero-reviews {
         padding: 0 calc(50% - 140px); /* Center 280px wide cards */
@@ -2635,7 +2635,7 @@ footer p {
         text-align: center;
         width: 100%;
     }
-    
+
     section { padding: 60px 0; }
 }
 
@@ -5393,3 +5393,49 @@ body[data-blog-page] h3 {
         font-size: 1.45rem;
     }
 }
+
+/* Codex mobile UX deploy overrides 2026-06-19 */
+.btn{align-items:center;display:inline-flex;justify-content:center;min-height:44px}
+.logo,.nav-links a,.nav-dropdown-toggle,.menu-toggle,.global-cart-icon,.lang-switcher a,.nav-actions .btn{align-items:center;min-height:44px}
+.global-cart-icon{min-width:44px}
+.lang-switcher a{display:inline-flex;justify-content:center;min-width:44px}
+.scroll-down{align-items:center;display:inline-flex;justify-content:center;min-height:44px;min-width:44px}
+.faq-more-btn{min-height:44px}
+.breadcrumb a,.toc-box a,.local-info-box a,.blog-link-panel a,.article-main a:not(.btn),footer a,.social-links a{align-items:center;display:inline-flex;min-height:44px}
+.blog-link-panel a,.article-main a:not(.btn),footer a{min-width:44px}
+.filter-btn{align-items:center;display:inline-flex;height:auto;justify-content:center;min-height:44px}
+#menu-products .menu-variant-select{min-height:44px}
+.shop-action{gap:10px;flex-wrap:wrap}
+.btn-add-cart{align-items:center;display:inline-flex;justify-content:center;min-height:44px;white-space:normal}
+.cart-close{line-height:1;min-height:44px;min-width:44px}
+.cart-qty{align-items:center;background:#fff;border:1px solid #ddd;border-radius:8px;color:var(--primary-color);cursor:pointer;display:inline-flex;justify-content:center;min-height:44px;min-width:44px}
+.qty-controls button,.checkout-qty-btn,.checkout-remove-btn{min-height:44px;min-width:44px}
+.promo-code-container input,.promo-code-container .btn,.success-content .btn,.checkout-empty a{min-height:44px}
+.promo-code-container .btn,.success-content .btn,.checkout-empty a,.checkout-box p a{align-items:center;display:inline-flex;justify-content:center;min-height:44px;min-width:44px}
+.auth-forgot-link,.auth-switch a{align-items:center;display:inline-flex;min-height:44px;padding:10px 0}
+.blog-filter-bar button{align-items:center;display:inline-flex;min-height:44px}
+.blog-read-link{align-items:center;display:inline-flex;justify-content:center;min-height:44px;min-width:44px}
+.blog-card a,.blog-cms-card-foot a{align-items:center;display:inline-flex;min-height:44px;min-width:44px}
+.social-icons-premium a{height:44px;width:44px}
+.eden-map-scroll{position:relative;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
+.eden-map-stage{scroll-snap-align:start}
+.eden-map-table{--table-scale:1}
+@media (max-width:768px){
+  .navbar .container{gap:8px;min-height:68px;padding:10px 16px}
+  .menu-toggle{height:44px;justify-content:center;width:44px}
+  .nav-actions .auth-container{display:none}
+  .nav-links{max-height:min(40dvh,260px);overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+  .nav-links.active{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;max-height:min(40dvh,260px)}
+  .nav-links>li{min-width:0;width:100%}
+  .nav-links a,.nav-dropdown-toggle{justify-content:center;min-height:44px;padding:10px 8px;text-align:center;white-space:normal}
+  .nav-dropdown{grid-column:1/-1;width:100%}
+  .nav-dropdown-menu{position:static;box-shadow:none;width:100%}
+  .nav-actions{gap:8px;justify-content:center;width:100%}
+  .nav-actions.active{display:flex;flex-wrap:wrap;max-height:22dvh;overflow-y:auto}
+  .nav-actions.active .auth-container{display:flex}
+  .nav-actions .btn{min-height:44px;padding:10px 14px}
+  .btn-add-cart{flex:1 1 118px;font-size:.82rem;min-height:44px;padding:9px 10px}
+  .eden-map-scroll::after{background:rgba(255,255,255,.92);border-radius:999px;box-shadow:0 8px 20px rgba(28,64,38,.12);color:#2a4a30;content:'???????????????????????????';font-size:.78rem;font-weight:700;left:14px;padding:7px 10px;pointer-events:none;position:sticky;top:10px;z-index:3}
+  .eden-map-stage{height:clamp(430px,118vw,500px);min-width:min(560px,calc(100vw - 56px));width:100%}
+}
+@media (max-width:520px){.eden-map-scroll{padding:10px}.eden-map-stage{height:430px;min-width:100%}.eden-map-table{--table-scale:1}.nav-links.active{grid-template-columns:repeat(2,minmax(0,1fr))}}

@@ -287,7 +287,7 @@ function injectConsentStyles() {
         .eden-consent-card strong{display:block;font-size:1rem;color:#17351f;margin-bottom:6px}
         .eden-consent-card p{margin:0;color:#526052;font-size:.88rem;line-height:1.55}
         .eden-consent-actions{display:flex;gap:10px;justify-content:flex-end;align-items:center;flex-wrap:wrap;margin-top:14px}
-        .eden-consent-btn{border:1px solid rgba(31,74,46,.22);background:#fff;color:#21412a;border-radius:999px;padding:9px 14px;font-weight:700;cursor:pointer}
+        .eden-consent-btn{border:1px solid rgba(31,74,46,.22);background:#fff;color:#21412a;border-radius:999px;min-height:44px;padding:10px 14px;font-weight:700;cursor:pointer}
         .eden-consent-btn.primary{background:#2f6f3e;color:#fff;border-color:#2f6f3e}
         .eden-consent-btn.ghost{background:#f3f7f1}
         .eden-consent-panel{display:none;margin-top:14px;padding-top:14px;border-top:1px solid #e3eadf}
