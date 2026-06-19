@@ -179,7 +179,7 @@
         .sales-dashboard-topbar h2 { font-size: 1.25rem; font-weight: 700; margin: 0; }
         .sales-dashboard-body { display: grid; grid-template-columns: 64px minmax(0, 1fr); min-height: 760px; }
         .sales-dashboard-rail { background: #fff; border-right: 1px solid #e3e7e3; display: grid; align-content: start; justify-items: center; padding-top: 14px; gap: 10px; }
-        .sales-rail-btn { width: 52px; height: 52px; border: 0; border-left: 4px solid transparent; background: transparent; color: #8a9490; font-size: 1.35rem; cursor: default; }
+        .sales-rail-btn { width: 52px; height: 52px; border: 0; border-left: 4px solid transparent; background: transparent; color: #8a9490; display: grid; font-size: 1.35rem; place-items: center; user-select: none; cursor: default; }
         .sales-rail-btn.active { border-left-color: #43ad4f; background: #f0f7f1; color: #43ad4f; }
         .sales-dashboard-main { padding: 22px; overflow: hidden; }
         .sales-dashboard-toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -1063,13 +1063,13 @@
                 </header>
 
                 <div class="sales-dashboard-body">
-                    <aside class="sales-dashboard-rail" aria-label="เมนูหลักรายงาน">
-                        <button class="sales-rail-btn" type="button" aria-label="บัญชี">●</button>
-                        <button class="sales-rail-btn active" type="button" aria-label="รายงานยอดขาย">▥</button>
-                        <button class="sales-rail-btn" type="button" aria-label="สินค้า">◆</button>
-                        <button class="sales-rail-btn" type="button" aria-label="ตะกร้า">▱</button>
-                        <button class="sales-rail-btn" type="button" aria-label="พนักงาน">♟</button>
-                        <button class="sales-rail-btn" type="button" aria-label="ตั้งค่า">⚙</button>
+                    <aside class="sales-dashboard-rail" aria-hidden="true">
+                        <span class="sales-rail-btn">●</span>
+                        <span class="sales-rail-btn active">▥</span>
+                        <span class="sales-rail-btn">◆</span>
+                        <span class="sales-rail-btn">▱</span>
+                        <span class="sales-rail-btn">♟</span>
+                        <span class="sales-rail-btn">⚙</span>
                     </aside>
 
                     <div class="sales-dashboard-main">
