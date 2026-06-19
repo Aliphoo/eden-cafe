@@ -205,6 +205,9 @@ const blankPost = () => ({
     author_name: auth.currentUser?.displayName || auth.currentUser?.email || 'Eden Writer',
     category_id: '',
     category_name: '',
+    category: '',
+    categoryId: '',
+    categoryName: '',
     tag_ids: [],
     tags: [],
     seo_title: '',
@@ -238,6 +241,27 @@ function $all(selector, scope = document) {
 
 function text(value = '') {
     return String(value ?? '').trim();
+}
+
+function coverCompatFields(url = '') {
+    const cleanUrl = text(url);
+    return {
+        cover_image_url: cleanUrl,
+        coverImageUrl: cleanUrl,
+        imageUrl: cleanUrl
+    };
+}
+
+function categoryCompatFields(categoryId = '', categoryName = '') {
+    const id = text(categoryId);
+    const name = text(categoryName || id);
+    return {
+        category_id: id,
+        category_name: name,
+        category: name,
+        categoryId: id,
+        categoryName: name
+    };
 }
 
 function escapeHTML(value = '') {
@@ -353,8 +377,10 @@ function formatDate(value) {
 function normalizePost(id, data = {}) {
     const title = text(data.title);
     const categoryName = text(data.category_name || data.categoryName || data.category || '');
+    const categoryId = text(data.category_id || data.categoryId || slugify(categoryName));
     const tags = Array.isArray(data.tags) ? data.tags.map(text).filter(Boolean) : text(data.tags).split(',').map(text).filter(Boolean);
     const content = text(data.content || data.body);
+    const coverUrl = text(data.cover_image_url || data.coverImageUrl || data.imageUrl || data.og_image_url);
     return {
         id,
         ...blankPost(),
@@ -363,13 +389,12 @@ function normalizePost(id, data = {}) {
         slug: slugify(data.slug || id || title),
         excerpt: text(data.excerpt || data.seo_description || htmlToText(content).slice(0, 170)),
         content,
-        cover_image_url: text(data.cover_image_url || data.coverImageUrl || data.imageUrl || data.og_image_url),
+        ...coverCompatFields(coverUrl),
         cover_image_alt: text(data.cover_image_alt || data.coverAlt || title),
         status: text(data.status || 'draft').toLowerCase(),
         author_id: text(data.author_id || data.authorId || ''),
         author_name: text(data.author_name || data.authorName || data.author || 'Eden Writer'),
-        category_id: text(data.category_id || data.categoryId || slugify(categoryName)),
-        category_name: categoryName,
+        ...categoryCompatFields(categoryId, categoryName),
         tag_ids: Array.isArray(data.tag_ids) ? data.tag_ids.map(text) : tags.map(slugify),
         tags,
         faqs: Array.isArray(data.faqs) ? data.faqs : [],
@@ -1095,6 +1120,11 @@ function readEditorPost(statusOverride = '') {
     const selectedCategoryId = text($('#blog-category')?.value);
     const category = state.categories.find((item) => item.id === selectedCategoryId)
         || (selectedCategoryId && existing.category_id === selectedCategoryId ? normalizedCategory({ id: selectedCategoryId, name: existing.category_name || selectedCategoryId }) : null);
+    const categoryId = category?.id || selectedCategoryId || '';
+    const categoryName = category?.name
+        || (selectedCategoryId === existing.category_id ? existing.category_name || existing.categoryName || existing.category : '')
+        || categoryId;
+    const coverUrl = text($('#blog-cover-url')?.value);
     const selectedTags = $all('[data-blog-tag].active').map((item) => item.dataset.blogTag);
     const tagNames = selectedTags.map((id) => state.tags.find((tag) => tag.id === id)?.name || id);
     return {
@@ -1106,13 +1136,10 @@ function readEditorPost(statusOverride = '') {
         status: statusOverride || $('#blog-status')?.value || 'draft',
         author_id: existing.author_id || auth.currentUser?.uid || '',
         author_name: text($('#blog-author-name')?.value || auth.currentUser?.displayName || auth.currentUser?.email),
-        category_id: category?.id || selectedCategoryId || '',
-        category_name: category?.name || (selectedCategoryId === existing.category_id ? existing.category_name : '') || '',
+        ...categoryCompatFields(categoryId, categoryName),
         tag_ids: selectedTags,
         tags: tagNames,
-        cover_image_url: text($('#blog-cover-url')?.value),
-        coverImageUrl: text($('#blog-cover-url')?.value),
-        imageUrl: text($('#blog-cover-url')?.value),
+        ...coverCompatFields(coverUrl),
         cover_image_alt: text($('#blog-cover-alt')?.value),
         cover_image_caption: text($('#blog-cover-caption')?.value),
         focus_keyword: text($('#blog-focus-keyword')?.value),
@@ -1328,9 +1355,7 @@ async function persistCoverAsset(asset) {
     const caption = text($('#blog-cover-caption')?.value || asset?.caption);
     const updated = nowIso();
     const patch = {
-        cover_image_url: url,
-        coverImageUrl: url,
-        imageUrl: url,
+        ...coverCompatFields(url),
         cover_image_alt: alt,
         cover_image_caption: caption,
         updated_at: updated,
@@ -1393,6 +1418,30 @@ async function verifyPublishedPostReadback(postId, expectedPost) {
     if (!actualCategoryId) readbackError(step, 'Publish readback mismatch: category_id is empty');
     if (expectedCategoryId && actualCategoryId !== expectedCategoryId) {
         readbackError(step, `Publish readback mismatch: expected category_id "${expectedCategoryId}", got "${actualCategoryId}"`);
+    }
+    if (expectedCategoryId) {
+        const categoryIdFields = {
+            category_id: text(data.category_id),
+            categoryId: text(data.categoryId)
+        };
+        Object.entries(categoryIdFields).forEach(([field, actual]) => {
+            if (actual !== expectedCategoryId) {
+                readbackError(step, `Publish readback mismatch: expected ${field} "${expectedCategoryId}", got "${actual || 'empty'}"`);
+            }
+        });
+    }
+    const expectedCategoryName = text(expectedPost.category_name || expectedPost.categoryName || expectedPost.category || expectedCategoryId);
+    if (expectedCategoryName) {
+        const categoryFields = {
+            category_name: text(data.category_name),
+            category: text(data.category),
+            categoryName: text(data.categoryName)
+        };
+        Object.entries(categoryFields).forEach(([field, actual]) => {
+            if (actual !== expectedCategoryName) {
+                readbackError(step, `Publish readback mismatch: expected ${field} "${expectedCategoryName}", got "${actual || 'empty'}"`);
+            }
+        });
     }
 
     const expectedCoverUrl = text(expectedPost.cover_image_url || expectedPost.coverImageUrl || expectedPost.imageUrl);
@@ -1820,7 +1869,7 @@ async function addCategoryFromEditor() {
     await runFirestoreStep('blog_categories.write', () => setDoc(doc(db, collections.categories, id), category, { merge: true }));
     await refreshData();
     const savedCategory = upsertCategoryInState(category);
-    state.editorDraft = { ...draft, category_id: id, category_name: name };
+    state.editorDraft = { ...draft, ...categoryCompatFields(id, name) };
     syncCategorySelect(savedCategory);
     const input = $('#blog-new-category');
     if (input) input.value = '';
@@ -1909,9 +1958,9 @@ async function seedBlogCms() {
     await Promise.all(posts.map(([title, slug, category], index) => setDoc(doc(db, collections.posts, slug), {
         title, slug, excerpt: `ตัวอย่างบทความสำหรับ Blog CMS: ${title}`,
         content: `<h2>สรุปคำตอบ</h2><p>${title} ควรเริ่มจากความต้องการของผู้อ่าน คำค้นหา และโครงสร้างบทความที่ตอบคำถามได้ชัดเจน</p><h2>แนวทางใช้งานจริง</h2><p>จัดหัวข้อย่อย ใส่ตัวอย่างที่เกี่ยวกับธุรกิจ เพิ่ม internal link ไปยัง <a href="/blog">บทความอื่น</a> และปิดท้ายด้วย CTA เช่น <a href="/booking">จองบริการ</a></p><h2>FAQ</h2><h3>ควรเริ่มอย่างไร?</h3><p>เริ่มจากคำถามหลักของผู้อ่าน แล้ววาง H2/H3 ให้ตอบเป็นลำดับ</p>`,
-        cover_image_url: '/Hero/Hero.webp', cover_image_alt: title, status: index < 3 ? 'published' : 'draft',
+        ...coverCompatFields('/Hero/Hero.webp'), cover_image_alt: title, status: index < 3 ? 'published' : 'draft',
         author_id: auth.currentUser?.uid || '', author_name: auth.currentUser?.displayName || auth.currentUser?.email || 'Eden Writer',
-        category_id: category, category_name: categories.find(([id]) => id === category)?.[1] || '',
+        ...categoryCompatFields(category, categories.find(([id]) => id === category)?.[1] || category),
         tag_ids: ['seo', 'blog'], tags: ['SEO', 'Blog'], seo_title: title, seo_description: `อ่าน${title} พร้อมแนวทาง SEO, AEO และ GEO`,
         focus_keyword: title.split(' ')[0], robots_index: true, robots_follow: true, schema_type: 'BlogPosting',
         faqs: [{ question: `ควรเริ่ม ${title} อย่างไร`, answer: 'เริ่มจากคำถามหลักของผู้อ่าน แล้ววาง H2/H3 ให้ตอบได้เป็นลำดับ' }],
