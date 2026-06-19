@@ -2379,9 +2379,28 @@
         <!-- Blogs Section -->
         <div id="blogs" class="content-section">
             <div class="section-container">
-                <div id="blog-cms-admin-root" class="blog-cms-admin-root">
-                    <div class="blog-cms-admin-loading">กำลังโหลด Blog CMS ใหม่...</div>
+                <div class="section-header">
+                    <h2>จัดการบทความ (Blogs)</h2>
+                    <div class="blog-admin-actions">
+                        <button class="btn-action btn-edit" id="seed-seo-blogs-btn" onclick="seedSeoBlogPosts()">นำเข้า/อัปเดต SEO Blog 6 บทความ</button>
+                        <button class="btn-action" onclick="openBlogModal()">+ เพิ่มบทความใหม่</button>
+                    </div>
                 </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>รูปหน้าปก</th>
+                            <th>หัวข้อ</th>
+                            <th>หมวดหมู่</th>
+                            <th>สถานะ</th>
+                            <th>วันที่สร้าง</th>
+                            <th>จัดการ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="blogs-table-body">
+                        <!-- Data injected via JS -->
+                    </tbody>
+                </table>
             </div>
         </div>
 
@@ -3124,6 +3143,51 @@
         </div>
     </div>
 
+    <!-- Blog Modal -->
+    <div id="blogModal" class="modal">
+        <div class="modal-content" style="max-width: 800px; width: 90%;">
+            <span class="close-modal" onclick="closeBlogModal()">&times;</span>
+            <h2 id="blogModalTitle">เพิ่มบทความใหม่</h2>
+            <form id="blogForm">
+                <input type="hidden" id="blogId">
+                <div class="form-group">
+                    <label for="blogTitle">หัวข้อบทความ (Title)</label>
+                    <input type="text" id="blogTitle" required>
+                </div>
+                <div class="form-group">
+                    <label for="blogCategory">หมวดหมู่</label>
+                    <select id="blogCategory">
+                        <option value="ความรู้เรื่องกาแฟ">ความรู้เรื่องกาแฟ</option>
+                        <option value="ข่าวสารและกิจกรรม">ข่าวสารและกิจกรรม</option>
+                        <option value="ไลฟ์สไตล์">ไลฟ์สไตล์</option>
+                        <option value="อื่นๆ">อื่นๆ</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="blogStatus">สถานะ</label>
+                    <select id="blogStatus">
+                        <option value="draft">ฉบับร่าง (Draft)</option>
+                        <option value="published">เผยแพร่ (Published)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="blogExcerpt">คำโปรย (Excerpt)</label>
+                    <textarea id="blogExcerpt" rows="2" placeholder="คำอธิบายสั้นๆ ก่อนกดอ่านเพิ่มเติม"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="blogImageFile">รูปภาพหน้าปก (Cover Image)</label>
+                    <input type="file" id="blogImageFile" accept="image/*">
+                    <small>หรือใช้ลิงก์รูปภาพ: <input type="url" id="blogImageUrl" placeholder="https://..." style="margin-top: 5px;"></small>
+                </div>
+                <div class="form-group" style="margin-bottom: 50px;">
+                    <label>เนื้อหาบทความ (Content)</label>
+                    <div id="blogContentEditor" style="height: 300px; background: white;"></div>
+                </div>
+                <button type="submit" class="btn-submit" id="btn-submit-blog">บันทึกบทความ</button>
+            </form>
+        </div>
+    </div>
+
     <!-- Legacy FAQ modal removed: FAQ is now managed inline in the FAQ section. -->
 
     <!-- Member Detail Modal -->
@@ -3138,8 +3202,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=archery-admin-ux-2"></script>
-    <script type="module" src="js/blog-cms-admin.js?v=blog-cms-admin-1"></script>
+    <script type="module" src="js/admin.js?v=blogs-stable-1"></script>
     <script>
         (function cleanRemovedAdminHash() {
             const rawHash = String(window.location.hash || '').replace(/^#/, '');
