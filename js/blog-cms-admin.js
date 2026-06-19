@@ -40,7 +40,9 @@ let state = {
     filterAuthor: 'all',
     sortBy: 'updated_at',
     search: '',
+    editorPane: 'content',
     previewMode: 'desktop',
+    editorDraft: null,
     autosaveTimer: null,
     lastSaved: '',
     statusMessage: '',
@@ -64,6 +66,7 @@ function persistCmsState() {
         localStorage.setItem(cmsStateKey, JSON.stringify({
             tab: state.tab,
             editingId: state.editingId,
+            editorPane: state.editorPane,
             previewMode: state.previewMode
         }));
     } catch (error) {
@@ -74,12 +77,14 @@ function restoreCmsState() {
     const saved = readStoredCmsState();
     if (cmsTabs.has(saved.tab)) state.tab = saved.tab;
     if (typeof saved.editingId === 'string') state.editingId = saved.editingId;
+    if (saved.editorPane === 'preview' || saved.editorPane === 'content') state.editorPane = saved.editorPane;
     if (saved.previewMode === 'mobile' || saved.previewMode === 'desktop') state.previewMode = saved.previewMode;
 }
 
 const actionTypes = Object.freeze({
     new: 'navigation',
     edit: 'navigation',
+    'editor-pane': 'navigation',
     'preview-mode': 'navigation',
     prompt: 'utility',
     'add-faq': 'utility',
@@ -454,9 +459,9 @@ function installStyles() {
         .blog-cms-status{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:.76rem;font-weight:900;text-transform:capitalize}.blog-cms-status.published{background:var(--cms-green-soft);color:var(--cms-green)}.blog-cms-status.draft{background:var(--cms-amber-soft);color:var(--cms-amber)}.blog-cms-status.scheduled{background:var(--cms-blue-soft);color:var(--cms-blue)}.blog-cms-status.archived{background:var(--cms-red-soft);color:var(--cms-red)}
         .blog-cms-score{display:grid;gap:5px;min-width:92px}.blog-cms-score-line{height:7px;border-radius:999px;background:#e9eee9;overflow:hidden}.blog-cms-score-line span{display:block;height:100%;background:var(--cms-green)}.blog-cms-score small{font-weight:850;color:#51645a}
         .blog-cms-editor-grid{display:grid;grid-template-columns:minmax(0,1fr)340px;gap:14px;align-items:start}.blog-cms-editor-main,.blog-cms-sidebar{display:grid;gap:12px;align-content:start}.blog-cms-editor-main{min-width:0}.blog-cms-sidebar{position:sticky;top:14px}
-        .blog-cms-editor-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.blog-cms-editor-toolbar h3{margin:0}.blog-cms-card>.blog-cms-editor-toolbar{margin-bottom:12px}.blog-cms-title-input{font-size:1.6rem;font-weight:900;line-height:1.2}.blog-cms-rich-toolbar{display:flex;gap:6px;flex-wrap:wrap;border:1px solid #dfe8e2;background:#f8faf8;border-radius:8px;padding:8px}.blog-cms-rich-toolbar button{border:1px solid transparent;background:#fff;color:#26382f;border-radius:6px;padding:7px 9px;font-weight:850;cursor:pointer}.blog-cms-rich-toolbar button:hover{border-color:#bcd0c3}
-        .blog-cms-editor{min-height:470px;border:1px solid #cfdcd4;border-radius:8px;padding:22px;background:#fff;line-height:1.82;outline:none;overflow:auto;font-size:1rem}.blog-cms-editor:focus{border-color:#78af8b;box-shadow:0 0 0 3px rgba(23,99,63,.1)}.blog-cms-editor:empty:before{content:attr(data-placeholder);color:#88958e}
-        .blog-cms-preview{border:1px solid #dfe8e2;border-radius:8px;background:#fff;padding:20px;line-height:1.8}.blog-cms-preview.mobile{max-width:390px;margin:auto}.blog-cms-preview img{max-width:100%;height:auto}
+        .blog-cms-editor-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.blog-cms-editor-toolbar h3{margin:0}.blog-cms-card>.blog-cms-editor-toolbar{margin-bottom:12px}.blog-cms-title-input{font-size:1.6rem;font-weight:900;line-height:1.2}.blog-cms-content-header{border-bottom:1px solid #edf1ed;padding-bottom:10px}.blog-cms-editor-tabs{display:inline-flex;gap:4px;align-items:center;border:1px solid var(--cms-line);border-radius:8px;background:#f8faf8;padding:4px}.blog-cms-editor-tabs button{min-height:34px;border:0;background:transparent;color:#3a5146;border-radius:6px;padding:7px 12px;font-weight:900;cursor:pointer}.blog-cms-editor-tabs button.active{background:var(--cms-green-dark);color:#fff}.blog-cms-rich-toolbar{display:grid;gap:8px;border:1px solid #dfe8e2;background:#f8faf8;border-radius:8px;padding:8px}.blog-cms-toolbar-group{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.blog-cms-toolbar-label{color:#6b7a72;font-size:.76rem;font-weight:900;text-transform:uppercase}.blog-cms-rich-toolbar button,.blog-cms-preview-actions button{border:1px solid transparent;background:#fff;color:#26382f;border-radius:6px;padding:7px 9px;font-weight:850;cursor:pointer}.blog-cms-rich-toolbar button:hover,.blog-cms-preview-actions button:hover{border-color:#bcd0c3}.blog-cms-preview-actions{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}.blog-cms-preview-actions button.active{background:var(--cms-green-dark);color:#fff}
+        .blog-cms-editor{min-height:470px;border:1px solid #cfdcd4;border-radius:8px;padding:22px;background:#fff;line-height:1.82;outline:none;overflow:auto;font-size:1rem}.blog-cms-editor:focus{border-color:#78af8b;box-shadow:0 0 0 3px rgba(23,99,63,.1)}.blog-cms-editor:empty:before{content:attr(data-placeholder);color:#88958e}.blog-cms-editor-pane-preview .blog-cms-rich-toolbar,.blog-cms-editor-pane-preview .blog-cms-editor{display:none}
+        .blog-cms-preview,.blog-cms-preview-actions{display:none}.blog-cms-preview.active{display:block}.blog-cms-preview-actions.active{display:flex}.blog-cms-preview{border:1px solid #dfe8e2;border-radius:8px;background:#fff;padding:20px;line-height:1.8}.blog-cms-preview.mobile{max-width:390px;margin:auto}.blog-cms-preview img{max-width:100%;height:auto}
         .blog-cms-check{display:grid;gap:8px}.blog-cms-check div{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;border:1px solid #edf1ed;border-radius:7px;padding:8px 10px}.blog-cms-check strong{border-radius:999px;padding:4px 8px;font-size:.75rem}.blog-cms-check .pass strong{background:var(--cms-green-soft);color:var(--cms-green)}.blog-cms-check .warn strong{background:var(--cms-amber-soft);color:var(--cms-amber)}.blog-cms-check .missing strong{background:var(--cms-red-soft);color:var(--cms-red)}
         .blog-cms-media-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.blog-cms-media-card img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:7px;background:#edf1ed}.blog-cms-alert{border:1px solid #c8dcff;background:#eef5ff;color:#285b83;border-radius:8px;padding:12px;font-weight:800}.blog-cms-alert.success{border-color:#b7dfc1;background:#edf8f0;color:#17633f}.blog-cms-alert.warning{border-color:#e3c16f;background:#fff7df;color:#7a4f08}.blog-cms-alert.error{border-color:#f0b7b7;background:#fff0f0;color:#9b2f2f}
         @media(max-width:1180px){.blog-cms-topbar,.blog-cms-editor-grid,.blog-cms-dashboard-grid,.blog-cms-toolbar,.blog-cms-field-grid{grid-template-columns:1fr}.blog-cms-sidebar{position:static}.blog-cms-kpis{grid-template-columns:repeat(2,minmax(130px,1fr))}.blog-cms-media-grid{grid-template-columns:repeat(2,minmax(150px,1fr))}.blog-cms-topbar-actions{justify-content:flex-start}}
@@ -754,13 +759,20 @@ function postRowHTML(post) {
 }
 
 function currentPost() {
-    return state.posts.find((post) => post.id === state.editingId) || blankPost();
+    const base = state.posts.find((post) => post.id === state.editingId) || blankPost();
+    if (state.editorDraft && (state.editorDraft.id || '') === (base.id || state.editingId || '')) {
+        return { ...base, ...state.editorDraft };
+    }
+    return base;
 }
 
 function editorHTML() {
     const post = currentPost();
     const tags = new Set(post.tag_ids || []);
     const score = checklistStats(post);
+    const editorPane = state.editorPane === 'preview' ? 'preview' : 'content';
+    const writingTools = [['p','Paragraph'],['h2','H2'],['h3','H3'],['bold','Bold'],['italic','Italic'],['underline','Underline'],['link','Link'],['quote','Quote'],['ul','Bullet'],['ol','Number'],['image','Image']];
+    const insertTools = [['h4','H4'],['gallery','Gallery'],['divider','Divider'],['cta','CTA'],['table','Table'],['faq','FAQ'],['youtube','YouTube'],['html','HTML'],['internal','Internal Link'],['related','Related Posts']];
     return `
         <div class="blog-cms-editor-grid">
             <div class="blog-cms-editor-main">
@@ -772,7 +784,6 @@ function editorHTML() {
                             <span class="blog-cms-muted">${state.lastSaved ? `บันทึกล่าสุด ${state.lastSaved}` : 'Autosave ทุก 12 วินาที'}</span>
                         </div>
                         <div class="blog-cms-action-stack">
-                            <button class="blog-cms-btn secondary" type="button" data-blog-action="preview-mode">${state.previewMode === 'desktop' ? 'Preview Mobile' : 'Preview Desktop'}</button>
                             <button class="blog-cms-btn secondary" type="button" data-blog-action="save-draft">Save Draft</button>
                             <button class="blog-cms-btn" type="button" data-blog-action="publish">Publish</button>
                             <button class="blog-cms-btn secondary" type="button" data-blog-action="schedule">Schedule</button>
@@ -790,22 +801,33 @@ function editorHTML() {
                         <textarea id="blog-excerpt" placeholder="สรุปสั้นสำหรับหน้ารวมบทความและ meta">${escapeHTML(post.excerpt)}</textarea>
                     </label>
                 </div>
-                <div class="blog-cms-card">
-                    <div class="blog-cms-editor-toolbar">
-                        <h3>Content</h3>
+                <div class="blog-cms-card blog-cms-editor-pane-${editorPane}">
+                    <div class="blog-cms-editor-toolbar blog-cms-content-header">
+                        <div class="blog-cms-editor-tabs" role="tablist" aria-label="Post editor views">
+                            <button type="button" data-blog-action="editor-pane" data-pane="content" class="${editorPane === 'content' ? 'active' : ''}" role="tab" aria-selected="${editorPane === 'content'}">Content</button>
+                            <button type="button" data-blog-action="editor-pane" data-pane="preview" class="${editorPane === 'preview' ? 'active' : ''}" role="tab" aria-selected="${editorPane === 'preview'}">Preview</button>
+                        </div>
                         <span class="blog-cms-muted"><span id="blog-word-count">${post.word_count || 0}</span> words · <span id="blog-reading-time">${post.reading_time || 1}</span> นาทีอ่าน</span>
                     </div>
                     <div class="blog-cms-rich-toolbar">
-                        ${[['h2','H2'],['h3','H3'],['h4','H4'],['p','Paragraph'],['ul','Bullet'],['ol','Number'],['quote','Quote'],['image','Image'],['gallery','Gallery'],['divider','Divider'],['cta','CTA'],['table','Table'],['faq','FAQ'],['youtube','YouTube'],['html','HTML'],['internal','Internal Link'],['related','Related Posts']].map(([cmd,label]) => `<button type="button" data-blog-insert="${cmd}">${label}</button>`).join('')}
+                        <div class="blog-cms-toolbar-group">
+                            <span class="blog-cms-toolbar-label">Write</span>
+                            ${writingTools.map(([cmd,label]) => `<button type="button" data-blog-insert="${cmd}">${label}</button>`).join('')}
+                        </div>
+                        <div class="blog-cms-toolbar-group">
+                            <span class="blog-cms-toolbar-label">Insert block</span>
+                            ${insertTools.map(([cmd,label]) => `<button type="button" data-blog-insert="${cmd}">${label}</button>`).join('')}
+                        </div>
                     </div>
                     <div id="blog-content-editor" class="blog-cms-editor" contenteditable="true" data-placeholder="เขียนบทความ วางจาก Google Docs หรือเพิ่ม block จาก toolbar ได้ที่นี่">${post.content || ''}</div>
-                </div>
-                <div class="blog-cms-card">
-                    <div class="blog-cms-editor-toolbar">
-                        <h3>Preview</h3>
-                        <span class="blog-cms-muted">${state.previewMode === 'desktop' ? 'Desktop' : 'Mobile'}</span>
+                    <div class="blog-cms-preview-actions ${editorPane === 'preview' ? 'active' : ''}">
+                        <span class="blog-cms-muted">Preview ${state.previewMode === 'desktop' ? 'Desktop' : 'Mobile'}</span>
+                        <div class="blog-cms-toolbar-group" aria-label="Preview size">
+                            <button type="button" data-blog-action="preview-mode" data-preview-mode="desktop" class="${state.previewMode === 'desktop' ? 'active' : ''}">Desktop</button>
+                            <button type="button" data-blog-action="preview-mode" data-preview-mode="mobile" class="${state.previewMode === 'mobile' ? 'active' : ''}">Mobile</button>
+                        </div>
                     </div>
-                    <article id="blog-preview" class="blog-cms-preview ${state.previewMode}"></article>
+                    <article id="blog-preview" class="blog-cms-preview ${state.previewMode} ${editorPane === 'preview' ? 'active' : ''}"></article>
                 </div>
             </div>
             <aside class="blog-cms-sidebar">
@@ -921,7 +943,8 @@ function fromLocalInput(value) {
 
 function readEditorPost(statusOverride = '') {
     const existing = currentPost();
-    const content = $('#blog-content-editor')?.innerHTML || '';
+    const editor = $('#blog-content-editor');
+    const content = editor ? editor.innerHTML : existing.content || '';
     const words = countWords(content);
     const category = state.categories.find((item) => item.id === $('#blog-category')?.value);
     const selectedTags = $all('[data-blog-tag].active').map((item) => item.dataset.blogTag);
@@ -963,6 +986,20 @@ function readEditorPost(statusOverride = '') {
         word_count: words,
         reading_time: readingTime(words)
     };
+}
+
+function captureEditorDraft() {
+    if (state.tab !== 'editor' || !$('#blog-title')) return;
+    state.editorDraft = readEditorPost();
+}
+
+function openEditor(id = '') {
+    state.editingId = id || '';
+    state.editorDraft = null;
+    state.editorPane = 'content';
+    state.tab = 'editor';
+    persistCmsState();
+    render();
 }
 
 function seoChecklist(post) {
@@ -1046,6 +1083,7 @@ async function savePost(statusOverride = '', options = {}) {
         revisionWarning = await writeRevisionLog({ post_id: state.editingId, title: payload.title, content: payload.content, edited_by: auth.currentUser?.uid || '', created_at: nowIso() });
     }
     state.lastSaved = new Date().toLocaleTimeString('th-TH');
+    state.editorDraft = null;
     persistCmsState();
     await refreshData();
     render();
@@ -1131,6 +1169,7 @@ function bindEvents() {
     const el = root();
     if (!el) return;
     $all('[data-blog-cms-tab]', el).forEach((button) => button.addEventListener('click', () => {
+        captureEditorDraft();
         state.tab = button.dataset.blogCmsTab;
         if (state.tab === 'editor' && !state.editingId) state.editingId = '';
         persistCmsState();
@@ -1163,6 +1202,32 @@ function bindEvents() {
 function insertBlock(command) {
     const editor = $('#blog-content-editor');
     if (!editor) return;
+    editor.focus();
+
+    const inlineCommands = { bold: 'bold', italic: 'italic', underline: 'underline' };
+    const blockFormats = { p: 'p', h2: 'h2', h3: 'h3', h4: 'h4', quote: 'blockquote' };
+    if (inlineCommands[command]) {
+        document.execCommand(inlineCommands[command], false);
+        updateEditorStats();
+        return;
+    }
+    if (command === 'link') {
+        const url = prompt('URL');
+        if (url) document.execCommand('createLink', false, url);
+        updateEditorStats();
+        return;
+    }
+    if (blockFormats[command]) {
+        document.execCommand('formatBlock', false, blockFormats[command]);
+        updateEditorStats();
+        return;
+    }
+    if (command === 'ul' || command === 'ol') {
+        document.execCommand(command === 'ul' ? 'insertUnorderedList' : 'insertOrderedList', false);
+        updateEditorStats();
+        return;
+    }
+
     const blocks = {
         h2: '<h2>หัวข้อ H2</h2>',
         h3: '<h3>หัวข้อ H3</h3>',
@@ -1182,7 +1247,6 @@ function insertBlock(command) {
         internal: '<p><a href="/blog">อ่านบทความอื่นใน Eden Cafe Blog</a></p>',
         related: '<section data-related-posts="manual"><h2>Related Posts</h2><p>เลือกลิงก์บทความที่เกี่ยวข้อง</p></section>'
     };
-    editor.focus();
     document.execCommand('insertHTML', false, blocks[command] || '');
     updateEditorStats();
 }
@@ -1197,9 +1261,23 @@ async function handleAction(event) {
         updateEditorStats();
         return;
     }
-    if (action === 'new') { state.editingId = ''; state.tab = 'editor'; persistCmsState(); render(); return; }
-    if (action === 'edit') { state.editingId = actionEl.dataset.id; state.tab = 'editor'; persistCmsState(); render(); return; }
-    if (action === 'preview-mode') { state.previewMode = state.previewMode === 'desktop' ? 'mobile' : 'desktop'; persistCmsState(); render(); return; }
+    if (action === 'new') return openEditor('');
+    if (action === 'edit') return openEditor(actionEl.dataset.id);
+    if (action === 'editor-pane') {
+        captureEditorDraft();
+        state.editorPane = actionEl.dataset.pane === 'preview' ? 'preview' : 'content';
+        persistCmsState();
+        render();
+        return;
+    }
+    if (action === 'preview-mode') {
+        captureEditorDraft();
+        state.previewMode = actionEl.dataset.previewMode || (state.previewMode === 'desktop' ? 'mobile' : 'desktop');
+        state.editorPane = 'preview';
+        persistCmsState();
+        render();
+        return;
+    }
     if (action === 'add-faq') return addFaqToEditor();
     if (action === 'prompt') return promptTemplate(actionEl.dataset.prompt);
 
@@ -1367,17 +1445,11 @@ window.fetchBlogsFromCloud = async () => {
     render();
 };
 window.openBlogModal = () => {
-    state.editingId = '';
-    state.tab = 'editor';
-    persistCmsState();
-    render();
+    openEditor('');
 };
 window.closeBlogModal = () => {};
 window.editBlog = (id) => {
-    state.editingId = id || '';
-    state.tab = 'editor';
-    persistCmsState();
-    render();
+    openEditor(id || '');
 };
 window.deleteBlog = deletePostById;
 window.seedSeoBlogPosts = seedBlogCms;
