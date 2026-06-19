@@ -5414,6 +5414,7 @@ body[data-blog-page] h3 {
 .promo-code-container .btn,.success-content .btn,.checkout-empty a,.checkout-box p a{align-items:center;display:inline-flex;justify-content:center;min-height:44px;min-width:44px}
 .auth-forgot-link,.auth-switch a{align-items:center;display:inline-flex;min-height:44px;padding:10px 0}
 .blog-filter-bar button{align-items:center;display:inline-flex;min-height:44px}
+.blog-cms-searchbar input,.blog-cms-searchbar select,#blog-search-input,#blog-category-filter,#blog-tag-filter{min-height:44px}
 .blog-read-link{align-items:center;display:inline-flex;justify-content:center;min-height:44px;min-width:44px}
 .blog-card a,.blog-cms-card-foot a{align-items:center;display:inline-flex;min-height:44px;min-width:44px}
 .social-icons-premium a{height:44px;width:44px}
