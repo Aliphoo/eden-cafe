@@ -5116,6 +5116,7 @@ exports.createBeamArcheryPayment = archeryPaymentsV1.createBeamArcheryPayment;
 exports.beamArcheryPaymentWebhook = archeryPaymentsV1.beamArcheryPaymentWebhook;
 exports.getArcheryPaymentStatus = archeryPaymentsV1.getArcheryPaymentStatus;
 exports.reconcileBeamLatePayment = archeryPaymentsV1.reconcileBeamLatePayment;
+exports.createShopOrderDraft = archeryPaymentsV1.createShopOrderDraft;
 exports.createPaymentIntent = archeryPaymentsV1.createPaymentIntent;
 exports.getPaymentStatus = archeryPaymentsV1.getPaymentStatus;
 exports.listPaymentsForSource = archeryPaymentsV1.listPaymentsForSource;

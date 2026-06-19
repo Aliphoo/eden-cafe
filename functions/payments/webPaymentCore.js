@@ -68,6 +68,8 @@ const TERMINAL_STATUSES = new Set([
   'PARTIALLY_REFUNDED',
   'PAID_PENDING_REVIEW',
 ]);
+const DEFAULT_WEB_ORDER_BRANCH_ID = 'BKK_MAIN';
+const DEFAULT_WEB_SHIPPING_FEE = 50;
 
 function envValue(name, fallback = '') {
   const value = process.env[name];
@@ -227,6 +229,164 @@ function numericAmount(...values) {
   return 0;
 }
 
+function roundMoney(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function webOrderBranchId(value) {
+  return normalizeBranchId(value || envValue('WEB_ORDER_BRANCH_ID', DEFAULT_WEB_ORDER_BRANCH_ID));
+}
+
+function normalizeShopOrderItems(rawItems = []) {
+  if (!Array.isArray(rawItems) || !rawItems.length) {
+    throw apiError('ORDER_ITEMS_REQUIRED', 400, 'Order items are required');
+  }
+  if (rawItems.length > 50) {
+    throw apiError('ORDER_ITEMS_TOO_MANY', 400, 'Order has too many line items');
+  }
+  return rawItems.map((item, index) => {
+    const rawId = cleanString(item.id || item.product_id || item.productId || item.sku, 160);
+    const [baseRawId, variantRawId = ''] = rawId.split('::');
+    const baseProductId = baseRawId.startsWith('menu-') ? baseRawId.slice(5) : baseRawId;
+    const quantity = Math.floor(Number(item.quantity || item.qty || 0) || 0);
+    if (!rawId) throw apiError('PRODUCT_REQUIRED', 400, `Product id is required for item ${index + 1}`);
+    if (quantity < 1 || quantity > 99) throw apiError('QUANTITY_INVALID', 400, `Quantity is invalid for item ${index + 1}`);
+    return {
+      raw_id: rawId,
+      product_id: baseProductId,
+      product_raw_id: baseRawId,
+      variant_id: cleanString(item.variant_id || item.variantId || variantRawId, 120),
+      quantity,
+      client_name: cleanString(item.name || item.label, 180),
+    };
+  });
+}
+
+function parseShopBoolean(value, fallback = false) {
+  if (value == null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
+function firstAvailableVariant(product = {}) {
+  const variants = Array.isArray(product.variants) ? product.variants : [];
+  return variants.find(variant => parseShopBoolean(variant.availableForSale ?? variant.available ?? variant.enabled, true))
+    || variants[0]
+    || null;
+}
+
+function shopVariantKey(value) {
+  return cleanString(value, 120).toLowerCase();
+}
+
+function findShopVariant(product = {}, variantId = '') {
+  const variants = Array.isArray(product.variants) ? product.variants : [];
+  if (!variants.length) return null;
+  const wanted = shopVariantKey(variantId);
+  if (!wanted) return firstAvailableVariant(product);
+  const found = variants.find(variant => {
+    return [variant.id, variant.sku, variant.name].some(value => shopVariantKey(value) === wanted);
+  });
+  if (!found) throw apiError('PRODUCT_VARIANT_NOT_FOUND', 404, `Product variant was not found: ${variantId}`);
+  if (!parseShopBoolean(found.availableForSale ?? found.available ?? found.enabled, true)) {
+    throw apiError('PRODUCT_VARIANT_NOT_AVAILABLE', 409, `Product variant is not available: ${variantId}`);
+  }
+  return found;
+}
+
+function shopProductName(product = {}, fallback = 'Eden Product') {
+  return cleanString(product.name || product.nameTh || product.nameEn || product.label || fallback, 180) || fallback;
+}
+
+function shopProductImage(product = {}) {
+  return cleanString(product.imageUrl || product.image || product.photoUrl || '', 500);
+}
+
+function shopProductIsSellable(product = {}) {
+  return parseShopBoolean(product.availableForSale ?? product.available, true)
+    && parseShopBoolean(product.showInShop, false);
+}
+
+function shopProductPrice(product = {}, variant = null) {
+  return roundMoney(variant?.price ?? variant?.salePrice ?? product.price ?? product.salePrice ?? 0);
+}
+
+function shopProductStock(product = {}, variant = null) {
+  const value = variant?.stock ?? variant?.inStock ?? product.stock ?? product.inStock;
+  const stock = Number(value);
+  return Number.isFinite(stock) ? stock : null;
+}
+
+async function readShopProduct(transaction, db, item) {
+  const candidates = Array.from(new Set([item.product_id, item.product_raw_id, item.raw_id].filter(Boolean)));
+  for (const id of candidates) {
+    const ref = db.collection('products').doc(id);
+    const snap = await transaction.get(ref);
+    if (snap.exists) return { ref, id, data: snap.data() || {} };
+  }
+  throw apiError('PRODUCT_NOT_FOUND', 404, `Product was not found: ${item.raw_id}`);
+}
+
+async function buildShopOrderLines(transaction, db, items) {
+  const lines = [];
+  for (const item of items) {
+    const productSnap = await readShopProduct(transaction, db, item);
+    const product = productSnap.data;
+    if (!shopProductIsSellable(product)) {
+      throw apiError('PRODUCT_NOT_AVAILABLE', 409, `Product is not available: ${item.raw_id}`);
+    }
+    const variant = findShopVariant(product, item.variant_id);
+    const price = shopProductPrice(product, variant);
+    if (price <= 0) throw apiError('PRODUCT_PRICE_INVALID', 409, `Product has no valid price: ${item.raw_id}`);
+    if (product.trackStock === true || variant?.trackStock === true) {
+      const stock = shopProductStock(product, variant);
+      if (stock != null && stock < item.quantity) {
+        throw apiError('PRODUCT_OUT_OF_STOCK', 409, `Product stock is not enough: ${item.raw_id}`);
+      }
+    }
+    const lineTotal = roundMoney(price * item.quantity);
+    lines.push({
+      id: item.raw_id,
+      productId: productSnap.id,
+      sku: cleanString(variant?.sku || product.sku || productSnap.id, 120),
+      variantId: cleanString(variant?.id || item.variant_id || '', 120),
+      variantName: cleanString(variant?.name || '', 120),
+      name: shopProductName(product, item.client_name),
+      price,
+      unitPrice: price,
+      quantity: item.quantity,
+      lineTotal,
+      imageUrl: shopProductImage(product),
+    });
+  }
+  return lines;
+}
+
+function normalizeFulfillmentMethod(value) {
+  const method = cleanString(value || 'delivery', 30).toLowerCase();
+  return method === 'pickup' ? 'pickup' : 'delivery';
+}
+
+function normalizeCustomerName(value) {
+  const name = cleanString(value, 120);
+  if (!name) throw apiError('CUSTOMER_NAME_REQUIRED', 400, 'Customer name is required');
+  return name;
+}
+
+function normalizeCustomerPhone(value) {
+  const phone = cleanString(value, 40);
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length < 8 || digits.length > 15) throw apiError('CUSTOMER_PHONE_REQUIRED', 400, 'Customer phone is required');
+  return phone;
+}
+
+function shopOrderDisplayId(sourceId) {
+  return `#ED${sha256(sourceId).slice(0, 8).toUpperCase()}`;
+}
+
 function sourceAmount(sourceType, source = {}) {
   if (sourceType === 'SHOP_ORDER') {
     return numericAmount(source.totalAmount, source.total, source.amount_total, source.amount);
@@ -255,7 +415,7 @@ function sourceMatchesType(sourceType, source = {}) {
   if (sourceType === 'ARCHERY_BOOKING') return service === 'ARCHERY' || service === 'ARCHERY_BOOKING' || bookingType === 'archery';
   if (sourceType === 'TABLE_BOOKING') return service === 'TABLE' || service === 'TABLE_BOOKING' || bookingType === 'table';
   if (sourceType === 'ROOM_BOOKING') return service === 'ROOM' || service === 'ROOM_BOOKING' || bookingType === 'room';
-  if (sourceType === 'SHOP_ORDER') return orderType === 'shop' || orderType === 'online' || cleanString(source.source, 40).toLowerCase() === 'online';
+  if (sourceType === 'SHOP_ORDER') return service === 'SHOP_ORDER' && source.payment_required === true;
   return false;
 }
 
@@ -274,7 +434,7 @@ function sourceExpiry(source = {}) {
 }
 
 function sourceContextFromSnapshot(sourceType, sourceId, branchId, ref, data) {
-  const sourceBranch = sourceBranchId(data, branchId);
+  const sourceBranch = sourceBranchId(data, sourceType === 'SHOP_ORDER' ? '' : branchId);
   if (!sourceBranch) throw apiError('BRANCH_REQUIRED', 400, 'branch_id is required for this source');
   if (branchId && sourceBranch !== branchId) throw apiError('SOURCE_NOT_FOUND', 404, 'Source was not found for this branch');
   if (!sourceMatchesType(sourceType, data)) throw apiError('SOURCE_NOT_FOUND', 404, 'Source does not match source_type');
@@ -688,6 +848,140 @@ function setPaymentBase(context, paymentId, providerResult, provider, idempotenc
     updated_at: now,
   };
 }
+
+const createShopOrderDraft = httpFunction(async ({ db, data, actor, requestId }) => {
+  const branchId = webOrderBranchId(data.branch_id || data.branchId);
+  const idempotencyKey = cleanString(data.idempotency_key || data.idempotencyKey, 180);
+  if (!idempotencyKey) throw apiError('IDEMPOTENCY_KEY_REQUIRED', 400, 'idempotency_key is required');
+
+  const rawItems = normalizeShopOrderItems(data.items || data.cart || []);
+  const fulfillmentMethod = normalizeFulfillmentMethod(data.fulfillment_method || data.fulfillmentMethod);
+  const customerName = normalizeCustomerName(data.customer_name || data.customerName || data.name);
+  const phone = normalizeCustomerPhone(data.phone || data.customerPhone);
+  const address = cleanString(data.address, 700);
+  if (fulfillmentMethod === 'delivery' && !address) {
+    throw apiError('DELIVERY_ADDRESS_REQUIRED', 400, 'Delivery address is required');
+  }
+  const promoCode = cleanString(data.promo_code || data.promoCode, 40).toUpperCase();
+
+  const result = await runIdempotentTransaction(db, {
+    branchId,
+    action: 'createShopOrderDraft',
+    idempotencyKey,
+    actorId: actor.uid,
+    payload: {
+      items: rawItems.map(item => ({ product_id: item.product_id, raw_id: item.raw_id, variant_id: item.variant_id, quantity: item.quantity })),
+      fulfillment_method: fulfillmentMethod,
+      promo_code: promoCode,
+      customer_name: customerName,
+      phone,
+      address,
+    },
+  }, async transaction => {
+    const lines = await buildShopOrderLines(transaction, db, rawItems);
+    const subtotal = roundMoney(lines.reduce((sum, item) => sum + item.lineTotal, 0));
+    if (promoCode && promoCode !== 'EDEN10') throw apiError('PROMO_CODE_INVALID', 400, 'Promo code is invalid');
+    const discount = promoCode === 'EDEN10' ? Math.min(subtotal, Math.round(subtotal * 0.1)) : 0;
+    const shippingFee = fulfillmentMethod === 'pickup'
+      ? 0
+      : Math.max(0, Number(envValue('WEB_ORDER_SHIPPING_FEE', DEFAULT_WEB_SHIPPING_FEE)) || DEFAULT_WEB_SHIPPING_FEE);
+    const totalAmount = roundMoney(Math.max(0, subtotal + shippingFee - discount));
+    if (totalAmount <= 0) throw apiError('ORDER_TOTAL_INVALID', 409, 'Order total must be greater than zero');
+
+    const orderRef = db.collection('orders').doc(paymentDocId('shop_order', `${branchId}:${actor.uid}:${idempotencyKey}`));
+    const orderSnap = await transaction.get(orderRef);
+    if (orderSnap.exists) {
+      const existing = orderSnap.data() || {};
+      if (existing.customerUid !== actor.uid && existing.uid !== actor.uid) {
+        throw apiError('ORDER_ALREADY_EXISTS', 409, 'Order draft already belongs to another user');
+      }
+      return {
+        source_type: 'SHOP_ORDER',
+        source_id: orderRef.id,
+        order_id: existing.id || existing.order_id || orderRef.id,
+        branch_id: existing.branch_id || branchId,
+        amount: Number(existing.totalAmount || existing.total || totalAmount) || totalAmount,
+        currency: existing.currency || 'THB',
+        status: existing.status || 'pending',
+        payment_status: existing.payment_status || existing.paymentStatus || 'UNPAID',
+      };
+    }
+
+    const now = FieldValue.serverTimestamp();
+    const orderId = shopOrderDisplayId(orderRef.id);
+    const orderPayload = {
+      id: orderId,
+      order_id: orderId,
+      branch_id: branchId,
+      source: 'online',
+      orderType: 'shop',
+      service_type: 'SHOP_ORDER',
+      uid: actor.uid,
+      customerUid: actor.uid,
+      member_id: actor.uid,
+      customerName,
+      phone,
+      address: fulfillmentMethod === 'pickup' ? 'Pickup at Store' : address,
+      fulfillmentMethod,
+      items: lines,
+      subtotal,
+      discount,
+      promoCode,
+      shippingFee,
+      totalAmount,
+      total: totalAmount,
+      currency: 'THB',
+      status: 'pending',
+      order_status: 'pending',
+      payment_status: 'UNPAID',
+      paymentStatus: 'pending',
+      paymentMethod: 'beam',
+      paymentLabel: 'Beam',
+      payment_provider: 'BEAM',
+      payment_required: true,
+      createdAt: now,
+      created_at: now,
+      timestamp: now,
+      updatedAt: now,
+      updated_at: now,
+    };
+
+    transaction.set(orderRef, orderPayload);
+    writeAuditLog(transaction, db, {
+      branchId,
+      actor,
+      actorType: 'CUSTOMER',
+      action: 'createShopOrderDraft',
+      targetCollection: 'orders',
+      targetId: orderRef.id,
+      before: null,
+      after: { order_id: orderId, source_id: orderRef.id, payment_status: 'UNPAID', totalAmount },
+      requestId,
+    });
+
+    return {
+      source_type: 'SHOP_ORDER',
+      source_id: orderRef.id,
+      order_id: orderId,
+      branch_id: branchId,
+      amount: totalAmount,
+      currency: 'THB',
+      status: 'pending',
+      payment_status: 'UNPAID',
+      totals: {
+        subtotal,
+        discount,
+        shippingFee,
+        totalAmount,
+      },
+    };
+  });
+
+  return { replayed: result.replayed, ...result.response };
+}, {
+  name: 'createShopOrderDraft',
+  methods: ['POST'],
+});
 
 const createPaymentIntent = httpFunction(async ({ db, data, actor, requestId }) => {
   const branchId = normalizeBranchId(data.branch_id);
@@ -1707,6 +2001,7 @@ const paymentWebhook = onRequest({
 });
 
 module.exports = {
+  createShopOrderDraft,
   createPaymentIntent,
   getPaymentStatus,
   listPaymentsForSource,

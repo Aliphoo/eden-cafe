@@ -730,34 +730,7 @@ service cloud.firestore {
     match /orders/{docId} {
       allow create: if isPosAdminOrderWrite()
         || isValidPosOrderCreate()
-        || ((hasAdminPermission('orders') || hasAdminPermission('pos')) && isValidAdminOrderCreate())
-        || (isSignedIn()
-        && request.resource.data.keys().hasOnly([
-          'id', 'date', 'items', 'total', 'totalAmount', 'uid', 'timestamp',
-          'customerName', 'phone', 'address', 'status',
-          'source', 'orderType', 'paymentStatus', 'paymentMethod', 'paymentLabel',
-          'fulfillmentMethod', 'shippingFee', 'subtotal', 'discount'
-        ])
-        && request.resource.data.keys().hasAll(['id', 'date', 'items', 'uid', 'timestamp'])
-        && request.resource.data.uid == request.auth.uid
-        && isShortString(request.resource.data.id, 40)
-        && isShortString(request.resource.data.date, 40)
-        && request.resource.data.items is list
-        && request.resource.data.items.size() > 0
-        && request.resource.data.items.size() <= 50
-        && (!request.resource.data.keys().hasAny(['status']) || request.resource.data.status == 'pending')
-        && (!request.resource.data.keys().hasAny(['source']) || request.resource.data.source == 'online')
-        && (!request.resource.data.keys().hasAny(['orderType']) || request.resource.data.orderType in ['online', 'shop'])
-        && (!request.resource.data.keys().hasAny(['paymentStatus']) || request.resource.data.paymentStatus == 'pending')
-        && (!request.resource.data.keys().hasAny(['paymentMethod']) || request.resource.data.paymentMethod in ['cash', 'transfer', 'thai_chuay_thai_plus', 'qr', 'card', 'other'])
-        && (!request.resource.data.keys().hasAny(['paymentLabel']) || (request.resource.data.paymentLabel is string && request.resource.data.paymentLabel.size() <= 80))
-        && (!request.resource.data.keys().hasAny(['fulfillmentMethod']) || request.resource.data.fulfillmentMethod in ['delivery', 'pickup'])
-        && (!request.resource.data.keys().hasAny(['shippingFee']) || (request.resource.data.shippingFee is number && request.resource.data.shippingFee >= 0 && request.resource.data.shippingFee <= 100000))
-        && (!request.resource.data.keys().hasAny(['subtotal']) || (request.resource.data.subtotal is number && request.resource.data.subtotal >= 0 && request.resource.data.subtotal <= 1000000))
-        && (!request.resource.data.keys().hasAny(['discount']) || (request.resource.data.discount is number && request.resource.data.discount >= 0 && request.resource.data.discount <= 1000000))
-        && (!request.resource.data.keys().hasAny(['total']) || (request.resource.data.total is number && request.resource.data.total >= 0 && request.resource.data.total <= 1000000))
-        && (!request.resource.data.keys().hasAny(['totalAmount']) || (request.resource.data.totalAmount is number && request.resource.data.totalAmount >= 0 && request.resource.data.totalAmount <= 1000000))
-        && request.resource.data.timestamp == request.time);
+        || ((hasAdminPermission('orders') || hasAdminPermission('pos')) && isValidAdminOrderCreate());
       allow read: if hasAdminPermission('orders') || hasAdminPermission('pos') || ownsResource();
       allow update: if isAdminOrderNonPaymentUpdate() || isPosAdminOrderWrite() || isValidPosOrderVoidUpdate() || isValidPosOpenBillUpdate();
       allow delete: if hasAdminPermission('orders');

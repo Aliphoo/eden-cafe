@@ -196,6 +196,7 @@ module.exports = {
   beamArcheryPaymentWebhook: beamArcheryPayments.beamArcheryPaymentWebhook,
   getArcheryPaymentStatus: beamArcheryPayments.getArcheryPaymentStatus,
   reconcileBeamLatePayment: beamArcheryPayments.reconcileBeamLatePayment,
+  createShopOrderDraft: webPaymentCore.createShopOrderDraft,
   createPaymentIntent: webPaymentCore.createPaymentIntent,
   getPaymentStatus: webPaymentCore.getPaymentStatus,
   listPaymentsForSource: webPaymentCore.listPaymentsForSource,

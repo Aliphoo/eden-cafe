@@ -749,7 +749,11 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         if (!orders.length) return `<p style="color:#777;">${escapeHTML(labels.noOrders)}</p>`;
         return orders.map(order => {
             const items = Array.isArray(order.items) ? order.items : [];
-            const status = order.status === 'paid' ? labels.paid : labels.pending;
+            const paymentStatus = String(order.paymentStatus || order.payment_status || '').toLowerCase();
+            const orderStatus = String(order.status || order.order_status || '').toLowerCase();
+            const status = paymentStatus === 'paid' || paymentStatus === 'paid_online' || orderStatus === 'paid' || orderStatus === 'completed'
+                ? labels.paid
+                : labels.pending;
             return `
                 <div class="order-card">
                     <div class="order-card-header">

@@ -41,7 +41,7 @@ Sync these only after confirming the current local changes are approved for prod
 
 ## Public HTML Sync Manifest
 
-Use `spaceship-production-drafts/public_html-sync-manifest.txt` as the working manifest.
+Regenerate a fresh sync manifest from the current source before any Spaceship upload. Do not reuse old local draft or package artifacts.
 
 High-level include list:
 
@@ -49,7 +49,7 @@ High-level include list:
 - `robots.txt`
 - `sitemap.xml`
 - Root HTML pages such as `index.html`, `menu.html`, `shop.html`, `booking.html`, `login.html`, `register.html`, `profile.html`, `admin.html`
-- English and utility pages such as `en.html`, `menu-en.html`, `shop-en.html`, `booking-en.html`, `checkout-en.html`, `profile-en.html`, `faq.html`, `feelfreepay.html`
+- English and utility pages such as `en.html`, `menu-en.html`, `shop-en.html`, `booking-en.html`, `checkout-en.html`, `profile-en.html`, `faq.html`
 - `blog/` and blog HTML files
 - `js/`
 - `Images/`
@@ -81,12 +81,7 @@ Never upload these to `public_html`:
 
 ## Draft Files
 
-Draft artifacts are local only:
-
-- `spaceship-production-drafts/.htaccess`
-- `spaceship-production-drafts/robots.txt`
-- `spaceship-production-drafts/sitemap.xml`
-- `spaceship-production-drafts/public_html-sync-manifest.txt`
+Draft artifacts are local only and should be regenerated per deploy. Do not keep generated Spaceship packages in the repo worktree after they become stale.
 
 Before any Spaceship deploy, copy drafts into a reviewed staging package and
 compare them with the current live `public_html` files.
