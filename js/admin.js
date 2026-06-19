@@ -267,6 +267,18 @@ let currentAdminAccess = null;
 let adminAccessData = {};
 let adminAccessUnsubscribe = null;
 let adminAccessFormBound = false;
+
+function publishAdminAccessState() {
+    const access = currentAdminAccess ? {
+        ...currentAdminAccess,
+        permissions: { ...(currentAdminAccess.permissions || {}) },
+        explicit_permissions: { ...(currentAdminAccess.explicit_permissions || {}) }
+    } : null;
+    window.edenAdminAccess = access;
+    window.dispatchEvent(new CustomEvent('eden:admin-access-change', { detail: access }));
+}
+window.edenAdminAccess = null;
+window.getEdenAdminAccess = () => window.edenAdminAccess || null;
 let discountsData = {};
 let discountsUnsubscribe = null;
 let discountFormBound = false;
@@ -993,6 +1005,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (user) {
             const authEmails = getAuthEmails(user);
             currentAdminAccess = await loadAdminAccess(user);
+            publishAdminAccessState();
 
             if (!currentAdminAccess) {
                 // Not an admin
@@ -1015,6 +1028,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             // User is logged out
             currentAdminAccess = null;
+            publishAdminAccessState();
             loginScreen.style.display = 'flex';
         }
     });

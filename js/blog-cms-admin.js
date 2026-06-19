@@ -44,7 +44,8 @@ let state = {
     autosaveTimer: null,
     lastSaved: '',
     statusMessage: '',
-    statusType: 'info'
+    statusType: 'info',
+    adminAccess: null
 };
 
 const cmsStateKey = 'edenBlogCmsAdminState';
@@ -267,6 +268,46 @@ function waitForAuthReady() {
     });
 }
 
+function adminAccessSnapshot() {
+    if (typeof window.getEdenAdminAccess === 'function') return window.getEdenAdminAccess();
+    return window.edenAdminAccess || null;
+}
+
+function hasBlogAdminPermission(access = state.adminAccess) {
+    if (typeof window.canAccessAdminTab === 'function' && window.canAccessAdminTab('blogs')) return true;
+    if (!access || access.status !== 'active') return false;
+    if (access.role === 'owner' || access.role === 'head_manager') return true;
+    return access.permissions?.blogs === true;
+}
+
+function blogRoleFromAdminAccess(access = state.adminAccess) {
+    if (!hasBlogAdminPermission(access)) return 'writer';
+    if (access?.role === 'owner' || access?.role === 'head_manager') return 'admin';
+    return 'editor';
+}
+
+function waitForAdminAccessReady() {
+    const existing = adminAccessSnapshot();
+    if (existing || typeof window.canAccessAdminTab !== 'function') {
+        state.adminAccess = existing;
+        return Promise.resolve(existing);
+    }
+    return new Promise((resolve) => {
+        let done = false;
+        const finish = (access) => {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            window.removeEventListener('eden:admin-access-change', onChange);
+            state.adminAccess = access || adminAccessSnapshot();
+            resolve(state.adminAccess);
+        };
+        const onChange = (event) => finish(event.detail || adminAccessSnapshot());
+        const timer = setTimeout(() => finish(adminAccessSnapshot()), 4000);
+        window.addEventListener('eden:admin-access-change', onChange);
+    });
+}
+
 function dateValue(value) {
     if (!value) return '';
     if (typeof value?.toDate === 'function') return value.toDate().toISOString();
@@ -324,29 +365,42 @@ async function listCollection(name) {
 async function getBlogRole() {
     const user = auth.currentUser;
     if (!user) return null;
+    state.adminAccess = state.adminAccess || adminAccessSnapshot();
     const existing = await getDoc(doc(db, collections.users, user.uid)).catch(() => null);
-    if (existing?.exists()) return { id: existing.id, ...existing.data() };
+    const profile = existing?.exists() ? existing.data() : {};
+    if (state.adminAccess || typeof window.canAccessAdminTab === 'function') {
+        return {
+            id: user.uid,
+            ...profile,
+            name: text(profile.name || state.adminAccess?.displayName || user.displayName || user.email || 'Eden Writer'),
+            email: text(profile.email || state.adminAccess?.email || user.email || ''),
+            role: blogRoleFromAdminAccess(state.adminAccess),
+            admin_role: state.adminAccess?.role || '',
+            source: 'admin_access'
+        };
+    }
+    if (existing?.exists()) return { id: existing.id, ...profile };
     const fallback = {
         id: user.uid,
         name: user.displayName || user.email || 'Eden Writer',
         email: user.email || '',
-        role: 'admin',
+        role: 'writer',
         avatar_url: user.photoURL || '',
         bio: '',
         created_at: nowIso(),
         updated_at: nowIso()
     };
-    await setDoc(doc(db, collections.users, user.uid), fallback, { merge: true }).catch(() => null);
     return fallback;
 }
 
 function canPublish() {
+    if (hasBlogAdminPermission()) return true;
     const role = state.currentUser?.role || 'writer';
     return role === 'admin' || role === 'editor';
 }
 
 function canManage() {
-    return (state.currentUser?.role || 'writer') === 'admin';
+    return hasBlogAdminPermission() || (state.currentUser?.role || 'writer') === 'admin';
 }
 
 async function refreshData() {
@@ -404,7 +458,7 @@ function installStyles() {
         .blog-cms-editor{min-height:470px;border:1px solid #cfdcd4;border-radius:8px;padding:22px;background:#fff;line-height:1.82;outline:none;overflow:auto;font-size:1rem}.blog-cms-editor:focus{border-color:#78af8b;box-shadow:0 0 0 3px rgba(23,99,63,.1)}.blog-cms-editor:empty:before{content:attr(data-placeholder);color:#88958e}
         .blog-cms-preview{border:1px solid #dfe8e2;border-radius:8px;background:#fff;padding:20px;line-height:1.8}.blog-cms-preview.mobile{max-width:390px;margin:auto}.blog-cms-preview img{max-width:100%;height:auto}
         .blog-cms-check{display:grid;gap:8px}.blog-cms-check div{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;border:1px solid #edf1ed;border-radius:7px;padding:8px 10px}.blog-cms-check strong{border-radius:999px;padding:4px 8px;font-size:.75rem}.blog-cms-check .pass strong{background:var(--cms-green-soft);color:var(--cms-green)}.blog-cms-check .warn strong{background:var(--cms-amber-soft);color:var(--cms-amber)}.blog-cms-check .missing strong{background:var(--cms-red-soft);color:var(--cms-red)}
-        .blog-cms-media-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.blog-cms-media-card img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:7px;background:#edf1ed}.blog-cms-alert{border:1px solid #c8dcff;background:#eef5ff;color:#285b83;border-radius:8px;padding:12px;font-weight:800}.blog-cms-alert.success{border-color:#b7dfc1;background:#edf8f0;color:#17633f}.blog-cms-alert.error{border-color:#f0b7b7;background:#fff0f0;color:#9b2f2f}
+        .blog-cms-media-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.blog-cms-media-card img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:7px;background:#edf1ed}.blog-cms-alert{border:1px solid #c8dcff;background:#eef5ff;color:#285b83;border-radius:8px;padding:12px;font-weight:800}.blog-cms-alert.success{border-color:#b7dfc1;background:#edf8f0;color:#17633f}.blog-cms-alert.warning{border-color:#e3c16f;background:#fff7df;color:#7a4f08}.blog-cms-alert.error{border-color:#f0b7b7;background:#fff0f0;color:#9b2f2f}
         @media(max-width:1180px){.blog-cms-topbar,.blog-cms-editor-grid,.blog-cms-dashboard-grid,.blog-cms-toolbar,.blog-cms-field-grid{grid-template-columns:1fr}.blog-cms-sidebar{position:static}.blog-cms-kpis{grid-template-columns:repeat(2,minmax(130px,1fr))}.blog-cms-media-grid{grid-template-columns:repeat(2,minmax(150px,1fr))}.blog-cms-topbar-actions{justify-content:flex-start}}
         @media(max-width:640px){.blog-cms-admin-root{padding-bottom:10px}.blog-cms-topbar{padding:15px}.blog-cms-kpis{grid-template-columns:1fr}.blog-cms-action-stack,.blog-cms-topbar-actions{width:100%}.blog-cms-btn{width:100%}.blog-cms-icon-btn{width:auto}.blog-cms-table{min-width:760px}}
     `;
@@ -474,6 +528,25 @@ function formatActionError(error, action = '') {
     return raw || 'ดำเนินการไม่สำเร็จ';
 }
 
+async function runFirestoreStep(step, task) {
+    try {
+        return await task();
+    } catch (error) {
+        error.blogStep = step;
+        throw error;
+    }
+}
+
+async function writeRevisionLog(entry) {
+    try {
+        await runFirestoreStep('blog_revisions.create', () => addDoc(collection(db, collections.revisions), entry));
+        return '';
+    } catch (error) {
+        console.warn('Blog revision log failed:', error);
+        return formatActionError(error, 'revision-log');
+    }
+}
+
 async function runAction(actionEl, action, work) {
     const restore = setActionBusy(actionEl, action);
     if (restore === null) return null;
@@ -485,7 +558,9 @@ async function runAction(actionEl, action, work) {
         }
         return result;
     } catch (error) {
-        setStatus(formatActionError(error, action), 'error');
+        const step = text(error?.blogStep || '');
+        const message = formatActionError(error, action);
+        setStatus(step ? `${message} (${step})` : message, 'error');
         return null;
     } finally {
         if (restore) restore();
@@ -951,6 +1026,7 @@ async function validatePost(post) {
 async function savePost(statusOverride = '', options = {}) {
     const post = readEditorPost(statusOverride);
     await validatePost(post);
+    let revisionWarning = '';
     const payload = {
         ...post,
         status: statusOverride || post.status,
@@ -962,18 +1038,23 @@ async function savePost(statusOverride = '', options = {}) {
         payload.created_at = nowIso();
         payload.createdAt = payload.created_at;
         payload.updatedAt = payload.updated_at;
-        const created = await addDoc(collection(db, collections.posts), payload);
+        const created = await runFirestoreStep('blogs.create', () => addDoc(collection(db, collections.posts), payload));
         state.editingId = created.id;
     } else {
         payload.updatedAt = payload.updated_at;
-        await setDoc(doc(db, collections.posts, state.editingId), payload, { merge: true });
-        await addDoc(collection(db, collections.revisions), { post_id: state.editingId, title: payload.title, content: payload.content, edited_by: auth.currentUser?.uid || '', created_at: nowIso() });
+        await runFirestoreStep('blogs.update', () => setDoc(doc(db, collections.posts, state.editingId), payload, { merge: true }));
+        revisionWarning = await writeRevisionLog({ post_id: state.editingId, title: payload.title, content: payload.content, edited_by: auth.currentUser?.uid || '', created_at: nowIso() });
     }
     state.lastSaved = new Date().toLocaleTimeString('th-TH');
     persistCmsState();
     await refreshData();
     render();
+    if (revisionWarning) {
+        setStatus(`บันทึกบทความสำเร็จ แต่บันทึก revision log ไม่สำเร็จ: ${revisionWarning}`, 'warning');
+        return false;
+    }
     if (!options.silent) setStatus('บันทึกบทความสำเร็จ');
+    return true;
 }
 
 async function uploadMediaFile(file, meta = {}) {
@@ -982,8 +1063,8 @@ async function uploadMediaFile(file, meta = {}) {
     if (file.size > 5 * 1024 * 1024) throw new Error('รูปต้องไม่เกิน 5MB');
     const safeName = `${Date.now()}-${slugify(file.name) || 'image'}`;
     const storageRef = ref(storage, `blogs/${safeName}`);
-    await uploadBytes(storageRef, file, { contentType: file.type });
-    const url = await getDownloadURL(storageRef);
+    await runFirestoreStep('storage.blogs.upload', () => uploadBytes(storageRef, file, { contentType: file.type }));
+    const url = await runFirestoreStep('storage.blogs.url', () => getDownloadURL(storageRef));
     const payload = {
         filename: file.name,
         url,
@@ -995,7 +1076,7 @@ async function uploadMediaFile(file, meta = {}) {
         uploaded_by: auth.currentUser?.uid || '',
         created_at: nowIso()
     };
-    const created = await addDoc(collection(db, collections.media), payload);
+    const created = await runFirestoreStep('blog_media_assets.create', () => addDoc(collection(db, collections.media), payload));
     return { id: created.id, ...payload };
 }
 
@@ -1159,20 +1240,20 @@ async function duplicatePost(id) {
     if (!source) return;
     const copy = { ...source, title: `${source.title} Copy`, slug: `${source.slug}-copy-${Date.now()}`, status: 'draft', published_at: '', scheduled_at: '', created_at: nowIso(), updated_at: nowIso() };
     delete copy.id;
-    await addDoc(collection(db, collections.posts), copy);
+    await runFirestoreStep('blogs.duplicate', () => addDoc(collection(db, collections.posts), copy));
     await refreshData();
     render();
 }
 
 async function archivePost(id) {
-    await setDoc(doc(db, collections.posts, id), { status: 'archived', updated_at: nowIso(), updatedAt: nowIso() }, { merge: true });
+    await runFirestoreStep('blogs.archive', () => setDoc(doc(db, collections.posts, id), { status: 'archived', updated_at: nowIso(), updatedAt: nowIso() }, { merge: true }));
     await refreshData();
     render();
 }
 
 async function deletePostById(id) {
     if (!confirm('ลบบทความนี้?')) return false;
-    await deleteDoc(doc(db, collections.posts, id));
+    await runFirestoreStep('blogs.delete', () => deleteDoc(doc(db, collections.posts, id)));
     await refreshData();
     render();
     return true;
@@ -1182,7 +1263,7 @@ async function addCategoryFromEditor() {
     const name = text($('#blog-new-category')?.value);
     if (!name) throw new BlogValidationError('เพิ่ม Category ไม่สำเร็จ ยังขาด: ชื่อ Category', ['ชื่อ Category']);
     const id = slugify(name);
-    await setDoc(doc(db, collections.categories, id), { name, slug: id, is_active: true, created_at: nowIso(), updated_at: nowIso() }, { merge: true });
+    await runFirestoreStep('blog_categories.write', () => setDoc(doc(db, collections.categories, id), { name, slug: id, is_active: true, created_at: nowIso(), updated_at: nowIso() }, { merge: true }));
     await refreshData();
     render();
     return true;
@@ -1192,7 +1273,7 @@ async function addTagFromEditor() {
     const name = text($('#blog-new-tag')?.value);
     if (!name) throw new BlogValidationError('เพิ่ม Tag ไม่สำเร็จ ยังขาด: ชื่อ Tag', ['ชื่อ Tag']);
     const id = slugify(name);
-    await setDoc(doc(db, collections.tags, id), { name, slug: id, created_at: nowIso(), updated_at: nowIso() }, { merge: true });
+    await runFirestoreStep('blog_tags.write', () => setDoc(doc(db, collections.tags, id), { name, slug: id, created_at: nowIso(), updated_at: nowIso() }, { merge: true }));
     await refreshData();
     render();
     return true;
@@ -1202,7 +1283,7 @@ async function saveCategoryManager() {
     const name = text($('#category-name')?.value);
     if (!name) throw new Error('กรุณาใส่ชื่อหมวดหมู่');
     const id = slugify(name);
-    await setDoc(doc(db, collections.categories, id), { name, slug: id, description: text($('#category-description')?.value), seo_title: text($('#category-seo-title')?.value), seo_description: text($('#category-seo-description')?.value), is_active: true, created_at: nowIso(), updated_at: nowIso() }, { merge: true });
+    await runFirestoreStep('blog_categories.write', () => setDoc(doc(db, collections.categories, id), { name, slug: id, description: text($('#category-description')?.value), seo_title: text($('#category-seo-title')?.value), seo_description: text($('#category-seo-description')?.value), is_active: true, created_at: nowIso(), updated_at: nowIso() }, { merge: true }));
     await refreshData();
     render();
 }
@@ -1211,7 +1292,7 @@ async function saveTagManager() {
     const name = text($('#tag-name')?.value);
     if (!name) throw new Error('กรุณาใส่ชื่อ Tag');
     const id = slugify(name);
-    await setDoc(doc(db, collections.tags, id), { name, slug: id, created_at: nowIso(), updated_at: nowIso() }, { merge: true });
+    await runFirestoreStep('blog_tags.write', () => setDoc(doc(db, collections.tags, id), { name, slug: id, created_at: nowIso(), updated_at: nowIso() }, { merge: true }));
     await refreshData();
     render();
 }
@@ -1230,8 +1311,8 @@ async function uploadMediaManager() {
 async function deleteMedia(id) {
     const asset = state.media.find((item) => item.id === id);
     if (!asset || !confirm('ลบรูปนี้?')) return false;
-    await deleteDoc(doc(db, collections.media, id));
-    if (asset.storage_path) await deleteObject(ref(storage, asset.storage_path)).catch(() => null);
+    await runFirestoreStep('blog_media_assets.delete', () => deleteDoc(doc(db, collections.media, id)));
+    if (asset.storage_path) await runFirestoreStep('storage.blogs.delete', () => deleteObject(ref(storage, asset.storage_path))).catch(() => null);
     await refreshData();
     render();
     return true;
@@ -1281,6 +1362,7 @@ async function seedBlogCms() {
 
 window.fetchBlogsFromCloud = async () => {
     await waitForAuthReady();
+    await waitForAdminAccessReady();
     await refreshData();
     render();
 };
@@ -1304,6 +1386,12 @@ window.addEventListener('eden-blog-cms-open-editor', () => window.openBlogModal(
 window.addEventListener('eden-blog-cms-edit-post', (event) => window.editBlog(event.detail?.id || ''));
 window.addEventListener('eden-blog-cms-delete-post', (event) => window.deleteBlog(event.detail?.id || ''));
 window.addEventListener('eden-blog-cms-seed', () => window.seedSeoBlogPosts());
+window.addEventListener('eden:admin-access-change', async (event) => {
+    state.adminAccess = event.detail || adminAccessSnapshot();
+    if (!root()?.querySelector('.blog-cms-topbar')) return;
+    await refreshData();
+    render();
+});
 
 document.addEventListener('DOMContentLoaded', async () => {
     const el = root();
@@ -1312,6 +1400,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.innerHTML = '<div class="blog-cms-admin-loading">กำลังโหลด Blog CMS ใหม่...</div>';
     try {
         await waitForAuthReady();
+        await waitForAdminAccessReady();
         await refreshData();
         restoreCmsState();
         render();
