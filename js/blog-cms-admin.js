@@ -42,8 +42,96 @@ let state = {
     search: '',
     previewMode: 'desktop',
     autosaveTimer: null,
-    lastSaved: ''
+    lastSaved: '',
+    statusMessage: '',
+    statusType: 'info'
 };
+
+const actionTypes = Object.freeze({
+    new: 'navigation',
+    edit: 'navigation',
+    'preview-mode': 'navigation',
+    prompt: 'utility',
+    'add-faq': 'utility',
+    'save-draft': 'async-write',
+    publish: 'async-write',
+    schedule: 'async-write',
+    duplicate: 'async-write',
+    archive: 'async-write',
+    delete: 'destructive-write',
+    'add-category': 'async-write',
+    'add-tag': 'async-write',
+    'save-category': 'async-write',
+    'save-tag': 'async-write',
+    'upload-media': 'async-upload',
+    'copy-media': 'async-utility',
+    'delete-media': 'destructive-write',
+    seed: 'async-write',
+    'upload-cover': 'async-upload'
+});
+
+const actionBusyLabels = Object.freeze({
+    'save-draft': 'Saving...',
+    publish: 'Publishing...',
+    schedule: 'Scheduling...',
+    duplicate: 'Duplicating...',
+    archive: 'Archiving...',
+    delete: 'Deleting...',
+    'add-category': 'Adding...',
+    'add-tag': 'Adding...',
+    'save-category': 'Saving...',
+    'save-tag': 'Saving...',
+    'upload-media': 'Uploading...',
+    'copy-media': 'Copying...',
+    'delete-media': 'Deleting...',
+    seed: 'Seeding...',
+    'upload-cover': 'Uploading...'
+});
+
+const actionProgressMessages = Object.freeze({
+    'save-draft': 'กำลังบันทึก Draft...',
+    publish: 'กำลัง Publish บทความ...',
+    schedule: 'กำลังตั้งเวลาเผยแพร่...',
+    duplicate: 'กำลังคัดลอกบทความ...',
+    archive: 'กำลัง Archive บทความ...',
+    delete: 'กำลังลบบทความ...',
+    'add-category': 'กำลังเพิ่ม Category...',
+    'add-tag': 'กำลังเพิ่ม Tag...',
+    'save-category': 'กำลังบันทึก Category...',
+    'save-tag': 'กำลังบันทึก Tag...',
+    'upload-media': 'กำลังอัปโหลดรูปภาพ...',
+    'copy-media': 'กำลังคัดลอก URL...',
+    'delete-media': 'กำลังลบรูปภาพ...',
+    seed: 'กำลังสร้างข้อมูลเริ่มต้น...',
+    'upload-cover': 'กำลังอัปโหลดรูปหน้าปก...'
+});
+
+const actionSuccessMessages = Object.freeze({
+    'save-draft': 'บันทึก Draft สำเร็จ',
+    publish: 'Publish บทความสำเร็จ',
+    schedule: 'ตั้งเวลาเผยแพร่สำเร็จ',
+    duplicate: 'คัดลอกบทความสำเร็จ',
+    archive: 'Archive บทความสำเร็จ',
+    delete: 'ลบบทความสำเร็จ',
+    'add-category': 'เพิ่ม Category สำเร็จ',
+    'add-tag': 'เพิ่ม Tag สำเร็จ',
+    'save-category': 'บันทึก Category สำเร็จ',
+    'save-tag': 'บันทึก Tag สำเร็จ',
+    'upload-media': 'อัปโหลดรูปภาพสำเร็จ',
+    'copy-media': 'คัดลอก URL แล้ว',
+    'delete-media': 'ลบรูปภาพสำเร็จ',
+    seed: 'สร้างข้อมูลเริ่มต้นสำเร็จ',
+    'upload-cover': 'อัปโหลดรูปหน้าปกสำเร็จ'
+});
+
+class BlogValidationError extends Error {
+    constructor(message, missing = []) {
+        super(message);
+        this.name = 'BlogValidationError';
+        this.missing = missing;
+        this.isValidationError = true;
+    }
+}
 
 const blankPost = () => ({
     title: '',
@@ -271,7 +359,8 @@ function installStyles() {
         .blog-cms-card h3{margin:0 0 12px;color:#17291f;font-size:1rem;line-height:1.3}.blog-cms-muted{color:var(--cms-muted)}
         .blog-cms-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:38px;border:1px solid var(--cms-green-dark);border-radius:7px;background:var(--cms-green-dark);color:#fff;padding:8px 12px;font-weight:850;text-decoration:none;cursor:pointer;line-height:1}
         .blog-cms-btn:hover{filter:brightness(.98);transform:translateY(-1px)}.blog-cms-btn.secondary{border-color:#cbd8d0;background:#fff;color:#20362a}.blog-cms-btn.ghost{border-color:transparent;background:transparent;color:#284238}.blog-cms-btn.danger{border-color:#b84a4a;background:#b84a4a;color:#fff}
-        .blog-cms-btn:disabled{opacity:.48;cursor:not-allowed;transform:none}.blog-cms-icon-btn{min-width:48px;padding:0 9px}.blog-cms-action-stack{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+        .blog-cms-btn:disabled{opacity:.48;cursor:not-allowed;transform:none}.blog-cms-btn.is-busy{opacity:.76;cursor:progress;transform:none;pointer-events:none}.blog-cms-btn.is-busy::before{content:"";width:13px;height:13px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:blogCmsSpin .75s linear infinite}.blog-cms-icon-btn{min-width:48px;padding:0 9px}.blog-cms-action-stack{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+        @keyframes blogCmsSpin{to{transform:rotate(360deg)}}
         .blog-cms-chip-list{display:flex;gap:8px;flex-wrap:wrap}.blog-cms-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid #cbd8d0;background:#fff;border-radius:999px;padding:7px 10px;font-weight:800;color:#33483d;cursor:pointer}.blog-cms-chip.active{background:var(--cms-green-soft);color:var(--cms-green);border-color:#a7d2b8}
         .blog-cms-kpis{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:10px}.blog-cms-kpi{display:grid;gap:6px;min-height:104px}.blog-cms-kpi strong{font-size:1.95rem;line-height:1;color:#14231b}.blog-cms-kpi span{color:var(--cms-muted);font-weight:850}.blog-cms-kpi small{color:#7a8780;font-weight:700}
         .blog-cms-dashboard-grid{display:grid;grid-template-columns:minmax(0,1.45fr)minmax(280px,.75fr);gap:14px}.blog-cms-attention{display:grid;gap:10px}.blog-cms-attention-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;border:1px solid #edf1ed;border-radius:8px;padding:11px 12px;background:#fbfcfb}.blog-cms-attention-row strong{font-size:1.25rem}.blog-cms-attention-row.warn strong{color:var(--cms-amber)}.blog-cms-attention-row.danger strong{color:var(--cms-red)}.blog-cms-attention-row.info strong{color:var(--cms-blue)}
@@ -286,7 +375,7 @@ function installStyles() {
         .blog-cms-editor{min-height:470px;border:1px solid #cfdcd4;border-radius:8px;padding:22px;background:#fff;line-height:1.82;outline:none;overflow:auto;font-size:1rem}.blog-cms-editor:focus{border-color:#78af8b;box-shadow:0 0 0 3px rgba(23,99,63,.1)}.blog-cms-editor:empty:before{content:attr(data-placeholder);color:#88958e}
         .blog-cms-preview{border:1px solid #dfe8e2;border-radius:8px;background:#fff;padding:20px;line-height:1.8}.blog-cms-preview.mobile{max-width:390px;margin:auto}.blog-cms-preview img{max-width:100%;height:auto}
         .blog-cms-check{display:grid;gap:8px}.blog-cms-check div{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;border:1px solid #edf1ed;border-radius:7px;padding:8px 10px}.blog-cms-check strong{border-radius:999px;padding:4px 8px;font-size:.75rem}.blog-cms-check .pass strong{background:var(--cms-green-soft);color:var(--cms-green)}.blog-cms-check .warn strong{background:var(--cms-amber-soft);color:var(--cms-amber)}.blog-cms-check .missing strong{background:var(--cms-red-soft);color:var(--cms-red)}
-        .blog-cms-media-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.blog-cms-media-card img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:7px;background:#edf1ed}.blog-cms-alert{border:1px solid #ffd6a6;background:#fff8e7;color:#7a4d0b;border-radius:8px;padding:12px;font-weight:800}.blog-cms-alert.success{border-color:#b7dfc1;background:#edf8f0;color:#17633f}.blog-cms-alert.error{border-color:#f0b7b7;background:#fff0f0;color:#9b2f2f}
+        .blog-cms-media-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.blog-cms-media-card img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:7px;background:#edf1ed}.blog-cms-alert{border:1px solid #c8dcff;background:#eef5ff;color:#285b83;border-radius:8px;padding:12px;font-weight:800}.blog-cms-alert.success{border-color:#b7dfc1;background:#edf8f0;color:#17633f}.blog-cms-alert.error{border-color:#f0b7b7;background:#fff0f0;color:#9b2f2f}
         @media(max-width:1180px){.blog-cms-topbar,.blog-cms-editor-grid,.blog-cms-dashboard-grid,.blog-cms-toolbar,.blog-cms-field-grid{grid-template-columns:1fr}.blog-cms-sidebar{position:static}.blog-cms-kpis{grid-template-columns:repeat(2,minmax(130px,1fr))}.blog-cms-media-grid{grid-template-columns:repeat(2,minmax(150px,1fr))}.blog-cms-topbar-actions{justify-content:flex-start}}
         @media(max-width:640px){.blog-cms-admin-root{padding-bottom:10px}.blog-cms-topbar{padding:15px}.blog-cms-kpis{grid-template-columns:1fr}.blog-cms-action-stack,.blog-cms-topbar-actions{width:100%}.blog-cms-btn{width:100%}.blog-cms-icon-btn{width:auto}.blog-cms-table{min-width:760px}}
     `;
@@ -298,10 +387,79 @@ function root() {
 }
 
 function setStatus(message, type = 'info') {
+    state.statusMessage = text(message);
+    state.statusType = type || 'info';
     const el = $('#blog-cms-admin-status');
     if (el) {
-        el.className = `blog-cms-alert ${type}`;
-        el.textContent = message;
+        el.className = `blog-cms-alert ${state.statusType}`;
+        el.textContent = state.statusMessage;
+        el.style.display = state.statusMessage ? 'block' : 'none';
+        el.setAttribute('role', state.statusType === 'error' ? 'alert' : 'status');
+        el.setAttribute('aria-live', state.statusType === 'error' ? 'assertive' : 'polite');
+    }
+}
+
+function actionNeedsBusy(action) {
+    const type = actionTypes[action];
+    return type === 'async-write' || type === 'async-upload' || type === 'async-utility' || type === 'destructive-write';
+}
+
+function setActionBusy(actionEl, action) {
+    if (!actionEl || !actionNeedsBusy(action)) return () => {};
+    if (actionEl.dataset.blogBusy === 'true') return null;
+    const previous = {
+        disabled: actionEl.disabled,
+        label: actionEl.textContent
+    };
+    actionEl.dataset.blogBusy = 'true';
+    actionEl.setAttribute('aria-busy', 'true');
+    actionEl.classList.add('is-busy');
+    if ('disabled' in actionEl) actionEl.disabled = true;
+    if (actionBusyLabels[action]) actionEl.textContent = actionBusyLabels[action];
+    return () => {
+        if (!actionEl.isConnected) return;
+        actionEl.dataset.blogBusy = 'false';
+        actionEl.removeAttribute('aria-busy');
+        actionEl.classList.remove('is-busy');
+        if ('disabled' in actionEl) actionEl.disabled = previous.disabled;
+        actionEl.textContent = previous.label;
+    };
+}
+
+function formatActionError(error, action = '') {
+    if (error?.isValidationError) return error.message;
+    const raw = text(error?.message || error);
+    const code = text(error?.code);
+    if (code.includes('permission-denied') || /missing or insufficient permissions|permission denied|403/i.test(raw)) {
+        if (['add-category', 'save-category'].includes(action)) {
+            return 'Firebase ปฏิเสธสิทธิ์: สิทธิ์ collection หมวดหมู่ยังไม่พร้อมหรือบัญชีนี้ไม่มีสิทธิ์จัดการ Category';
+        }
+        return 'Firebase ปฏิเสธสิทธิ์: บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้ หรือ Firestore rules ยังไม่อนุญาต';
+    }
+    if (code.includes('unavailable') || /network|offline|failed to fetch|internet/i.test(raw)) {
+        return 'เชื่อมต่อไม่ได้: ตรวจสอบอินเทอร์เน็ตแล้วลองอีกครั้ง';
+    }
+    if (/slug/i.test(raw) && /ซ้ำ|duplicate|already/i.test(raw)) {
+        return 'Publish ไม่สำเร็จ: Slug ซ้ำ';
+    }
+    return raw || 'ดำเนินการไม่สำเร็จ';
+}
+
+async function runAction(actionEl, action, work) {
+    const restore = setActionBusy(actionEl, action);
+    if (restore === null) return null;
+    if (actionNeedsBusy(action)) setStatus(actionProgressMessages[action] || 'กำลังดำเนินการ...', 'info');
+    try {
+        const result = await work();
+        if (actionNeedsBusy(action) && result !== false) {
+            setStatus(actionSuccessMessages[action] || 'ดำเนินการสำเร็จ', 'success');
+        }
+        return result;
+    } catch (error) {
+        setStatus(formatActionError(error, action), 'error');
+        return null;
+    } finally {
+        if (restore) restore();
     }
 }
 
@@ -340,7 +498,7 @@ function layoutHTML(content) {
                 <button class="blog-cms-btn secondary" type="button" data-blog-action="seed">Seed Data</button>
             </div>
         </div>
-        <div id="blog-cms-admin-status" style="display:none"></div>
+        <div id="blog-cms-admin-status" class="blog-cms-alert ${escapeHTML(state.statusType || 'info')}" style="${state.statusMessage ? '' : 'display:none'}" role="${state.statusType === 'error' ? 'alert' : 'status'}" aria-live="${state.statusType === 'error' ? 'assertive' : 'polite'}">${escapeHTML(state.statusMessage || '')}</div>
         ${navHTML()}
         ${content}
     `;
@@ -513,8 +671,8 @@ function editorHTML() {
                         <div class="blog-cms-action-stack">
                             <button class="blog-cms-btn secondary" type="button" data-blog-action="preview-mode">${state.previewMode === 'desktop' ? 'Preview Mobile' : 'Preview Desktop'}</button>
                             <button class="blog-cms-btn secondary" type="button" data-blog-action="save-draft">Save Draft</button>
-                            <button class="blog-cms-btn" type="button" data-blog-action="publish" ${canPublish() ? '' : 'disabled'}>Publish</button>
-                            <button class="blog-cms-btn secondary" type="button" data-blog-action="schedule" ${canPublish() ? '' : 'disabled'}>Schedule</button>
+                            <button class="blog-cms-btn" type="button" data-blog-action="publish">Publish</button>
+                            <button class="blog-cms-btn secondary" type="button" data-blog-action="schedule">Schedule</button>
                         </div>
                     </div>
                     <div class="blog-cms-field-grid">
@@ -740,18 +898,29 @@ function updateEditorStats() {
     }
 }
 
-async function validatePost(post) {
-    if (!post.title) throw new Error('Title ห้ามว่าง');
-    if (!post.slug) throw new Error('Slug ไม่ถูกต้อง');
-    if ((post.status === 'published' || post.status === 'scheduled') && !canPublish()) throw new Error('Writer บันทึกได้เฉพาะ Draft');
-    if ((post.status === 'published' || post.status === 'scheduled') && !post.category_id) throw new Error('ต้องมี Category ก่อน Publish');
-    if ((post.status === 'published' || post.status === 'scheduled') && !htmlToText(post.content)) throw new Error('ต้องมีเนื้อหาก่อน Publish');
-    if (post.status === 'scheduled' && !post.scheduled_at) throw new Error('Scheduled ต้องมีวันและเวลา');
-    const duplicate = state.posts.find((item) => item.slug === post.slug && item.id !== post.id);
-    if (duplicate) throw new Error('Slug ห้ามซ้ำ');
+function actionNameForStatus(status) {
+    if (status === 'published') return 'Publish';
+    if (status === 'scheduled') return 'Schedule';
+    return 'Save Draft';
 }
 
-async function savePost(statusOverride = '') {
+async function validatePost(post) {
+    const isPublishFlow = post.status === 'published' || post.status === 'scheduled';
+    const missing = [];
+    if (!post.title) missing.push('Title');
+    if (!post.slug) missing.push('Slug');
+    if (isPublishFlow && !canPublish()) missing.push('user role เป็น admin หรือ editor');
+    if (isPublishFlow && !post.category_id) missing.push('Category');
+    if (isPublishFlow && !htmlToText(post.content)) missing.push('เนื้อหาใน editor');
+    if (post.status === 'scheduled' && !post.scheduled_at) missing.push('วันและเวลา Schedule');
+    if (missing.length) {
+        throw new BlogValidationError(`${actionNameForStatus(post.status)} ไม่สำเร็จ ยังขาด: ${missing.join(', ')}`, missing);
+    }
+    const duplicate = state.posts.find((item) => item.slug === post.slug && item.id !== post.id);
+    if (duplicate) throw new BlogValidationError(`${actionNameForStatus(post.status)} ไม่สำเร็จ: Slug ซ้ำ`, ['Slug ซ้ำ']);
+}
+
+async function savePost(statusOverride = '', options = {}) {
     const post = readEditorPost(statusOverride);
     await validatePost(post);
     const payload = {
@@ -775,7 +944,7 @@ async function savePost(statusOverride = '') {
     state.lastSaved = new Date().toLocaleTimeString('th-TH');
     await refreshData();
     render();
-    setStatus('บันทึกบทความสำเร็จ');
+    if (!options.silent) setStatus('บันทึกบทความสำเร็จ');
 }
 
 async function uploadMediaFile(file, meta = {}) {
@@ -872,14 +1041,11 @@ function bindEvents() {
     $('#blog-cover-upload')?.addEventListener('change', async (event) => {
         const file = event.target.files?.[0];
         if (!file) return;
-        try {
+        await runAction(event.target, 'upload-cover', async () => {
             const asset = await uploadMediaFile(file, { alt_text: $('#blog-cover-alt')?.value || $('#blog-title')?.value });
             $('#blog-cover-url').value = asset.url;
             updateEditorStats();
-            setStatus('อัปโหลดรูปสำเร็จ');
-        } catch (error) {
-            alert(error.message || error);
-        }
+        });
     });
 }
 
@@ -914,19 +1080,22 @@ async function handleAction(event) {
     const actionEl = event.target.closest('[data-blog-action],[data-blog-insert],[data-blog-tag]');
     if (!actionEl) return;
     const action = actionEl.dataset.blogAction;
-    try {
-        if (actionEl.dataset.blogInsert) return insertBlock(actionEl.dataset.blogInsert);
-        if (actionEl.dataset.blogTag) {
-            actionEl.classList.toggle('active');
-            updateEditorStats();
-            return;
-        }
-        if (action === 'new') { state.editingId = ''; state.tab = 'editor'; render(); return; }
-        if (action === 'edit') { state.editingId = actionEl.dataset.id; state.tab = 'editor'; render(); return; }
-        if (action === 'save-draft') return savePost('draft');
-        if (action === 'publish') return savePost('published');
-        if (action === 'schedule') return savePost('scheduled');
-        if (action === 'preview-mode') { state.previewMode = state.previewMode === 'desktop' ? 'mobile' : 'desktop'; render(); return; }
+    if (actionEl.dataset.blogInsert) return insertBlock(actionEl.dataset.blogInsert);
+    if (actionEl.dataset.blogTag) {
+        actionEl.classList.toggle('active');
+        updateEditorStats();
+        return;
+    }
+    if (action === 'new') { state.editingId = ''; state.tab = 'editor'; render(); return; }
+    if (action === 'edit') { state.editingId = actionEl.dataset.id; state.tab = 'editor'; render(); return; }
+    if (action === 'preview-mode') { state.previewMode = state.previewMode === 'desktop' ? 'mobile' : 'desktop'; render(); return; }
+    if (action === 'add-faq') return addFaqToEditor();
+    if (action === 'prompt') return promptTemplate(actionEl.dataset.prompt);
+
+    return runAction(actionEl, action, async () => {
+        if (action === 'save-draft') return savePost('draft', { silent: true });
+        if (action === 'publish') return savePost('published', { silent: true });
+        if (action === 'schedule') return savePost('scheduled', { silent: true });
         if (action === 'duplicate') return duplicatePost(actionEl.dataset.id);
         if (action === 'archive') return archivePost(actionEl.dataset.id);
         if (action === 'delete') return deletePostById(actionEl.dataset.id);
@@ -935,14 +1104,11 @@ async function handleAction(event) {
         if (action === 'save-category') return saveCategoryManager();
         if (action === 'save-tag') return saveTagManager();
         if (action === 'upload-media') return uploadMediaManager();
-        if (action === 'copy-media') { await navigator.clipboard.writeText(actionEl.dataset.url); setStatus('คัดลอก URL แล้ว'); return; }
+        if (action === 'copy-media') return navigator.clipboard.writeText(actionEl.dataset.url);
         if (action === 'delete-media') return deleteMedia(actionEl.dataset.id);
         if (action === 'seed') return seedBlogCms();
-        if (action === 'add-faq') return addFaqToEditor();
-        if (action === 'prompt') return promptTemplate(actionEl.dataset.prompt);
-    } catch (error) {
-        alert(error.message || error);
-    }
+        return null;
+    });
 }
 
 function bindEditorAutosave() {
@@ -952,7 +1118,7 @@ function bindEditorAutosave() {
         const post = readEditorPost('draft');
         if (!post.title || !htmlToText(post.content)) return;
         try {
-            await savePost('draft');
+            await savePost('draft', { silent: true });
         } catch (error) {
         }
     }, 12000);
@@ -975,28 +1141,31 @@ async function archivePost(id) {
 }
 
 async function deletePostById(id) {
-    if (!confirm('ลบบทความนี้?')) return;
+    if (!confirm('ลบบทความนี้?')) return false;
     await deleteDoc(doc(db, collections.posts, id));
     await refreshData();
     render();
+    return true;
 }
 
 async function addCategoryFromEditor() {
     const name = text($('#blog-new-category')?.value);
-    if (!name) return;
+    if (!name) throw new BlogValidationError('เพิ่ม Category ไม่สำเร็จ ยังขาด: ชื่อ Category', ['ชื่อ Category']);
     const id = slugify(name);
     await setDoc(doc(db, collections.categories, id), { name, slug: id, is_active: true, created_at: nowIso(), updated_at: nowIso() }, { merge: true });
     await refreshData();
     render();
+    return true;
 }
 
 async function addTagFromEditor() {
     const name = text($('#blog-new-tag')?.value);
-    if (!name) return;
+    if (!name) throw new BlogValidationError('เพิ่ม Tag ไม่สำเร็จ ยังขาด: ชื่อ Tag', ['ชื่อ Tag']);
     const id = slugify(name);
     await setDoc(doc(db, collections.tags, id), { name, slug: id, created_at: nowIso(), updated_at: nowIso() }, { merge: true });
     await refreshData();
     render();
+    return true;
 }
 
 async function saveCategoryManager() {
@@ -1019,20 +1188,23 @@ async function saveTagManager() {
 
 async function uploadMediaManager() {
     const file = $('#media-upload')?.files?.[0];
+    if (!file) throw new BlogValidationError('อัปโหลดรูปภาพไม่สำเร็จ ยังขาด: ไฟล์รูปภาพ', ['ไฟล์รูปภาพ']);
     const asset = await uploadMediaFile(file, { alt_text: $('#media-alt')?.value, caption: $('#media-caption')?.value });
     if (asset) {
         await refreshData();
         render();
     }
+    return true;
 }
 
 async function deleteMedia(id) {
     const asset = state.media.find((item) => item.id === id);
-    if (!asset || !confirm('ลบรูปนี้?')) return;
+    if (!asset || !confirm('ลบรูปนี้?')) return false;
     await deleteDoc(doc(db, collections.media, id));
     if (asset.storage_path) await deleteObject(ref(storage, asset.storage_path)).catch(() => null);
     await refreshData();
     render();
+    return true;
 }
 
 function addFaqToEditor() {
