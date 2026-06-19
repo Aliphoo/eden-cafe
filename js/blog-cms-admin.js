@@ -157,7 +157,7 @@ const actionSuccessMessages = Object.freeze({
     'copy-media': 'คัดลอก URL แล้ว',
     'delete-media': 'ลบรูปภาพสำเร็จ',
     seed: 'สร้างข้อมูลเริ่มต้นสำเร็จ',
-    'upload-cover': 'อัปโหลดรูปหน้าปกสำเร็จ'
+    'upload-cover': 'Cover uploaded and saved to Firestore'
 });
 
 class BlogValidationError extends Error {
@@ -175,6 +175,8 @@ const blankPost = () => ({
     excerpt: '',
     content: '',
     cover_image_url: '',
+    coverImageUrl: '',
+    imageUrl: '',
     cover_image_alt: '',
     cover_image_caption: '',
     status: 'draft',
@@ -1062,6 +1064,8 @@ function readEditorPost(statusOverride = '') {
         tag_ids: selectedTags,
         tags: tagNames,
         cover_image_url: text($('#blog-cover-url')?.value),
+        coverImageUrl: text($('#blog-cover-url')?.value),
+        imageUrl: text($('#blog-cover-url')?.value),
         cover_image_alt: text($('#blog-cover-alt')?.value),
         cover_image_caption: text($('#blog-cover-caption')?.value),
         focus_keyword: text($('#blog-focus-keyword')?.value),
@@ -1207,6 +1211,14 @@ async function uploadBlogImageToHosting(file) {
     return result;
 }
 
+function assertBlogHostingUrl(url, label = 'Image') {
+    const cleanUrl = text(url);
+    if (!/^https:\/\/www\.edencafe\.co\/Images\/uploads\/blogs\//i.test(cleanUrl)) {
+        throw new Error(`${label} upload returned an unexpected URL: ${cleanUrl || 'empty URL'}`);
+    }
+    return cleanUrl;
+}
+
 async function verifySavedPostStatus(postId, expectedStatus) {
     if (!postId || !expectedStatus) return;
     const snap = await runFirestoreStep('blogs.status-readback', () => getDoc(doc(db, collections.posts, postId)));
@@ -1214,6 +1226,90 @@ async function verifySavedPostStatus(postId, expectedStatus) {
     if (actual && actual !== expectedStatus) {
         throw new Error(`Saved status mismatch: expected ${expectedStatus}, got ${actual}`);
     }
+}
+
+function readbackError(step, message) {
+    const error = new Error(message);
+    error.blogStep = step;
+    throw error;
+}
+
+async function readBackPost(postId, step) {
+    if (!postId) readbackError(step, 'Post readback failed: missing post id');
+    const snap = await runFirestoreStep(step, () => getDoc(doc(db, collections.posts, postId)));
+    if (!snap?.exists()) readbackError(step, `Post readback failed: blogs/${postId} was not found`);
+    return snap.data() || {};
+}
+
+async function verifyPostFields(postId, expectedFields, step = 'blogs.field-readback') {
+    const data = await readBackPost(postId, step);
+    Object.entries(expectedFields || {}).forEach(([field, expected]) => {
+        const actual = text(data[field]);
+        const wanted = text(expected);
+        if (actual !== wanted) {
+            readbackError(step, `Post readback mismatch for ${field}: expected "${wanted}", got "${actual}"`);
+        }
+    });
+    return data;
+}
+
+async function verifyPostFieldIncludes(postId, field, expectedFragment, step = 'blogs.field-readback') {
+    const data = await readBackPost(postId, step);
+    const actual = String(data[field] || '');
+    const wanted = text(expectedFragment);
+    if (!actual.includes(wanted)) {
+        readbackError(step, `Post readback mismatch for ${field}: saved content does not include "${wanted}"`);
+    }
+    return data;
+}
+
+async function ensureEditablePostDocument(reason = 'Image save') {
+    if (state.editingId) return state.editingId;
+    const draft = readEditorPost('draft');
+    if (!draft.title || !draft.slug) {
+        throw new BlogValidationError(`${reason} needs a saved draft first: please add Title before uploading`, ['Title']);
+    }
+    await savePost('draft', { silent: true, source: 'manual' });
+    if (!state.editingId) throw new Error(`${reason} failed: draft document was not created`);
+    return state.editingId;
+}
+
+async function persistCoverAsset(asset) {
+    const url = assertBlogHostingUrl(asset?.url, 'Cover');
+    const postId = await ensureEditablePostDocument('Cover upload');
+    const alt = text($('#blog-cover-alt')?.value || $('#blog-title')?.value || asset?.alt_text);
+    const caption = text($('#blog-cover-caption')?.value || asset?.caption);
+    const updated = nowIso();
+    const patch = {
+        cover_image_url: url,
+        coverImageUrl: url,
+        imageUrl: url,
+        cover_image_alt: alt,
+        cover_image_caption: caption,
+        updated_at: updated,
+        updatedAt: updated,
+        updatedBy: auth.currentUser?.uid || ''
+    };
+    await runFirestoreStep('blogs.cover.update', () => setDoc(doc(db, collections.posts, postId), patch, { merge: true }));
+    const readback = await verifyPostFields(postId, { cover_image_url: url, imageUrl: url }, 'blogs.cover-readback');
+    const coverInput = $('#blog-cover-url');
+    const altInput = $('#blog-cover-alt');
+    const captionInput = $('#blog-cover-caption');
+    if (coverInput) coverInput.value = url;
+    if (altInput && alt) altInput.value = alt;
+    if (captionInput && caption) captionInput.value = caption;
+    const saved = normalizePost(postId, { ...currentPost(), ...readback, id: postId });
+    state.editorDraft = { ...saved, id: postId };
+    syncSavedEditorState(saved);
+    refreshCoverPreview();
+    return saved;
+}
+
+async function persistContentImage(url) {
+    const cleanUrl = assertBlogHostingUrl(url, 'Content image');
+    await ensureEditablePostDocument('Content image insert');
+    await savePost('', { silent: true, source: 'manual' });
+    return verifyPostFieldIncludes(state.editingId, 'content', cleanUrl, 'blogs.content-image-readback');
 }
 
 function actionNameForStatus(status) {
@@ -1393,12 +1489,12 @@ function bindEvents() {
         const file = event.target.files?.[0];
         if (!file) return;
         await runAction(event.target, 'upload-cover', async () => {
+            await ensureEditablePostDocument('Cover upload');
             const asset = await uploadMediaFile(file, { alt_text: $('#blog-cover-alt')?.value || $('#blog-title')?.value });
-            $('#blog-cover-url').value = asset.url;
-            refreshCoverPreview();
-            updateEditorStats();
+            const url = assertBlogHostingUrl(asset.url, 'Cover');
+            await persistCoverAsset({ ...asset, url });
             if (asset.metadata_warning) {
-                setStatus(`Cover uploaded, but media library save failed: ${asset.metadata_warning}`, 'warning');
+                setStatus(`Cover uploaded and saved, but media library save failed: ${asset.metadata_warning}`, 'warning');
                 return false;
             }
         });
@@ -1444,19 +1540,21 @@ async function insertImageBlock(editor) {
     const file = await pickEditorImageFile();
     if (file) {
         try {
+            await ensureEditablePostDocument('Content image insert');
             setStatus('Uploading image...', 'info');
             const asset = await uploadMediaFile(file, { alt_text: $('#blog-title')?.value || file.name });
-            insertImageHTML(editor, asset.url, asset.alt_text || file.name.replace(/\.[^.]+$/, ''));
-            if (asset.metadata_warning) setStatus(`Image inserted, but media library save failed: ${asset.metadata_warning}`, 'warning');
-            else setStatus('Image inserted', 'success');
+            const url = assertBlogHostingUrl(asset.url, 'Content image');
+            insertImageHTML(editor, url, asset.alt_text || file.name.replace(/\.[^.]+$/, ''));
+            await persistContentImage(url);
+            if (asset.metadata_warning) setStatus(`Image inserted and saved, but media library save failed: ${asset.metadata_warning}`, 'warning');
+            else setStatus('Image inserted and saved', 'success');
             return;
         } catch (error) {
             setStatus(error.message || 'Image upload failed', 'error');
+            return;
         }
     }
-    const url = prompt('Image URL (optional)');
-    if (!url) return;
-    insertImageHTML(editor, url, prompt('Alt text', '') || '');
+    setStatus('Image insert cancelled', 'info');
 }
 
 async function insertBlock(command) {
