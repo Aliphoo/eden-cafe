@@ -459,8 +459,8 @@ function installStyles() {
         .blog-cms-status{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:.76rem;font-weight:900;text-transform:capitalize}.blog-cms-status.published{background:var(--cms-green-soft);color:var(--cms-green)}.blog-cms-status.draft{background:var(--cms-amber-soft);color:var(--cms-amber)}.blog-cms-status.scheduled{background:var(--cms-blue-soft);color:var(--cms-blue)}.blog-cms-status.archived{background:var(--cms-red-soft);color:var(--cms-red)}
         .blog-cms-score{display:grid;gap:5px;min-width:92px}.blog-cms-score-line{height:7px;border-radius:999px;background:#e9eee9;overflow:hidden}.blog-cms-score-line span{display:block;height:100%;background:var(--cms-green)}.blog-cms-score small{font-weight:850;color:#51645a}
         .blog-cms-editor-grid{display:grid;grid-template-columns:minmax(0,1fr)340px;gap:14px;align-items:start}.blog-cms-editor-main,.blog-cms-sidebar{display:grid;gap:12px;align-content:start}.blog-cms-editor-main{min-width:0}.blog-cms-sidebar{position:sticky;top:14px}
-        .blog-cms-editor-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.blog-cms-editor-toolbar h3{margin:0}.blog-cms-card>.blog-cms-editor-toolbar{margin-bottom:12px}.blog-cms-title-input{font-size:1.6rem;font-weight:900;line-height:1.2}.blog-cms-content-header{border-bottom:1px solid #edf1ed;padding-bottom:10px}.blog-cms-editor-tabs{display:inline-flex;gap:4px;align-items:center;border:1px solid var(--cms-line);border-radius:8px;background:#f8faf8;padding:4px}.blog-cms-editor-tabs button{min-height:34px;border:0;background:transparent;color:#3a5146;border-radius:6px;padding:7px 12px;font-weight:900;cursor:pointer}.blog-cms-editor-tabs button.active{background:var(--cms-green-dark);color:#fff}.blog-cms-rich-toolbar{display:grid;gap:8px;border:1px solid #dfe8e2;background:#f8faf8;border-radius:8px;padding:8px}.blog-cms-toolbar-group{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.blog-cms-toolbar-label{color:#6b7a72;font-size:.76rem;font-weight:900;text-transform:uppercase}.blog-cms-rich-toolbar button,.blog-cms-preview-actions button{border:1px solid transparent;background:#fff;color:#26382f;border-radius:6px;padding:7px 9px;font-weight:850;cursor:pointer}.blog-cms-rich-toolbar button:hover,.blog-cms-preview-actions button:hover{border-color:#bcd0c3}.blog-cms-preview-actions{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}.blog-cms-preview-actions button.active{background:var(--cms-green-dark);color:#fff}
-        .blog-cms-editor{min-height:470px;border:1px solid #cfdcd4;border-radius:8px;padding:22px;background:#fff;line-height:1.82;outline:none;overflow:auto;font-size:1rem}.blog-cms-editor:focus{border-color:#78af8b;box-shadow:0 0 0 3px rgba(23,99,63,.1)}.blog-cms-editor:empty:before{content:attr(data-placeholder);color:#88958e}.blog-cms-editor-pane-preview .blog-cms-rich-toolbar,.blog-cms-editor-pane-preview .blog-cms-editor{display:none}
+        .blog-cms-editor-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.blog-cms-editor-toolbar h3{margin:0}.blog-cms-card>.blog-cms-editor-toolbar{margin-bottom:12px}.blog-cms-title-input{font-size:1.6rem;font-weight:900;line-height:1.2}.blog-cms-content-header{border-bottom:1px solid #edf1ed;padding-bottom:10px}.blog-cms-editor-tabs{display:inline-flex;gap:4px;align-items:center;border:1px solid var(--cms-line);border-radius:8px;background:#f8faf8;padding:4px}.blog-cms-editor-tabs button{min-height:34px;border:0;background:transparent;color:#3a5146;border-radius:6px;padding:7px 12px;font-weight:900;cursor:pointer}.blog-cms-editor-tabs button.active{background:var(--cms-green-dark);color:#fff}.blog-cms-rich-toolbar{position:sticky;top:0;z-index:4;display:grid;gap:8px;border:1px solid #dfe8e2;background:#f8faf8;border-radius:8px;padding:8px;box-shadow:0 10px 18px rgba(20,45,31,.07)}.blog-cms-toolbar-group{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.blog-cms-toolbar-label{color:#6b7a72;font-size:.76rem;font-weight:900;text-transform:uppercase}.blog-cms-rich-toolbar button,.blog-cms-preview-actions button{border:1px solid transparent;background:#fff;color:#26382f;border-radius:6px;padding:7px 9px;font-weight:850;cursor:pointer}.blog-cms-rich-toolbar button:hover,.blog-cms-preview-actions button:hover{border-color:#bcd0c3}.blog-cms-tool-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px}.blog-cms-tool-btn.icon-only{width:40px;min-width:40px;padding:0}.blog-cms-tool-icon{display:inline-grid;place-items:center;min-width:18px;font-size:1rem;line-height:1}.blog-cms-tool-label{max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.84rem;line-height:1}.blog-cms-tool-btn[data-blog-insert="bold"] .blog-cms-tool-icon{font-weight:950}.blog-cms-tool-btn[data-blog-insert="italic"] .blog-cms-tool-icon{font-style:italic}.blog-cms-tool-btn[data-blog-insert="underline"] .blog-cms-tool-icon{text-decoration:underline}.blog-cms-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.blog-cms-preview-actions{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}.blog-cms-preview-actions button.active{background:var(--cms-green-dark);color:#fff}
+        .blog-cms-editor{height:clamp(440px,calc(100vh - 360px),700px);min-height:440px;border:1px solid #cfdcd4;border-radius:8px;padding:22px;background:#fff;line-height:1.82;outline:none;overflow-y:auto;scrollbar-gutter:stable;font-size:1rem}.blog-cms-editor:focus{border-color:#78af8b;box-shadow:0 0 0 3px rgba(23,99,63,.1)}.blog-cms-editor:empty:before{content:attr(data-placeholder);color:#88958e}.blog-cms-editor-pane-preview .blog-cms-rich-toolbar,.blog-cms-editor-pane-preview .blog-cms-editor{display:none}
         .blog-cms-preview,.blog-cms-preview-actions{display:none}.blog-cms-preview.active{display:block}.blog-cms-preview-actions.active{display:flex}.blog-cms-preview{border:1px solid #dfe8e2;border-radius:8px;background:#fff;padding:20px;line-height:1.8}.blog-cms-preview.mobile{max-width:390px;margin:auto}.blog-cms-preview img{max-width:100%;height:auto}
         .blog-cms-check{display:grid;gap:8px}.blog-cms-check div{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;border:1px solid #edf1ed;border-radius:7px;padding:8px 10px}.blog-cms-check strong{border-radius:999px;padding:4px 8px;font-size:.75rem}.blog-cms-check .pass strong{background:var(--cms-green-soft);color:var(--cms-green)}.blog-cms-check .warn strong{background:var(--cms-amber-soft);color:var(--cms-amber)}.blog-cms-check .missing strong{background:var(--cms-red-soft);color:var(--cms-red)}
         .blog-cms-media-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.blog-cms-media-card img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:7px;background:#edf1ed}.blog-cms-alert{border:1px solid #c8dcff;background:#eef5ff;color:#285b83;border-radius:8px;padding:12px;font-weight:800}.blog-cms-alert.success{border-color:#b7dfc1;background:#edf8f0;color:#17633f}.blog-cms-alert.warning{border-color:#e3c16f;background:#fff7df;color:#7a4f08}.blog-cms-alert.error{border-color:#f0b7b7;background:#fff0f0;color:#9b2f2f}
@@ -766,13 +766,45 @@ function currentPost() {
     return base;
 }
 
+function toolbarButton(tool, mode = 'label') {
+    const label = escapeHTML(tool.label);
+    const icon = escapeHTML(tool.icon || tool.short || tool.label);
+    const short = escapeHTML(tool.short || tool.label);
+    const iconHTML = `<span class="blog-cms-tool-icon" aria-hidden="true">${icon}</span>`;
+    const labelHTML = mode === 'icon' ? `<span class="blog-cms-sr-only">${label}</span>` : `<span class="blog-cms-tool-label">${short}</span>`;
+    return `<button type="button" class="blog-cms-tool-btn ${mode === 'icon' ? 'icon-only' : 'with-label'}" data-blog-insert="${escapeHTML(tool.cmd)}" title="${label}" aria-label="${label}">${iconHTML}${labelHTML}</button>`;
+}
+
 function editorHTML() {
     const post = currentPost();
     const tags = new Set(post.tag_ids || []);
     const score = checklistStats(post);
     const editorPane = state.editorPane === 'preview' ? 'preview' : 'content';
-    const writingTools = [['p','Paragraph'],['h2','H2'],['h3','H3'],['bold','Bold'],['italic','Italic'],['underline','Underline'],['link','Link'],['quote','Quote'],['ul','Bullet'],['ol','Number'],['image','Image']];
-    const insertTools = [['h4','H4'],['gallery','Gallery'],['divider','Divider'],['cta','CTA'],['table','Table'],['faq','FAQ'],['youtube','YouTube'],['html','HTML'],['internal','Internal Link'],['related','Related Posts']];
+    const writingTools = [
+        { cmd: 'p', label: 'Paragraph', icon: '¶' },
+        { cmd: 'h2', label: 'Heading 2', icon: 'H2' },
+        { cmd: 'h3', label: 'Heading 3', icon: 'H3' },
+        { cmd: 'bold', label: 'Bold', icon: 'B' },
+        { cmd: 'italic', label: 'Italic', icon: 'I' },
+        { cmd: 'underline', label: 'Underline', icon: 'U' },
+        { cmd: 'link', label: 'Link', icon: '↗' },
+        { cmd: 'quote', label: 'Quote', icon: '"' },
+        { cmd: 'ul', label: 'Bullet List', icon: '•' },
+        { cmd: 'ol', label: 'Numbered List', icon: '1.' },
+        { cmd: 'image', label: 'Image', icon: '▧' }
+    ];
+    const insertTools = [
+        { cmd: 'h4', label: 'Heading 4', icon: 'H4', short: 'H4' },
+        { cmd: 'gallery', label: 'Gallery', icon: '▦', short: 'Gallery' },
+        { cmd: 'divider', label: 'Divider', icon: '—', short: 'Divider' },
+        { cmd: 'cta', label: 'Call to Action', icon: 'CTA', short: 'CTA' },
+        { cmd: 'table', label: 'Table', icon: 'Table', short: 'Table' },
+        { cmd: 'faq', label: 'FAQ', icon: 'FAQ', short: 'FAQ' },
+        { cmd: 'youtube', label: 'YouTube', icon: '▶', short: 'YouTube' },
+        { cmd: 'html', label: 'HTML', icon: '</>', short: 'HTML' },
+        { cmd: 'internal', label: 'Internal Link', icon: '↗', short: 'Internal' },
+        { cmd: 'related', label: 'Related Posts', icon: 'Rel', short: 'Related' }
+    ];
     return `
         <div class="blog-cms-editor-grid">
             <div class="blog-cms-editor-main">
@@ -812,11 +844,11 @@ function editorHTML() {
                     <div class="blog-cms-rich-toolbar">
                         <div class="blog-cms-toolbar-group">
                             <span class="blog-cms-toolbar-label">Write</span>
-                            ${writingTools.map(([cmd,label]) => `<button type="button" data-blog-insert="${cmd}">${label}</button>`).join('')}
+                            ${writingTools.map((tool) => toolbarButton(tool, 'icon')).join('')}
                         </div>
                         <div class="blog-cms-toolbar-group">
                             <span class="blog-cms-toolbar-label">Insert block</span>
-                            ${insertTools.map(([cmd,label]) => `<button type="button" data-blog-insert="${cmd}">${label}</button>`).join('')}
+                            ${insertTools.map((tool) => toolbarButton(tool, 'label')).join('')}
                         </div>
                     </div>
                     <div id="blog-content-editor" class="blog-cms-editor" contenteditable="true" data-placeholder="เขียนบทความ วางจาก Google Docs หรือเพิ่ม block จาก toolbar ได้ที่นี่">${post.content || ''}</div>
