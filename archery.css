@@ -108,28 +108,44 @@
 
 .archery-choice-card {
     display: grid;
-    grid-template-columns: 22px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     align-items: start;
     gap: 4px 10px;
     border: 1px solid #d8dfd5;
     border-radius: 8px;
     min-height: 74px;
-    padding: 14px 16px;
+    padding: 14px 16px 14px 52px;
+    position: relative;
     background: #fff;
     cursor: pointer;
     transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
 }
 
 .archery-choice-card input[type="radio"] {
-    width: 18px;
-    height: 18px;
-    min-width: 18px;
-    min-height: 18px;
-    margin: 2px 0 0;
-    accent-color: #18823c;
-    grid-row: 1 / span 2;
-    align-self: start;
-    justify-self: start;
+    opacity: 0;
+    pointer-events: none;
+    position: absolute;
+}
+
+.archery-choice-card strong::before {
+    border: 2px solid #18823c;
+    border-radius: 50%;
+    content: "";
+    height: 20px;
+    left: 18px;
+    position: absolute;
+    top: 16px;
+    width: 20px;
+}
+
+.archery-choice-card input[type="radio"]:checked + strong::before {
+    background: #18823c;
+    box-shadow: inset 0 0 0 5px #fff;
+}
+
+.archery-choice-card input[type="radio"]:focus-visible + strong::before {
+    outline: 2px solid #18823c;
+    outline-offset: 2px;
 }
 
 .archery-choice-card strong,
