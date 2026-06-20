@@ -5544,27 +5544,57 @@ body[data-blog-page] h3 {
         max-height: calc(100dvh - 96px);
         overflow-y: auto;
         overscroll-behavior: contain;
-        padding: 10px;
+        padding: 12px;
         position: relative;
         z-index: 1006;
     }
 
     .nav-links.active {
         display: grid;
-        gap: 8px;
+        gap: 10px;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         max-height: calc(100dvh - 96px);
         overflow-y: auto;
     }
 
+    .nav-links > li {
+        min-width: 0;
+        width: 100%;
+    }
+
     .nav-links a,
     .nav-dropdown-toggle {
-        border-radius: 8px;
+        align-items: center;
+        background: #f7fbf8;
+        border: 1px solid #d7e7da;
+        border-radius: 10px;
+        color: #243a2d;
+        box-shadow: 0 1px 0 rgba(19, 114, 52, 0.05);
+        display: flex;
         justify-content: center;
-        min-height: 44px;
-        padding: 10px 8px;
+        min-height: 48px;
+        padding: 11px 10px;
         text-align: center;
         white-space: normal;
+        width: 100%;
+    }
+
+    .nav-links a:hover,
+    .nav-links a:focus,
+    .nav-dropdown-toggle:hover,
+    .nav-dropdown-toggle:focus {
+        background: #edf7f0;
+        border-color: #137234;
+        color: #0f6f33;
+        outline: none;
+    }
+
+    .nav-links a.active,
+    .nav-dropdown-toggle.active {
+        background: #137234;
+        border-color: #137234;
+        box-shadow: 0 8px 18px rgba(19, 114, 52, 0.18);
+        color: #ffffff;
     }
 
     .nav-dropdown {
@@ -5573,16 +5603,16 @@ body[data-blog-page] h3 {
     }
 
     .nav-dropdown-menu {
-        background: #ffffff;
-        border: 1px solid rgba(19, 114, 52, 0.1);
-        border-radius: 10px;
+        background: #f2f8f4;
+        border: 1px solid #d4e6d7;
+        border-radius: 12px;
         box-shadow: none;
         display: grid;
-        gap: 6px;
+        gap: 8px;
         grid-template-columns: 1fr;
-        margin-top: 6px;
+        margin-top: 8px;
         opacity: 1;
-        padding: 6px;
+        padding: 8px;
         pointer-events: auto;
         position: static;
         transform: none;
@@ -5596,7 +5626,9 @@ body[data-blog-page] h3 {
     }
 
     .nav-dropdown-menu a {
-        min-height: 44px;
+        background: #ffffff;
+        border-color: #cfe3d3;
+        min-height: 48px;
     }
 
     .nav-actions.active {
