@@ -28,6 +28,11 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
     let currentAuthUser = null;
     let authStateResolved = false;
     let selectedPreviewTier = '';
+    let activeProfileTab = 'overview';
+    let activeHistoryFilter = 'all';
+    let historyExpanded = false;
+    const PROFILE_TABS = ['overview', 'points', 'history', 'account'];
+    const HISTORY_FILTERS = ['all', 'orders', 'bookings', 'archery'];
     const CAN_LOG_CLIENT_ERRORS = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
 
     const DEFAULT_LOYALTY_CONFIG = {
@@ -151,6 +156,26 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             orders: 'Orders',
             bookings: 'Bookings',
             account: 'Account',
+            pointsTab: 'Points',
+            history: 'History',
+            dashboardTitle: 'Member Dashboard',
+            dashboardLead: 'Manage your Eden profile, points, rewards, and recent activity in one place.',
+            memberSummary: 'Member summary',
+            quickActions: 'Quick actions',
+            bookArchery: 'Book Archery',
+            historyAll: 'All',
+            historyOrders: 'Orders',
+            historyBookings: 'Table / Room',
+            historyArchery: 'Archery',
+            recentActivity: 'Recent activity',
+            noHistory: 'No activity yet.',
+            showAll: 'View all',
+            showLess: 'Show less',
+            activityStatus: 'Status',
+            tableBooking: 'Table booking',
+            roomBooking: 'Room booking',
+            archeryBooking: 'Archery booking',
+            generalBooking: 'Booking',
             memberId: 'Member ID',
             points: 'Reward Points',
             totalSpent: 'Total Spent',
@@ -248,6 +273,26 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             orders: 'คำสั่งซื้อ',
             bookings: 'การจอง',
             account: 'บัญชีของฉัน',
+            pointsTab: 'แต้ม',
+            history: 'ประวัติ',
+            dashboardTitle: 'แดชบอร์ดสมาชิก',
+            dashboardLead: 'จัดการข้อมูลสมาชิก แต้ม สิทธิประโยชน์ และประวัติการใช้งานของคุณในที่เดียว',
+            memberSummary: 'สรุปสมาชิก',
+            quickActions: 'เมนูลัด',
+            bookArchery: 'จองยิงธนู',
+            historyAll: 'ทั้งหมด',
+            historyOrders: 'คำสั่งซื้อ',
+            historyBookings: 'โต๊ะ / ห้อง',
+            historyArchery: 'ยิงธนู',
+            recentActivity: 'กิจกรรมล่าสุด',
+            noHistory: 'ยังไม่มีประวัติการใช้งาน',
+            showAll: 'ดูทั้งหมด',
+            showLess: 'ย่อรายการ',
+            activityStatus: 'สถานะ',
+            tableBooking: 'จองโต๊ะ',
+            roomBooking: 'จองห้อง',
+            archeryBooking: 'จองยิงธนู',
+            generalBooking: 'การจอง',
             memberId: 'รหัสสมาชิก',
             points: 'คะแนนสะสม',
             totalSpent: 'ยอดใช้จ่ายสะสม',
@@ -574,11 +619,6 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                     </div>
                     <div class="member-id">${escapeHTML(labels.memberId)}: ${escapeHTML(membershipUser.memberCode || memberId(user))}</div>
                 </div>
-                <div class="member-metrics-row">
-                    <span>${escapeHTML(labels.points)} <strong>${formatNumber(membershipUser.points)}</strong></span>
-                    <span>${escapeHTML(labels.totalSpent)} <strong>฿${formatBaht(membershipUser.totalSpent)}</strong></span>
-                    <span>${escapeHTML(labels.visits)} <strong>${formatNumber(membershipUser.visitCount)}</strong></span>
-                </div>
                 <div class="member-progress-container">
                     <div class="member-progress-text"><span>${escapeHTML(progressLabel)}</span><span>${percent}%</span></div>
                     <div class="member-progress-bar"><div class="member-progress-fill" style="width:${percent}%"></div></div>
@@ -639,14 +679,20 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         `;
     }
 
-    function renderBenefits(tier, labels) {
+    function renderBenefitGrid(tier) {
         const benefits = getTierBenefits(tier, isEnglishPage() ? 'en' : 'th');
+        return `
+            <div class="benefit-grid">
+                ${benefits.map(item => `<div class="benefit-pill">${escapeHTML(item)}</div>`).join('')}
+            </div>
+        `;
+    }
+
+    function renderBenefits(tier, labels) {
         return `
             <div class="membership-panel">
                 <h2>${escapeHTML(labels.benefits)}</h2>
-                <div class="benefit-grid">
-                    ${benefits.map(item => `<div class="benefit-pill">${escapeHTML(item)}</div>`).join('')}
-                </div>
+                ${renderBenefitGrid(tier)}
             </div>
         `;
     }
@@ -781,6 +827,325 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         `).join('');
     }
 
+    function profileTabLabel(tab, labels) {
+        return {
+            overview: labels.overview,
+            points: labels.pointsTab,
+            history: labels.history,
+            account: labels.account
+        }[tab] || labels.overview;
+    }
+
+    function renderProfileTabs(labels) {
+        return `
+            <div class="profile-tabs" role="tablist" aria-label="${escapeHTML(labels.dashboardTitle)}">
+                ${PROFILE_TABS.map(tab => `
+                    <button
+                        class="profile-tab ${activeProfileTab === tab ? 'active' : ''}"
+                        type="button"
+                        role="tab"
+                        aria-selected="${activeProfileTab === tab ? 'true' : 'false'}"
+                        aria-controls="profile-tab-${escapeHTML(tab)}"
+                        onclick="setProfileTab('${escapeHTML(tab)}')">
+                        ${escapeHTML(profileTabLabel(tab, labels))}
+                    </button>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    function setProfileTab(tab) {
+        if (!PROFILE_TABS.includes(tab)) return false;
+        activeProfileTab = tab;
+        renderProfile();
+        requestAnimationFrame(() => {
+            document.getElementById(`profile-tab-${tab}`)?.focus?.({ preventScroll: true });
+        });
+        return false;
+    }
+
+    function setProfileHistoryFilter(filter) {
+        if (!HISTORY_FILTERS.includes(filter)) return false;
+        activeHistoryFilter = filter;
+        activeProfileTab = 'history';
+        historyExpanded = false;
+        renderProfile();
+        return false;
+    }
+
+    function toggleProfileHistoryExpanded() {
+        historyExpanded = !historyExpanded;
+        activeProfileTab = 'history';
+        renderProfile();
+        return false;
+    }
+
+    function renderProfileSummary(user, labels, membershipUser, tier, avatar, displayName, email) {
+        const theme = getTierTheme(tier);
+        return `
+            <aside class="profile-sidebar profile-dashboard-sidebar" aria-label="${escapeHTML(labels.memberSummary)}">
+                <section class="profile-summary-card">
+                    <img src="${escapeHTML(avatar)}" alt="Profile" class="profile-summary-avatar">
+                    <div class="profile-summary-body">
+                        <span class="profile-kicker">${escapeHTML(labels.memberSummary)}</span>
+                        <h2>${escapeHTML(displayName || labels.member)}</h2>
+                        <p>${escapeHTML(email || labels.notProvided)}</p>
+                        <span class="member-tier-badge ${theme.badgeClass}">${escapeHTML(tier)}</span>
+                        <small>${escapeHTML(labels.memberId)}: ${escapeHTML(membershipUser.memberCode || memberId(user))}</small>
+                    </div>
+                </section>
+
+                <div class="profile-quick-actions" aria-label="${escapeHTML(labels.quickActions)}">
+                    <a class="btn" href="${isEnglishPage() ? '/shop-en' : '/shop'}">${escapeHTML(labels.shopNow)}</a>
+                    <a class="btn btn-outline" href="${isEnglishPage() ? '/booking-en' : '/booking'}">${escapeHTML(labels.bookTable)}</a>
+                    <a class="btn btn-outline" href="/archery/">${escapeHTML(labels.bookArchery)}</a>
+                </div>
+
+                ${renderProfileTabs(labels)}
+
+                <button class="profile-logout-btn" type="button" onclick="logout(); return false;">${escapeHTML(labels.logout)}</button>
+            </aside>
+        `;
+    }
+
+    function renderDashboardMetrics(membershipUser, labels) {
+        const metrics = [
+            { value: formatNumber(membershipUser.points), label: labels.points },
+            { value: '฿' + formatBaht(membershipUser.totalSpent), label: labels.totalSpent },
+            { value: formatNumber(membershipUser.visitCount), label: labels.visits },
+            { value: formatNumber(membershipUser.cartItemCount), label: labels.cartItems }
+        ];
+        return `
+            <div class="stats-grid profile-metric-grid" aria-label="${escapeHTML(labels.overview)}">
+                ${metrics.map(metric => `
+                    <div class="stat-box profile-metric-card">
+                        <div class="stat-value">${escapeHTML(metric.value)}</div>
+                        <div class="stat-label">${escapeHTML(metric.label)}</div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    function timestampMillis(value) {
+        if (!value) return 0;
+        if (value.toMillis) return value.toMillis();
+        if (value.toDate) return value.toDate().getTime();
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+    }
+
+    function isArcheryBooking(booking = {}) {
+        const type = String(booking.service_type || booking.serviceType || booking.bookingType || booking.type || '').toLowerCase();
+        return type.includes('archery')
+            || Array.isArray(booking.assigned_lane_numbers)
+            || Array.isArray(booking.assigned_resource_ids)
+            || booking.required_lane_count != null
+            || booking.duration_minutes != null
+            || booking.package_amount != null;
+    }
+
+    function bookingKindLabel(booking, labels) {
+        if (isArcheryBooking(booking)) return labels.archeryBooking;
+        const bookingType = String(booking.bookingType || booking.booking_type || '').toLowerCase();
+        if (bookingType === 'table') return labels.tableBooking;
+        if (bookingType === 'room') return labels.roomBooking;
+        return labels.generalBooking;
+    }
+
+    function bookingTimeText(booking) {
+        const date = booking.booking_date || booking.date || '';
+        const start = booking.start_time || booking.startTime || booking.arrivalTime || '';
+        const end = booking.end_time || booking.endTime || '';
+        const range = [start, end].filter(Boolean).join(' - ');
+        return [date, range].filter(Boolean).join(' | ') || '-';
+    }
+
+    function bookingDetailText(booking) {
+        const laneNumbers = Array.isArray(booking.assigned_lane_numbers)
+            ? booking.assigned_lane_numbers.map(number => `Lane ${number}`).join(', ')
+            : '';
+        const laneIds = !laneNumbers && Array.isArray(booking.assigned_resource_ids)
+            ? booking.assigned_resource_ids.join(', ')
+            : '';
+        return [
+            laneNumbers || laneIds,
+            booking.tableZone || booking.tableNo || booking.roomType || booking.zone || booking.table,
+            booking.party_size ? `${booking.party_size} people` : '',
+            booking.guests ? `${booking.guests} people` : '',
+            booking.duration_minutes ? `${booking.duration_minutes} min` : ''
+        ].filter(Boolean).join(' / ');
+    }
+
+    function buildHistoryItems(orders, bookings, labels) {
+        const orderItems = orders.map(order => {
+            const items = Array.isArray(order.items) ? order.items.map(item => item.name || '').filter(Boolean).join(', ') : '';
+            const paymentStatus = String(order.paymentStatus || order.payment_status || '').toLowerCase();
+            const orderStatus = String(order.status || order.order_status || '').toLowerCase();
+            const status = paymentStatus === 'paid' || paymentStatus === 'paid_online' || orderStatus === 'paid' || orderStatus === 'completed'
+                ? labels.paid
+                : labels.pending;
+            return {
+                category: 'orders',
+                title: `${labels.orderId} ${order.id || '-'}`,
+                typeLabel: labels.orders,
+                status,
+                meta: formatDate(order.date || order.timestamp || order.createdAt),
+                detail: items || '-',
+                amount: money(order.totalAmount || order.total || 0),
+                timestamp: timestampMillis(order.timestamp || order.createdAt || order.date)
+            };
+        });
+        const bookingItems = bookings.map(booking => {
+            const archery = isArcheryBooking(booking);
+            return {
+                category: archery ? 'archery' : 'bookings',
+                title: bookingKindLabel(booking, labels),
+                typeLabel: archery ? labels.historyArchery : labels.historyBookings,
+                status: booking.status || booking.paymentStatus || booking.payment_status || 'confirmed',
+                meta: bookingTimeText(booking),
+                detail: bookingDetailText(booking) || booking.id || '-',
+                amount: booking.total ? money(booking.total) : booking.price || '',
+                timestamp: timestampMillis(booking.timestamp || booking.createdAt || booking.booking_date || booking.date)
+            };
+        });
+        return [...orderItems, ...bookingItems].sort((a, b) => b.timestamp - a.timestamp);
+    }
+
+    function filteredHistoryItems(items) {
+        if (activeHistoryFilter === 'all') return items;
+        return items.filter(item => item.category === activeHistoryFilter);
+    }
+
+    function renderHistoryFilters(labels) {
+        const filterLabels = {
+            all: labels.historyAll,
+            orders: labels.historyOrders,
+            bookings: labels.historyBookings,
+            archery: labels.historyArchery
+        };
+        return `
+            <div class="profile-history-filters" role="toolbar" aria-label="${escapeHTML(labels.history)}">
+                ${HISTORY_FILTERS.map(filter => `
+                    <button
+                        class="profile-history-filter ${activeHistoryFilter === filter ? 'active' : ''}"
+                        type="button"
+                        onclick="setProfileHistoryFilter('${escapeHTML(filter)}')">
+                        ${escapeHTML(filterLabels[filter])}
+                    </button>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    function renderHistoryTimeline(items, labels) {
+        if (!items.length) {
+            return `<div class="profile-empty-state">${escapeHTML(labels.noHistory)}</div>`;
+        }
+        return `
+            <div class="profile-timeline">
+                ${items.map(item => `
+                    <article class="profile-timeline-item profile-timeline-item--${escapeHTML(item.category)}">
+                        <span class="profile-timeline-dot" aria-hidden="true"></span>
+                        <div class="profile-timeline-main">
+                            <div class="profile-timeline-top">
+                                <span>${escapeHTML(item.typeLabel)}</span>
+                                <strong>${escapeHTML(item.status)}</strong>
+                            </div>
+                            <h3>${escapeHTML(item.title)}</h3>
+                            <p>${escapeHTML(item.meta)}</p>
+                            <small>${escapeHTML(item.detail)}</small>
+                            ${item.amount ? `<b>${escapeHTML(item.amount)}</b>` : ''}
+                        </div>
+                    </article>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    function renderOverviewTab(user, labels, membershipUser, tier, historyItems) {
+        return `
+            <section class="profile-tab-panel" id="profile-tab-overview" role="tabpanel" tabindex="-1">
+                <div class="profile-dashboard-head">
+                    <span class="profile-kicker">${escapeHTML(labels.dashboardTitle)}</span>
+                    <h1>${escapeHTML(labels.overview)}</h1>
+                    <p>${escapeHTML(labels.dashboardLead)}</p>
+                </div>
+                ${renderMemberCard(user, labels, membershipUser)}
+                ${renderDashboardMetrics(membershipUser, labels)}
+                <div class="profile-overview-grid">
+                    ${renderNextTierRequirements(membershipUser, labels)}
+                    <details class="membership-panel profile-accordion">
+                        <summary>${escapeHTML(labels.benefits)}</summary>
+                        ${renderBenefitGrid(tier)}
+                    </details>
+                </div>
+                <section class="membership-panel profile-history-preview">
+                    <div class="profile-panel-heading">
+                        <h2>${escapeHTML(labels.recentActivity)}</h2>
+                        <button type="button" class="profile-link-button" onclick="setProfileTab('history')">${escapeHTML(labels.showAll)}</button>
+                    </div>
+                    ${renderHistoryTimeline(historyItems.slice(0, 3), labels)}
+                </section>
+            </section>
+        `;
+    }
+
+    function renderPointsTab(labels, membershipUser, tier) {
+        return `
+            <section class="profile-tab-panel" id="profile-tab-points" role="tabpanel" tabindex="-1">
+                ${renderLoyaltyWallet(membershipUser, labels)}
+                ${renderTierPreview(tier, labels)}
+                ${renderBenefits(tier, labels)}
+                ${renderNextTierRequirements(membershipUser, labels)}
+            </section>
+        `;
+    }
+
+    function renderHistoryTab(labels, historyItems) {
+        const visibleItems = filteredHistoryItems(historyItems);
+        const limitedItems = historyExpanded ? visibleItems : visibleItems.slice(0, 5);
+        const hasMore = visibleItems.length > 5;
+        return `
+            <section class="profile-tab-panel" id="profile-tab-history" role="tabpanel" tabindex="-1">
+                <div class="profile-panel-heading">
+                    <div>
+                        <span class="profile-kicker">${escapeHTML(labels.history)}</span>
+                        <h2>${escapeHTML(labels.recentActivity)}</h2>
+                    </div>
+                </div>
+                ${renderHistoryFilters(labels)}
+                ${renderHistoryTimeline(limitedItems, labels)}
+                ${hasMore ? `
+                    <button class="btn btn-outline profile-history-more" type="button" onclick="toggleProfileHistoryExpanded()">
+                        ${escapeHTML(historyExpanded ? labels.showLess : labels.showAll)}
+                    </button>
+                ` : ''}
+            </section>
+        `;
+    }
+
+    function renderAccountTab(user, labels) {
+        return `
+            <section class="profile-tab-panel" id="profile-tab-account" role="tabpanel" tabindex="-1">
+                <div class="profile-panel-heading">
+                    <div>
+                        <span class="profile-kicker">${escapeHTML(labels.account)}</span>
+                        <h2>${escapeHTML(labels.editableInfo)}</h2>
+                    </div>
+                </div>
+                ${renderProfileForm(user, labels)}
+            </section>
+        `;
+    }
+
+    function renderActiveProfilePanel(user, labels, membershipUser, tier, historyItems) {
+        if (activeProfileTab === 'points') return renderPointsTab(labels, membershipUser, tier);
+        if (activeProfileTab === 'history') return renderHistoryTab(labels, historyItems);
+        if (activeProfileTab === 'account') return renderAccountTab(user, labels);
+        return renderOverviewTab(user, labels, membershipUser, tier, historyItems);
+    }
+
     function renderMemberIdentity(user, labels) {
         const en = isEnglishPage();
         const displayName = profileValue('displayName', profileValue('display_name', user.name || labels.member)) || labels.member;
@@ -906,59 +1271,15 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         const avatar = profileValue('photoURL', user.avatar || user.photoURL || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user.name || labels.member) + '&background=4caf50&color=fff');
         const displayName = profileValue('displayName', user.name || labels.member);
         const email = profileValue('email', user.email || '');
+        const historyItems = buildHistoryItems(orders, bookings, labels);
+        if (!PROFILE_TABS.includes(activeProfileTab)) activeProfileTab = 'overview';
+        if (!HISTORY_FILTERS.includes(activeHistoryFilter)) activeHistoryFilter = 'all';
 
         container.innerHTML = `
-            <div class="profile-layout">
-                <aside class="profile-sidebar">
-                    <a class="profile-nav-item active" href="#profile-overview">${escapeHTML(labels.overview)}</a>
-                    <a class="profile-nav-item" href="#profile-orders">${escapeHTML(labels.orders)}</a>
-                    <a class="profile-nav-item" href="#profile-bookings">${escapeHTML(labels.bookings)}</a>
-                    <a class="profile-nav-item" href="#profile-account">${escapeHTML(labels.account)}</a>
-                    <a class="profile-nav-item" href="#" onclick="logout(); return false;">${escapeHTML(labels.logout)}</a>
-                </aside>
-                <section class="profile-main">
-                    <div class="profile-header">
-                        <img src="${escapeHTML(avatar)}" alt="Profile">
-                        <div>
-                            <h1 style="margin:0;">${escapeHTML(displayName || labels.member)}</h1>
-                            <p style="margin:5px 0 0;color:#666;">${escapeHTML(email || '')}</p>
-                        </div>
-                    </div>
-
-                    ${renderMemberIdentity(user, labels)}
-                    ${renderMemberCard(user, labels, membershipUser)}
-                    ${renderLoyaltyWallet(membershipUser, labels)}
-                    ${renderTierPreview(tier, labels)}
-
-                    <div class="stats-grid">
-                        <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.points)}</div><div class="stat-label">${escapeHTML(labels.points)}</div></div>
-                        <div class="stat-box"><div class="stat-value">฿${formatBaht(membershipUser.totalSpent)}</div><div class="stat-label">${escapeHTML(labels.totalSpent)}</div></div>
-                        <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.visitCount)}</div><div class="stat-label">${escapeHTML(labels.visits)}</div></div>
-                        <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.cartItemCount)}</div><div class="stat-label">${escapeHTML(labels.cartItems)}</div></div>
-                    </div>
-
-                    ${renderBenefits(tier, labels)}
-                    ${renderNextTierRequirements(membershipUser, labels)}
-
-                    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:30px;">
-                        <a class="btn" href="${isEnglishPage() ? '/shop-en' : '/shop'}">${escapeHTML(labels.shopNow)}</a>
-                        <a class="btn btn-outline" href="${isEnglishPage() ? '/booking-en' : '/booking'}">${escapeHTML(labels.bookTable)}</a>
-                    </div>
-
-                    <div class="order-history" id="profile-account">
-                        <h2>${escapeHTML(labels.editableInfo)}</h2>
-                        ${renderProfileForm(user, labels)}
-                    </div>
-
-                    <div class="order-history" id="profile-orders">
-                        <h2>${escapeHTML(labels.recentOrders)}</h2>
-                        ${renderOrderList(orders, labels)}
-                    </div>
-
-                    <div class="order-history" id="profile-bookings">
-                        <h2>${escapeHTML(labels.bookings)}</h2>
-                        ${renderBookingList(bookings, labels)}
-                    </div>
+            <div class="profile-layout profile-dashboard">
+                ${renderProfileSummary(user, labels, membershipUser, tier, avatar, displayName, email)}
+                <section class="profile-main profile-dashboard-main">
+                    ${renderActiveProfilePanel(user, labels, membershipUser, tier, historyItems)}
                 </section>
             </div>
         `;
@@ -1179,6 +1500,9 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
     window.saveMemberProfile = saveMemberProfile;
     window.resetMemberProfileForm = resetMemberProfileForm;
     window.previewMemberTier = previewMemberTier;
+    window.setProfileTab = setProfileTab;
+    window.setProfileHistoryFilter = setProfileHistoryFilter;
+    window.toggleProfileHistoryExpanded = toggleProfileHistoryExpanded;
     window.sendMemberEmailVerificationCode = sendMemberEmailVerificationCode;
     window.verifyMemberEmailCode = verifyMemberEmailCode;
 
