@@ -2678,6 +2678,19 @@ footer p {
     display: inline-block;
 }
 
+.auth-login-link {
+    font-size: 0.9rem;
+    font-weight: 700;
+    gap: 6px;
+    line-height: 1;
+    padding: 6px 14px;
+    white-space: nowrap;
+}
+
+.auth-login-text-mobile {
+    display: none;
+}
+
 .user-avatar {
     width: 36px;
     height: 36px;
@@ -5586,7 +5599,24 @@ body[data-blog-page] h3 {
     }
 
     .nav-actions .auth-container:has(.btn) {
+        display: flex;
+    }
+
+    .nav-actions .auth-login-link {
+        border-radius: 999px;
+        font-size: 0.76rem;
+        height: 34px;
+        min-height: 34px;
+        min-width: 52px;
+        padding: 0 10px;
+    }
+
+    .nav-actions .auth-login-text-desktop {
         display: none;
+    }
+
+    .nav-actions .auth-login-text-mobile {
+        display: inline;
     }
 
     .nav-actions .user-profile-menu {
@@ -5725,7 +5755,7 @@ body[data-blog-page] h3 {
     }
 
     .nav-actions.active .auth-container:has(.btn) {
-        display: none;
+        display: flex;
     }
 }
 
@@ -5739,7 +5769,24 @@ body[data-blog-page] h3 {
 }
 
 .checkout-auth-container:has(.btn) {
+    display: flex;
+}
+
+.checkout-auth-container .auth-login-link {
+    border-radius: 999px;
+    font-size: 0.76rem;
+    height: 34px;
+    min-height: 34px;
+    min-width: 52px;
+    padding: 0 10px;
+}
+
+.checkout-auth-container .auth-login-text-desktop {
     display: none;
+}
+
+.checkout-auth-container .auth-login-text-mobile {
+    display: inline;
 }
 
 .checkout-auth-container .user-avatar {

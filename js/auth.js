@@ -321,7 +321,8 @@ function checkLoginStatus() {
     authContainers.forEach(container => {
         if (!user) {
             const loginText = isEn ? 'Sign In' : 'เข้าสู่ระบบ';
-            container.innerHTML = `<a class="btn btn-outline" style="padding:5px 15px; font-size:0.9rem;" href="/login">${loginText}</a>`;
+            const mobileLoginText = 'Login';
+            container.innerHTML = `<a class="btn btn-outline auth-login-link" aria-label="${loginText}" href="/login"><span class="auth-login-text auth-login-text-desktop">${loginText}</span><span class="auth-login-text auth-login-text-mobile" aria-hidden="true">${mobileLoginText}</span></a>`;
             return;
         }
 
