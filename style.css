@@ -5474,6 +5474,17 @@ body[data-blog-page] h3 {
         overflow: visible;
     }
 
+    main,
+    footer {
+        transition: filter 0.16s ease;
+    }
+
+    body:has(.nav-links.active) main,
+    body:has(.nav-links.active) footer {
+        filter: brightness(0.34) blur(1px);
+        pointer-events: none;
+    }
+
     .navbar .container {
         align-items: center;
         display: grid;
