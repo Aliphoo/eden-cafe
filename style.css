@@ -5800,6 +5800,129 @@ body[data-blog-page] h3 {
     top: 42px;
 }
 
+/* Keep desktop navigation from inheriting compact mobile touch rules. */
+@media (min-width: 769px) {
+    .navbar .container {
+        gap: clamp(18px, 2vw, 34px);
+        justify-content: flex-start;
+        max-width: min(1480px, 100%);
+        padding-left: clamp(28px, 4vw, 64px);
+        padding-right: clamp(28px, 4vw, 64px);
+    }
+
+    .navbar nav {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .nav-links {
+        align-items: center;
+        flex-wrap: nowrap;
+        gap: clamp(16px, 1.7vw, 32px);
+        justify-content: center;
+    }
+
+    .nav-links > li {
+        flex: 0 0 auto;
+    }
+
+    .nav-links a,
+    .nav-dropdown-toggle {
+        line-height: 1.25;
+        text-align: center;
+        white-space: nowrap;
+    }
+
+    .nav-actions {
+        flex: 0 0 auto;
+        gap: clamp(10px, 1vw, 15px);
+        white-space: nowrap;
+    }
+
+    .nav-actions .auth-container {
+        flex: 0 0 auto;
+        margin-left: 0;
+    }
+
+    .global-cart-icon {
+        flex: 0 0 44px;
+        justify-content: center;
+        width: 44px;
+    }
+
+    .lang-switcher {
+        align-items: center;
+        display: inline-flex;
+        gap: 8px;
+        line-height: 1;
+        white-space: nowrap;
+    }
+
+    .lang-switcher a {
+        min-height: 36px;
+        min-width: auto;
+        padding: 6px 6px;
+    }
+
+    .auth-login-link {
+        min-height: 40px;
+        padding: 0 18px;
+    }
+
+    .auth-login-text-mobile {
+        display: none;
+    }
+}
+
+@media (min-width: 769px) and (max-width: 959px) {
+    .navbar .container {
+        gap: 10px;
+        padding-left: 24px;
+        padding-right: 24px;
+    }
+
+    .nav-links {
+        gap: 8px;
+        justify-content: flex-start;
+    }
+
+    .nav-links a,
+    .nav-dropdown-toggle {
+        font-size: 0.8rem;
+    }
+
+    .nav-dropdown-toggle {
+        gap: 5px;
+    }
+
+    .nav-actions {
+        gap: 6px;
+    }
+
+    .global-cart-icon {
+        flex-basis: 36px;
+        min-width: 36px;
+        width: 36px;
+    }
+
+    .lang-switcher {
+        font-size: 0.8rem;
+        gap: 4px;
+    }
+
+    .lang-switcher a {
+        min-height: 34px;
+        padding-left: 3px;
+        padding-right: 3px;
+    }
+
+    .auth-login-link {
+        font-size: 0.76rem;
+        min-height: 38px;
+        padding: 0 8px;
+    }
+}
+
 @media (max-width: 576px) {
     #online-shop .shop-grid-online .shop-action,
     #menu-products .menu-grid-online .shop-action,
