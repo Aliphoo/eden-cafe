@@ -236,6 +236,47 @@
     color: #577064;
 }
 
+.archery-status.loading:not(:empty) {
+    display: block;
+    width: 100%;
+    margin-top: 8px;
+    padding: 12px;
+    border: 1px solid rgba(24, 130, 60, 0.22);
+    border-radius: 8px;
+    background: linear-gradient(135deg, #f5fbf5 0%, #ffffff 58%, #fff8e8 100%);
+    box-shadow: 0 10px 28px rgba(18, 88, 45, 0.08);
+    color: #21382b;
+    font-weight: 800;
+}
+
+.archery-status.loading:not(:empty)::after {
+    content: "";
+    position: relative;
+    display: block;
+    height: 9px;
+    margin-top: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background:
+        linear-gradient(90deg, transparent 0%, #18823c 18%, #4fbf78 62%, #f2b84b 100%)
+        0 0 / 44% 100% no-repeat,
+        #dce8df;
+    box-shadow: inset 0 0 0 1px rgba(24, 130, 60, 0.05);
+    animation: archeryAvailabilityFallbackBar 1.35s ease-in-out infinite;
+}
+
+.archery-status.loading:has(.archery-availability-loader) {
+    margin-top: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.archery-status.loading:has(.archery-availability-loader)::after {
+    display: none;
+}
+
 .archery-availability-loader {
     display: grid;
     gap: 8px;
@@ -344,6 +385,18 @@
     }
 }
 
+@keyframes archeryAvailabilityFallbackBar {
+    0% {
+        background-position: -60% 0, 0 0;
+    }
+    52% {
+        background-position: 72% 0, 0 0;
+    }
+    100% {
+        background-position: 160% 0, 0 0;
+    }
+}
+
 @media (max-width: 520px) {
     .archery-availability-loader {
         padding: 10px;
@@ -360,9 +413,18 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .archery-status.loading:not(:empty)::after,
     .archery-availability-loader__pulse,
     .archery-availability-loader__bar span {
         animation: none;
+    }
+
+    .archery-status.loading:not(:empty)::after {
+        background:
+            linear-gradient(90deg, #18823c 0%, #4fbf78 62%, #f2b84b 100%)
+            0 0 / 100% 100% no-repeat,
+            #dce8df;
+        opacity: 0.78;
     }
 
     .archery-availability-loader__bar span {
