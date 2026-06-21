@@ -1,5 +1,5 @@
 import { Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   CustomerProfile,
   LoyaltyConfig,
@@ -43,6 +43,7 @@ type RegisterScreenProps = {
   onNewProduct(): ProductDraft;
   onSaveOpenBill: ReturnType<typeof import("../usePosRegister").usePosRegister>["saveOpenBill"];
   onQuantity(productId: string, quantity: number): void;
+  onRefreshLoyaltyConfig: ReturnType<typeof import("../usePosRegister").usePosRegister>["refreshLoyaltyConfig"];
   onSaveCustomerLocal: ReturnType<typeof import("../usePosRegister").usePosRegister>["saveLocalCustomer"];
   onSearch(value: string): void;
   onReorderCategories(categories: string[]): void;
@@ -66,6 +67,7 @@ export const RegisterScreen = ({
   onComplete,
   onDiscount,
   onQuantity,
+  onRefreshLoyaltyConfig,
   onSaveOpenBill,
   onSaveCustomerLocal,
   onSearch,
@@ -105,11 +107,20 @@ export const RegisterScreen = ({
     setActiveBillCustomerDetached(false);
   }, [activeBillId]);
 
+  const openPayment = useCallback(async () => {
+    try {
+      await onRefreshLoyaltyConfig();
+    } catch (error) {
+      console.warn("Unable to refresh loyalty config before payment", error);
+    }
+    setPaymentOpen(true);
+  }, [onRefreshLoyaltyConfig]);
+
   useEffect(() => {
     if (paymentRequest > 0 && cart.length > 0) {
-      setPaymentOpen(true);
+      void openPayment();
     }
-  }, [cart.length, paymentRequest]);
+  }, [cart.length, openPayment, paymentRequest]);
 
   const clearTicket = () => {
     onClear();
@@ -199,7 +210,9 @@ export const RegisterScreen = ({
         onClear={clearTicket}
         onCustomerClick={() => setMemberPickerOpen(true)}
         onDiscountChange={onDiscount}
-        onPayment={() => setPaymentOpen(true)}
+        onPayment={() => {
+          void openPayment();
+        }}
         onSaveOpenBill={() => {
           const receipt = saveOpenBillWithCustomer();
           if (receipt) {
@@ -218,7 +231,7 @@ export const RegisterScreen = ({
         onClose={() => setMemberPickerOpen(false)}
         onCreateNew={() => {
           setMemberPickerOpen(false);
-          setPaymentOpen(true);
+          void openPayment();
         }}
         onSelect={(customer) => {
           setSelectedCustomer(customer);
@@ -240,6 +253,7 @@ export const RegisterScreen = ({
         onSaveOpenBill={saveOpenBillWithCustomer}
         onSyncCustomer={onSyncCustomer}
         open={paymentOpen}
+        orderDiscount={totals.orderDiscount}
         store={store}
         tables={tables}
         subtotal={totals.subtotal}

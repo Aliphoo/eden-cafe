@@ -331,6 +331,7 @@ export const SplitBillDialog = ({
         onSaveOpenBill={() => null}
         onSyncCustomer={onSyncCustomer}
         open={paymentOpen}
+        orderDiscount={selectedTotals.orderDiscount}
         store={store}
         tables={tables}
         subtotal={selectedTotals.subtotal}

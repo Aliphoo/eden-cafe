@@ -16,7 +16,6 @@ import type {
   CartLine,
   CustomerProfile,
   DiscountType,
-  LoyaltySkipReason,
   LoyaltyRedemption,
   PaymentAdjustment,
   PaymentMethod,
@@ -30,6 +29,7 @@ import type {
   SecuritySettings,
   StoreProfile
 } from "../../domain/pos";
+import { loyaltySkipReasonFor } from "../../domain/pos";
 import { calculateLoyaltyPreview } from "../../domain/loyalty";
 import {
   buildRefundLines,
@@ -46,6 +46,7 @@ import {
   edenAuth,
   edenUserLabel,
   type EdenCategoryOption,
+  type EdenMemberProfileDraft,
   applyPosLoyaltySale,
   loadEdenCatalog,
   loadEdenLoyaltyConfig,
@@ -54,11 +55,13 @@ import {
   normalizePhone,
   observeEdenAuth,
   subscribeEdenDiscounts,
+  subscribeEdenLoyaltyConfig,
   subscribeEdenMenu,
   subscribeEdenTables,
   syncPosProductToEden,
   syncOrRegisterEdenCustomerByPhone,
-  syncReceiptToEdenOrders
+  syncReceiptToEdenOrders,
+  upsertEdenMemberProfile
 } from "../../integrations/edenFirebase";
 import {
   buildCustomerDisplayState,
@@ -286,14 +289,6 @@ export const usePosRegister = () => {
       data.store.softLaunch === true
   });
 
-  const loyaltySkipReasonFor = (
-    flags: Pick<Receipt, "isTestOrder" | "softLaunch">
-  ): LoyaltySkipReason | "" => {
-    if (flags.isTestOrder) return "test-order";
-    if (flags.softLaunch) return "soft-launch";
-    return "";
-  };
-
   useEffect(() => {
     savePosData(data);
   }, [data]);
@@ -385,6 +380,31 @@ export const usePosRegister = () => {
   }, [syncEdenCatalog]);
 
   useEffect(() => {
+    const unsubscribe = subscribeEdenLoyaltyConfig(
+      (loyaltyConfig) => {
+        setData((current) => ({
+          ...current,
+          loyaltyConfig
+        }));
+      },
+      (error) => {
+        console.warn("Unable to subscribe to Eden loyalty config", error);
+      }
+    );
+
+    return unsubscribe;
+  }, []);
+
+  const refreshLoyaltyConfig = useCallback(async () => {
+    const loyaltyConfig = await loadEdenLoyaltyConfig();
+    setData((current) => ({
+      ...current,
+      loyaltyConfig
+    }));
+    return loyaltyConfig;
+  }, []);
+
+  useEffect(() => {
     let stopMenu: (() => void) | null = null;
     let stopDiscounts: (() => void) | null = null;
     let stopTables: (() => void) | null = null;
@@ -465,14 +485,19 @@ export const usePosRegister = () => {
       );
     };
 
-    attachRealtimeListeners();
-
     const stopAuth = observeEdenAuth((user) => {
-      attachRealtimeListeners();
-
       if (user) {
+        attachRealtimeListeners();
         void syncEdenCatalog();
+        return;
       }
+
+      stopMenu?.();
+      stopDiscounts?.();
+      stopTables?.();
+      stopMenu = null;
+      stopDiscounts = null;
+      stopTables = null;
     });
 
     return () => {
@@ -836,29 +861,6 @@ export const usePosRegister = () => {
       imageUrl: draft.imageUrl.trim()
     };
 
-    setData((current) => {
-      const exists = current.products.some((product) => product.id === localDraft.id);
-      const product: Product = {
-        ...localDraft,
-        cost: Math.max(0, localDraft.cost ?? 0),
-        price: Math.max(0, localDraft.price),
-        stock: Math.max(0, localDraft.stock),
-        imageUrl: localDraft.imageUrl,
-        taxEnabled: true,
-        trackStock: false,
-        active: true
-      };
-
-      return {
-        ...current,
-        products: exists
-          ? current.products.map((item) =>
-              item.id === product.id ? product : item
-            )
-          : [...current.products, product]
-      };
-    });
-
     try {
       const synced = await syncPosProductToEden(
         {
@@ -884,23 +886,36 @@ export const usePosRegister = () => {
 
       setData((current) => ({
         ...current,
-        products: current.products.map((product) =>
-          product.id === localDraft.id
-            ? {
-                ...product,
-                id: synced.id,
-                category: synced.category.name,
-                categoryId: synced.category.id,
-                imageUrl: synced.imageUrl
-              }
-            : product
-        )
+        products: (() => {
+          const product: Product = {
+            ...localDraft,
+            id: synced.id,
+            category: synced.category.name,
+            categoryId: synced.category.id,
+            cost: Math.max(0, localDraft.cost ?? 0),
+            price: Math.max(0, localDraft.price),
+            stock: Math.max(0, localDraft.stock),
+            imageUrl: synced.imageUrl,
+            taxEnabled: true,
+            trackStock: false,
+            active: true
+          };
+          const exists = current.products.some(
+            (item) => item.id === localDraft.id || item.id === synced.id
+          );
+
+          return exists
+            ? current.products.map((item) =>
+                item.id === localDraft.id || item.id === synced.id ? product : item
+              )
+            : [...current.products, product];
+        })()
       }));
     } catch (error) {
       throw new Error(
         error instanceof Error
-          ? `บันทึกในเครื่องแล้ว แต่ส่งเข้าหลังบ้านไม่สำเร็จ: ${error.message}`
-          : "บันทึกในเครื่องแล้ว แต่ส่งเข้าหลังบ้านไม่สำเร็จ"
+          ? `บันทึกสินค้าไม่สำเร็จ: ${error.message}`
+          : "บันทึกสินค้าไม่สำเร็จ"
       );
     }
   };
@@ -994,6 +1009,12 @@ export const usePosRegister = () => {
     return customer;
   };
 
+  const saveMemberProfile = async (draft: EdenMemberProfileDraft) => {
+    const customer = await upsertEdenMemberProfile(draft);
+    upsertCustomer(customer);
+    return customer;
+  };
+
   const updateReceiptSyncState = (
     receiptId: string,
     patch: Partial<Receipt>
@@ -1073,9 +1094,7 @@ export const usePosRegister = () => {
     receipt.paymentStatus === "paid" &&
     receipt.billStatus === "paid" &&
     !receipt.isOpenBill &&
-    receipt.isTestOrder !== true &&
-    receipt.softLaunch !== true &&
-    Boolean(receipt.customerUid && receipt.customerProfileSynced);
+    !loyaltySkipReasonFor(receipt);
 
   const buildLoyaltyReceiptFields = (
     receiptNo: string,
@@ -1085,17 +1104,21 @@ export const usePosRegister = () => {
     sourceReceipt?: Receipt | null
   ): Partial<Receipt> & { payableTotal: number } => {
     const orderFlags = resolveOrderModeFlags(details, sourceReceipt);
-    const skipReason = loyaltySkipReasonFor(orderFlags);
     const fallbackCustomer =
       shouldPreserveReceiptCustomer(details, sourceReceipt) && sourceReceipt
         ? customerProfileFromReceipt(sourceReceipt)
         : null;
     const loyaltyCustomer = details.customer ?? fallbackCustomer ?? undefined;
+    const skipReason = loyaltySkipReasonFor({
+      ...orderFlags,
+      customerUid: loyaltyCustomer?.uid,
+      customerProfileSynced: loyaltyCustomer?.profileSynced
+    });
     const preview = calculateLoyaltyPreview({
       config: data.loyaltyConfig,
       customer: loyaltyCustomer,
       lines,
-      normalDiscount: sourceTotals.discount,
+      orderDiscount: sourceTotals.orderDiscount,
       requestedRedeemPoints: details.loyaltyRedemption?.redeemedPoints ?? 0,
       subtotal: sourceTotals.subtotal,
       totalBeforeLoyalty: sourceTotals.total
@@ -1114,7 +1137,7 @@ export const usePosRegister = () => {
 
     return {
       ...orderFlags,
-      normalDiscount: sourceTotals.discount,
+      normalDiscount: sourceTotals.orderDiscount,
       totalBeforeLoyalty: sourceTotals.total,
       loyaltyDiscount: skipReason ? 0 : preview.loyaltyDiscount,
       loyaltyRedemption: redemption,
@@ -1593,7 +1616,12 @@ export const usePosRegister = () => {
     const openedAt = existingBill?.openedAt ?? existingBill?.createdAt ?? nowIso;
     const customerFields = buildCustomerFields(details, existingBill);
     const orderFlags = resolveOrderModeFlags(details, existingBill);
-    const skipReason = loyaltySkipReasonFor(orderFlags);
+    const skipReason = loyaltySkipReasonFor({
+      ...orderFlags,
+      customerUid: details.customer?.uid || customerFields.customerUid,
+      customerProfileSynced:
+        details.customer?.profileSynced ?? customerFields.customerProfileSynced
+    });
     const receipt: Receipt = {
       id: existingBill?.id ?? makeId("receipt"),
       number:
@@ -1606,7 +1634,7 @@ export const usePosRegister = () => {
       items: cart.map((item) => ({ ...item })),
       subtotal: totals.subtotal,
       discount: totals.discount,
-      normalDiscount: totals.discount,
+      normalDiscount: totals.orderDiscount,
       loyaltyDiscount: 0,
       totalBeforeLoyalty: totals.total,
       tax: totals.taxIncluded,
@@ -1707,7 +1735,7 @@ export const usePosRegister = () => {
       items: cart.map((item) => ({ ...item })),
       subtotal: totals.subtotal,
       discount: totals.discount,
-      normalDiscount: totals.discount,
+      normalDiscount: totals.orderDiscount,
       loyaltyDiscount: loyaltyFields.loyaltyDiscount ?? 0,
       totalBeforeLoyalty: totals.total,
       tax: totals.taxIncluded,
@@ -2006,7 +2034,7 @@ export const usePosRegister = () => {
       items: selectedLines.map((item) => ({ ...item })),
       subtotal: selectedTotals.subtotal,
       discount: selectedTotals.discount,
-      normalDiscount: selectedTotals.discount,
+      normalDiscount: selectedTotals.orderDiscount,
       loyaltyDiscount: loyaltyFields.loyaltyDiscount ?? 0,
       totalBeforeLoyalty: selectedTotals.total,
       tax: selectedTotals.taxIncluded,
@@ -2062,7 +2090,7 @@ export const usePosRegister = () => {
           items: remainingLines.map((item) => ({ ...item })),
           subtotal: remainingTotals.subtotal,
           discount: remainingTotals.discount,
-          normalDiscount: remainingTotals.discount,
+          normalDiscount: remainingTotals.orderDiscount,
           loyaltyDiscount: 0,
           totalBeforeLoyalty: remainingTotals.total,
           tax: remainingTotals.taxIncluded,
@@ -2221,9 +2249,11 @@ export const usePosRegister = () => {
     query,
     refundReceiptItems,
     refreshCustomerLoyalty,
+    refreshLoyaltyConfig,
     retryLoyaltySync,
     restoreCancelledBill,
     saveLocalCustomer,
+    saveMemberProfile,
     saveOpenBill,
     saveProduct,
     saveSecuritySettings,

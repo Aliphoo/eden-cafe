@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   ArrowLeftRight,
   Banknote,
   Ban,
@@ -61,7 +62,12 @@ type ReceiptsScreenProps = {
   taxRate: number;
 };
 
-type ReceiptStatusFilter = "all" | "pending" | "paid" | "cancelled";
+type ReceiptStatusFilter =
+  | "all"
+  | "pending_all"
+  | "pending"
+  | "paid"
+  | "cancelled";
 
 type PrintState = {
   receiptId: string;
@@ -74,6 +80,7 @@ const statusFilters: Array<{
   label: string;
 }> = [
   { id: "all", label: "ทุกรายการ" },
+  { id: "pending_all", label: "บิลค้างทั้งหมด" },
   { id: "pending", label: "บิลค้างชำระ" },
   { id: "paid", label: "ชำระเงินสำเร็จ" }
 ];
@@ -106,6 +113,20 @@ const syncLabel: Record<Receipt["syncStatus"], string> = {
   failed: "ส่งไม่สำเร็จ"
 };
 
+const loyaltyReason = (receipt: Receipt) =>
+  receipt.loyaltySkipReason ||
+  (receipt.loyaltySyncStatus === "skipped" ? receipt.loyaltyError || "" : "");
+
+const loyaltyStatusText = (receipt: Receipt) => {
+  const reason = loyaltyReason(receipt);
+  const status = receipt.loyaltySyncStatus || "skipped";
+  const parts = [`Loyalty ${status}`];
+  if (status === "skipped" && reason) parts.push(reason);
+  if (receipt.earnedPoints) parts.push(`+${receipt.earnedPoints}`);
+  if (receipt.redeemedPoints) parts.push(`redeemed ${receipt.redeemedPoints}`);
+  return parts.join(" / ");
+};
+
 const dateKey = localDateKey;
 
 const receiptDateKey = receiptReportDateKey;
@@ -127,6 +148,44 @@ const formatDateTime = (value: string) =>
     timeStyle: "short"
   }).format(new Date(value));
 
+const isPendingReceipt = (receipt: Receipt) =>
+  receipt.billStatus !== "cancelled" &&
+  receipt.paymentStatus !== "refunded" &&
+  (receipt.paymentStatus === "pending" ||
+    receipt.paymentStatus === "failed" ||
+    receipt.billStatus === "open" ||
+    receipt.isOpenBill ||
+    receipt.status === "pending");
+
+const receiptOpenedTime = (receipt: Receipt) => {
+  const candidates = [
+    receipt.openedAt,
+    receipt.createdAt,
+    receiptReportDateTime(receipt)
+  ];
+  for (const value of candidates) {
+    const time = new Date(value || "").getTime();
+    if (Number.isFinite(time)) return time;
+  }
+  return Date.now();
+};
+
+const pendingAgeInfo = (receipt: Receipt) => {
+  const openedTime = receiptOpenedTime(receipt);
+  const ageMs = Math.max(0, Date.now() - openedTime);
+  const hours = Math.floor(ageMs / (60 * 60 * 1000));
+  const days = Math.floor(hours / 24);
+  const severity = days >= 2 ? "danger" : days >= 1 ? "warning" : "normal";
+  const label =
+    days >= 1
+      ? `ค้าง ${days} วัน`
+      : hours >= 1
+        ? `ค้าง ${hours} ชม.`
+        : "ค้างไม่ถึง 1 ชม.";
+
+  return { label, severity };
+};
+
 export const ReceiptsScreen = ({
   onAdjustPayment,
   onCancelBill,
@@ -143,7 +202,7 @@ export const ReceiptsScreen = ({
   const today = dateKey(new Date());
   const [selectedDate, setSelectedDate] = useState(today);
   const [statusFilter, setStatusFilter] =
-    useState<ReceiptStatusFilter>("all");
+    useState<ReceiptStatusFilter>("pending_all");
   const [adjustingReceipt, setAdjustingReceipt] = useState<Receipt | null>(null);
   const [nextPaymentMethod, setNextPaymentMethod] =
     useState<PaymentMethod>("cash");
@@ -154,12 +213,18 @@ export const ReceiptsScreen = ({
     () => receipts.filter((receipt) => receiptDateKey(receipt) === selectedDate),
     [receipts, selectedDate]
   );
+  const allPendingReceipts = useMemo(
+    () =>
+      receipts
+        .filter(isPendingReceipt)
+        .sort((a, b) => receiptOpenedTime(a) - receiptOpenedTime(b)),
+    [receipts]
+  );
   const paidReceipts = dateReceipts.filter(
     (receipt) => receipt.paymentStatus === "paid"
   );
   const pendingReceipts = dateReceipts.filter(
-    (receipt) =>
-      receipt.paymentStatus !== "paid" && receipt.billStatus !== "cancelled"
+    isPendingReceipt
   );
   const cancelledReceipts = dateReceipts.filter(
     (receipt) => receipt.billStatus === "cancelled"
@@ -167,6 +232,10 @@ export const ReceiptsScreen = ({
   const visibleReceipts = useMemo(() => {
     if (statusFilter === "paid") {
       return paidReceipts;
+    }
+
+    if (statusFilter === "pending_all") {
+      return allPendingReceipts;
     }
 
     if (statusFilter === "pending") {
@@ -179,6 +248,7 @@ export const ReceiptsScreen = ({
 
     return dateReceipts;
   }, [
+    allPendingReceipts,
     cancelledReceipts,
     dateReceipts,
     paidReceipts,
@@ -193,14 +263,21 @@ export const ReceiptsScreen = ({
     (sum, receipt) => sum + receipt.total,
     0
   );
+  const allPendingTotal = allPendingReceipts.reduce(
+    (sum, receipt) => sum + receipt.total,
+    0
+  );
   const statusCounts: Record<ReceiptStatusFilter, number> = {
     all: dateReceipts.length,
+    pending_all: allPendingReceipts.length,
     pending: pendingReceipts.length,
     paid: paidReceipts.length,
     cancelled: cancelledReceipts.length
   };
   const emptyMessage =
-    statusFilter === "pending"
+    statusFilter === "pending_all"
+      ? "ไม่มีบิลค้างชำระทั้งหมด"
+      : statusFilter === "pending"
       ? "ไม่มีบิลค้างชำระในวันที่เลือก"
       : statusFilter === "paid"
         ? "ไม่มีรายการชำระเงินสำเร็จในวันที่เลือก"
@@ -285,47 +362,68 @@ export const ReceiptsScreen = ({
           <p>ประวัติ</p>
           <h2>ใบเสร็จรับเงินและบิลค้างชำระ</h2>
         </div>
-        <strong>
-          ชำระแล้ว {paidReceipts.length} / ค้างชำระ {pendingReceipts.length}
+        <strong className={allPendingReceipts.length ? "receipt-global-alert" : ""}>
+          ค้างชำระทั้งหมด {allPendingReceipts.length} /{" "}
+          {formatCurrency(allPendingTotal)}
         </strong>
       </div>
 
-      <section className="receipt-date-panel" aria-label="เลือกวันที่ใบเสร็จ">
-        <button
-          aria-label="วันก่อนหน้า"
-          onClick={() => setSelectedDate((current) => addDays(current, -1))}
-          type="button"
-        >
-          <ChevronLeft aria-hidden="true" size={20} />
-        </button>
-        <label className="receipt-date-field">
-          <CalendarDays aria-hidden="true" size={18} />
-          <input
-            onChange={(event) => setSelectedDate(event.target.value || today)}
-            type="date"
-            value={selectedDate}
-          />
-        </label>
-        <button
-          aria-label="วันถัดไป"
-          onClick={() => setSelectedDate((current) => addDays(current, 1))}
-          type="button"
-        >
-          <ChevronRight aria-hidden="true" size={20} />
-        </button>
-        <button
-          className="receipt-today-button"
-          onClick={() => setSelectedDate(today)}
-          type="button"
-        >
-          วันนี้
-        </button>
-      </section>
+      {statusFilter !== "pending_all" ? (
+        <section className="receipt-date-panel" aria-label="เลือกวันที่ใบเสร็จ">
+          <button
+            aria-label="วันก่อนหน้า"
+            onClick={() => setSelectedDate((current) => addDays(current, -1))}
+            type="button"
+          >
+            <ChevronLeft aria-hidden="true" size={20} />
+          </button>
+          <label className="receipt-date-field">
+            <CalendarDays aria-hidden="true" size={18} />
+            <input
+              onChange={(event) => setSelectedDate(event.target.value || today)}
+              type="date"
+              value={selectedDate}
+            />
+          </label>
+          <button
+            aria-label="วันถัดไป"
+            onClick={() => setSelectedDate((current) => addDays(current, 1))}
+            type="button"
+          >
+            <ChevronRight aria-hidden="true" size={20} />
+          </button>
+          <button
+            className="receipt-today-button"
+            onClick={() => setSelectedDate(today)}
+            type="button"
+          >
+            วันนี้
+          </button>
+        </section>
+      ) : (
+        <section className="receipt-all-pending-panel" aria-label="บิลค้างชำระทั้งหมด">
+          <AlertTriangle aria-hidden="true" size={20} />
+          <div>
+            <strong>บิลค้างชำระทั้งหมดจากทุกวัน</strong>
+            <span>เรียงจากบิลเก่าสุดก่อน เพื่อช่วยเคลียร์รายการที่เสี่ยงตกหล่น</span>
+          </div>
+        </section>
+      )}
 
       <div className="receipt-date-summary">
-        <span>{formatDateLabel(selectedDate)}</span>
-        <strong>ยอดชำระแล้ว {formatCurrency(paidTotal)}</strong>
-        <strong>ค้างชำระ {formatCurrency(pendingTotal)}</strong>
+        {statusFilter === "pending_all" ? (
+          <>
+            <span>ไม่จำกัดวันที่</span>
+            <strong>บิลค้างทั้งหมด {allPendingReceipts.length}</strong>
+            <strong>ยอดค้างทั้งหมด {formatCurrency(allPendingTotal)}</strong>
+          </>
+        ) : (
+          <>
+            <span>{formatDateLabel(selectedDate)}</span>
+            <strong>ยอดชำระแล้ว {formatCurrency(paidTotal)}</strong>
+            <strong>ค้างชำระ {formatCurrency(pendingTotal)}</strong>
+          </>
+        )}
       </div>
 
       <div className="receipt-status-tabs" role="tablist" aria-label="ตัวกรองสถานะบิล">
@@ -355,6 +453,7 @@ export const ReceiptsScreen = ({
             const isPaid = receipt.paymentStatus === "paid";
             const isCancelled = receipt.billStatus === "cancelled";
             const isPending = !isPaid && !isCancelled;
+            const ageInfo = isPending ? pendingAgeInfo(receipt) : null;
             const StatusIcon = isCancelled ? Ban : isPaid ? CheckCircle2 : Clock3;
             const adjustmentCount = receipt.paymentAdjustments?.length ?? 0;
             const refundedAmount = receiptTotalRefunded(receipt);
@@ -381,12 +480,13 @@ export const ReceiptsScreen = ({
               receipt.paymentAdjustments?.[
                 (receipt.paymentAdjustments?.length ?? 0) - 1
               ];
+            const loyaltyReasonCode = loyaltyReason(receipt);
 
             return (
               <article
                 className={`receipt-item ${
                   isCancelled ? "cancelled" : isPaid ? "paid" : "pending"
-                }`}
+                } ${ageInfo ? `age-${ageInfo.severity}` : ""}`}
                 key={receipt.id}
               >
                 <div className="receipt-head">
@@ -439,6 +539,12 @@ export const ReceiptsScreen = ({
                     <Icon aria-hidden="true" size={16} />
                     {isPaid ? methodLabel[receipt.paymentMethod] : "ยังไม่ชำระ"}
                   </span>
+                  {ageInfo && (
+                    <span className={`receipt-age ${ageInfo.severity}`}>
+                      <AlertTriangle aria-hidden="true" size={16} />
+                      {ageInfo.label}
+                    </span>
+                  )}
                   {isPaid && <span>ทอน {formatCurrency(receipt.change)}</span>}
                   <span
                     className={`receipt-payment-status ${
@@ -455,18 +561,11 @@ export const ReceiptsScreen = ({
                   <span className={`receipt-sync ${receipt.syncStatus}`}>
                     {syncLabel[receipt.syncStatus]}
                   </span>
-                  {receipt.loyaltySyncStatus &&
-                    receipt.loyaltySyncStatus !== "skipped" && (
-                      <span className={`receipt-loyalty ${receipt.loyaltySyncStatus}`}>
-                        แต้ม {receipt.loyaltySyncStatus}
-                        {receipt.earnedPoints
-                          ? ` +${receipt.earnedPoints}`
-                          : ""}
-                        {receipt.redeemedPoints
-                          ? ` / ใช้ ${receipt.redeemedPoints}`
-                          : ""}
-                      </span>
-                    )}
+                  {receipt.loyaltySyncStatus && (
+                    <span className={`receipt-loyalty ${receipt.loyaltySyncStatus}`}>
+                      {loyaltyStatusText(receipt)}
+                    </span>
+                  )}
                   {adjustmentCount > 0 && (
                     <span className="receipt-adjusted">
                       <History aria-hidden="true" size={16} />
@@ -486,7 +585,7 @@ export const ReceiptsScreen = ({
                     <>
                       <button onClick={() => onEditBill(receipt.id)} type="button">
                         <Pencil aria-hidden="true" size={16} />
-                        แก้ไขบิล
+                        เปิดบิล
                       </button>
                       <button
                         className="receipt-split-button"
@@ -502,7 +601,7 @@ export const ReceiptsScreen = ({
                         type="button"
                       >
                         <Banknote aria-hidden="true" size={16} />
-                        เรียกชำระเงิน
+                        ชำระเงิน
                       </button>
                       <button
                         className="danger"
@@ -588,7 +687,8 @@ export const ReceiptsScreen = ({
                 {receipt.syncError && (
                   <small className="receipt-error">{receipt.syncError}</small>
                 )}
-                {receipt.loyaltyError && (
+                {receipt.loyaltyError &&
+                  receipt.loyaltyError !== loyaltyReasonCode && (
                   <small className="receipt-error">
                     loyalty: {receipt.loyaltyError}
                   </small>

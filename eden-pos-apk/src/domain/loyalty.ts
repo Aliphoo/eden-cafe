@@ -115,7 +115,7 @@ type LoyaltyPreviewInput = {
   config?: Partial<LoyaltyConfig> | null;
   customer?: CustomerProfile | null;
   lines: CartLine[];
-  normalDiscount: number;
+  orderDiscount: number;
   requestedRedeemPoints: number;
   subtotal: number;
   totalBeforeLoyalty: number;
@@ -125,7 +125,7 @@ export const calculateLoyaltyPreview = ({
   config,
   customer,
   lines,
-  normalDiscount,
+  orderDiscount,
   requestedRedeemPoints,
   subtotal,
   totalBeforeLoyalty
@@ -184,15 +184,21 @@ export const calculateLoyaltyPreview = ({
     lines,
     loyaltyConfig.excludedCategories
   );
-  const subtotalRatio = subtotal > 0 ? Math.min(1, eligibleSubtotal / subtotal) : 0;
-  const normalDiscountShare = loyaltyConfig.earnAfterDiscount
-    ? Math.max(0, normalDiscount) * subtotalRatio
+  const subtotalAfterLineDiscount = lines.reduce((sum, line) => sum + lineGross(line), 0);
+  const orderDiscountAllocationBase =
+    subtotalAfterLineDiscount > 0 ? subtotalAfterLineDiscount : Math.max(0, subtotal);
+  const subtotalRatio =
+    orderDiscountAllocationBase > 0
+      ? Math.min(1, eligibleSubtotal / orderDiscountAllocationBase)
+      : 0;
+  const orderDiscountShare = loyaltyConfig.earnAfterDiscount
+    ? Math.max(0, orderDiscount) * subtotalRatio
     : 0;
   const redeemedDiscountShare = loyaltyConfig.earnOnRedeemedAmount
     ? 0
     : loyaltyDiscount * subtotalRatio;
   const earnBase = canUseLoyalty
-    ? Math.max(0, eligibleSubtotal - normalDiscountShare - redeemedDiscountShare)
+    ? Math.max(0, eligibleSubtotal - orderDiscountShare - redeemedDiscountShare)
     : 0;
   const tier = customer?.tier || "standard";
   const multiplier = loyaltyConfig.tierMultipliers[tier] ?? 1;

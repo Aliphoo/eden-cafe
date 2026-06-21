@@ -15,7 +15,10 @@ import {
   WalletCards
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { formatCurrency, formatNumber } from "../../../domain/money";
+import {
+  formatCurrency,
+  formatNumber
+} from "../../../domain/money";
 import { calculateLoyaltyPreview } from "../../../domain/loyalty";
 import type {
   CartLine,
@@ -46,6 +49,7 @@ type PaymentDialogProps = {
   cart: CartLine[];
   discount: number;
   open: boolean;
+  orderDiscount: number;
   store: StoreProfile;
   tables: PosTable[];
   subtotal: number;
@@ -169,6 +173,7 @@ export const PaymentDialog = ({
   onSyncCustomer,
   loyaltyConfig,
   open,
+  orderDiscount,
   store,
   tables,
   subtotal,
@@ -238,7 +243,7 @@ export const PaymentDialog = ({
         config: effectiveLoyaltyConfig,
         customer: loyaltyBlockedByMode ? null : selectedCustomer,
         lines: cart,
-        normalDiscount: discount,
+        orderDiscount,
         requestedRedeemPoints: loyaltyBlockedByMode ? 0 : Number(redeemPoints || 0),
         subtotal,
         totalBeforeLoyalty: total
@@ -248,6 +253,7 @@ export const PaymentDialog = ({
       discount,
       effectiveLoyaltyConfig,
       loyaltyBlockedByMode,
+      orderDiscount,
       redeemPoints,
       selectedCustomer,
       subtotal,

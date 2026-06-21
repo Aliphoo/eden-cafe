@@ -21,6 +21,17 @@ export const formatCurrency = (value: unknown) =>
 
 export const formatBaht = formatCurrency;
 
+export const lineDiscountTotal = (lines: CartLine[]) =>
+  lines.reduce((sum, line) => {
+    const lineSubtotal = line.unitPrice * line.quantity;
+    return sum + Math.min(Math.max(line.lineDiscount ?? 0, 0), lineSubtotal);
+  }, 0);
+
+export const orderDiscountFromTotalDiscount = (
+  lines: CartLine[],
+  totalDiscount = 0
+) => Math.max(safeNumber(totalDiscount) - lineDiscountTotal(lines), 0);
+
 export const calculateTotals = (
   lines: CartLine[],
   store: StoreProfile,
@@ -30,10 +41,7 @@ export const calculateTotals = (
     (sum, line) => sum + line.unitPrice * line.quantity,
     0
   );
-  const lineDiscount = lines.reduce((sum, line) => {
-    const lineSubtotal = line.unitPrice * line.quantity;
-    return sum + Math.min(Math.max(line.lineDiscount ?? 0, 0), lineSubtotal);
-  }, 0);
+  const lineDiscount = lineDiscountTotal(lines);
   const subtotalAfterLineDiscount = Math.max(subtotal - lineDiscount, 0);
   const orderDiscount = Math.min(Math.max(discount, 0), subtotalAfterLineDiscount);
   const safeDiscount = lineDiscount + orderDiscount;

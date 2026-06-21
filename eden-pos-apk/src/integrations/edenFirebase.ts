@@ -24,6 +24,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   getFirestore,
   limit,
@@ -62,6 +63,7 @@ import {
 } from "../domain/receiptHistorySync";
 import {
   receiptNetDiscount,
+  receiptOrderDiscount,
   receiptNetTaxIncluded,
   receiptNetTotal,
   receiptRefundStatus,
@@ -221,6 +223,27 @@ export type EdenPromptPaySettings = {
   promptPayId: string;
   merchantName: string;
   city: string;
+};
+
+export type EdenMemberProfileDraft = {
+  uid?: string;
+  displayName: string;
+  email?: string;
+  phone: string;
+  lineId?: string;
+  memberCode?: string;
+};
+
+export type EdenMemberActivityOrder = {
+  id: string;
+  receiptNo: string;
+  date: string;
+  status: string;
+  paymentStatus: string;
+  paymentLabel: string;
+  totalAmount: number;
+  businessDate: string;
+  source: string;
 };
 
 const EDEN_PROMPTPAY_DEFAULT_ACCOUNT: PromptPayAccount = {
@@ -715,7 +738,10 @@ const productsFromSnapshot = (
 
 export const loadEdenLoyaltyConfig = async (): Promise<LoyaltyConfig> => {
   try {
-    const snap = await getDoc(doc(edenDb, "site_settings", "loyalty"));
+    const loyaltyRef = doc(edenDb, "site_settings", "loyalty");
+    const snap = await getDocFromServer(loyaltyRef).catch(() =>
+      getDoc(loyaltyRef)
+    );
     return normalizeLoyaltyConfig(
       snap.exists() ? (snap.data() as Partial<LoyaltyConfig>) : undefined
     );
@@ -724,6 +750,24 @@ export const loadEdenLoyaltyConfig = async (): Promise<LoyaltyConfig> => {
     return normalizeLoyaltyConfig();
   }
 };
+
+export const subscribeEdenLoyaltyConfig = (
+  onChange: (config: LoyaltyConfig) => void,
+  onError?: (error: Error) => void
+): Unsubscribe =>
+  onSnapshot(
+    doc(edenDb, "site_settings", "loyalty"),
+    (snap) => {
+      onChange(
+        normalizeLoyaltyConfig(
+          snap.exists() ? (snap.data() as Partial<LoyaltyConfig>) : undefined
+        )
+      );
+    },
+    (error) => {
+      onError?.(error);
+    }
+  );
 
 export const loadEdenCatalog = async () => {
   const [categorySnap, productSnap, promptPaySnap, discountSnap, tableSnap] = await Promise.all([
@@ -1273,37 +1317,76 @@ const estimateLegacyPoints = (
 export const loadEdenLoyaltySummary = async (
   customerUid: string,
   fallbackPoints = 0,
-  loyaltyConfig?: LoyaltyConfig
+  _loyaltyConfig?: LoyaltyConfig
 ): Promise<LoyaltySummary> => {
   const uid = String(customerUid || "").trim();
   if (!uid) {
     return normalizeLoyaltySummary("", undefined, fallbackPoints);
   }
 
-  const summarySnap = await getDoc(doc(edenDb, "member_summaries", uid));
-  if (summarySnap.exists()) {
-    return normalizeLoyaltySummary(
-      uid,
-      summarySnap.data() as Partial<LoyaltySummary>,
-      fallbackPoints
-    );
+  const idToken = await getEdenPosIdToken();
+  const response = await fetch(`${FUNCTIONS_BASE_URL}/getPosMemberLoyaltySummary`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ uid })
+  });
+  const payload = await readEdenJsonResponse<{ summary?: Partial<LoyaltySummary> }>(
+    response
+  );
+
+  return normalizeLoyaltySummary(uid, payload.summary, fallbackPoints);
+};
+
+const getEdenPosIdToken = async () => {
+  const user = edenAuth.currentUser;
+  if (!user) {
+    throw new Error("ต้องล็อกอินแอดมิน Eden ก่อนใช้งานระบบสมาชิก");
   }
 
-  const userSnap = await getDoc(doc(edenDb, "users", uid));
-  const userData = userSnap.exists()
-    ? (userSnap.data() as Record<string, unknown>)
-    : {};
-  const config = loyaltyConfig ?? (await loadEdenLoyaltyConfig());
-  const estimatedPoints = estimateLegacyPoints(userData, config, fallbackPoints);
-  return normalizeLoyaltySummary(
-    uid,
-    {
-      tier: limitText(userData.tier || "Silver", 30),
-      totalSpent: toNumber(userData.totalSpent),
-      visitCount: toNumber(userData.visitCount)
+  await requireEdenPosAccess(user);
+  return user.getIdToken();
+};
+
+const loadPosMembersFromBackend = async (options: {
+  search?: string;
+  phone?: string;
+  limitCount?: number;
+} = {}) => {
+  const memberLimit = Math.min(Math.max(options.limitCount ?? 250, 1), 500);
+  const idToken = await getEdenPosIdToken();
+  const response = await fetch(`${FUNCTIONS_BASE_URL}/searchPosMembers`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      "Content-Type": "application/json"
     },
-    estimatedPoints
+    body: JSON.stringify({
+      search: options.search?.trim() || "",
+      phone: options.phone?.trim() || "",
+      limitCount: memberLimit
+    })
+  });
+  const payload = await readEdenJsonResponse<{ members?: CustomerProfile[] }>(
+    response
   );
+
+  return Array.isArray(payload.members) ? payload.members : [];
+};
+
+const readEdenJsonResponse = async <T>(response: Response): Promise<T> => {
+  const contentType = response.headers.get("content-type") || "";
+  const payload = contentType.includes("application/json")
+    ? ((await response.json()) as Record<string, unknown>)
+    : { error: await response.text() };
+
+  if (!response.ok) {
+    throw new Error(String(payload.error || `HTTP ${response.status}`));
+  }
+
+  return payload as T;
 };
 
 const withLoyaltySummary = async (
@@ -1370,47 +1453,12 @@ export const findEdenCustomerByPhone = async (
     return null;
   }
 
-  const candidates = new Map<string, CustomerProfile>();
-  const customerQueries = new Map<string, ReturnType<typeof query>>();
-  const addCustomerQuery = (field: string, value: string, queryLimit = 10) => {
-    const cleanValue = String(value || "").trim();
-    if (!cleanValue) return;
-    customerQueries.set(
-      `${field}:${cleanValue}`,
-      query(collection(edenDb, "users"), where(field, "==", cleanValue), limit(queryLimit))
-    );
-  };
-
-  ["phone", "mobile", "tel", "phoneNumber"].forEach((field) => {
-    addCustomerQuery(field, rawPhone);
-    addCustomerQuery(field, phone);
+  const candidates = await loadPosMembersFromBackend({
+    search: displayName,
+    phone: rawPhone,
+    limitCount: 25
   });
-  addCustomerQuery("phoneNormalized", phone);
-
-  const cleanDisplayName = displayName.trim();
-  if (cleanDisplayName.length >= 2) {
-    ["displayName", "name", "customerName"].forEach((field) =>
-      addCustomerQuery(field, cleanDisplayName, 5)
-    );
-  }
-
-  for (const customerQuery of customerQueries.values()) {
-    const snap = await getDocs(customerQuery);
-    snap.forEach((customerDoc) => {
-      candidates.set(
-        customerDoc.id,
-        cleanCustomerProfile(customerDoc.id, customerDoc.data() as Record<string, unknown>)
-      );
-    });
-  }
-
-  const loyaltyConfig = await loadEdenLoyaltyConfig();
-  const enriched = await Promise.all(
-    Array.from(candidates.values()).map((candidate) =>
-      withLoyaltySummary(candidate, loyaltyConfig)
-    )
-  );
-  const customer = enriched
+  const customer = candidates
     .sort(
       (a, b) =>
         scoreEdenCustomerCandidate(b, rawPhone, displayName) -
@@ -1424,65 +1472,113 @@ export const loadEdenMembers = async (options: {
   search?: string;
   limitCount?: number;
 } = {}) => {
+  return loadPosMembersFromBackend({
+    search: options.search || "",
+    limitCount: options.limitCount ?? 250
+  });
+};
+
+export const upsertEdenMemberProfile = async (
+  draft: EdenMemberProfileDraft
+) => {
   const user = edenAuth.currentUser;
   if (!user) {
-    throw new Error("ต้องล็อกอินแอดมิน Eden ก่อนจึงจะดูรายชื่อสมาชิกได้");
+    throw new Error(
+      "ต้องล็อกอินแอดมิน Eden ก่อนจึงจะบันทึกสมาชิกขึ้นหลังบ้านได้"
+    );
   }
 
   await requireEdenPosAccess(user);
-
-  const memberLimit = Math.min(Math.max(options.limitCount ?? 250, 20), 500);
-  const snap = await getDocs(query(collection(edenDb, "users"), limit(memberLimit)));
-  const searchText = String(options.search || "").trim().toLowerCase();
-  const searchDigits = normalizePhone(searchText);
-  const members = snap.docs
-    .map((memberDoc) => {
-      const data = memberDoc.data() as Record<string, unknown>;
-      const status = String(data.status || "active").toLowerCase();
-
-      if (["deleted", "disabled", "blocked"].includes(status)) {
-        return null;
-      }
-
-      return cleanCustomerProfile(memberDoc.id, data);
+  const idToken = await user.getIdToken();
+  const response = await fetch(`${FUNCTIONS_BASE_URL}/upsertPosMemberProfile`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      uid: draft.uid || "",
+      displayName: draft.displayName.trim(),
+      email: draft.email?.trim() || "",
+      phone: draft.phone.trim(),
+      lineId: draft.lineId?.trim() || "",
+      memberCode: draft.memberCode?.trim() || ""
     })
-    .filter((member): member is CustomerProfile => Boolean(member));
-
-  const filteredMembers = members
-    .filter((member) => {
-      if (!searchText) return true;
-
-      const haystack = [
-        member.displayName,
-        member.email,
-        member.phone,
-        member.phoneNormalized,
-        member.lineId,
-        member.memberCode,
-        member.tier
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      return (
-        haystack.includes(searchText) ||
-        (searchDigits ? member.phoneNormalized.includes(searchDigits) : false)
-      );
-    })
-    .sort((a, b) => {
-      const codeA = a.memberCode || "";
-      const codeB = b.memberCode || "";
-      if (codeA && codeB && codeA !== codeB) {
-        return codeA.localeCompare(codeB, "th");
-      }
-      return a.displayName.localeCompare(b.displayName, "th");
-    });
-
-  const loyaltyConfig = await loadEdenLoyaltyConfig();
-  return Promise.all(
-    filteredMembers.map((member) => withLoyaltySummary(member, loyaltyConfig))
+  });
+  const payload = await readEdenJsonResponse<{ member?: CustomerProfile }>(
+    response
   );
+
+  if (!payload.member) {
+    throw new Error("หลังบ้านบันทึกสมาชิกแล้วแต่ไม่ส่งข้อมูลสมาชิกกลับมา");
+  }
+
+  return payload.member;
+};
+
+const memberOrderTime = (value: unknown) => {
+  if (value instanceof Timestamp) return value.toMillis();
+  if (value && typeof value === "object" && "toMillis" in value) {
+    const millis = (value as { toMillis?: () => number }).toMillis?.();
+    return Number.isFinite(millis) ? millis : 0;
+  }
+  const parsed = new Date(String(value || "")).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const memberOrderFromDoc = (
+  id: string,
+  data: Record<string, unknown>
+): EdenMemberActivityOrder => ({
+  id,
+  receiptNo: String(data.receiptNo || data.id || id),
+  date: String(data.date || data.businessDateLabel || ""),
+  status: String(data.status || "pending"),
+  paymentStatus: String(data.paymentStatus || ""),
+  paymentLabel: String(data.paymentLabel || data.paymentMethod || ""),
+  totalAmount: toNumber(data.totalAmount ?? data.total),
+  businessDate: String(data.businessDate || ""),
+  source: String(data.source || "")
+});
+
+export const loadEdenMemberActivity = async (uid: string) => {
+  const user = edenAuth.currentUser;
+  if (!user) {
+    throw new Error(
+      "ต้องล็อกอินแอดมิน Eden ก่อนจึงจะโหลดประวัติสมาชิกจากหลังบ้านได้"
+    );
+  }
+  await requireEdenPosAccess(user);
+
+  const memberUid = String(uid || "").trim();
+  if (!memberUid) return { orders: [] as EdenMemberActivityOrder[] };
+
+  const [customerOrdersSnap, legacyOrdersSnap] = await Promise.all([
+    getDocs(query(collection(edenDb, "orders"), where("customerUid", "==", memberUid))).catch(
+      () => ({ docs: [] })
+    ),
+    getDocs(query(collection(edenDb, "orders"), where("uid", "==", memberUid))).catch(
+      () => ({ docs: [] })
+    )
+  ]);
+  const byId = new Map<string, Record<string, unknown>>();
+
+  [...customerOrdersSnap.docs, ...legacyOrdersSnap.docs].forEach((docSnap) => {
+    const data = docSnap.data() as Record<string, unknown>;
+    if (data.isTestOrder === true) return;
+    byId.set(docSnap.id, data);
+  });
+
+  const orders = Array.from(byId.entries())
+    .map(([id, data]) => ({
+      ...memberOrderFromDoc(id, data),
+      sortTime: memberOrderTime(data.timestamp || data.paidAt || data.createdAt)
+    }))
+    .sort((a, b) => (b.sortTime ?? 0) - (a.sortTime ?? 0))
+    .slice(0, 50)
+    .map(({ sortTime: _sortTime, ...order }) => order);
+
+  return { orders };
 };
 
 export const syncOrRegisterEdenCustomerByPhone = async (input: {
@@ -1505,29 +1601,10 @@ export const syncOrRegisterEdenCustomerByPhone = async (input: {
     return existing;
   }
 
-  const uid = `pos-phone-${phone}`;
-  const displayName = limitText(input.displayName || `ลูกค้า ${phone}`, 120);
-  const memberCode = `POS${phone.slice(-6)}`;
-  const payload = {
-    uid,
-    displayName,
-    name: displayName,
-    email: "",
-    phone: input.phone,
-    phoneNormalized: phone,
-    memberCode,
-    tier: "Silver",
-    points: 0,
-    totalSpent: 0,
-    visitCount: 0,
-    status: "active",
-    source: "pos-phone",
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  };
-
-  await setDoc(doc(edenDb, "users", uid), payload, { merge: true });
-  return withLoyaltySummary(cleanCustomerProfile(uid, payload));
+  return upsertEdenMemberProfile({
+    displayName: input.displayName || `ลูกค้า ${phone}`,
+    phone: input.phone
+  });
 };
 
 export const syncReceiptToEdenOrders = async (receipt: Receipt) => {
@@ -1542,6 +1619,7 @@ export const syncReceiptToEdenOrders = async (receipt: Receipt) => {
   const netTaxIncluded = receiptNetTaxIncluded(receipt);
   const refundStatus = receiptRefundStatus(receipt);
   const loyaltyDiscount = receipt.loyaltyDiscount ?? 0;
+  const orderDiscount = receipt.normalDiscount ?? receiptOrderDiscount(receipt);
   const redeemedPoints =
     receipt.redeemedPoints ?? receipt.loyaltyRedemption?.redeemedPoints ?? 0;
   const earnedPoints = receipt.earnedPoints ?? receipt.loyalty?.earnedPoints ?? 0;
@@ -1666,7 +1744,7 @@ export const syncReceiptToEdenOrders = async (receipt: Receipt) => {
     redeemedPoints,
     earnedPoints,
     totalBeforeLoyalty: receipt.totalBeforeLoyalty ?? receipt.total,
-    normalDiscount: receipt.normalDiscount ?? receipt.discount,
+    normalDiscount: orderDiscount,
     loyaltyRedemption: {
       redeemedPoints,
       discountAmount: receipt.loyaltyRedemption?.discountAmount ?? loyaltyDiscount,
@@ -1685,7 +1763,9 @@ export const syncReceiptToEdenOrders = async (receipt: Receipt) => {
       idempotencyKey: loyaltyResult?.idempotencyKey || receipt.loyaltyIdempotencyKey || receipt.number,
       earnLedgerId: loyaltyResult?.ledgerIds?.earn || "",
       redeemLedgerId: loyaltyResult?.ledgerIds?.redeem || "",
-      syncedAt: loyaltyResult?.syncedAt || receipt.loyaltySyncedAt || ""
+      syncedAt: loyaltyResult?.syncedAt || receipt.loyaltySyncedAt || "",
+      skipped: receipt.loyaltySyncStatus === "skipped" || loyaltyResult?.skipped === true,
+      reason: receipt.loyaltySkipReason || loyaltyResult?.reason || ""
     },
     address: "หน้าร้าน Eden Cafe",
     note: receipt.note,
@@ -1806,6 +1886,7 @@ export const applyPosLoyaltySale = async (
     throw new Error("บิลนี้ยังไม่มีสมาชิก Eden ที่ซิงก์แล้ว");
   }
 
+  const orderDiscount = receipt.normalDiscount ?? receiptOrderDiscount(receipt);
   const token = await user.getIdToken();
   const response = await fetch(`${FUNCTIONS_BASE_URL}/applyPosLoyaltySale`, {
     method: "POST",
@@ -1819,7 +1900,8 @@ export const applyPosLoyaltySale = async (
       receiptNo: receipt.number,
       customerUid: receipt.customerUid,
       netAmount: receipt.totalBeforeLoyalty ?? receipt.totalAmount ?? receipt.total,
-      normalDiscount: receipt.normalDiscount ?? receipt.discount ?? 0,
+      normalDiscount: orderDiscount,
+      orderDiscount,
       subtotal: receipt.subtotal,
       items: receipt.items.map((item) => ({
         productId: item.sourceProductId || item.productId.split("::")[0],
@@ -1836,6 +1918,8 @@ export const applyPosLoyaltySale = async (
       redeemedPoints:
         receipt.redeemedPoints ?? receipt.loyaltyRedemption?.redeemedPoints ?? 0,
       loyaltyDiscount: receipt.loyaltyDiscount ?? 0,
+      customerProfileSynced: receipt.customerProfileSynced === true,
+      loyaltySkipReason: receipt.loyaltySkipReason || "",
       isTestOrder: receipt.isTestOrder === true,
       softLaunch: receipt.softLaunch === true,
       idempotencyKey: receipt.loyaltyIdempotencyKey || receipt.number

@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { Readable } = require('stream');
 const { createMemberAuthHandlers } = require('./services/memberAuth');
+const loyaltyFormula = require('./loyaltyFormula');
 
 admin.initializeApp();
 
@@ -4354,29 +4355,11 @@ function safeLedgerKey(value) {
 }
 
 function normalizePosSaleItems(items) {
-  return Array.isArray(items)
-    ? items.map(item => ({
-      productId: cleanString(item.productId || item.id || item.menuItemId || '', 120),
-      variantId: cleanString(item.variantId || item.variant || item.optionId || item.variantName || 'base', 80),
-      sku: cleanString(item.sku || item.variantSku || '', 80),
-      name: cleanString(item.name || item.productName || 'POS item', 180),
-      variantName: cleanString(item.variantName || item.optionName || item.variant || '', 120),
-      category: cleanString(item.category || item.categoryName || item.categoryId || '', 160),
-      quantity: Math.max(0, Number(item.quantity ?? item.qty ?? 0)),
-      unitPrice: Math.max(0, Number(item.unitPrice ?? item.price ?? item.basePrice ?? 0)),
-      lineDiscount: Math.max(0, Number(item.lineDiscount ?? item.discount ?? 0)),
-      taxEnabled: item.taxEnabled !== false,
-    })).filter(item => item.quantity > 0)
-    : [];
+  return loyaltyFormula.normalizePosSaleItems(items);
 }
 
 function eligibleSubtotalForPosSale(items, excludedCategories) {
-  const excluded = new Set(excludedCategories);
-  return items.reduce((sum, item) => {
-    const category = cleanString(item.category, 160).toLowerCase();
-    if (category && excluded.has(category)) return sum;
-    return sum + Math.max(0, item.unitPrice * item.quantity - item.lineDiscount);
-  }, 0);
+  return loyaltyFormula.eligibleSubtotalForPosSale(items, excludedCategories);
 }
 
 function expiryTimestamp(months) {
@@ -4443,6 +4426,55 @@ async function markPosLoyaltyFailed(orderRef, error, idempotencyKey) {
   }
 }
 
+const POS_LOYALTY_SKIP_REASONS = new Set([
+  'no-customer',
+  'unsynced-customer',
+  'test-order',
+  'soft-launch',
+]);
+
+function normalizePosLoyaltySkipReason(value) {
+  const reason = cleanString(value || '', 80).toLowerCase().replace(/_/g, '-');
+  return POS_LOYALTY_SKIP_REASONS.has(reason) ? reason : '';
+}
+
+function posLoyaltySkipReasonFor({ customerProfileSynced, customerUid, isTestOrder, softLaunch } = {}) {
+  if (isTestOrder === true) return 'test-order';
+  if (softLaunch === true) return 'soft-launch';
+  if (!cleanString(customerUid || '', 180)) return 'no-customer';
+  if (customerProfileSynced === false) return 'unsynced-customer';
+  return '';
+}
+
+function posLoyaltySkippedPayload({ customerUid = '', idempotencyKey = '', reason = '' } = {}) {
+  const skipReason = normalizePosLoyaltySkipReason(reason) || 'no-customer';
+  return {
+    customerUid: cleanString(customerUid || '', 180),
+    earnedPoints: 0,
+    redeemedPoints: 0,
+    loyaltyDiscount: 0,
+    idempotencyKey,
+    skipped: true,
+    reason: skipReason,
+    syncedAt: new Date().toISOString(),
+  };
+}
+
+function posLoyaltySkippedOrderPatch(payload, idempotencyKey) {
+  return {
+    loyalty: payload,
+    earnedPoints: 0,
+    redeemedPoints: 0,
+    loyaltyDiscount: 0,
+    loyaltySyncStatus: 'skipped',
+    loyaltyError: payload.reason,
+    loyaltySkipReason: payload.reason,
+    loyaltyIdempotencyKey: idempotencyKey || payload.idempotencyKey || '',
+    loyaltySkippedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+}
+
 function firstFiniteNumber(values, fallback = 0) {
   for (const value of values) {
     const number = Number(value);
@@ -4452,10 +4484,26 @@ function firstFiniteNumber(values, fallback = 0) {
 }
 
 function sumPosItemsSubtotal(items) {
-  return normalizePosSaleItems(items).reduce(
-    (sum, item) => sum + Math.max(0, item.unitPrice * item.quantity),
-    0
-  );
+  return loyaltyFormula.sumPosItemsSubtotal(items);
+}
+
+function sumPosItemsLineDiscount(items) {
+  return loyaltyFormula.sumPosItemsLineDiscount(items);
+}
+
+function finiteNumberOrNull(value) {
+  return loyaltyFormula.finiteNumberOrNull(value);
+}
+
+function resolvePosOrderDiscount({ orderDiscount, normalDiscount, discount, subtotal, netAmount, items }) {
+  return loyaltyFormula.resolvePosOrderDiscount({
+    orderDiscount,
+    normalDiscount,
+    discount,
+    subtotal,
+    netAmount,
+    items,
+  });
 }
 
 function buildTrustedPosLoyaltyPayload(orderRef, order = {}) {
@@ -4543,10 +4591,25 @@ exports.applyPosLoyaltySale = onRequest(
       const customerUid = cleanString(body.customerUid || '', 180);
       idempotencyKey = safeLedgerKey(body.idempotencyKey || receiptNo || orderId);
       const netAmount = Math.max(0, Number(body.netAmount || 0));
-      const normalDiscount = Math.max(0, Number(body.normalDiscount || 0));
       const subtotal = Math.max(0, Number(body.subtotal || 0));
       const requestedRedeemedPoints = Math.max(0, Math.trunc(Number(body.redeemedPoints || 0)));
       const items = normalizePosSaleItems(body.items || []);
+      const orderDiscount = resolvePosOrderDiscount({
+        orderDiscount: body.orderDiscount,
+        normalDiscount: body.normalDiscount,
+        discount: body.discount,
+        subtotal,
+        netAmount,
+        items,
+      });
+      const requestSkipReason =
+        normalizePosLoyaltySkipReason(body.loyaltySkipReason) ||
+        posLoyaltySkipReasonFor({
+          customerUid,
+          customerProfileSynced: body.customerProfileSynced,
+          isTestOrder: body.isTestOrder,
+          softLaunch: body.softLaunch,
+        });
       const orderLookup = await resolvePosOrderRef(requestedOrderId || orderId, firestoreId, receiptNo);
       orderRef = orderLookup.ref;
 
@@ -4570,22 +4633,39 @@ exports.applyPosLoyaltySale = onRequest(
         error.statusCode = 400;
         throw error;
       }
-      if (!customerUid) {
-        const error = new Error('Customer UID is required');
-        error.statusCode = 400;
-        throw error;
-      }
-      if (netAmount <= 0) {
-        const error = new Error('Net amount must be greater than zero');
-        error.statusCode = 400;
-        throw error;
-      }
       if (!orderRef) {
         const error = new Error('Synced order was not found');
         error.statusCode = 404;
         throw error;
       }
       orderId = orderRef.id;
+
+      if (requestSkipReason) {
+        const resultPayload = posLoyaltySkippedPayload({
+          customerUid,
+          idempotencyKey,
+          reason: requestSkipReason,
+        });
+        await orderRef.set(posLoyaltySkippedOrderPatch(resultPayload, idempotencyKey), { merge: true });
+        logger.info('POS loyalty sale skipped before ledger apply', {
+          orderId,
+          receiptNo,
+          customerUid,
+          idempotencyKey,
+          reason: requestSkipReason,
+        });
+        res.status(200).json({
+          ok: true,
+          status: 'skipped',
+          loyalty: resultPayload,
+        });
+        return;
+      }
+      if (netAmount <= 0) {
+        const error = new Error('Net amount must be greater than zero');
+        error.statusCode = 400;
+        throw error;
+      }
 
       const userRef = db.collection('users').doc(customerUid);
       const summaryRef = db.collection('member_summaries').doc(customerUid);
@@ -4617,53 +4697,39 @@ exports.applyPosLoyaltySale = onRequest(
           error.statusCode = 404;
           throw error;
         }
-        if (!userSnap.exists) {
-          const error = new Error('Member profile was not found');
-          error.statusCode = 404;
-          throw error;
-        }
-
         const order = orderSnap.data() || {};
         if (cleanString(order.customerUid || '', 180) && cleanString(order.customerUid || '', 180) !== customerUid) {
           const error = new Error('Customer UID does not match synced order');
           error.statusCode = 400;
           throw error;
         }
-        if (
-          order.isTestOrder === true ||
-          order.softLaunch === true ||
-          body.isTestOrder === true ||
-          body.softLaunch === true
-        ) {
-          resultPayload = {
+        const orderSkipReason = posLoyaltySkipReasonFor({
+          customerUid,
+          customerProfileSynced: order.customerProfileSynced,
+          isTestOrder: order.isTestOrder === true || body.isTestOrder === true,
+          softLaunch: order.softLaunch === true || body.softLaunch === true,
+        });
+        if (orderSkipReason) {
+          resultPayload = posLoyaltySkippedPayload({
             customerUid,
-            earnedPoints: 0,
-            redeemedPoints: 0,
-            loyaltyDiscount: 0,
             idempotencyKey,
-            skipped: true,
-            reason: 'test_order',
-            syncedAt: new Date().toISOString(),
-          };
+            reason: orderSkipReason,
+          });
           resultStatus = 'skipped';
-          transaction.set(orderRef, {
-            loyalty: resultPayload,
-            earnedPoints: 0,
-            redeemedPoints: 0,
-            loyaltyDiscount: 0,
-            loyaltySyncStatus: 'skipped',
-            loyaltyError: '',
-            loyaltyIdempotencyKey: idempotencyKey,
-            loyaltySkippedAt: admin.firestore.FieldValue.serverTimestamp(),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          }, { merge: true });
-          logger.info('POS loyalty sale skipped for test order', {
+          transaction.set(orderRef, posLoyaltySkippedOrderPatch(resultPayload, idempotencyKey), { merge: true });
+          logger.info('POS loyalty sale skipped', {
             orderId,
             receiptNo,
             customerUid,
             idempotencyKey,
+            reason: orderSkipReason,
           });
           return;
+        }
+        if (!userSnap.exists) {
+          const error = new Error('Member profile was not found');
+          error.statusCode = 404;
+          throw error;
         }
         if (
           order.loyaltySyncStatus === 'synced' &&
@@ -4724,72 +4790,33 @@ exports.applyPosLoyaltySale = onRequest(
 
         const member = userSnap.data() || {};
         const summary = summarySnap.exists ? summarySnap.data() || {} : {};
-        const memberTotalSpent = Math.max(0, Number(member.totalSpent || 0));
-        const memberVisitCount = Math.max(0, Math.floor(Number(member.visitCount || 0)));
-        const summaryTotalSpent = Math.max(0, Number(summary.totalSpent ?? memberTotalSpent));
-        const summaryVisitCount = Math.max(0, Math.floor(Number(summary.visitCount ?? memberVisitCount)));
-        const summaryLifetimePoints = Math.max(0, Number(summary.lifetimePoints || 0));
-        const summaryTotalRedeemed = Math.max(0, Number(summary.totalRedeemed || 0));
-        const memberPoints = Math.max(0, Math.floor(Number(member.points || 0)));
-        const estimatedLegacyPoints = config.spendPerPoint > 0
-          ? Math.floor(memberTotalSpent / config.spendPerPoint)
-          : 0;
-        const pointsBefore = summarySnap.exists && summary.pointsBalance !== undefined
-          ? Math.max(0, Math.floor(Number(summary.pointsBalance || 0)))
-          : Math.max(memberPoints, estimatedLegacyPoints);
-        const summaryLifetimeBase = Math.max(summaryLifetimePoints, pointsBefore);
-
-        if (requestedRedeemedPoints > pointsBefore) {
-          const error = new Error('Redeemed points exceed member balance');
-          error.statusCode = 400;
-          throw error;
-        }
-        if (
-          requestedRedeemedPoints > 0 &&
-          config.minRedeemPoints > 0 &&
-          requestedRedeemedPoints < config.minRedeemPoints
-        ) {
-          const error = new Error(`Minimum redeem points is ${config.minRedeemPoints}`);
-          error.statusCode = 400;
-          throw error;
-        }
-
-        const requestedDiscount = requestedRedeemedPoints * config.pointValue;
-        const maxRedeemDiscount = (netAmount * config.maxRedeemPercent) / 100;
-        if (requestedDiscount > maxRedeemDiscount + 0.0001) {
-          const error = new Error('Redeemed points exceed max redeem percent');
-          error.statusCode = 400;
-          throw error;
-        }
-        if (requestedDiscount > netAmount + 0.0001) {
-          const error = new Error('Redeemed points exceed sale amount');
-          error.statusCode = 400;
-          throw error;
-        }
-
-        const loyaltyDiscount = Math.min(netAmount, requestedDiscount);
-        const payableAmount = Math.max(0, netAmount - loyaltyDiscount);
-        const eligibleSubtotal = eligibleSubtotalForPosSale(items, config.excludedCategories);
-        const subtotalBase = subtotal > 0
-          ? subtotal
-          : items.reduce((sum, item) => sum + Math.max(0, item.unitPrice * item.quantity), 0);
-        const eligibleRatio = subtotalBase > 0 ? Math.min(1, eligibleSubtotal / subtotalBase) : 0;
-        const normalDiscountShare = config.earnAfterDiscount
-          ? normalDiscount * eligibleRatio
-          : 0;
-        const redeemedDiscountShare = config.earnOnRedeemedAmount
-          ? 0
-          : loyaltyDiscount * eligibleRatio;
-        const earnBase = Math.max(0, eligibleSubtotal - normalDiscountShare - redeemedDiscountShare);
-        const currentTier = cleanString(member.tier || summary.tier || 'Silver', 40);
-        const multiplier = Number(config.tierMultipliers[currentTier] || 1);
-        const earnedPoints = config.spendPerPoint > 0
-          ? Math.floor((earnBase / config.spendPerPoint) * multiplier)
-          : 0;
-        const pointsAfter = Math.max(0, pointsBefore - requestedRedeemedPoints + earnedPoints);
-        const totalSpentAfter = memberTotalSpent + payableAmount;
-        const visitCountAfter = memberVisitCount + 1;
-        const tier = memberTierFromMetrics(pointsAfter, totalSpentAfter, visitCountAfter);
+        const saleCalc = loyaltyFormula.calculatePosLoyaltySale({
+          config,
+          member,
+          summary: summarySnap.exists ? summary : {},
+          items,
+          subtotal,
+          netAmount,
+          orderDiscount,
+          requestedRedeemedPoints,
+        });
+        const {
+          earnedPoints,
+          redeemedPoints,
+          loyaltyDiscount,
+          payableAmount,
+          pointsBefore,
+          pointsAfter,
+          tier,
+          eligibleAmount: eligibleSubtotal,
+          earnBase,
+          totalSpentAfter,
+          visitCountAfter,
+          summaryTotalSpent,
+          summaryVisitCount,
+          summaryLifetimeBase,
+          summaryTotalRedeemed,
+        } = saleCalc;
         const now = admin.firestore.FieldValue.serverTimestamp();
         const syncedAt = new Date().toISOString();
         const memberCode = cleanString(member.memberCode || '', 80);
@@ -4799,7 +4826,7 @@ exports.applyPosLoyaltySale = onRequest(
         resultPayload = {
           customerUid,
           earnedPoints,
-          redeemedPoints: requestedRedeemedPoints,
+          redeemedPoints,
           loyaltyDiscount,
           pointsBefore,
           pointsAfter,
@@ -4809,21 +4836,21 @@ exports.applyPosLoyaltySale = onRequest(
           idempotencyKey,
           ledgerIds: {
             earn: earnedPoints > 0 ? earnLedgerRef.id : '',
-            redeem: requestedRedeemedPoints > 0 ? redeemLedgerRef.id : '',
+            redeem: redeemedPoints > 0 ? redeemLedgerRef.id : '',
           },
           syncedAt,
         };
 
-        if (requestedRedeemedPoints > 0) {
+        if (redeemedPoints > 0) {
           transaction.set(redeemLedgerRef, {
             userId: customerUid,
             memberCode,
             memberName,
             memberEmail,
             type: 'pos_redeem',
-            pointsDelta: -requestedRedeemedPoints,
+            pointsDelta: -redeemedPoints,
             pointsBefore,
-            pointsAfter: pointsBefore - requestedRedeemedPoints,
+            pointsAfter: pointsBefore - redeemedPoints,
             amount: loyaltyDiscount,
             receiptNo,
             orderId,
@@ -4842,7 +4869,7 @@ exports.applyPosLoyaltySale = onRequest(
             memberEmail,
             type: 'pos_earn',
             pointsDelta: earnedPoints,
-            pointsBefore: pointsBefore - requestedRedeemedPoints,
+            pointsBefore: pointsBefore - redeemedPoints,
             pointsAfter,
             amount: earnBase,
             receiptNo,
@@ -4875,13 +4902,13 @@ exports.applyPosLoyaltySale = onRequest(
           pointsBalance: pointsAfter,
           tier,
           lifetimePoints: summaryLifetimeBase + earnedPoints,
-          totalRedeemed: summaryTotalRedeemed + requestedRedeemedPoints,
+          totalRedeemed: summaryTotalRedeemed + redeemedPoints,
           totalSpent: summaryTotalSpent + payableAmount,
           visitCount: summaryVisitCount + 1,
           lastLedgerId:
             earnedPoints > 0
               ? earnLedgerRef.id
-              : requestedRedeemedPoints > 0
+              : redeemedPoints > 0
                 ? redeemLedgerRef.id
                 : cleanString(summary.lastLedgerId || '', 180),
           updatedAt: now,
@@ -4890,8 +4917,9 @@ exports.applyPosLoyaltySale = onRequest(
         transaction.set(orderRef, {
           loyalty: resultPayload,
           earnedPoints,
-          redeemedPoints: requestedRedeemedPoints,
+          redeemedPoints,
           loyaltyDiscount,
+          normalDiscount: orderDiscount,
           totalBeforeLoyalty: netAmount,
           totalAmount: payableAmount,
           total: payableAmount,
@@ -4996,33 +5024,36 @@ exports.adminRetryPosLoyaltySale = onRequest(
         throw error;
       }
 
-      if (order.isTestOrder === true || order.softLaunch === true) {
-        await orderRef.set({
-          loyalty: {
-            customerUid: cleanString(order.customerUid || '', 180),
-            earnedPoints: 0,
-            redeemedPoints: 0,
-            loyaltyDiscount: 0,
-            idempotencyKey,
-            skipped: true,
-            reason: 'test_order',
-            syncedAt: new Date().toISOString(),
-          },
-          earnedPoints: 0,
-          redeemedPoints: 0,
-          loyaltyDiscount: 0,
-          loyaltySyncStatus: 'skipped',
-          loyaltyError: '',
-          loyaltyIdempotencyKey: idempotencyKey,
-          loyaltySkippedAt: admin.firestore.FieldValue.serverTimestamp(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        }, { merge: true });
-        logger.info('Admin POS loyalty retry skipped test order', {
+      const retrySkipReason =
+        normalizePosLoyaltySkipReason(order.loyaltySkipReason || order.loyalty?.reason || order.loyaltyError) ||
+        posLoyaltySkipReasonFor({
+          customerUid: order.customerUid,
+          customerProfileSynced: order.customerProfileSynced,
+          isTestOrder: order.isTestOrder === true,
+          softLaunch: order.softLaunch === true,
+        });
+
+      if (retrySkipReason) {
+        const resultPayload = posLoyaltySkippedPayload({
+          customerUid: order.customerUid,
+          idempotencyKey,
+          reason: retrySkipReason,
+        });
+        await orderRef.set(posLoyaltySkippedOrderPatch(resultPayload, idempotencyKey), { merge: true });
+        logger.info('Admin POS loyalty retry skipped non-retryable order', {
           orderId: orderRef.id,
           receiptNo,
           idempotencyKey,
+          reason: retrySkipReason,
         });
-        res.status(200).json({ ok: true, status: 'skipped', orderId: orderRef.id, receiptNo, idempotencyKey });
+        res.status(200).json({
+          ok: true,
+          status: 'skipped',
+          orderId: orderRef.id,
+          receiptNo,
+          idempotencyKey,
+          loyalty: resultPayload,
+        });
         return;
       }
 
