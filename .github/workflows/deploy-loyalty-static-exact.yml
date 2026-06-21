@@ -1,0 +1,41 @@
+name: Deploy Loyalty Static Exact Upload
+
+on:
+  push:
+    branches:
+      - codex/loyalty-phase13-fix
+    paths:
+      - .github/workflows/deploy-loyalty-static-exact.yml
+      - js/admin.js
+      - js/profile.js
+      - js/ui-skeleton.js
+
+jobs:
+  deploy:
+    name: Upload loyalty static files only
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build exact upload payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p exact-upload/js
+          cp js/admin.js exact-upload/js/admin.js
+          cp js/profile.js exact-upload/js/profile.js
+          cp js/ui-skeleton.js exact-upload/js/ui-skeleton.js
+          find exact-upload -type f | sort
+
+      - name: Upload exact files to Spaceship by FTPS
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.SPACESHIP_FTP_SERVER }}
+          username: ${{ secrets.SPACESHIP_FTP_USERNAME }}
+          password: ${{ secrets.SPACESHIP_FTP_PASSWORD }}
+          protocol: ftps
+          local-dir: ./exact-upload/
+          server-dir: ${{ secrets.SPACESHIP_FTP_SERVER_DIR }}
+          dangerous-clean-slate: false
