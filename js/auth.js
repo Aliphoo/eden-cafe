@@ -343,7 +343,7 @@ function checkLoginStatus() {
                     </div>
                     ${adminLink}
                     <a href="${profileUrl}">${profileText}</a>
-                    <a href="#" onclick="logout(); return false;">${logoutText}</a>
+                    <a class="profile-dropdown-logout" href="#" onclick="logout(); return false;">${logoutText}</a>
                 </div>
             </div>
         `;

@@ -988,8 +988,6 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                 </div>
 
                 ${renderProfileTabs(labels)}
-
-                <button class="profile-logout-btn" type="button" onclick="logout(); return false;">${escapeHTML(labels.logout)}</button>
             </aside>
         `;
     }
