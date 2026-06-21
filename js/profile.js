@@ -1153,9 +1153,6 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         return `
             <section class="profile-tab-panel" id="profile-tab-points" role="tabpanel" tabindex="-1">
                 ${renderLoyaltyWallet(membershipUser, labels)}
-                ${renderTierPreview(tier, labels)}
-                ${renderBenefits(tier, labels)}
-                ${renderNextTierRequirements(membershipUser, labels)}
             </section>
         `;
     }
