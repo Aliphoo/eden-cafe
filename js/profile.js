@@ -162,6 +162,16 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             dashboardLead: 'Manage your Eden profile, points, rewards, and recent activity in one place.',
             memberSummary: 'Member summary',
             quickActions: 'Quick actions',
+            greetingPrefix: 'Hey',
+            youHave: 'You have',
+            edenPoints: 'Eden Points',
+            viewPoints: 'View Points',
+            memberCard: 'Member card',
+            tierProgress: 'Tier progress',
+            howItWorks: 'How it works',
+            howItWorksEarn: 'Earn points from eligible Eden Cafe orders and bookings.',
+            howItWorksRedeem: 'Use points and member benefits with Eden promotions.',
+            howItWorksTier: 'Grow your tier from Silver to Gold and Platinum as you spend, collect points, or visit.',
             bookArchery: 'Book Archery',
             historyAll: 'All',
             historyOrders: 'Orders',
@@ -279,6 +289,16 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             dashboardLead: 'จัดการข้อมูลสมาชิก แต้ม สิทธิประโยชน์ และประวัติการใช้งานของคุณในที่เดียว',
             memberSummary: 'สรุปสมาชิก',
             quickActions: 'เมนูลัด',
+            greetingPrefix: 'สวัสดี',
+            youHave: 'คุณมี',
+            edenPoints: 'Eden Points',
+            viewPoints: 'ดูแต้ม',
+            memberCard: 'บัตรสมาชิก',
+            tierProgress: 'ความคืบหน้าระดับสมาชิก',
+            howItWorks: 'วิธีใช้งาน',
+            howItWorksEarn: 'สะสมแต้มจากคำสั่งซื้อและการจองที่เข้าร่วมของ Eden Cafe',
+            howItWorksRedeem: 'ใช้แต้มและสิทธิ์สมาชิกกับโปรโมชันของ Eden',
+            howItWorksTier: 'ขยับระดับจาก Silver ไป Gold และ Platinum เมื่อยอดใช้จ่าย แต้ม หรือจำนวนครั้งเข้าเงื่อนไข',
             bookArchery: 'จองยิงธนู',
             historyAll: 'ทั้งหมด',
             historyOrders: 'คำสั่งซื้อ',
@@ -844,6 +864,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                         class="profile-tab ${activeProfileTab === tab ? 'active' : ''}"
                         type="button"
                         role="tab"
+                        data-profile-tab="${escapeHTML(tab)}"
                         aria-selected="${activeProfileTab === tab ? 'true' : 'false'}"
                         aria-controls="profile-tab-${escapeHTML(tab)}"
                         onclick="setProfileTab('${escapeHTML(tab)}')">
@@ -880,25 +901,90 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         return false;
     }
 
+    function tierPointTarget(tier) {
+        const rules = getTierRules();
+        return Number(rules[tier.toUpperCase()]?.minPoints || 0) || 0;
+    }
+
+    function renderTierJourney(membershipUser, labels) {
+        const currentTier = getMemberTier(membershipUser);
+        const tiers = ['Silver', 'Gold', 'Platinum'];
+        const maxPoints = Math.max(1, tierPointTarget('Platinum'));
+        const pointsForRail = Math.max(Number(membershipUser.points) || 0, tierPointTarget(currentTier));
+        const progressPercent = Math.max(0, Math.min(100, Math.round(pointsForRail / maxPoints * 100)));
+        const progressScale = (progressPercent / 100).toFixed(2);
+        return `
+            <section class="membership-panel profile-tier-journey" aria-label="${escapeHTML(labels.tierProgress)}">
+                <div class="profile-tier-heading">
+                    <div>
+                        <span class="profile-kicker">${escapeHTML(labels.tierProgress)}</span>
+                        <h2>${escapeHTML(currentTier)}</h2>
+                    </div>
+                    <strong>${formatNumber(membershipUser.points)} ${escapeHTML(labels.points)}</strong>
+                </div>
+                <div class="profile-tier-track" style="--profile-tier-progress:${progressScale}">
+                    <span class="profile-tier-track-fill" aria-hidden="true"></span>
+                    ${tiers.map(tier => {
+                        const unlocked = tierRank(tier) <= tierRank(currentTier);
+                        const active = tier === currentTier;
+                        return `
+                            <div class="profile-tier-step ${unlocked ? 'is-unlocked' : 'is-locked'} ${active ? 'is-active' : ''}">
+                                <span class="profile-tier-diamond" aria-hidden="true"></span>
+                                <strong>${escapeHTML(tier)}</strong>
+                                <small>${formatNumber(tierPointTarget(tier))} ${escapeHTML(labels.points)}</small>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                <p class="membership-rule-lead">${escapeHTML(progressMessage(getNextTierProgress(membershipUser), labels))}</p>
+            </section>
+        `;
+    }
+
+    function renderHowItWorks(labels) {
+        const steps = [labels.howItWorksEarn, labels.howItWorksRedeem, labels.howItWorksTier];
+        return `
+            <section class="membership-panel profile-how-panel" aria-label="${escapeHTML(labels.howItWorks)}">
+                <h2>${escapeHTML(labels.howItWorks)}</h2>
+                <div class="profile-how-list">
+                    ${steps.map((step, index) => `
+                        <div class="profile-how-step">
+                            <span>${index + 1}</span>
+                            <p>${escapeHTML(step)}</p>
+                        </div>
+                    `).join('')}
+                </div>
+            </section>
+        `;
+    }
+
     function renderProfileSummary(user, labels, membershipUser, tier, avatar, displayName, email) {
         const theme = getTierTheme(tier);
         return `
             <aside class="profile-sidebar profile-dashboard-sidebar" aria-label="${escapeHTML(labels.memberSummary)}">
-                <section class="profile-summary-card">
-                    <img src="${escapeHTML(avatar)}" alt="Profile" class="profile-summary-avatar">
-                    <div class="profile-summary-body">
-                        <span class="profile-kicker">${escapeHTML(labels.memberSummary)}</span>
-                        <h2>${escapeHTML(displayName || labels.member)}</h2>
-                        <p>${escapeHTML(email || labels.notProvided)}</p>
-                        <span class="member-tier-badge ${theme.badgeClass}">${escapeHTML(tier)}</span>
-                        <small>${escapeHTML(labels.memberId)}: ${escapeHTML(membershipUser.memberCode || memberId(user))}</small>
+                <section class="profile-summary-card profile-summary-card-premium">
+                    <div class="profile-summary-top">
+                        <span class="profile-tier-chip ${theme.badgeClass}">${escapeHTML(tier)} ${escapeHTML(labels.member)}</span>
+                        <h2>${escapeHTML(labels.greetingPrefix)} ${escapeHTML(displayName || labels.member)}</h2>
+                        <p>${escapeHTML(labels.youHave)}</p>
+                        <strong class="profile-summary-points">${formatNumber(membershipUser.points)}</strong>
+                        <small>${escapeHTML(labels.edenPoints)}</small>
+                        <button class="profile-claim-button" type="button" onclick="setProfileTab('points')">${escapeHTML(labels.viewPoints)}</button>
+                    </div>
+                    <div class="profile-mini-card" aria-label="${escapeHTML(labels.memberCard)}">
+                        <div>
+                            <strong>${escapeHTML(displayName || labels.member)}</strong>
+                            <span>${escapeHTML(membershipUser.memberCode || memberId(user))}</span>
+                        </div>
+                        <span class="profile-mini-tier">${escapeHTML(tier)}</span>
+                        <b>${formatNumber(membershipUser.points)} ${escapeHTML(labels.points)}</b>
                     </div>
                 </section>
 
                 <div class="profile-quick-actions" aria-label="${escapeHTML(labels.quickActions)}">
-                    <a class="btn" href="${isEnglishPage() ? '/shop-en' : '/shop'}">${escapeHTML(labels.shopNow)}</a>
-                    <a class="btn btn-outline" href="${isEnglishPage() ? '/booking-en' : '/booking'}">${escapeHTML(labels.bookTable)}</a>
-                    <a class="btn btn-outline" href="/archery/">${escapeHTML(labels.bookArchery)}</a>
+                    <a class="profile-action-card" href="${isEnglishPage() ? '/shop-en' : '/shop'}"><span aria-hidden="true"></span>${escapeHTML(labels.shopNow)}</a>
+                    <a class="profile-action-card" href="${isEnglishPage() ? '/booking-en' : '/booking'}"><span aria-hidden="true"></span>${escapeHTML(labels.bookTable)}</a>
+                    <a class="profile-action-card" href="/archery/"><span aria-hidden="true"></span>${escapeHTML(labels.bookArchery)}</a>
                 </div>
 
                 ${renderProfileTabs(labels)}
@@ -1030,6 +1116,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                     <button
                         class="profile-history-filter ${activeHistoryFilter === filter ? 'active' : ''}"
                         type="button"
+                        data-history-filter="${escapeHTML(filter)}"
                         onclick="setProfileHistoryFilter('${escapeHTML(filter)}')">
                         ${escapeHTML(filterLabels[filter])}
                     </button>
@@ -1071,8 +1158,8 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                     <h1>${escapeHTML(labels.overview)}</h1>
                     <p>${escapeHTML(labels.dashboardLead)}</p>
                 </div>
-                ${renderMemberCard(user, labels, membershipUser)}
                 ${renderDashboardMetrics(membershipUser, labels)}
+                ${renderTierJourney(membershipUser, labels)}
                 <div class="profile-overview-grid">
                     ${renderNextTierRequirements(membershipUser, labels)}
                     <details class="membership-panel profile-accordion">
@@ -1080,6 +1167,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                         ${renderBenefitGrid(tier)}
                     </details>
                 </div>
+                ${renderHowItWorks(labels)}
                 <section class="membership-panel profile-history-preview">
                     <div class="profile-panel-heading">
                         <h2>${escapeHTML(labels.recentActivity)}</h2>
