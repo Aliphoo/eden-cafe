@@ -2,6 +2,7 @@ import { auth, db } from './firebase-config.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import qrcodeFactory from './qrcode-generator.esm.js';
+import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 const BRANCH_ID = 'BKK_MAIN';
 const PACKAGE_PRICES = { 60: 350, 120: 600, 180: 800 };
@@ -502,6 +503,7 @@ function renderAvailability(result) {
 function renderOptionCards(containerId, inputName, options = [], formatter = () => '') {
     const el = $(containerId);
     if (!el) return;
+    clearSkeleton(el);
     const active = activeItems(options);
     el.innerHTML = active.map((option, index) => `
         <label class="archery-choice-card">
@@ -518,6 +520,31 @@ function renderOptionCards(containerId, inputName, options = [], formatter = () 
             scheduleAvailabilityRefresh();
         });
     });
+}
+
+function renderChoiceGridSkeleton() {
+    renderSkeleton($('archery-ability-options'), 'stats', { count: 3 });
+    renderSkeleton($('archery-equipment-options'), 'stats', { count: 3 });
+}
+
+function renderSummaryListSkeleton(id, rows = 6) {
+    const list = $(id);
+    if (!list) return;
+    list.dataset.edenSkeleton = 'summary-list';
+    list.setAttribute('aria-busy', 'true');
+    list.innerHTML = Array.from({ length: rows }, () => `
+        <li class="archery-summary-row">
+            <span class="eden-skeleton-line short"></span>
+            <span class="eden-skeleton-line medium"></span>
+        </li>
+    `).join('');
+}
+
+function clearSummaryListSkeleton(id) {
+    const list = $(id);
+    if (!list) return;
+    delete list.dataset.edenSkeleton;
+    list.removeAttribute('aria-busy');
 }
 
 function renderPricingOptions() {
@@ -541,6 +568,7 @@ function renderPricingOptions() {
 }
 
 async function loadPricingOptions() {
+    renderChoiceGridSkeleton();
     try {
         const snap = db ? await getDoc(doc(db, 'site_settings', 'archery')) : null;
         archeryPricingConfig = normalizePricingConfig(snap?.exists() ? snap.data() : DEFAULT_PRICING_CONFIG);
@@ -1048,6 +1076,8 @@ function bookingDuration(booking) {
 
 function renderConfirmPageBooking(booking) {
     const summary = $('archery-confirm-summary');
+    clearSummaryListSkeleton('archery-confirm-summary');
+    clearSkeleton($('archery-qr'));
     const duration = bookingDuration(booking);
     const bookingId = booking.id || booking.booking_id || '';
     const bookingDate = booking.booking_date || booking.date || '';
@@ -1106,6 +1136,8 @@ async function initConfirmPage(user) {
         setStatus('archery-confirm-page-status', 'ไม่พบรหัสการจอง', 'error');
         return;
     }
+    renderSummaryListSkeleton('archery-confirm-summary', 7);
+    renderSkeleton($('archery-qr'), 'qr');
     try {
         const snap = await getDoc(doc(db, 'bookings', bookingId));
         if (!snap.exists()) throw new Error('BOOKING_NOT_FOUND');

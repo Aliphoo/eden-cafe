@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Archive, Copy, Eye, Pencil, Trash2 } from 'lucide-react';
 import { archivePost, deletePost, duplicatePost, listCategories, listPosts } from '@/lib/blogRepository';
 import type { BlogPost, Category } from '@/lib/types';
-import { Badge, Button, Input, Panel, Select } from '@/components/ui';
+import { Badge, Button, Input, Panel, Select, Skeleton, SkeletonTable } from '@/components/ui';
 import { useAuth } from '@/components/AuthProvider';
 
 export default function PostsPage() {
@@ -17,11 +17,17 @@ export default function PostsPage() {
   const [category, setCategory] = useState('all');
   const [author, setAuthor] = useState('all');
   const [sort, setSort] = useState('updated_at');
+  const [loading, setLoading] = useState(true);
 
   async function reload() {
-    const [postRows, categoryRows] = await Promise.all([listPosts(true), listCategories()]);
-    setPosts(postRows);
-    setCategories(categoryRows);
+    setLoading(true);
+    try {
+      const [postRows, categoryRows] = await Promise.all([listPosts(true), listCategories()]);
+      setPosts(postRows);
+      setCategories(categoryRows);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => { reload(); }, []);
@@ -44,6 +50,10 @@ export default function PostsPage() {
         <Link href="/admin/posts/new"><Button>เพิ่มบทความใหม่</Button></Link>
       </div>
       <Panel className="grid gap-3 lg:grid-cols-[1.4fr_.7fr_.8fr_.8fr_.8fr]">
+        {loading ? (
+          Array.from({ length: 5 }).map((_, index) => <Skeleton key={index} className="h-10 w-full" />)
+        ) : (
+          <>
         <Input placeholder="ค้นหาบทความ" value={search} onChange={(event) => setSearch(event.target.value)} />
         <Select value={status} onChange={(event) => setStatus(event.target.value)}>
           <option value="all">ทุกสถานะ</option><option value="draft">Draft</option><option value="published">Published</option><option value="scheduled">Scheduled</option><option value="archived">Archived</option>
@@ -57,10 +67,12 @@ export default function PostsPage() {
         <Select value={sort} onChange={(event) => setSort(event.target.value)}>
           <option value="created_at">วันที่สร้าง</option><option value="updated_at">วันที่แก้ไข</option><option value="published_at">วันที่เผยแพร่</option>
         </Select>
+          </>
+        )}
       </Panel>
       <Panel>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-left text-sm">
+          {loading ? <SkeletonTable rows={7} columns={7} /> : <table className="w-full min-w-[980px] text-left text-sm">
             <thead className="text-[#66746c]"><tr><th className="py-2">Cover</th><th>Title</th><th>Status</th><th>Category</th><th>Author</th><th>Published</th><th>Actions</th></tr></thead>
             <tbody>
               {filtered.map((post) => (
@@ -84,7 +96,7 @@ export default function PostsPage() {
               ))}
               {!filtered.length && <tr><td colSpan={7} className="py-10 text-center font-bold text-[#66746c]">ยังไม่มีบทความตามเงื่อนไขนี้</td></tr>}
             </tbody>
-          </table>
+          </table>}
         </div>
       </Panel>
     </div>

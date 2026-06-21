@@ -5,21 +5,24 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { listPosts, listTags } from '@/lib/blogRepository';
 import type { BlogPost, Tag } from '@/lib/types';
-import { Badge, Panel } from '@/components/ui';
+import { Badge, Panel, SkeletonGrid } from '@/components/ui';
 
 export default function TagPage() {
   const params = useParams<{ slug: string }>();
   const [posts, setPosts] = useState<BlogPost[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     Promise.all([listPosts(false), listTags()])
       .then(([postRows, tagRows]) => {
         setPosts(postRows);
         setTags(tagRows);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'โหลดบทความไม่สำเร็จ'));
+      .catch((err) => setError(err instanceof Error ? err.message : 'โหลดบทความไม่สำเร็จ'))
+      .finally(() => setLoading(false));
   }, []);
 
   const tag = useMemo(() => tags.find((item) => item.slug === params.slug || item.id === params.slug), [params.slug, tags]);
@@ -31,7 +34,8 @@ export default function TagPage() {
         <p className="text-sm font-bold text-leaf">Tag</p>
         <h1 className="mt-2 text-4xl font-black">#{tag?.name || params.slug}</h1>
         <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {error && <Panel className="border-[#ffd6a6] bg-[#fff8e7] font-bold text-[#8a5a10] md:col-span-2 xl:col-span-3">โหลดบทความจาก Firestore ไม่สำเร็จ: {error}</Panel>}
+          {loading && <SkeletonGrid className="md:col-span-2 xl:col-span-3" count={6} />}
+          {!loading && error && <Panel className="border-[#ffd6a6] bg-[#fff8e7] font-bold text-[#8a5a10] md:col-span-2 xl:col-span-3">โหลดบทความจาก Firestore ไม่สำเร็จ: {error}</Panel>}
           {filtered.map((post) => (
             <article key={post.id} className="overflow-hidden rounded-lg border border-line bg-white shadow-panel">
               {post.cover_image_url && <img src={post.cover_image_url} alt={post.cover_image_alt || post.title} className="aspect-video w-full object-cover" />}
@@ -42,7 +46,7 @@ export default function TagPage() {
               </div>
             </article>
           ))}
-          {!filtered.length && <Panel className="md:col-span-2 xl:col-span-3">ยังไม่มีบทความ published สำหรับ tag นี้</Panel>}
+          {!loading && !filtered.length && <Panel className="md:col-span-2 xl:col-span-3">ยังไม่มีบทความ published สำหรับ tag นี้</Panel>}
         </div>
       </div>
     </main>

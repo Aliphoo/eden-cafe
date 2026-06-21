@@ -18,7 +18,7 @@ import { archivePost, listCategories, listTags, saveCategory, savePost, saveTag,
 import type { BlogPost, Category, FaqItem, Tag } from '@/lib/types';
 import { countWords, readingTime, seoChecklist, slugify } from '@/lib/utils';
 import { useAuth } from './AuthProvider';
-import { Badge, Button, Field, Input, Panel, Select, Textarea } from './ui';
+import { Badge, Button, Field, Input, Panel, Select, Skeleton, Textarea } from './ui';
 
 type Props = { initial?: BlogPost | null };
 
@@ -47,6 +47,7 @@ export function PostEditor({ initial }: Props) {
   const [lastSaved, setLastSaved] = useState('');
   const [error, setError] = useState('');
   const [previewMode, setPreviewMode] = useState<'desktop' | 'mobile'>('desktop');
+  const [metaLoading, setMetaLoading] = useState(true);
 
   const editor = useEditor({
     extensions: [
@@ -75,10 +76,13 @@ export function PostEditor({ initial }: Props) {
   });
 
   useEffect(() => {
-    Promise.all([listCategories(), listTags()]).then(([catRows, tagRows]) => {
-      setCategories(catRows);
-      setTags(tagRows);
-    });
+    setMetaLoading(true);
+    Promise.all([listCategories(), listTags()])
+      .then(([catRows, tagRows]) => {
+        setCategories(catRows);
+        setTags(tagRows);
+      })
+      .finally(() => setMetaLoading(false));
   }, []);
 
   useEffect(() => {
@@ -242,18 +246,20 @@ export function PostEditor({ initial }: Props) {
         <Panel className="grid gap-3">
           <h2 className="font-black">Category & Tags</h2>
           <Field label="Category">
-            <Select value={post.category_id || ''} onChange={(event) => {
+            {metaLoading ? <Skeleton className="h-10 w-full" /> : <Select value={post.category_id || ''} onChange={(event) => {
               const category = categories.find((item) => item.id === event.target.value);
               update('category_id', event.target.value);
               update('category_name', category?.name || '');
             }}>
               <option value="">เลือกหมวดหมู่</option>
               {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-            </Select>
+            </Select>}
           </Field>
           <Button variant="secondary" onClick={() => { const name = prompt('ชื่อหมวดหมู่ใหม่'); if (name) addCategory(name); }}>เพิ่ม Category</Button>
           <div className="flex flex-wrap gap-2">
-            {tags.map((tag) => (
+            {metaLoading ? (
+              Array.from({ length: 6 }).map((_, index) => <Skeleton key={index} className="h-8 w-20 rounded-full" />)
+            ) : tags.map((tag) => (
               <button key={tag.id} className="rounded-full border border-line px-3 py-1 text-sm font-bold" onClick={() => setPost((current) => ({
                 ...current,
                 tag_ids: Array.from(new Set([...(current.tag_ids || []), tag.id])),

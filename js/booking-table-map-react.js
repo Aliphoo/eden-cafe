@@ -6,6 +6,13 @@
         return;
     }
 
+    rootEl.setAttribute('aria-busy', 'true');
+    rootEl.innerHTML = `
+        <div class="eden-skeleton-map" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span>
+        </div>
+    `;
+
     const h = React.createElement;
 
     const DEFAULT_ZONES = [
@@ -324,4 +331,5 @@
     }
 
     ReactDOM.createRoot(rootEl).render(h(TableMapApp));
+    rootEl.removeAttribute('aria-busy');
 })();

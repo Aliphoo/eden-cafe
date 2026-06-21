@@ -1,5 +1,6 @@
 import { db } from './firebase-config.js';
 import { collection, getDocs, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 const FALLBACK_PRODUCTS = [
     { id: 'p1_light', category: 'coffee', categoryNameTh: 'เมล็ดกาแฟ', categoryNameEn: 'Coffee Beans', nameTh: 'Light Roast Beans', nameEn: 'Light Roast Beans', descriptionTh: 'โทนผลไม้สดชื่น เหมาะกับดริปและอเมริกาโน่', descriptionEn: 'Bright fruity notes for pour-over and americano.', price: 450, imageUrl: 'https://images.unsplash.com/photo-1559525839-b184a4d698c7?auto=format&fit=crop&w=600&q=80', stock: 12 },
@@ -87,6 +88,7 @@ function fallbackProducts() {
 }
 
 function renderProducts(container, products, note = '') {
+    clearSkeleton(container);
     const en = isEnglishPage();
     const fallbackMode = Boolean(note);
     const grouped = products.reduce((acc, product) => {
@@ -205,7 +207,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!onlineShopContainer) return;
 
     const en = isEnglishPage();
-    onlineShopContainer.innerHTML = `<div style="text-align:center; padding:40px;">${en ? 'Loading products...' : 'กำลังโหลดสินค้า...'}</div>`;
+    renderSkeleton(onlineShopContainer, 'product-grid', { count: 8 });
 
     try {
         subscribeProductsFromCloud((products) => {

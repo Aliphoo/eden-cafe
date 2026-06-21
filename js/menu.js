@@ -1,6 +1,7 @@
 import { auth, db } from './firebase-config.js';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, doc, getDoc, getDocs, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
 const ADMIN_ORDER_ROLES = ['owner', 'head_manager', 'manager'];
@@ -435,6 +436,7 @@ function subscribeMenuFromCloud(onResult, onError) {
 }
 
 function renderMenu(container, items, note = '', categories = []) {
+    clearSkeleton(container);
     const en = isEnglishPage();
     const fallbackMode = Boolean(note);
     const categoryFilters = buildCategoryFilters(items, categories);
@@ -517,7 +519,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initMenuOrderAccessWatcher();
 
     const en = isEnglishPage();
-    container.innerHTML = '<div style="text-align:center; padding:40px;">' + (en ? 'Loading menu...' : '\u0e01\u0e33\u0e25\u0e31\u0e07\u0e42\u0e2b\u0e25\u0e14\u0e40\u0e21\u0e19\u0e39...') + '</div>';
+    renderSkeleton(container, 'menu-grid', { count: 8 });
 
     try {
         subscribeMenuFromCloud((result) => {

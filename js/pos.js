@@ -1,9 +1,11 @@
 import { auth, provider, db } from './firebase-config.js';
 import qrcodeFactory from './qrcode-generator.esm.js';
+import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, setDoc, addDoc, query, orderBy, onSnapshot, getDoc, serverTimestamp, runTransaction, where, limit, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
+const POS_QR_PLACEHOLDER_SRC = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 const ADMIN_COLLECTION = 'admin_users';
 const ADMIN_PERMISSION_LABELS = {
     dashboard: 'ภาพรวมระบบ', members: 'จัดการสมาชิก', pos: 'POS หน้าร้าน', orders: 'ออเดอร์สินค้า',
@@ -37,6 +39,10 @@ let posReceiptOrders = [];
 let posSelectedReceiptId = '';
 let posReceiptSearchTerm = '';
 let posReceiptBusinessDate = posTodayBusinessDate();
+let posCategoriesLoaded = false;
+let posProductsLoaded = false;
+let posOpenBillsLoaded = false;
+let posReceiptsLoaded = false;
 const POS_VIEW_KEY = 'edenPosActiveView';
 const POS_PAYMENT_METHODS = {
     cash: { label: 'เงินสด', hint: 'รับเงินสดและคำนวณเงินทอน' },
@@ -194,6 +200,7 @@ function cleanupRealtimeListeners() {
     promptPaySettingsUnsubscribe = null;
 }
 function renderCategoriesSnapshot(snapshot) {
+    posCategoriesLoaded = true;
     categoriesData = {};
     const docs = snapshot?.docs ? snapshot.docs.slice() : [];
     docs.sort((a, b) => {
@@ -220,6 +227,7 @@ function setupRealtimeCategories() {
     });
 }
 function renderProductsSnapshot(snapshot) {
+    posProductsLoaded = true;
     productsData = {};
     productRows = [];
     if (!snapshot.empty) {
@@ -298,6 +306,7 @@ function posOrderDateText(order = {}) {
     return order.date || '-';
 }
 function renderOpenBillsSnapshot(snapshot) {
+    posOpenBillsLoaded = true;
     const docs = snapshot?.docs ? snapshot.docs : [];
     posOpenBills = docs
         .map(docSnap => ({ firestoreId: docSnap.id, ...(docSnap.data() || {}) }))
@@ -1207,6 +1216,30 @@ async function createQrDataUrl(payload) {
     throw new Error('QR library is not available');
 }
 
+function setPosPromptPayQrSkeleton(isLoading) {
+    const wrap = document.querySelector('.pos-promptpay-qr-wrap');
+    const qrImg = document.getElementById('pos-promptpay-qr');
+    if (!wrap) return;
+
+    let skeleton = document.getElementById('pos-promptpay-qr-skeleton');
+    if (isLoading) {
+        if (qrImg) qrImg.hidden = true;
+        if (!skeleton) {
+            skeleton = document.createElement('div');
+            skeleton.id = 'pos-promptpay-qr-skeleton';
+            skeleton.className = 'pos-promptpay-qr-skeleton';
+            wrap.prepend(skeleton);
+        }
+        renderSkeleton(skeleton, 'qr');
+        return;
+    }
+
+    if (skeleton) {
+        clearSkeleton(skeleton);
+        skeleton.remove();
+    }
+}
+
 async function renderPosPromptPayQr(totals = posCartTotals()) {
     const panel = document.getElementById('pos-promptpay-panel');
     if (!panel) return;
@@ -1214,6 +1247,7 @@ async function renderPosPromptPayQr(totals = posCartTotals()) {
     panel.hidden = !isQrPayment;
     if (!isQrPayment) {
         posPromptPayRenderToken += 1;
+        setPosPromptPayQrSkeleton(false);
         return;
     }
 
@@ -1233,11 +1267,13 @@ async function renderPosPromptPayQr(totals = posCartTotals()) {
     }
 
     if (settings.enabled === false) {
+        setPosPromptPayQrSkeleton(false);
         setPromptPayStatus('\u0e1b\u0e34\u0e14\u0e01\u0e32\u0e23\u0e43\u0e0a\u0e49 QR PromptPay \u0e08\u0e32\u0e01\u0e2b\u0e25\u0e31\u0e07\u0e1a\u0e49\u0e32\u0e19', 'warning');
         return;
     }
 
     if (!posCart.length || amount <= 0) {
+        setPosPromptPayQrSkeleton(false);
         setPromptPayStatus('เลือกสินค้าเพื่อสร้าง QR ตามยอดชำระ', 'warning');
         return;
     }
@@ -1247,15 +1283,18 @@ async function renderPosPromptPayQr(totals = posCartTotals()) {
 
     const token = ++posPromptPayRenderToken;
     setPromptPayStatus('กำลังสร้าง QR พร้อมเพย์...', 'warning');
+    setPosPromptPayQrSkeleton(true);
     try {
         const dataUrl = await createQrDataUrl(payload);
         if (token !== posPromptPayRenderToken) return;
+        setPosPromptPayQrSkeleton(false);
         if (qrImg) {
             qrImg.src = dataUrl;
             qrImg.hidden = false;
         }
         setPromptPayStatus('\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e2a\u0e41\u0e01\u0e19\u0e0a\u0e33\u0e23\u0e30\u0e1c\u0e48\u0e32\u0e19 PromptPay ' + settings.promptPayId, 'ready');
     } catch (error) {
+        setPosPromptPayQrSkeleton(false);
         console.error('PromptPay QR generation failed:', error);
         setPromptPayStatus('สร้าง QR ไม่สำเร็จ: ' + error.message, 'error');
     }
@@ -1552,6 +1591,12 @@ function renderPosProducts() {
     const grid = document.getElementById('pos-product-grid');
     const count = document.getElementById('pos-product-count');
     if (!grid) return;
+    if (!posProductsLoaded || !posCategoriesLoaded) {
+        renderSkeleton(grid, 'product-grid', { count: 9 });
+        if (count) count.textContent = '-';
+        return;
+    }
+    clearSkeleton(grid);
     const allRows = posProductRows();
     const rows = filteredPosProductRows();
     if (count) count.textContent = allRows.length.toLocaleString('th-TH');
@@ -1698,6 +1743,11 @@ function renderPosActiveBill() {
 function renderPosOpenBills() {
     const container = document.getElementById('pos-open-bills-list');
     if (!container) return;
+    if (!posOpenBillsLoaded) {
+        renderSkeleton(container, 'list', { rows: 4 });
+        return;
+    }
+    clearSkeleton(container);
     if (!posOpenBills.length) {
         container.innerHTML = '<div class="pos-empty">ยังไม่มีบิลค้างชำระ</div>';
         return;
@@ -1727,6 +1777,13 @@ function renderPosOverviewOpenBills() {
     const list = document.getElementById('pos-overview-open-bills-list');
     const countEl = document.getElementById('pos-overview-open-count');
     const totalEl = document.getElementById('pos-overview-open-total');
+    if (!posOpenBillsLoaded) {
+        if (countEl) countEl.textContent = '-';
+        if (totalEl) totalEl.textContent = '...';
+        if (list) renderSkeleton(list, 'list', { rows: 4 });
+        return;
+    }
+    if (list) clearSkeleton(list);
     const dailyOpenBills = posOpenBills.filter(posOrderMatchesReceiptDate);
     const openTotal = dailyOpenBills.reduce((sum, order) => sum + safeNumber(order.totalAmount ?? order.total), 0);
     if (countEl) countEl.textContent = dailyOpenBills.length.toLocaleString('th-TH');
@@ -1757,6 +1814,7 @@ function renderPosOverviewOpenBills() {
 }
 
 function renderReceiptsSnapshot(snapshot) {
+    posReceiptsLoaded = true;
     const docs = snapshot?.docs ? snapshot.docs : [];
     posReceiptOrders = docs
         .map(docSnap => ({ firestoreId: docSnap.id, ...(docSnap.data() || {}) }))
@@ -1805,6 +1863,16 @@ function renderPosReceiptManager() {
     const countEl = document.getElementById('pos-receipt-count');
     const totalEl = document.getElementById('pos-receipt-total');
     const dateLabelEl = document.getElementById('pos-receipt-date-label');
+    if (!posReceiptsLoaded) {
+        if (countEl) countEl.textContent = '-';
+        if (totalEl) totalEl.textContent = '...';
+        if (dateLabelEl) dateLabelEl.textContent = 'Loading...';
+        if (list) renderSkeleton(list, 'list', { rows: 5 });
+        if (preview) renderSkeleton(preview, 'summary', { rows: 5 });
+        return;
+    }
+    clearSkeleton(list);
+    clearSkeleton(preview);
     const receipts = filteredPosReceipts();
     const receiptTotal = posReceiptOrders.reduce((sum, order) => sum + safeNumber(order.totalAmount ?? order.total), 0);
     if (countEl) countEl.textContent = posReceiptOrders.length.toLocaleString('th-TH');

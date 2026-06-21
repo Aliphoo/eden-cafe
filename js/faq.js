@@ -1,5 +1,6 @@
 import { db } from './firebase-config.js';
 import { collection, getDocs, orderBy, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 const PAGE_LIMIT = 3;
 const HUB_PREVIEW_LIMIT = 12;
@@ -271,8 +272,13 @@ async function renderPageFaqs(container) {
         container.innerHTML = '<p class="faq-loading">กำลังโหลดคำถามที่พบบ่อย...</p>';
     }
 
+    if (container.querySelector('.faq-loading')) {
+        renderSkeleton(container, 'faq-grid', { count: pageKey === 'faq' ? 6 : 3 });
+    }
+
     try {
         const faqs = getPageFaqs(await fetchFaqs(), pageKey);
+        clearSkeleton(container);
         if (!faqs.length) {
             container.innerHTML = `<p class="faq-empty">ยังไม่มีคำถามสำหรับ${escapeHTML(PAGE_LABELS[pageKey] || 'หน้านี้')}</p>`;
             return;
@@ -281,6 +287,7 @@ async function renderPageFaqs(container) {
         addMoreLink(container, pageKey);
         renderPageSchema(pageKey, faqs);
     } catch (_) {
+        clearSkeleton(container);
         const faqs = getPageFaqs(fallbackFaqs(), pageKey);
         if (faqs.length) {
             container.innerHTML = faqs.map((faq, index) => renderFaqCard(faq, { open: index === 0 })).join('');
@@ -322,10 +329,15 @@ async function renderFaqHub(container) {
         container.innerHTML = '<p class="faq-loading">กำลังโหลดศูนย์รวมคำถาม...</p>';
     }
 
+    if (container.querySelector('.faq-loading')) {
+        renderSkeleton(container, 'faq-grid', { count: 6 });
+    }
+
     try {
         const faqs = (await fetchFaqs())
             .filter(faq => faq.targetPages.includes('faq') || faq.isPopular)
             .sort((a, b) => safeNumber(a.popularOrder, a.order) - safeNumber(b.popularOrder, b.order));
+        clearSkeleton(container);
         container.innerHTML = `
             <div class="faq-hub-toolbar">
                 <input type="search" data-faq-hub-search placeholder="ค้นหาคำถาม เช่น จองโต๊ะ, ชำระเงิน, สมาชิก">
@@ -348,6 +360,7 @@ async function renderFaqHub(container) {
         });
         refresh();
     } catch (_) {
+        clearSkeleton(container);
         const faqs = fallbackFaqs()
             .filter(faq => faq.targetPages.includes('faq') || faq.isPopular)
             .sort((a, b) => safeNumber(a.popularOrder, a.order) - safeNumber(b.popularOrder, b.order));

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Search } from 'lucide-react';
 import { listCategories, listPosts } from '@/lib/blogRepository';
 import type { BlogPost, Category } from '@/lib/types';
-import { Badge, Input, Panel } from '@/components/ui';
+import { Badge, Input, Panel, Skeleton, SkeletonGrid } from '@/components/ui';
 
 export default function PublicBlogPage() {
   const [posts, setPosts] = useState<BlogPost[]>([]);
@@ -13,14 +13,17 @@ export default function PublicBlogPage() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     Promise.all([listPosts(false), listCategories()])
       .then(([postRows, categoryRows]) => {
         setPosts(postRows);
         setCategories(categoryRows);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'โหลดบทความไม่สำเร็จ'));
+      .catch((err) => setError(err instanceof Error ? err.message : 'โหลดบทความไม่สำเร็จ'))
+      .finally(() => setLoading(false));
   }, []);
 
   const filtered = useMemo(() => posts
@@ -41,6 +44,7 @@ export default function PublicBlogPage() {
             </div>
             <div className="flex flex-wrap gap-2">
               <button className="rounded-md border border-line px-3 py-2 text-sm font-bold" onClick={() => setCategory('all')}>ทั้งหมด</button>
+              {loading && Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-10 w-24" />)}
               {categories.map((item) => <button key={item.id} className="rounded-md border border-line px-3 py-2 text-sm font-bold" onClick={() => setCategory(item.id)}>{item.name}</button>)}
             </div>
           </div>
@@ -48,8 +52,22 @@ export default function PublicBlogPage() {
       </section>
       <section className="px-5 py-8">
         <div className="mx-auto grid max-w-6xl gap-5">
-          {error && <Panel className="border-[#ffd6a6] bg-[#fff8e7] font-bold text-[#8a5a10]">โหลดบทความจาก Firestore ไม่สำเร็จ: {error}. ตรวจสอบ Firestore rules สำหรับ public read ของ published posts.</Panel>}
-          {featured && (
+          {loading && (
+            <>
+              <Panel className="grid gap-5 md:grid-cols-[1.1fr_.9fr]">
+                <Skeleton className="aspect-video h-full w-full" />
+                <div className="grid content-center gap-3">
+                  <Skeleton className="h-6 w-24" />
+                  <Skeleton className="h-9 w-4/5" />
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-3/4" />
+                </div>
+              </Panel>
+              <SkeletonGrid count={6} />
+            </>
+          )}
+          {!loading && error && <Panel className="border-[#ffd6a6] bg-[#fff8e7] font-bold text-[#8a5a10]">โหลดบทความจาก Firestore ไม่สำเร็จ: {error}. ตรวจสอบ Firestore rules สำหรับ public read ของ published posts.</Panel>}
+          {!loading && featured && (
             <Panel className="grid gap-5 md:grid-cols-[1.1fr_.9fr]">
               {featured.cover_image_url && <img src={featured.cover_image_url} alt={featured.cover_image_alt || featured.title} className="aspect-video h-full w-full rounded-md object-cover" />}
               <div className="grid content-center gap-3">
@@ -72,7 +90,7 @@ export default function PublicBlogPage() {
                 </div>
               </article>
             ))}
-            {!filtered.length && <Panel className="md:col-span-2 xl:col-span-3">ยังไม่มีบทความ published ในระบบ</Panel>}
+            {!loading && !filtered.length && <Panel className="md:col-span-2 xl:col-span-3">ยังไม่มีบทความ published ในระบบ</Panel>}
           </div>
         </div>
       </section>

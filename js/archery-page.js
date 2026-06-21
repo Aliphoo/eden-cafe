@@ -1,5 +1,6 @@
 import { db } from './firebase-config.js';
 import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 const SETTINGS_REF = doc(db, 'site_settings', 'archery');
 const HERO_FALLBACK = 'https://www.edencafe.co/Images/uploads/archery/2026-06/1781174524924-archery-hero-1781174549114.webp';
@@ -95,6 +96,7 @@ function renderPackages(settings = {}) {
     const grids = document.querySelectorAll('.archery-band .archery-grid');
     const packageGrid = grids[0];
     if (!packageGrid) return;
+    clearSkeleton(packageGrid);
 
     const isEnglish = String(document.documentElement.lang || '').toLowerCase().startsWith('en');
     const sourcePackages = isEnglish && Array.isArray(settings.packagesEn)
@@ -119,9 +121,12 @@ function renderPackages(settings = {}) {
 }
 
 async function loadArcheryPageSettings() {
+    const packageGrid = document.querySelector('.archery-band .archery-grid');
+    if (packageGrid) renderSkeleton(packageGrid, 'stats', { count: 3 });
     try {
         const snap = await getDoc(SETTINGS_REF);
         if (!snap.exists()) {
+            clearSkeleton(packageGrid);
             renderHero({});
             return;
         }
@@ -130,6 +135,7 @@ async function loadArcheryPageSettings() {
         renderPackages(settings);
     } catch (error) {
         console.warn('Unable to load Archery page settings:', error);
+        clearSkeleton(packageGrid);
         renderHero({});
     }
 }

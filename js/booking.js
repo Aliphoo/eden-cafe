@@ -1,3 +1,5 @@
+import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
+
 document.addEventListener('DOMContentLoaded', async () => {
     const bookingTypeRadios = document.querySelectorAll('input[name="booking-type-radio"]');
     const tableSelectionGroup = document.getElementById('table-selection-group');
@@ -19,6 +21,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     const timeSelectionContainer = document.getElementById('time-selection-container');
 
     let roomsMap = {};
+
+    function setRoomSkeleton(isLoading) {
+        if (!roomSelectionGroup) return;
+        let skeleton = document.getElementById('room-loading-skeleton');
+        if (isLoading) {
+            if (!skeleton) {
+                skeleton = document.createElement('div');
+                skeleton.id = 'room-loading-skeleton';
+                skeleton.className = 'room-loading-skeleton';
+                roomSelectionGroup.appendChild(skeleton);
+            }
+            renderSkeleton(skeleton, 'summary', { rows: 3 });
+            return;
+        }
+        if (skeleton) {
+            clearSkeleton(skeleton);
+            skeleton.remove();
+        }
+    }
 
     function todayISO() {
         const now = new Date();
@@ -99,8 +120,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     async function loadRooms() {
         if (!roomSelect) return;
+        setRoomSkeleton(true);
         const fetchRoomsFromCloud = await waitForWindowFunction('fetchRoomsFromCloud');
-        if (typeof fetchRoomsFromCloud !== 'function') return;
+        if (typeof fetchRoomsFromCloud !== 'function') {
+            setRoomSkeleton(false);
+            return;
+        }
 
         try {
             const rooms = await fetchRoomsFromCloud();
@@ -115,6 +140,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (err) {
             console.error('Error loading rooms:', err);
             roomSelect.innerHTML = '<option value="" disabled selected>Error loading rooms</option>';
+        } finally {
+            setRoomSkeleton(false);
         }
     }
 

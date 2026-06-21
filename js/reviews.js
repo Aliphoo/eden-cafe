@@ -50,6 +50,7 @@ function fromFirestoreValue(value) {
 async function loadCachedGoogleReviews() {
     const containerEl = document.getElementById('google-reviews-container');
     if (!containerEl) return;
+    showReviewSkeleton();
 
     try {
         const cache = await fetchReviewCache();
@@ -59,10 +60,28 @@ async function loadCachedGoogleReviews() {
     }
 }
 
+function showReviewSkeleton() {
+    const scoreEl = document.getElementById('google-rating-score');
+    const countEl = document.getElementById('google-rating-count');
+    const containerEl = document.getElementById('google-reviews-container');
+    if (scoreEl) scoreEl.innerHTML = '<span class="eden-skeleton-counter" aria-hidden="true"></span>';
+    if (countEl) countEl.innerHTML = '<span class="eden-skeleton-counter" aria-hidden="true"></span>';
+    if (!containerEl) return;
+    containerEl.setAttribute('aria-busy', 'true');
+    containerEl.innerHTML = `
+        <div class="eden-skeleton-grid reviews" aria-hidden="true">
+            <article class="eden-skeleton-card compact"><span class="eden-skeleton-pill"></span><span class="eden-skeleton-line wide"></span><span class="eden-skeleton-line medium"></span></article>
+            <article class="eden-skeleton-card compact"><span class="eden-skeleton-pill"></span><span class="eden-skeleton-line wide"></span><span class="eden-skeleton-line medium"></span></article>
+            <article class="eden-skeleton-card compact"><span class="eden-skeleton-pill"></span><span class="eden-skeleton-line wide"></span><span class="eden-skeleton-line medium"></span></article>
+        </div>
+    `;
+}
+
 function showReviewCachePending() {
     const countEl = document.getElementById('google-rating-count');
     const containerEl = document.getElementById('google-reviews-container');
     if (!containerEl) return;
+    containerEl.removeAttribute('aria-busy');
 
     const path = window.location.pathname;
     const isEnglish = path.includes('-en') || path.endsWith('/en');
@@ -121,6 +140,7 @@ function updateReviewsUI(cache) {
     const containerEl = document.getElementById('google-reviews-container');
 
     if (!scoreEl || !countEl || !containerEl) return;
+    containerEl.removeAttribute('aria-busy');
 
     const path = window.location.pathname;
     const isEnglish = path.includes('-en') || path.endsWith('/en');

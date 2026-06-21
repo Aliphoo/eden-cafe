@@ -7,7 +7,7 @@ import { Facebook, LinkIcon } from 'lucide-react';
 import { getPostBySlug, listPosts } from '@/lib/blogRepository';
 import type { BlogPost } from '@/lib/types';
 import { buildJsonLd } from '@/lib/utils';
-import { Badge, Button, Panel } from '@/components/ui';
+import { Badge, Button, Panel, SkeletonArticle } from '@/components/ui';
 
 export default function PublicPostPage() {
   const params = useParams<{ slug: string }>();
@@ -28,7 +28,7 @@ export default function PublicPostPage() {
   const previous = index > 0 ? allPosts[index - 1] : null;
   const next = index >= 0 ? allPosts[index + 1] : null;
 
-  if (post === undefined) return <main className="grid min-h-screen place-items-center font-bold">กำลังโหลดบทความ...</main>;
+  if (post === undefined) return <SkeletonArticle />;
   if (error) return <main className="grid min-h-screen place-items-center p-5"><Panel className="max-w-xl border-[#ffd6a6] bg-[#fff8e7] font-bold text-[#8a5a10]">โหลดบทความจาก Firestore ไม่สำเร็จ: {error}. ตรวจสอบ Firestore rules สำหรับ public read ของ published posts.</Panel></main>;
   if (!post || post.status !== 'published') return <main className="grid min-h-screen place-items-center font-bold">ไม่พบบทความ</main>;
 

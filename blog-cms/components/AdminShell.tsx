@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { BarChart3, FileText, FolderTree, Image, LogOut, PenLine, Search, Settings, Sparkles, Tags, Users } from 'lucide-react';
 import { AuthProvider, useAuth } from './AuthProvider';
-import { Button } from './ui';
+import { Button, Skeleton } from './ui';
 import { cn } from '@/lib/utils';
 
 const nav = [
@@ -20,12 +20,35 @@ const nav = [
   { href: '/admin/assistant', label: 'AI Assistant', icon: Sparkles }
 ];
 
+function ShellSkeleton() {
+  return (
+    <div className="grid min-h-screen grid-cols-[260px_1fr] max-lg:grid-cols-1" role="status" aria-label="Loading">
+      <aside className="border-r border-line bg-white p-4 max-lg:hidden">
+        <Skeleton className="h-20 w-full" />
+        <div className="mt-5 grid gap-3">
+          {Array.from({ length: 8 }).map((_, index) => <Skeleton key={index} className="h-10 w-full" />)}
+        </div>
+        <Skeleton className="mt-6 h-28 w-full" />
+      </aside>
+      <main className="min-w-0 p-5 lg:p-7">
+        <div className="grid gap-5">
+          <Skeleton className="h-10 w-72 max-w-full" />
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-32 w-full" />)}
+          </div>
+          <Skeleton className="h-80 w-full" />
+        </div>
+      </main>
+    </div>
+  );
+}
+
 function ShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, blogUser, loading, login, logout } = useAuth();
 
-  if (loading) return <div className="grid min-h-screen place-items-center text-sm font-bold">กำลังโหลดระบบ...</div>;
+  if (loading) return <ShellSkeleton />;
   if (!user) {
     return (
       <main className="grid min-h-screen place-items-center p-6">

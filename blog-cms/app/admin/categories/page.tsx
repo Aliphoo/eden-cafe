@@ -4,12 +4,20 @@ import { useEffect, useState } from 'react';
 import { listCategories, saveCategory } from '@/lib/blogRepository';
 import type { Category } from '@/lib/types';
 import { slugify } from '@/lib/utils';
-import { Button, Field, Input, Panel, Textarea } from '@/components/ui';
+import { Button, Field, Input, Panel, Skeleton, Textarea } from '@/components/ui';
 
 export default function CategoriesPage() {
   const [rows, setRows] = useState<Category[]>([]);
   const [form, setForm] = useState<Partial<Category>>({ name: '', slug: '', is_active: true });
-  async function reload() { setRows(await listCategories()); }
+  const [loading, setLoading] = useState(true);
+  async function reload() {
+    setLoading(true);
+    try {
+      setRows(await listCategories());
+    } finally {
+      setLoading(false);
+    }
+  }
   useEffect(() => { reload(); }, []);
   return (
     <div className="grid gap-5 xl:grid-cols-[420px_1fr]">
@@ -24,7 +32,9 @@ export default function CategoriesPage() {
       </Panel>
       <Panel>
         <div className="grid gap-2">
-          {rows.map((row) => <button key={row.id} className="rounded-md border border-line p-3 text-left" onClick={() => setForm(row)}><strong>{row.name}</strong><p className="text-sm text-[#66746c]">/{row.slug}</p></button>)}
+          {loading ? (
+            Array.from({ length: 5 }).map((_, index) => <Skeleton key={index} className="h-16 w-full" />)
+          ) : rows.map((row) => <button key={row.id} className="rounded-md border border-line p-3 text-left" onClick={() => setForm(row)}><strong>{row.name}</strong><p className="text-sm text-[#66746c]">/{row.slug}</p></button>)}
         </div>
       </Panel>
     </div>

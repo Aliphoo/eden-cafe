@@ -4,12 +4,20 @@ import { useEffect, useState } from 'react';
 import { listTags, saveTag } from '@/lib/blogRepository';
 import type { Tag } from '@/lib/types';
 import { slugify } from '@/lib/utils';
-import { Button, Field, Input, Panel } from '@/components/ui';
+import { Button, Field, Input, Panel, Skeleton } from '@/components/ui';
 
 export default function TagsPage() {
   const [rows, setRows] = useState<Tag[]>([]);
   const [name, setName] = useState('');
-  async function reload() { setRows(await listTags()); }
+  const [loading, setLoading] = useState(true);
+  async function reload() {
+    setLoading(true);
+    try {
+      setRows(await listTags());
+    } finally {
+      setLoading(false);
+    }
+  }
   useEffect(() => { reload(); }, []);
   return (
     <div className="grid gap-5">
@@ -19,7 +27,11 @@ export default function TagsPage() {
         <Button onClick={async () => { await saveTag({ name, slug: slugify(name) }); setName(''); reload(); }}>บันทึก Tag</Button>
       </Panel>
       <Panel>
-        <div className="flex flex-wrap gap-2">{rows.map((tag) => <span key={tag.id} className="rounded-full border border-line px-3 py-2 text-sm font-bold">{tag.name}</span>)}</div>
+        <div className="flex flex-wrap gap-2">
+          {loading ? (
+            Array.from({ length: 10 }).map((_, index) => <Skeleton key={index} className="h-9 w-24 rounded-full" />)
+          ) : rows.map((tag) => <span key={tag.id} className="rounded-full border border-line px-3 py-2 text-sm font-bold">{tag.name}</span>)}
+        </div>
       </Panel>
     </div>
   );

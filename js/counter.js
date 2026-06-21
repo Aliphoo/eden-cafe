@@ -1,3 +1,5 @@
+import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
+
 const COUNTER_API_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net/trackVisitorCounter';
 const COUNTER_CLIENT_KEY = 'eden_counter_client_id';
 const COUNTER_LOADING_LABEL = '\u0e01\u0e33\u0e25\u0e31\u0e07\u0e2d\u0e31\u0e1b\u0e40\u0e14\u0e15\u0e2a\u0e16\u0e34\u0e15\u0e34';
@@ -60,8 +62,15 @@ function formatCounterValue(value) {
 }
 
 function setCounterText(dailyEl, totalEl, dailyText, totalText = dailyText) {
+    clearSkeleton(dailyEl);
+    clearSkeleton(totalEl);
     if (dailyEl) dailyEl.innerText = dailyText;
     if (totalEl) totalEl.innerText = totalText;
+}
+
+function setCounterSkeleton(dailyEl, totalEl) {
+    if (dailyEl) renderSkeleton(dailyEl, 'counter');
+    if (totalEl) renderSkeleton(totalEl, 'counter');
 }
 
 function updateCounterUI(dailyEl, totalEl, stats) {
@@ -115,7 +124,7 @@ async function trackVisit() {
     const hasSessionCount = storageGet(sessionStorage, sessionVisitKey) === 'true';
     const shouldCountVisit = !hasLocalCount && !hasSessionCount;
 
-    setCounterText(dailyEl, totalEl, COUNTER_LOADING_LABEL);
+    setCounterSkeleton(dailyEl, totalEl);
 
     try {
         const stats = await fetchCounterStats(shouldCountVisit);

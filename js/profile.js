@@ -3,6 +3,7 @@ import { onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.c
 import { collection, doc, getDoc, getDocs, query, setDoc, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getTierRules } from './membership.js';
 import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
+import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 (() => {
     const USER_KEY = 'eden_user';
@@ -1533,7 +1534,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                 window.location.href = '/login';
                 return;
             }
-            renderSignedOut(container, labels);
+            renderSkeleton(container, 'profile');
             return;
         }
         if (user.passwordLoginEnabled === false || user.password_login_enabled === false) {
@@ -1541,10 +1542,11 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             return;
         }
         if (authStateResolved && currentAuthUser && !cloudProfile && cloudProfileUid !== user.uid) {
-            container.innerHTML = `<div class="profile-loading"><p>${escapeHTML(labels.loadingProfile)}</p></div>`;
+            renderSkeleton(container, 'profile');
             refreshCloudProfile(user);
             return;
         }
+        clearSkeleton(container);
         renderSignedIn(container, user, labels);
     }
 

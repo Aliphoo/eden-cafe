@@ -1,6 +1,7 @@
 import { auth, provider, db } from './firebase-config.js';
 import { getMemberTier, getTierBenefits } from './membership.js';
 import { BLOG_POSTS, SITE, getBlogUrl } from './blog-data.mjs';
+import { renderSkeleton } from './ui-skeleton.js';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp, writeBatch, runTransaction, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -26,6 +27,54 @@ function safeImageURL(value, fallback = 'Images/Logo.webp') {
 function safeNumber(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
+}
+
+const ADMIN_TABLE_SKELETONS = {
+    'sales-summary-table-body': { cols: 4, rows: 5 },
+    'pos-apk-release-table-body': { cols: 7, rows: 4 },
+    'pos-apk-device-table-body': { cols: 6, rows: 4 },
+    'pos-apk-event-table-body': { cols: 6, rows: 4 },
+    'members-table-body': { cols: 10, rows: 6 },
+    'admin-access-table-body': { cols: 7, rows: 5 },
+    'discount-table-body': { cols: 6, rows: 5 },
+    'loyalty-ledger-body': { cols: 7, rows: 5 },
+    'orders-table-body': { cols: 9, rows: 6 },
+    'bookings-table-body': { cols: 8, rows: 6 },
+    'room-bookings-table-body': { cols: 8, rows: 5 },
+    'archery-bookings-table-body': { cols: 10, rows: 6 },
+    'all-bookings-table-body': { cols: 9, rows: 6 },
+    'tables-table-body': { cols: 7, rows: 6 },
+    'rooms-table-body': { cols: 6, rows: 5 },
+    'products-table-body': { cols: 8, rows: 6 },
+    'categories-table-body': { cols: 4, rows: 5 },
+    'blogs-table-body': { cols: 5, rows: 5 },
+    'faqs-table-body': { cols: 4, rows: 5 }
+};
+
+const ADMIN_PANEL_SKELETONS = [
+    { id: 'archery-ops-summary', type: 'stats', options: { count: 4 } },
+    { id: 'archery-payment-panel', type: 'summary', options: { rows: 5 } },
+    { id: 'archery-payment-watch', type: 'summary', options: { rows: 4 } },
+    { id: 'archery-webhook-events', type: 'list', options: { rows: 4 } },
+    { id: 'archery-reconciliation-panel', type: 'summary', options: { rows: 4 } },
+    { id: 'archery-audit-trail', type: 'list', options: { rows: 4 } },
+    { id: 'admin-table-map-preview', type: 'map', options: {} },
+    { id: 'promptpay-account-list', type: 'list', options: { rows: 3 } }
+];
+
+let adminSkeletonsPrimed = false;
+
+function primeAdminSkeletons() {
+    if (adminSkeletonsPrimed) return;
+    adminSkeletonsPrimed = true;
+    Object.entries(ADMIN_TABLE_SKELETONS).forEach(([id, options]) => {
+        const target = document.getElementById(id);
+        if (target) renderSkeleton(target, 'table', options);
+    });
+    ADMIN_PANEL_SKELETONS.forEach(item => {
+        const target = document.getElementById(item.id);
+        if (target) renderSkeleton(target, item.type, item.options);
+    });
 }
 
 function safeAdminError(action = 'ดำเนินการไม่สำเร็จ') {
@@ -1024,6 +1073,7 @@ document.addEventListener('DOMContentLoaded', () => {
             adminName.innerText = `${currentAdminAccess.displayName || user.displayName || 'Admin'} (${ADMIN_ROLE_LABELS[currentAdminAccess.role] || currentAdminAccess.role})`;
             adminAvatar.src = user.photoURL || 'Images/Logo.webp';
             applyAdminAccessUI();
+            primeAdminSkeletons();
             initializeAdminModules();
         } else {
             // User is logged out

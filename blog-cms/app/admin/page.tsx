@@ -6,7 +6,30 @@ import { AlertTriangle, FileText, Image, Send, Timer, Wand2, type LucideIcon } f
 import { listCategories, listPosts } from '@/lib/blogRepository';
 import type { BlogPost, Category } from '@/lib/types';
 import { seoChecklist } from '@/lib/utils';
-import { Badge, Button, Panel } from '@/components/ui';
+import { Badge, Button, Panel, Skeleton, SkeletonTable } from '@/components/ui';
+
+function DashboardSkeleton() {
+  return (
+    <div className="grid gap-5" role="status" aria-label="Loading">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="grid gap-2">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-9 w-72 max-w-full" />
+        </div>
+        <Skeleton className="h-10 w-40" />
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, index) => <Skeleton key={index} className="h-32 w-full" />)}
+      </div>
+      <div className="grid gap-4 xl:grid-cols-[1.2fr_.8fr]">
+        <Panel><SkeletonTable rows={6} columns={5} /></Panel>
+        <Panel className="grid gap-3">
+          {Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-12 w-full" />)}
+        </Panel>
+      </div>
+    </div>
+  );
+}
 
 export default function AdminDashboard() {
   const [posts, setPosts] = useState<BlogPost[]>([]);
@@ -18,7 +41,7 @@ export default function AdminDashboard() {
       setPosts(postRows);
       setCategories(categoryRows);
       setLoading(false);
-    });
+    }).finally(() => setLoading(false));
   }, []);
 
   const stats = useMemo(() => ({
@@ -31,7 +54,7 @@ export default function AdminDashboard() {
     missingMeta: posts.filter((post) => !post.seo_description).length
   }), [posts]);
 
-  if (loading) return <p className="font-bold">กำลังโหลด Dashboard...</p>;
+  if (loading) return <DashboardSkeleton />;
 
   const statCards: Array<[string, number, LucideIcon]> = [
     ['บทความทั้งหมด', stats.all, FileText],

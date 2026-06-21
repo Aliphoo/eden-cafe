@@ -1491,3 +1491,76 @@ body.pos-ready .pos-app { opacity: 1; transform: none; }
 .pos-promptpay-qr-wrap img[hidden]{display:none}
 .pos-qty button{height:44px;min-width:44px;width:44px}
 .pos-remove-btn{align-items:center;display:inline-flex;justify-content:center;min-height:44px;padding:6px 12px}
+
+/* Shared Skeleton Loading for POS */
+.eden-skeleton-grid,
+.eden-skeleton-list,
+.eden-skeleton-form,
+.eden-skeleton-profile,
+.eden-skeleton-summary {
+    display: grid;
+    gap: 14px;
+    width: 100%;
+}
+
+.eden-skeleton-grid.cards { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.eden-skeleton-grid.faq,
+.eden-skeleton-grid.reviews,
+.eden-skeleton-grid.stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.eden-skeleton-card,
+.eden-skeleton-panel,
+.eden-skeleton-list-item {
+    background: rgba(255,255,255,.88);
+    border: 1px solid rgba(35,64,48,.12);
+    border-radius: 18px;
+    box-shadow: 0 10px 24px rgba(15,37,26,.08);
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+}
+.eden-skeleton-card.compact { min-height: 118px; }
+.eden-skeleton-line,
+.eden-skeleton-media,
+.eden-skeleton-pill,
+.eden-skeleton-button,
+.eden-skeleton-input,
+.eden-skeleton-avatar,
+.eden-skeleton-filter,
+.eden-skeleton-counter,
+.eden-skeleton-qr,
+.eden-skeleton-map,
+.eden-skeleton-map span {
+    animation: edenSkeletonShimmer 1.25s ease-in-out infinite;
+    background: linear-gradient(90deg, rgba(221,230,224,.78), rgba(248,251,249,.98), rgba(221,230,224,.78));
+    background-size: 220% 100%;
+    display: block;
+}
+.eden-skeleton-media { aspect-ratio: 4 / 3; border-radius: 16px; }
+.eden-skeleton-line { border-radius: 999px; height: 12px; width: 74%; }
+.eden-skeleton-line.wide { width: 92%; }
+.eden-skeleton-line.medium { width: 62%; }
+.eden-skeleton-line.short { width: 36%; }
+.eden-skeleton-line.table-cell { height: 14px; width: 100%; }
+.eden-skeleton-pill { border-radius: 999px; height: 24px; width: 84px; }
+.eden-skeleton-button { border-radius: 999px; height: 40px; width: 128px; }
+.eden-skeleton-input { border-radius: 12px; height: 44px; width: 100%; }
+.eden-skeleton-avatar { border-radius: 50%; height: 44px; width: 44px; }
+.eden-skeleton-avatar.large { height: 76px; width: 76px; }
+.eden-skeleton-filter-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.eden-skeleton-filter { border-radius: 999px; height: 36px; width: 96px; }
+.eden-skeleton-list-item { align-items: center; grid-template-columns: auto 1fr; }
+.eden-skeleton-form { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.eden-skeleton-summary-row { align-items: center; border-bottom: 1px solid rgba(35,64,48,.1); display: grid; gap: 12px; grid-template-columns: minmax(80px,.6fr) 1fr; padding: 10px 0; }
+.eden-skeleton-counter { border-radius: 999px; height: 28px; min-width: 96px; }
+.eden-skeleton-qr { aspect-ratio: 1; border-radius: 18px; margin: 0 auto; max-width: 260px; width: 100%; }
+.eden-skeleton-map { border-radius: 18px; min-height: 280px; overflow: hidden; position: relative; }
+.eden-skeleton-map span { border-radius: 12px; position: absolute; }
+.eden-skeleton-map span:nth-child(1) { height: 24%; left: 8%; top: 12%; width: 22%; }
+.eden-skeleton-map span:nth-child(2) { height: 18%; left: 38%; top: 18%; width: 18%; }
+.eden-skeleton-map span:nth-child(3) { height: 22%; left: 67%; top: 16%; width: 20%; }
+.eden-skeleton-map span:nth-child(4) { height: 20%; left: 17%; top: 58%; width: 24%; }
+.eden-skeleton-map span:nth-child(5) { height: 24%; left: 57%; top: 54%; width: 28%; }
+.eden-skeleton-row td { padding: 12px 10px; }
+@keyframes edenSkeletonShimmer { 0% { background-position: 120% 0; } 100% { background-position: -120% 0; } }
+@media (max-width: 640px) { .eden-skeleton-grid.cards, .eden-skeleton-grid.faq, .eden-skeleton-grid.reviews, .eden-skeleton-grid.stats, .eden-skeleton-summary-row { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { .eden-skeleton-line, .eden-skeleton-media, .eden-skeleton-pill, .eden-skeleton-button, .eden-skeleton-input, .eden-skeleton-avatar, .eden-skeleton-filter, .eden-skeleton-counter, .eden-skeleton-qr, .eden-skeleton-map, .eden-skeleton-map span { animation: none; } }
