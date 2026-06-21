@@ -5019,7 +5019,7 @@ footer p {
         position: sticky;
         top: 76px;
         z-index: 8;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 4px;
         padding: 4px;
         border: 1px solid rgba(46, 125, 50, 0.12);

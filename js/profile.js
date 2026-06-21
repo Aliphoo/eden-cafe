@@ -28,10 +28,10 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
     let currentAuthUser = null;
     let authStateResolved = false;
     let selectedPreviewTier = '';
-    let activeProfileTab = 'overview';
+    let activeProfileTab = 'points';
     let activeHistoryFilter = 'all';
     let historyExpanded = false;
-    const PROFILE_TABS = ['overview', 'points', 'history', 'account'];
+    const PROFILE_TABS = ['points', 'history', 'account'];
     const HISTORY_FILTERS = ['all', 'orders', 'bookings', 'archery'];
     const CAN_LOG_CLIENT_ERRORS = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
 
@@ -849,11 +849,10 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
 
     function profileTabLabel(tab, labels) {
         return {
-            overview: labels.overview,
             points: labels.pointsTab,
             history: labels.history,
             account: labels.account
-        }[tab] || labels.overview;
+        }[tab] || labels.pointsTab;
     }
 
     function renderProfileTabs(labels) {
@@ -1150,34 +1149,6 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         `;
     }
 
-    function renderOverviewTab(user, labels, membershipUser, tier, historyItems) {
-        return `
-            <section class="profile-tab-panel" id="profile-tab-overview" role="tabpanel" tabindex="-1">
-                <div class="profile-dashboard-head">
-                    <span class="profile-kicker">${escapeHTML(labels.dashboardTitle)}</span>
-                    <h1>${escapeHTML(labels.overview)}</h1>
-                    <p>${escapeHTML(labels.dashboardLead)}</p>
-                </div>
-                ${renderDashboardMetrics(membershipUser, labels)}
-                <div class="profile-overview-grid">
-                    ${renderNextTierRequirements(membershipUser, labels)}
-                    <details class="membership-panel profile-accordion">
-                        <summary>${escapeHTML(labels.benefits)}</summary>
-                        ${renderBenefitGrid(tier)}
-                    </details>
-                </div>
-                ${renderHowItWorks(labels)}
-                <section class="membership-panel profile-history-preview">
-                    <div class="profile-panel-heading">
-                        <h2>${escapeHTML(labels.recentActivity)}</h2>
-                        <button type="button" class="profile-link-button" onclick="setProfileTab('history')">${escapeHTML(labels.showAll)}</button>
-                    </div>
-                    ${renderHistoryTimeline(historyItems.slice(0, 3), labels)}
-                </section>
-            </section>
-        `;
-    }
-
     function renderPointsTab(labels, membershipUser, tier) {
         return `
             <section class="profile-tab-panel" id="profile-tab-points" role="tabpanel" tabindex="-1">
@@ -1230,7 +1201,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         if (activeProfileTab === 'points') return renderPointsTab(labels, membershipUser, tier);
         if (activeProfileTab === 'history') return renderHistoryTab(labels, historyItems);
         if (activeProfileTab === 'account') return renderAccountTab(user, labels);
-        return renderOverviewTab(user, labels, membershipUser, tier, historyItems);
+        return renderPointsTab(labels, membershipUser, tier);
     }
 
     function renderMemberIdentity(user, labels) {
@@ -1359,7 +1330,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         const displayName = profileValue('displayName', user.name || labels.member);
         const email = profileValue('email', user.email || '');
         const historyItems = buildHistoryItems(orders, bookings, labels);
-        if (!PROFILE_TABS.includes(activeProfileTab)) activeProfileTab = 'overview';
+        if (!PROFILE_TABS.includes(activeProfileTab)) activeProfileTab = 'points';
         if (!HISTORY_FILTERS.includes(activeHistoryFilter)) activeHistoryFilter = 'all';
 
         container.innerHTML = `
