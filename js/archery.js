@@ -202,7 +202,27 @@ function optionDisplayLabel(option = {}) {
 function setStatus(id, message, type = '') {
     const el = $(id);
     if (!el) return;
-    el.textContent = message || '';
+    if (id === 'archery-status' && type === 'loading' && message) {
+        el.innerHTML = `
+            <span class="archery-availability-loader" role="status" aria-live="polite">
+                <span class="archery-availability-loader__top">
+                    <span class="archery-availability-loader__pulse" aria-hidden="true"></span>
+                    <span class="archery-availability-loader__label">${escapeHTML(message)}</span>
+                    <span class="archery-availability-loader__badge">กำลังเช็ก</span>
+                </span>
+                <span class="archery-availability-loader__bar" aria-hidden="true">
+                    <span></span>
+                </span>
+                <span class="archery-availability-loader__steps" aria-hidden="true">
+                    <span>เวลาจอง</span>
+                    <span>คิวล่าสุด</span>
+                    <span>จัดเลน</span>
+                </span>
+            </span>
+        `;
+    } else {
+        el.textContent = message || '';
+    }
     el.classList.toggle('error', type === 'error');
     el.classList.toggle('success', type === 'success');
     el.classList.toggle('loading', type === 'loading');
