@@ -981,6 +981,8 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                     </div>
                 </section>
 
+                ${renderTierJourney(membershipUser, labels)}
+
                 <div class="profile-quick-actions" aria-label="${escapeHTML(labels.quickActions)}">
                     <a class="profile-action-card" href="${isEnglishPage() ? '/shop-en' : '/shop'}"><span aria-hidden="true"></span>${escapeHTML(labels.shopNow)}</a>
                     <a class="profile-action-card" href="${isEnglishPage() ? '/booking-en' : '/booking'}"><span aria-hidden="true"></span>${escapeHTML(labels.bookTable)}</a>
@@ -1157,7 +1159,6 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                     <p>${escapeHTML(labels.dashboardLead)}</p>
                 </div>
                 ${renderDashboardMetrics(membershipUser, labels)}
-                ${renderTierJourney(membershipUser, labels)}
                 <div class="profile-overview-grid">
                     ${renderNextTierRequirements(membershipUser, labels)}
                     <details class="membership-panel profile-accordion">

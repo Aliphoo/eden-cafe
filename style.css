@@ -4715,6 +4715,13 @@ footer p {
     overflow: hidden;
 }
 
+.profile-dashboard-sidebar .profile-tier-journey {
+    margin: -2px 0 0;
+    padding: 14px;
+    border-radius: 14px;
+    box-shadow: 0 10px 22px rgba(15, 62, 46, 0.05);
+}
+
 .profile-tier-heading {
     display: flex;
     align-items: flex-start;
@@ -4732,6 +4739,28 @@ footer p {
     flex: 0 0 auto;
     color: var(--primary-color);
     font-size: 1rem;
+}
+
+.profile-dashboard-sidebar .profile-tier-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 4px 10px;
+    margin-bottom: 12px;
+}
+
+.profile-dashboard-sidebar .profile-tier-heading .profile-kicker {
+    grid-column: 1 / -1;
+}
+
+.profile-dashboard-sidebar .profile-tier-heading h2 {
+    font-size: 1.34rem;
+    margin-top: 0;
+}
+
+.profile-dashboard-sidebar .profile-tier-heading strong {
+    font-size: 0.82rem;
+    line-height: 1.25;
 }
 
 .profile-tier-track {
@@ -4804,6 +4833,42 @@ footer p {
     color: #66756d;
     font-size: 0.78rem;
     line-height: 1.35;
+}
+
+.profile-dashboard-sidebar .profile-tier-track {
+    gap: 4px;
+    margin: 4px 0 12px;
+}
+
+.profile-dashboard-sidebar .profile-tier-track::before,
+.profile-dashboard-sidebar .profile-tier-track-fill {
+    left: 14%;
+    right: 14%;
+    top: 18px;
+    height: 5px;
+}
+
+.profile-dashboard-sidebar .profile-tier-diamond {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+}
+
+.profile-dashboard-sidebar .profile-tier-step strong {
+    font-size: 0.74rem;
+}
+
+.profile-dashboard-sidebar .profile-tier-step small {
+    font-size: 0.58rem;
+}
+
+.profile-tier-journey .membership-rule-lead {
+    margin-bottom: 0;
+}
+
+.profile-dashboard-sidebar .profile-tier-journey .membership-rule-lead {
+    font-size: 0.82rem;
+    line-height: 1.45;
 }
 
 .profile-how-panel h2 {
