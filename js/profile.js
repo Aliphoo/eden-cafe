@@ -1,3 +1,4 @@
+// Profile dashboard asset deploy marker: profile-assets-20260621-1
 import { auth, db } from './firebase-config.js';
 import { onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, doc, getDoc, getDocs, query, setDoc, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
