@@ -3,6 +3,7 @@ import { onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.c
 import { collection, doc, getDoc, getDocs, query, setDoc, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getTierRules } from './membership.js';
 import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
+import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 (() => {
     const USER_KEY = 'eden_user';
@@ -161,6 +162,8 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             loyaltyRule: 'Earning & redemption rules',
             loyaltyHistory: 'Recent point history',
             loyaltyLoading: 'Loading loyalty information...',
+            refreshLoyalty: 'Refresh points',
+            refreshingLoyalty: 'Refreshing...',
             noLoyaltyHistory: 'No point movement yet.',
             pointsAsCash: '{points} points = THB {value} credit',
             earnRule: 'Earn 1 point for every THB {spend}. Gold x{gold}, Platinum x{platinum}.',
@@ -366,14 +369,72 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         return Array.isArray(history) ? history.slice(0, 10) : [];
     }
 
+    function historyTimestampMillis(item = {}) {
+        const value = item.paidAt || item.closedAt || item.completedAt || item.timestamp || item.createdAt || item.updatedAt || item.date;
+        if (value?.toDate) return value.toDate().getTime();
+        const parsed = new Date(value || 0).getTime();
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function sortHistoryDesc(items) {
+        return items.sort((a, b) => historyTimestampMillis(b) - historyTimestampMillis(a));
+    }
+
+    function mapCloudOrder(docSnap) {
+        const data = docSnap.data() || {};
+        return {
+            firestoreId: docSnap.id,
+            id: data.id || data.receiptNo || data.orderNumber || docSnap.id,
+            ...data
+        };
+    }
+
+    async function fetchProfileOrdersFromCloud(uid) {
+        if (!db || !uid) return [];
+        const [customerSnap, legacySnap] = await Promise.all([
+            getDocs(query(collection(db, 'orders'), where('customerUid', '==', uid))).catch(() => ({ docs: [] })),
+            getDocs(query(collection(db, 'orders'), where('uid', '==', uid))).catch(() => ({ docs: [] }))
+        ]);
+        const ordersByDocId = new Map();
+        [...customerSnap.docs, ...legacySnap.docs].forEach(docSnap => {
+            const data = docSnap.data() || {};
+            const customerUid = String(data.customerUid || '').trim();
+            const orderUid = String(data.uid || '').trim();
+            const source = String(data.source || '').toLowerCase();
+            if (data.isTestOrder === true) return;
+            if (customerUid ? customerUid !== uid : (orderUid !== uid || source === 'pos')) return;
+            ordersByDocId.set(docSnap.id, mapCloudOrder(docSnap));
+        });
+        return sortHistoryDesc(Array.from(ordersByDocId.values())).slice(0, 20);
+    }
+
+    async function fetchProfileBookingsFromCloud(uid) {
+        if (!db || !uid) return [];
+        const [uidSnap, customerSnap, memberSnap] = await Promise.all([
+            getDocs(query(collection(db, 'bookings'), where('uid', '==', uid))).catch(() => ({ docs: [] })),
+            getDocs(query(collection(db, 'bookings'), where('customerUid', '==', uid))).catch(() => ({ docs: [] })),
+            getDocs(query(collection(db, 'bookings'), where('member_id', '==', uid))).catch(() => ({ docs: [] }))
+        ]);
+        const bookingsByDocId = new Map();
+        [...uidSnap.docs, ...customerSnap.docs, ...memberSnap.docs].forEach(docSnap => {
+            bookingsByDocId.set(docSnap.id, { id: docSnap.id, ...docSnap.data() });
+        });
+        return sortHistoryDesc(Array.from(bookingsByDocId.values())).slice(0, 20);
+    }
+
     async function refreshCloudHistory(user) {
         if (!user?.uid || cloudHistoryLoading || cloudHistoryUid === user.uid) return;
-        if (typeof window.fetchUserOrdersFromCloud !== 'function' || typeof window.fetchUserBookingsFromCloud !== 'function') return;
+        const fetchOrders = typeof window.fetchUserOrdersFromCloud === 'function'
+            ? window.fetchUserOrdersFromCloud
+            : fetchProfileOrdersFromCloud;
+        const fetchBookings = typeof window.fetchUserBookingsFromCloud === 'function'
+            ? window.fetchUserBookingsFromCloud
+            : fetchProfileBookingsFromCloud;
         cloudHistoryLoading = true;
         try {
             const [orders, bookings] = await Promise.all([
-                window.fetchUserOrdersFromCloud(user.uid),
-                window.fetchUserBookingsFromCloud(user.uid)
+                fetchOrders(user.uid),
+                fetchBookings(user.uid)
             ]);
             cloudOrders = Array.isArray(orders) ? orders : [];
             cloudBookings = Array.isArray(bookings) ? bookings : [];
@@ -425,9 +486,11 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         }
     }
 
-    async function refreshLoyaltyData(user) {
-        if (!db || !user?.uid || loyaltyLoading || loyaltyUid === user.uid) return;
+    async function refreshLoyaltyData(user, options = {}) {
+        const force = options.force === true;
+        if (!db || !user?.uid || loyaltyLoading || (!force && loyaltyUid === user.uid)) return;
         loyaltyLoading = true;
+        if (force) renderProfile();
         try {
             const [configSnap, summarySnap, ledgerSnap] = await Promise.all([
                 getDoc(doc(db, 'site_settings', 'loyalty')),
@@ -451,6 +514,13 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         } finally {
             loyaltyLoading = false;
         }
+    }
+
+    async function refreshProfileLoyalty() {
+        const user = readUser();
+        if (!user?.uid) return;
+        loyaltyUid = '';
+        await refreshLoyaltyData(user, { force: true });
     }
 
     function cartCount() {
@@ -619,7 +689,10 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
 
         return `
             <div class="membership-panel" id="profile-loyalty-wallet">
-                <h2>${escapeHTML(labels.loyaltyWallet)}</h2>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                    <h2 style="margin:0;">${escapeHTML(labels.loyaltyWallet)}</h2>
+                    <button class="btn btn-outline" type="button" onclick="refreshProfileLoyalty()" ${loyaltyLoading ? 'disabled' : ''}>${escapeHTML(loyaltyLoading ? (labels.refreshingLoyalty || 'Refreshing...') : (labels.refreshLoyalty || 'Refresh points'))}</button>
+                </div>
                 <div class="stats-grid">
                     <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.points)}</div><div class="stat-label">${escapeHTML(labels.points)}</div></div>
                     <div class="stat-box"><div class="stat-value">฿${formatBaht(pointCashValue)}</div><div class="stat-label">${escapeHTML(labels.pointValue)}</div></div>
@@ -750,19 +823,22 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         return orders.map(order => {
             const items = Array.isArray(order.items) ? order.items : [];
             const paymentStatus = String(order.paymentStatus || order.payment_status || '').toLowerCase();
-            const orderStatus = String(order.status || order.order_status || '').toLowerCase();
+            const orderStatus = String(order.billStatus || order.status || order.order_status || '').toLowerCase();
             const status = paymentStatus === 'paid' || paymentStatus === 'paid_online' || orderStatus === 'paid' || orderStatus === 'completed'
                 ? labels.paid
                 : labels.pending;
+            const displayId = order.receiptNo || order.orderNumber || order.id || order.firestoreId || '-';
+            const orderDate = order.paidAt || order.closedAt || order.completedAt || order.timestamp || order.createdAt || order.date || order.updatedAt;
+            const total = order.totalAmount ?? order.payableTotal ?? order.totalBeforeLoyalty ?? order.total ?? order.netTotal ?? 0;
             return `
                 <div class="order-card">
                     <div class="order-card-header">
-                        <strong>${escapeHTML(labels.orderId)} ${escapeHTML(order.id || '-')}</strong>
+                        <strong>${escapeHTML(labels.orderId)} ${escapeHTML(displayId)}</strong>
                         <span style="color:var(--primary-color);font-weight:600;">${escapeHTML(status)}</span>
                     </div>
-                    <p style="margin:0 0 8px;color:#666;">${formatDate(order.date || order.timestamp)}</p>
+                    <p style="margin:0 0 8px;color:#666;">${formatDate(orderDate)}</p>
                     <p style="margin:0 0 8px;">${escapeHTML(labels.items)}: ${items.map(item => escapeHTML(item.name || '')).join(', ') || '-'}</p>
-                    <strong>${escapeHTML(labels.total)}: ${money(order.totalAmount || order.total || 0)}</strong>
+                    <strong>${escapeHTML(labels.total)}: ${money(total)}</strong>
                 </div>
             `;
         }).join('');
@@ -1256,7 +1332,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                 window.location.href = '/login';
                 return;
             }
-            renderSignedOut(container, labels);
+            renderSkeleton(container, 'profile');
             return;
         }
         if (user.passwordLoginEnabled === false || user.password_login_enabled === false) {
@@ -1264,10 +1340,11 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             return;
         }
         if (authStateResolved && currentAuthUser && !cloudProfile && cloudProfileUid !== user.uid) {
-            container.innerHTML = `<div class="profile-loading"><p>${escapeHTML(labels.loadingProfile)}</p></div>`;
+            renderSkeleton(container, 'profile');
             refreshCloudProfile(user);
             return;
         }
+        clearSkeleton(container);
         renderSignedIn(container, user, labels);
     }
 
@@ -1275,6 +1352,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
     window.saveMemberProfile = saveMemberProfile;
     window.resetMemberProfileForm = resetMemberProfileForm;
     window.previewMemberTier = previewMemberTier;
+    window.refreshProfileLoyalty = refreshProfileLoyalty;
     window.sendMemberEmailVerificationCode = sendMemberEmailVerificationCode;
     window.verifyMemberEmailCode = verifyMemberEmailCode;
 

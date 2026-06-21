@@ -3033,7 +3033,8 @@ function renderDashboardOperations(operationalOrders, bookings) {
     const bookingPending = bookings.filter(booking => String(booking.status || 'pending').toLowerCase() === 'pending');
     const loyaltyIssues = operationalOrders.filter(order => {
         const status = posLoyaltySyncStatus(order);
-        return status === 'pending' || status === 'failed' || status === 'syncing';
+        const diagnostic = posLoyaltyDiagnostic(order);
+        return status === 'syncing' || diagnostic.retryable;
     });
     const stockAlerts = dashboardProductAlertRows();
     setDashboardText('dashboard-queue-online-pending', onlinePending.length.toLocaleString('th-TH'));
@@ -3101,7 +3102,8 @@ function renderDashboardMembersAndLoyalty(revenueOrders, bookings) {
     const totalPoints = pointSource.reduce((sum, member) => sum + Math.max(0, Math.floor(safeNumber(member.points ?? member.pointsBalance ?? member._memberSummary?.pointsBalance))), 0);
     const loyaltyIssues = dashboardOperationalOrders().filter(order => {
         const status = posLoyaltySyncStatus(order);
-        return status === 'pending' || status === 'failed' || status === 'syncing';
+        const diagnostic = posLoyaltyDiagnostic(order);
+        return status === 'syncing' || diagnostic.retryable;
     }).length;
     setDashboardText('dashboard-member-new', newMembers.length.toLocaleString('th-TH'));
     setDashboardText('dashboard-member-active', activeIds.size.toLocaleString('th-TH'));
@@ -3409,11 +3411,43 @@ function posLoyaltySyncStatus(order = {}) {
     return String(order.loyaltySyncStatus || '').trim().toLowerCase();
 }
 
+const POS_LOYALTY_NON_RETRYABLE_REASONS = new Set([
+    'no-customer',
+    'unsynced-customer',
+    'test-order',
+    'soft-launch'
+]);
+
+function normalizePosLoyaltyReason(value = '') {
+    const reason = String(value || '').trim().toLowerCase().replace(/_/g, '-');
+    return POS_LOYALTY_NON_RETRYABLE_REASONS.has(reason) ? reason : '';
+}
+
+function posLoyaltyReason(order = {}) {
+    return normalizePosLoyaltyReason(order.loyaltySkipReason)
+        || normalizePosLoyaltyReason(order.loyalty?.reason)
+        || normalizePosLoyaltyReason(order.loyaltyError);
+}
+
+function posLoyaltyDiagnostic(order = {}) {
+    const status = posLoyaltySyncStatus(order) || 'not_synced';
+    const reason = posLoyaltyReason(order);
+    const error = String(order.loyaltyError || '').trim();
+    const source = String(order.source || '').toLowerCase();
+    const nonRetryable = status === 'skipped' || POS_LOYALTY_NON_RETRYABLE_REASONS.has(reason);
+    return {
+        status,
+        reason,
+        error,
+        retryable: source === 'pos' && !nonRetryable && ['pending', 'failed', 'local'].includes(status),
+        nonRetryable
+    };
+}
+
 function posLoyaltyRetryActionHTML(order = {}, orderId = '') {
     if (String(order.source || '').toLowerCase() !== 'pos') return '';
-    const status = posLoyaltySyncStatus(order) || 'not_synced';
-    const error = String(order.loyaltyError || '').trim();
-    const retryable = status === 'pending' || status === 'failed';
+    const diagnostic = posLoyaltyDiagnostic(order);
+    const { status, reason, error, retryable, nonRetryable } = diagnostic;
     const receiptNo = order.receiptNo || order.orderNumber || order.id || orderId;
     const color = status === 'synced'
         ? '#2e7d32'
@@ -3425,12 +3459,15 @@ function posLoyaltyRetryActionHTML(order = {}, orderId = '') {
     const retryButton = retryable
         ? `<button class="btn-action btn-view" type="button" style="margin-left:6px;" onclick="retryPosLoyaltySale('${escapeJSString(orderId)}', '${escapeJSString(receiptNo)}', this)">Retry loyalty</button>`
         : '';
-    const errorText = error ? `<br><small style="color:#c62828;">${escapeHTML(error)}</small>` : '';
+    const actionText = retryable ? 'Retryable' : nonRetryable ? 'Non-retryable' : 'No retry action';
+    const reasonText = reason ? `<br><small style="color:#555;">Reason: ${escapeHTML(reason)}</small>` : '';
+    const errorText = error && error !== reason ? `<br><small style="color:#c62828;">Error: ${escapeHTML(error)}</small>` : '';
     return `
         <div style="margin-top:6px;">
-            <small style="color:${color};">Loyalty: ${escapeHTML(status)}</small>
+            <small style="color:${color};">Loyalty: ${escapeHTML(status)} / ${escapeHTML(actionText)}</small>
             ${retryButton}
             <small id="pos-loyalty-retry-${escapeHTML(orderId)}" style="display:block; margin-top:4px;"></small>
+            ${reasonText}
             ${errorText}
         </div>
     `;
@@ -3458,7 +3495,9 @@ window.retryPosLoyaltySale = async (orderId, receiptNo = '', button = null) => {
         setPosLoyaltyRetryMessage(orderId, 'Retrying loyalty sync...', '#607d8b');
         const result = await callAdminFunction('adminRetryPosLoyaltySale', { orderId });
         const status = result.status || 'synced';
-        setPosLoyaltyRetryMessage(orderId, `Loyalty ${status}`, '#2e7d32');
+        const reason = normalizePosLoyaltyReason(result.loyalty?.reason || result.reason || '');
+        const message = reason ? `Loyalty ${status}: ${reason}` : `Loyalty ${status}`;
+        setPosLoyaltyRetryMessage(orderId, message, status === 'skipped' ? '#6d6d6d' : '#2e7d32');
         if (button) button.textContent = status === 'skipped' ? 'Skipped' : 'Synced';
         if (typeof setupRealtimeOrders === 'function') setupRealtimeOrders();
     } catch (error) {
