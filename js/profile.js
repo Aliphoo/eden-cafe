@@ -165,7 +165,6 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             greetingPrefix: 'Hey',
             youHave: 'You have',
             edenPoints: 'Eden Points',
-            viewPoints: 'View Points',
             memberCard: 'Member card',
             tierProgress: 'Tier progress',
             howItWorks: 'How it works',
@@ -292,7 +291,6 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             greetingPrefix: 'สวัสดี',
             youHave: 'คุณมี',
             edenPoints: 'Eden Points',
-            viewPoints: 'ดูแต้ม',
             memberCard: 'บัตรสมาชิก',
             tierProgress: 'ความคืบหน้าระดับสมาชิก',
             howItWorks: 'วิธีใช้งาน',
@@ -968,7 +966,6 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                         <p>${escapeHTML(labels.youHave)}</p>
                         <strong class="profile-summary-points">${formatNumber(membershipUser.points)}</strong>
                         <small>${escapeHTML(labels.edenPoints)}</small>
-                        <button class="profile-claim-button" type="button" onclick="setProfileTab('points')">${escapeHTML(labels.viewPoints)}</button>
                     </div>
                     <div class="profile-mini-card" aria-label="${escapeHTML(labels.memberCard)}">
                         <div>

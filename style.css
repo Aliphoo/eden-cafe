@@ -4568,27 +4568,6 @@ footer p {
     font-weight: 900;
 }
 
-.profile-claim-button {
-    min-height: 42px;
-    margin-top: 8px;
-    padding: 9px 24px;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    border-radius: 999px;
-    background: linear-gradient(135deg, #1aa48c 0%, #22b9a0 100%);
-    color: #fff;
-    cursor: pointer;
-    font: inherit;
-    font-size: 0.86rem;
-    font-weight: 900;
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
-}
-
-.profile-claim-button:hover,
-.profile-claim-button:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.18), 0 10px 24px rgba(0, 0, 0, 0.18);
-}
-
 .profile-mini-card {
     position: relative;
     z-index: 1;
