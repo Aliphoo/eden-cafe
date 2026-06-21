@@ -39,14 +39,15 @@ let currentHold = null;
 let latestAvailability = null;
 let holdTimer = null;
 let paymentPollTimer = null;
+let availabilityDebounceTimer = null;
+let availabilityCheckQueued = false;
 let busyAction = '';
 let isCheckingAvailability = false;
 let holdIdempotencyKey = '';
 let beamPaymentIdempotencyKey = '';
 let archeryPricingConfig = DEFAULT_PRICING_CONFIG;
 
-const AVAILABILITY_BUTTON_TEXT = 'ตรวจสอบเวลา';
-const AVAILABILITY_LOADING_TEXT = 'กำลังตรวจสอบ...';
+const AUTO_AVAILABILITY_DELAY_MS = 350;
 
 function $(id) {
     return document.getElementById(id);
@@ -201,7 +202,27 @@ function optionDisplayLabel(option = {}) {
 function setStatus(id, message, type = '') {
     const el = $(id);
     if (!el) return;
-    el.textContent = message || '';
+    if (id === 'archery-status' && type === 'loading' && message) {
+        el.innerHTML = `
+            <span class="archery-availability-loader" role="status" aria-live="polite">
+                <span class="archery-availability-loader__top">
+                    <span class="archery-availability-loader__pulse" aria-hidden="true"></span>
+                    <span class="archery-availability-loader__label">${escapeHTML(message)}</span>
+                    <span class="archery-availability-loader__badge">กำลังเช็ก</span>
+                </span>
+                <span class="archery-availability-loader__bar" aria-hidden="true">
+                    <span></span>
+                </span>
+                <span class="archery-availability-loader__steps" aria-hidden="true">
+                    <span>เวลาจอง</span>
+                    <span>คิวล่าสุด</span>
+                    <span>จัดเลน</span>
+                </span>
+            </span>
+        `;
+    } else {
+        el.textContent = message || '';
+    }
     el.classList.toggle('error', type === 'error');
     el.classList.toggle('success', type === 'success');
     el.classList.toggle('loading', type === 'loading');
@@ -247,12 +268,11 @@ function userMessage(error) {
 
 function setLoading(action, isLoading) {
     busyAction = isLoading ? action : '';
-    ['archery-check-btn', 'archery-hold-btn', 'archery-confirm-btn'].forEach(id => {
+    ['archery-hold-btn', 'archery-confirm-btn'].forEach(id => {
         const button = $(id);
         if (!button) return;
         const disabledByAction =
-            (id === 'archery-check-btn' && action === 'availability')
-            || (id === 'archery-hold-btn' && action === 'hold')
+            (id === 'archery-hold-btn' && action === 'hold')
             || (id === 'archery-confirm-btn' && action === 'confirm');
         if (isLoading && disabledByAction) button.disabled = true;
     });
@@ -260,30 +280,29 @@ function setLoading(action, isLoading) {
 
 function setAvailabilityControlsChecking(isChecking) {
     isCheckingAvailability = isChecking;
-    const checkBtn = $('archery-check-btn');
-    if (checkBtn) {
-        checkBtn.disabled = isChecking;
-        checkBtn.classList.toggle('is-loading', isChecking);
-        checkBtn.setAttribute('aria-busy', isChecking ? 'true' : 'false');
-        checkBtn.innerHTML = isChecking
-            ? '<span class="archery-btn-spinner" aria-hidden="true"></span><span>' + AVAILABILITY_LOADING_TEXT + '</span>'
-            : AVAILABILITY_BUTTON_TEXT;
+    const holdBtn = $('archery-hold-btn');
+    if (holdBtn) {
+        holdBtn.classList.toggle('is-loading', isChecking);
+        holdBtn.setAttribute('aria-busy', isChecking ? 'true' : 'false');
     }
-    ['archery-date', 'archery-start', 'archery-package', 'archery-party-size'].forEach(id => {
-        const field = $(id);
-        if (field) field.disabled = isChecking;
-    });
-    document.querySelectorAll('input[name="archery-ability"], input[name="archery-equipment"]').forEach(field => {
-        field.disabled = isChecking;
-    });
 }
 
 function restoreButtonStates() {
-    const checkBtn = $('archery-check-btn');
     const holdBtn = $('archery-hold-btn');
     const confirmBtn = $('archery-confirm-btn');
-    if (checkBtn) checkBtn.disabled = isCheckingAvailability;
-    if (holdBtn) holdBtn.disabled = !currentUser || !latestAvailability?.available || !!currentHold;
+    if (holdBtn) {
+        holdBtn.disabled = isCheckingAvailability || !currentUser || !latestAvailability?.available || !!currentHold;
+        holdBtn.setAttribute('aria-disabled', holdBtn.disabled ? 'true' : 'false');
+        holdBtn.title = !currentUser
+            ? 'กรุณาเข้าสู่ระบบสมาชิกก่อนยืนยันการจอง'
+            : isCheckingAvailability
+                ? 'ระบบกำลังตรวจสอบเลนว่าง'
+                : !latestAvailability?.available
+                    ? 'เลือกวันและเวลาให้ระบบตรวจเลนว่างก่อน'
+                    : currentHold
+                        ? 'ยืนยันการจองแล้ว'
+                        : '';
+    }
     if (confirmBtn) {
         const paymentStatus = String(currentHold?.payment_status || '').toUpperCase();
         const bookingStatus = String(currentHold?.booking_status || currentHold?.status || '').toUpperCase();
@@ -294,6 +313,8 @@ function restoreButtonStates() {
             || paymentStatus === 'PAID_ONLINE'
             || paymentStatus === 'PAID_COUNTER'
             || paymentStatus === 'REFUNDED';
+        confirmBtn.setAttribute('aria-disabled', confirmBtn.disabled ? 'true' : 'false');
+        confirmBtn.title = !currentHold ? 'กรุณากดยืนยันการจองก่อนชำระเงิน' : '';
     }
 }
 
@@ -337,6 +358,34 @@ function waitForApi(timeoutMs = 5000) {
             }
         }, 80);
     });
+}
+
+function shouldAutoCheckAvailability() {
+    if (currentHold) return false;
+    return Boolean(
+        $('archery-booking-form')
+        && selectedDate()
+        && selectedStartTime()
+        && packageMinutes()
+        && partySize()
+    );
+}
+
+function scheduleAvailabilityRefresh({ immediate = false } = {}) {
+    if (availabilityDebounceTimer) {
+        window.clearTimeout(availabilityDebounceTimer);
+        availabilityDebounceTimer = null;
+    }
+    if (!shouldAutoCheckAvailability()) return;
+    if (isCheckingAvailability || busyAction) {
+        availabilityCheckQueued = true;
+        return;
+    }
+    setStatus('archery-status', 'กำลังเตรียมตรวจสอบเลนว่าง...', 'loading');
+    availabilityDebounceTimer = window.setTimeout(() => {
+        availabilityDebounceTimer = null;
+        refreshAvailability();
+    }, immediate ? 0 : AUTO_AVAILABILITY_DELAY_MS);
 }
 
 function fillTimeOptions() {
@@ -423,8 +472,9 @@ function renderSuggestions(times = []) {
         button.addEventListener('click', () => {
             const select = $('archery-start');
             if (select) select.value = button.getAttribute('data-start-time') || select.value;
+            resetAvailabilityState();
             resetHoldState();
-            refreshAvailability();
+            scheduleAvailabilityRefresh({ immediate: true });
         });
     });
 }
@@ -434,7 +484,7 @@ function renderAvailability(result) {
     const required = Number(result?.required_lane_count || partySize()) || 1;
     const availableCount = Number(result?.available_lane_count || 0) || 0;
     if (available) {
-        setStatus('archery-status', 'เวลานี้ยังว่าง สามารถยืนยันเวลาได้', 'success');
+        setStatus('archery-status', 'เวลานี้ยังว่าง สามารถยืนยันการจองได้', 'success');
     } else {
         setStatus('archery-status', 'เวลานี้ถูกจองแล้ว กรุณาเลือกเวลาอื่น', 'error');
     }
@@ -465,6 +515,7 @@ function renderOptionCards(containerId, inputName, options = [], formatter = () 
             resetAvailabilityState();
             resetHoldState();
             renderDraftSummary();
+            scheduleAvailabilityRefresh();
         });
     });
 }
@@ -501,6 +552,11 @@ async function loadPricingOptions() {
 }
 
 function resetAvailabilityState() {
+    if (availabilityDebounceTimer) {
+        window.clearTimeout(availabilityDebounceTimer);
+        availabilityDebounceTimer = null;
+    }
+    availabilityCheckQueued = false;
     latestAvailability = null;
     renderSuggestions([]);
     setStatus('archery-status', '');
@@ -785,7 +841,14 @@ async function fillMemberState(user) {
 
 async function refreshAvailability(event) {
     if (event) event.preventDefault();
-    if (isCheckingAvailability || busyAction) return;
+    if (!shouldAutoCheckAvailability()) {
+        restoreButtonStates();
+        return;
+    }
+    if (isCheckingAvailability || busyAction) {
+        availabilityCheckQueued = true;
+        return;
+    }
     const api = await waitForApi();
     if (!api?.getArcheryAvailability) {
         setStatus('archery-status', 'ระบบยังไม่พร้อม กรุณาลองใหม่อีกครั้ง', 'error');
@@ -796,7 +859,7 @@ async function refreshAvailability(event) {
         setAvailabilityControlsChecking(true);
         latestAvailability = null;
         restoreButtonStates();
-        setStatus('archery-status', 'กำลังตรวจสอบเวลาว่าง...', 'loading');
+        setStatus('archery-status', 'กำลังตรวจสอบเลนว่าง...', 'loading');
         latestAvailability = await api.getArcheryAvailability(selectionPayload());
         renderAvailability(latestAvailability);
         renderDraftSummary();
@@ -808,6 +871,10 @@ async function refreshAvailability(event) {
         setAvailabilityControlsChecking(false);
         setLoading('availability', false);
         restoreButtonStates();
+        if (availabilityCheckQueued) {
+            availabilityCheckQueued = false;
+            scheduleAvailabilityRefresh({ immediate: true });
+        }
     }
 }
 
@@ -820,7 +887,8 @@ async function createHold(event) {
         return;
     }
     if (!latestAvailability?.available) {
-        setStatus('archery-status', 'กรุณาตรวจสอบเวลาว่างก่อนยืนยันเวลา', 'error');
+        scheduleAvailabilityRefresh({ immediate: true });
+        setStatus('archery-status', 'กรุณารอให้ระบบตรวจสอบเลนว่างก่อนยืนยันการจอง', 'error');
         restoreButtonStates();
         return;
     }
@@ -859,7 +927,12 @@ async function createHold(event) {
 }
 
 async function startBeamPayment() {
-    if (busyAction || !currentHold?.booking_id) return;
+    if (busyAction) return;
+    if (!currentHold?.booking_id) {
+        setStatus('archery-confirm-status', 'กรุณากดยืนยันการจองก่อนชำระเงิน', 'error');
+        restoreButtonStates();
+        return;
+    }
     setLoading('confirm', true);
     if (isHoldExpired(currentHold)) {
         setStatus('archery-confirm-status', userMessage({ code: 'HOLD_EXPIRED' }), 'error');
@@ -922,7 +995,9 @@ function initBookingPage() {
         dateInput.min = todayISO();
         dateInput.value = dateInput.value || todayISO();
     }
-    loadPricingOptions();
+    loadPricingOptions().then(() => {
+        if (!currentHold) scheduleAvailabilityRefresh({ immediate: true });
+    });
     ['archery-date', 'archery-start', 'archery-package', 'archery-party-size'].forEach(id => {
         const el = $(id);
         if (!el) return;
@@ -931,9 +1006,9 @@ function initBookingPage() {
             resetAvailabilityState();
             resetHoldState();
             renderDraftSummary();
+            scheduleAvailabilityRefresh();
         });
     });
-    $('archery-check-btn')?.addEventListener('click', refreshAvailability);
     form.addEventListener('submit', createHold);
     $('archery-confirm-btn')?.addEventListener('click', startBeamPayment);
     const stored = readStoredHold();
@@ -949,6 +1024,7 @@ function initBookingPage() {
         renderDraftSummary();
     }
     restoreButtonStates();
+    if (!currentHold) scheduleAvailabilityRefresh({ immediate: true });
 }
 
 function bookingStatusLabel(booking) {

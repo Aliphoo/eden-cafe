@@ -6,8 +6,8 @@
     <title>Book Archery | Eden Archery</title>
     <link rel="icon" type="image/webp" href="/Images/Logo.webp">
     <meta name="description" content="Book Eden Archery with your existing Eden member account.">
-    <link rel="stylesheet" href="/style.css">
-    <link rel="stylesheet" href="/archery.css?v=availability-loading-1">
+    <link rel="stylesheet" href="/style.css?v=mobile-ux-20260619">
+    <link rel="stylesheet" href="/archery.css?v=availability-progress-1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -92,14 +92,34 @@
                                     <option value="180">180 min - 800 THB</option>
                                 </select>
                             </label>
+                            <label class="archery-field full">
+                                Party size
+                                <select id="archery-party-size" required>
+                                    <option value="1" selected>1 person</option>
+                                    <option value="2">2 people</option>
+                                    <option value="3">3 people</option>
+                                    <option value="4">4 people</option>
+                                    <option value="5">5 people</option>
+                                    <option value="6">6 people</option>
+                                    <option value="7">7 people</option>
+                                    <option value="8">8 people</option>
+                                    <option value="9">9 people</option>
+                                    <option value="10">10 people</option>
+                                </select>
+                                <small>1 person uses 1 lane</small>
+                            </label>
+                            <div class="archery-field full">
+                                <span>Experience level</span>
+                                <div class="archery-choice-grid" id="archery-ability-options"></div>
+                            </div>
+                            <div class="archery-field full">
+                                <span>Equipment</span>
+                                <div class="archery-choice-grid" id="archery-equipment-options"></div>
+                            </div>
                         </div>
 
                         <p class="archery-status" id="archery-status" aria-live="polite"></p>
                         <div class="archery-suggestions" id="archery-suggestions"></div>
-                        <div class="archery-action-row">
-                            <button class="btn btn-outline" id="archery-check-btn" type="button">Check time</button>
-                            <button class="btn" id="archery-hold-btn" type="submit" disabled>Confirm time</button>
-                        </div>
                     </form>
 
                     <aside class="archery-panel" id="archery-hold-panel">
@@ -109,7 +129,10 @@
                         </ul>
                         <p class="archery-status" id="archery-countdown" aria-live="polite"></p>
                         <p class="archery-status" id="archery-confirm-status" aria-live="polite"></p>
-                        <button class="btn" id="archery-confirm-btn" type="button" disabled>Pay</button>
+                        <div class="archery-summary-actions">
+                            <button class="btn btn-outline" id="archery-hold-btn" type="submit" form="archery-booking-form" disabled>Confirm booking</button>
+                            <button class="btn" id="archery-confirm-btn" type="button" disabled>Pay</button>
+                        </div>
                     </aside>
                 </div>
             </div>
@@ -135,7 +158,7 @@
         }
     </script>
     <script type="module" src="/js/auth.js?v=availability-loading-1"></script>
-    <script type="module" src="/js/archery.js?v=availability-loading-1"></script>
-    <script src="/js/cart.js?v=1"></script>
+    <script type="module" src="/js/archery.js?v=availability-progress-1"></script>
+    <script src="/js/cart.js?v=mobile-cart-20260619"></script>
 </body>
 </html>
