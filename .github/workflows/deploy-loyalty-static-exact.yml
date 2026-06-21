@@ -38,4 +38,5 @@ jobs:
           protocol: ftps
           local-dir: ./exact-upload/
           server-dir: ${{ secrets.SPACESHIP_FTP_SERVER_DIR }}
+          state-name: .ftp-deploy-loyalty-static-exact-state.json
           dangerous-clean-slate: false

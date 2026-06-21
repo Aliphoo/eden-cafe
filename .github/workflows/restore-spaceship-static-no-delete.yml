@@ -1,0 +1,76 @@
+name: Restore Spaceship Static No Delete
+
+on:
+  push:
+    branches:
+      - codex/loyalty-phase13-fix
+    paths:
+      - .github/workflows/restore-spaceship-static-no-delete.yml
+      - .github/workflows/deploy-loyalty-static-exact.yml
+
+jobs:
+  restore:
+    name: Upload committed static files without deleting remote files
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build static restore manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          git ls-files | awk '
+            /^\.github\// { next }
+            /^\.git/ && $0 != ".htaccess" { next }
+            /^functions\// { next }
+            /^eden-pos-apk\// { next }
+            /^blog-cms\// { next }
+            /^docs\// { next }
+            /^scripts\// { next }
+            /^tools\// { next }
+            /^firebase-default-hosting-minimal\// { next }
+            /^README\.md$/ { next }
+            /^package(-lock)?\.json$/ { next }
+            /^firebase\.json$/ { next }
+            /^firestore\.rules$/ { next }
+            /^storage\.rules$/ { next }
+            /^\.firebaserc$/ { next }
+            { print }
+          ' > static-restore-manifest.txt
+          test -s static-restore-manifest.txt
+          echo "Files to upload:"
+          wc -l static-restore-manifest.txt
+          sed -n '1,80p' static-restore-manifest.txt
+
+      - name: Upload static files by FTPS without delete
+        shell: bash
+        env:
+          SPACESHIP_FTP_SERVER: ${{ secrets.SPACESHIP_FTP_SERVER }}
+          SPACESHIP_FTP_USERNAME: ${{ secrets.SPACESHIP_FTP_USERNAME }}
+          SPACESHIP_FTP_PASSWORD: ${{ secrets.SPACESHIP_FTP_PASSWORD }}
+          SPACESHIP_FTP_SERVER_DIR: ${{ secrets.SPACESHIP_FTP_SERVER_DIR }}
+        run: |
+          set -euo pipefail
+          test -n "$SPACESHIP_FTP_SERVER"
+          test -n "$SPACESHIP_FTP_USERNAME"
+          test -n "$SPACESHIP_FTP_PASSWORD"
+
+          remote_dir="${SPACESHIP_FTP_SERVER_DIR:-}"
+          remote_dir="${remote_dir#/}"
+          remote_dir="${remote_dir%/}"
+
+          while IFS= read -r file; do
+            [ -f "$file" ] || continue
+            if [ -n "$remote_dir" ]; then
+              remote_url="ftp://${SPACESHIP_FTP_SERVER}/${remote_dir}/${file}"
+            else
+              remote_url="ftp://${SPACESHIP_FTP_SERVER}/${file}"
+            fi
+            echo "Uploading $file"
+            curl --fail --show-error --silent --ssl-reqd --ftp-create-dirs \
+              --user "$SPACESHIP_FTP_USERNAME:$SPACESHIP_FTP_PASSWORD" \
+              --upload-file "$file" \
+              "$remote_url"
+          done < static-restore-manifest.txt
