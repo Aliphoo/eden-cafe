@@ -257,6 +257,10 @@ function exposeBlogDataForDebugging(posts = getStaticPosts(), source = 'static-f
     });
 }
 
+function clearBlogListingPendingState() {
+    document.documentElement.classList.remove('blog-listing-pending');
+}
+
 function renderListingFilters(posts) {
     const categories = [...new Set(posts.map(post => post.category).filter(Boolean))];
     return `
@@ -290,7 +294,10 @@ function renderListingCard(post, index = 0) {
 
 function renderCmsListing(posts) {
     const grid = document.querySelector('.blog-grid');
-    if (!grid || !posts.length) return;
+    if (!grid || !posts.length) {
+        clearBlogListingPendingState();
+        return;
+    }
 
     const existingFilter = document.querySelector('.blog-filter-bar');
     if (existingFilter) {
@@ -309,6 +316,7 @@ function renderCmsListing(posts) {
     document.body.dataset.blogSource = 'firestore';
     exposeBlogDataForDebugging(posts, 'firestore');
     setupListingFilters();
+    clearBlogListingPendingState();
 }
 
 function currentRouteSlug() {
@@ -430,6 +438,10 @@ function tocHTML(items) {
     return `<ol>${items.map(item => `<li class="${item.level === 'h3' ? 'toc-subitem' : ''}"><a href="#${escapeHTML(item.id)}">${escapeHTML(item.title)}</a></li>`).join('')}</ol>`;
 }
 
+function clearBlogDetailPendingState() {
+    document.documentElement.classList.remove('blog-detail-pending');
+}
+
 function renderCmsDetail(post, posts) {
     const main = document.querySelector('main');
     if (!main) return;
@@ -440,6 +452,7 @@ function renderCmsDetail(post, posts) {
     const dateText = formatThaiDate(post.publishedAt || post.createdAt);
     const externalCta = /^https?:\/\//i.test(cta.href) ? ' target="_blank" rel="noopener noreferrer"' : '';
 
+    clearBlogDetailPendingState();
     main.className = 'blog-post blog-post-static';
     main.innerHTML = `
     <div class="container">
@@ -490,6 +503,7 @@ function renderCmsDetail(post, posts) {
     </div>`;
 
     document.body.dataset.blogPage = post.source === 'firestore' ? 'cms-detail' : 'static-detail-fallback';
+    document.body.dataset.blogSource = post.source === 'firestore' ? 'firestore' : 'static-fallback';
     updateHead(post);
     injectJsonLd(post);
     setupTocHighlight();
@@ -498,6 +512,7 @@ function renderCmsDetail(post, posts) {
 function renderMissingPost(slug, message = 'ไม่พบบทความที่เผยแพร่แล้วสำหรับ URL นี้') {
     const main = document.querySelector('main');
     if (!main) return;
+    clearBlogDetailPendingState();
     main.className = 'blog-post blog-post-static';
     main.innerHTML = `
     <div class="container">
@@ -587,8 +602,17 @@ function injectJsonLd(post) {
 }
 
 async function hydrateCmsListing() {
-    const posts = await fetchPublishedCmsPosts();
-    if (posts.length) renderCmsListing(posts);
+    try {
+        const posts = await fetchPublishedCmsPosts();
+        if (posts.length) {
+            renderCmsListing(posts);
+        } else {
+            clearBlogListingPendingState();
+        }
+    } catch (error) {
+        clearBlogListingPendingState();
+        throw error;
+    }
 }
 
 async function hydrateCmsDetail() {
