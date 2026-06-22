@@ -2620,6 +2620,10 @@ function itemReportCost(item = {}) {
     return safeNumber(item.cost) * quantity;
 }
 
+function itemReportQuantity(item = {}) {
+    return Math.max(0, safeNumber(item.quantity, 1));
+}
+
 function orderReportCost(order = {}) {
     return orderReportItems(order).reduce((sum, item) => sum + itemReportCost(item), 0);
 }
@@ -2771,6 +2775,17 @@ function salesReportOptionLabel(item = {}) {
     return item.variantName || item.optionName || item.optionLabel || item.modifierName || '';
 }
 
+function salesReportItemName(item = {}) {
+    return [orderItemName(item), salesReportOptionLabel(item)].filter(Boolean).join(' - ');
+}
+
+function salesReportAllocatedAmount(total, itemAmount, allItemsAmount, itemCount = 1) {
+    const safeTotal = safeNumber(total);
+    if (!safeTotal) return 0;
+    if (allItemsAmount > 0) return safeTotal * (safeNumber(itemAmount) / allItemsAmount);
+    return safeTotal / Math.max(1, itemCount);
+}
+
 function salesReportProductRows(orders = dashboardRevenueOrders()) {
     const groups = new Map();
     orders.forEach(order => {
@@ -2782,7 +2797,7 @@ function salesReportProductRows(orders = dashboardRevenueOrders()) {
             const current = groups.get(key) || { product, option, sku, quantity: 0, sales: 0, cost: 0, profit: 0 };
             const amount = itemReportAmount(item);
             const cost = itemReportCost(item);
-            current.quantity += Math.max(0, safeNumber(item.quantity, 1));
+            current.quantity += itemReportQuantity(item);
             current.sales += amount;
             current.cost += cost;
             current.profit += amount - cost;
@@ -2792,19 +2807,80 @@ function salesReportProductRows(orders = dashboardRevenueOrders()) {
     return Array.from(groups.values()).sort((a, b) => (b.sales - a.sales) || String(a.product).localeCompare(String(b.product), 'th'));
 }
 
-function salesReportCategoryRows(orders = dashboardRevenueOrders()) {
+function salesReportCategoryRows(orders = dashboardRevenueOrders(), refundOrders = dashboardRefundOrders()) {
     const groups = new Map();
+
+    const ensureRow = (item = {}) => {
+        const name = salesReportItemName(item) || 'ไม่ระบุสินค้า';
+        const sku = salesReportSku(item);
+        const category = orderItemCategoryLabel(item);
+        const key = [name, sku, category].join('||');
+        const current = groups.get(key) || {
+            itemName: name,
+            sku,
+            category,
+            soldQuantity: 0,
+            gross: 0,
+            returnedQuantity: 0,
+            refunds: 0,
+            discounts: 0,
+            net: 0,
+            cost: 0,
+            profit: 0,
+            margin: 0,
+            tax: 0
+        };
+        groups.set(key, current);
+        return current;
+    };
+
     orders.forEach(order => {
-        orderReportItems(order).forEach(item => {
-            const categoryKey = orderItemCategoryKey(item);
-            const category = orderItemCategoryLabel(item);
-            const current = groups.get(categoryKey) || { category, quantity: 0, sales: 0 };
-            current.quantity += Math.max(0, safeNumber(item.quantity, 1));
-            current.sales += itemReportAmount(item);
-            groups.set(categoryKey, current);
+        const items = orderReportItems(order);
+        const itemGrossTotal = items.reduce((sum, item) => sum + itemReportAmount(item), 0);
+        const itemDiscountTotal = items.reduce((sum, item) => sum + safeNumber(item.lineDiscount ?? item.discount), 0);
+        const discountPool = orderReportDiscount(order) || itemDiscountTotal;
+        const taxPool = orderReportTax(order);
+        items.forEach(item => {
+            const row = ensureRow(item);
+            const gross = itemReportAmount(item);
+            const cost = itemReportCost(item);
+            const discount = discountPool
+                ? salesReportAllocatedAmount(discountPool, gross, itemGrossTotal, items.length)
+                : safeNumber(item.lineDiscount ?? item.discount);
+            const tax = salesReportAllocatedAmount(taxPool, gross, itemGrossTotal, items.length);
+            row.soldQuantity += itemReportQuantity(item);
+            row.gross += gross;
+            row.discounts += discount;
+            row.net += gross - discount;
+            row.cost += cost;
+            row.tax += tax;
         });
     });
-    return Array.from(groups.values()).sort((a, b) => (b.sales - a.sales) || String(a.category).localeCompare(String(b.category), 'th'));
+
+    refundOrders.forEach(order => {
+        const items = orderReportItems(order);
+        const itemGrossTotal = items.reduce((sum, item) => sum + itemReportAmount(item), 0);
+        const refundPool = orderReportTotal(order);
+        items.forEach(item => {
+            const row = ensureRow(item);
+            const gross = itemReportAmount(item);
+            const refund = salesReportAllocatedAmount(refundPool || gross, gross, itemGrossTotal, items.length);
+            row.returnedQuantity += itemReportQuantity(item);
+            row.refunds += refund;
+            row.net -= refund;
+            row.cost -= itemReportCost(item);
+        });
+    });
+
+    groups.forEach(row => {
+        row.profit = row.net - row.cost;
+        row.margin = row.net > 0 ? Number(((row.profit / row.net) * 100).toFixed(2)) : 0;
+    });
+
+    return Array.from(groups.values()).sort((a, b) => {
+        const categorySort = String(a.category).localeCompare(String(b.category), 'th');
+        return categorySort || (b.net - a.net) || String(a.itemName).localeCompare(String(b.itemName), 'th');
+    });
 }
 
 function salesReportStaffRows(orders = dashboardRevenueOrders()) {
@@ -2943,13 +3019,23 @@ const SALES_REPORT_DEFINITIONS = {
         label: SALES_REPORT_LABELS.category,
         sheetName: 'categories',
         filenameKey: 'category',
-        labelKey: 'category',
-        amountKey: 'sales',
+        labelKey: 'itemName',
+        amountKey: 'net',
         totalLabel: 'ยอดขายรวม',
         columns: [
-            { key: 'category', label: 'หมวดหมู่', type: 'text' },
-            { key: 'quantity', label: 'จำนวน', type: 'number', total: 'sum' },
-            { key: 'sales', label: 'ยอดขาย', type: 'money', total: 'sum' }
+            { key: 'itemName', label: 'รายการ', type: 'text' },
+            { key: 'sku', label: 'รหัสSKUสินค้า', type: 'text' },
+            { key: 'category', label: 'ประเภท', type: 'text' },
+            { key: 'soldQuantity', label: 'สินค้าที่ขาย', type: 'number', total: 'sum' },
+            { key: 'gross', label: 'ยอดขายรวม', type: 'money', total: 'sum' },
+            { key: 'returnedQuantity', label: 'สินค้าที่รับคืน', type: 'number', total: 'sum' },
+            { key: 'refunds', label: 'คืนเงิน', type: 'money', total: 'sum' },
+            { key: 'discounts', label: 'ส่วนลด', type: 'money', total: 'sum' },
+            { key: 'net', label: 'ยอดขายสุทธิ', type: 'money', total: 'sum' },
+            { key: 'cost', label: 'ต้นทุนของสินค้า', type: 'money', total: 'sum' },
+            { key: 'profit', label: 'กำไรรวม', type: 'money', total: 'sum' },
+            { key: 'margin', label: 'กำไร', type: 'percent' },
+            { key: 'tax', label: 'ภาษี', type: 'money', total: 'sum' }
         ],
         buildRows: () => salesReportCategoryRows()
     },
