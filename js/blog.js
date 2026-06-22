@@ -430,6 +430,10 @@ function tocHTML(items) {
     return `<ol>${items.map(item => `<li class="${item.level === 'h3' ? 'toc-subitem' : ''}"><a href="#${escapeHTML(item.id)}">${escapeHTML(item.title)}</a></li>`).join('')}</ol>`;
 }
 
+function clearBlogDetailPendingState() {
+    document.documentElement.classList.remove('blog-detail-pending');
+}
+
 function renderCmsDetail(post, posts) {
     const main = document.querySelector('main');
     if (!main) return;
@@ -440,6 +444,7 @@ function renderCmsDetail(post, posts) {
     const dateText = formatThaiDate(post.publishedAt || post.createdAt);
     const externalCta = /^https?:\/\//i.test(cta.href) ? ' target="_blank" rel="noopener noreferrer"' : '';
 
+    clearBlogDetailPendingState();
     main.className = 'blog-post blog-post-static';
     main.innerHTML = `
     <div class="container">
@@ -490,6 +495,7 @@ function renderCmsDetail(post, posts) {
     </div>`;
 
     document.body.dataset.blogPage = post.source === 'firestore' ? 'cms-detail' : 'static-detail-fallback';
+    document.body.dataset.blogSource = post.source === 'firestore' ? 'firestore' : 'static-fallback';
     updateHead(post);
     injectJsonLd(post);
     setupTocHighlight();
@@ -498,6 +504,7 @@ function renderCmsDetail(post, posts) {
 function renderMissingPost(slug, message = 'ไม่พบบทความที่เผยแพร่แล้วสำหรับ URL นี้') {
     const main = document.querySelector('main');
     if (!main) return;
+    clearBlogDetailPendingState();
     main.className = 'blog-post blog-post-static';
     main.innerHTML = `
     <div class="container">

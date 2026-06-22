@@ -10,6 +10,65 @@
     <link rel="canonical" href="https://www.edencafe.co/blog-post">
     <link rel="icon" type="image/webp" href="/Images/Logo.webp">
     <link rel="stylesheet" href="/style.css?v=mobile-ux-20260619">
+    <script>
+        (function () {
+            var path = window.location.pathname.replace(/\/+$/, '');
+            var params = new URLSearchParams(window.location.search);
+            if (/^\/blog\/[^/]+$/.test(path) || params.get('slug')) {
+                document.documentElement.classList.add('blog-detail-pending');
+            }
+        })();
+    </script>
+    <style>
+        .blog-detail-loading {
+            display: none;
+        }
+
+        html.blog-detail-pending .blog-detail-loading {
+            display: block;
+        }
+
+        html.blog-detail-pending .blog-legacy-picker {
+            display: none;
+        }
+
+        .blog-loading-hero {
+            animation: blogDetailPulse 1.3s ease-in-out infinite;
+            background: linear-gradient(90deg, rgba(225, 236, 228, 0.76), rgba(250, 253, 250, 0.96), rgba(225, 236, 228, 0.76));
+            background-size: 220% 100%;
+            border-radius: 16px;
+            height: 360px;
+            margin: 0 auto 34px;
+            max-width: 980px;
+        }
+
+        .blog-loading-lines {
+            margin: 0 auto;
+            max-width: 740px;
+        }
+
+        .blog-loading-line {
+            animation: blogDetailPulse 1.3s ease-in-out infinite;
+            background: linear-gradient(90deg, rgba(225, 236, 228, 0.84), rgba(250, 253, 250, 0.96), rgba(225, 236, 228, 0.84));
+            background-size: 220% 100%;
+            border-radius: 999px;
+            height: 16px;
+            margin-bottom: 14px;
+        }
+
+        .blog-loading-line:nth-child(2) {
+            width: 82%;
+        }
+
+        .blog-loading-line:nth-child(3) {
+            width: 64%;
+        }
+
+        @keyframes blogDetailPulse {
+            0% { background-position: 0 0; }
+            100% { background-position: -220% 0; }
+        }
+    </style>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -229,6 +288,20 @@
     </header>
 <main class="blog-post blog-post-static">
     <div class="container">
+        <div class="blog-detail-loading" role="status" aria-live="polite">
+            <div class="blog-header">
+                <span class="blog-chip">Eden Cafe Blog</span>
+                <h1>กำลังโหลดบทความ</h1>
+                <p>กำลังดึงบทความที่เผยแพร่จากระบบแอดมิน</p>
+            </div>
+            <div class="blog-loading-hero" aria-hidden="true"></div>
+            <div class="blog-loading-lines" aria-hidden="true">
+                <div class="blog-loading-line"></div>
+                <div class="blog-loading-line"></div>
+                <div class="blog-loading-line"></div>
+            </div>
+        </div>
+        <div class="blog-legacy-picker">
         <div class="blog-header">
             <span class="blog-chip">Eden Cafe Blog</span>
             <h1>เลือกบทความที่ต้องการอ่าน</h1>
@@ -340,6 +413,7 @@
         </div>
     </article>
         </div>
+        </div>
     </div>
 </main>
 
@@ -388,7 +462,7 @@
             });
         }
     </script>
-<script type="module" src="/js/blog.js?v=cms-2"></script>
+<script type="module" src="/js/blog.js?v=cms-3"></script>
 <script type="module" src="/js/marketing-consent.js?v=mobile-ux-20260619"></script>
 <script src="/js/cart.js?v=mobile-cart-20260619"></script>
 <script type="module" src="/js/auth.js?v=12"></script>
