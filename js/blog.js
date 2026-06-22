@@ -257,6 +257,10 @@ function exposeBlogDataForDebugging(posts = getStaticPosts(), source = 'static-f
     });
 }
 
+function clearBlogListingPendingState() {
+    document.documentElement.classList.remove('blog-listing-pending');
+}
+
 function renderListingFilters(posts) {
     const categories = [...new Set(posts.map(post => post.category).filter(Boolean))];
     return `
@@ -290,7 +294,10 @@ function renderListingCard(post, index = 0) {
 
 function renderCmsListing(posts) {
     const grid = document.querySelector('.blog-grid');
-    if (!grid || !posts.length) return;
+    if (!grid || !posts.length) {
+        clearBlogListingPendingState();
+        return;
+    }
 
     const existingFilter = document.querySelector('.blog-filter-bar');
     if (existingFilter) {
@@ -309,6 +316,7 @@ function renderCmsListing(posts) {
     document.body.dataset.blogSource = 'firestore';
     exposeBlogDataForDebugging(posts, 'firestore');
     setupListingFilters();
+    clearBlogListingPendingState();
 }
 
 function currentRouteSlug() {
@@ -594,8 +602,17 @@ function injectJsonLd(post) {
 }
 
 async function hydrateCmsListing() {
-    const posts = await fetchPublishedCmsPosts();
-    if (posts.length) renderCmsListing(posts);
+    try {
+        const posts = await fetchPublishedCmsPosts();
+        if (posts.length) {
+            renderCmsListing(posts);
+        } else {
+            clearBlogListingPendingState();
+        }
+    } catch (error) {
+        clearBlogListingPendingState();
+        throw error;
+    }
 }
 
 async function hydrateCmsDetail() {

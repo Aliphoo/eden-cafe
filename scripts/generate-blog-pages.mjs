@@ -422,7 +422,7 @@ ${renderHeader('blog')}
 </main>
 ${renderFooter()}
 ${renderMobileNavScript()}
-<script type="module" src="/js/blog.js?v=cms-3"></script>
+<script type="module" src="/js/blog.js?v=cms-4"></script>
 <script type="module" src="/js/marketing-consent.js?v=1"></script>
 <script src="/js/cart.js?v=1"></script>
 <script type="module" src="/js/auth.js?v=7"></script>
@@ -487,6 +487,77 @@ ${renderHead({
     type: 'website',
     schema: listingSchema()
 })}
+<script>
+    (function () {
+        var path = window.location.pathname.replace(/\\/+$/, '') || '/';
+        if (path === '/blog') {
+            document.documentElement.classList.add('blog-listing-pending');
+        }
+    })();
+</script>
+<style>
+    .blog-listing-loading {
+        display: none;
+    }
+
+    html.blog-listing-pending .blog-listing-loading {
+        display: block;
+    }
+
+    html.blog-listing-pending .blog-quick-strip,
+    html.blog-listing-pending .blog-listing-static {
+        display: none;
+    }
+
+    .blog-loading-grid {
+        display: grid;
+        gap: 28px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .blog-loading-card {
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 14px 34px rgba(26, 147, 69, 0.08);
+        overflow: hidden;
+    }
+
+    .blog-loading-media,
+    .blog-loading-line {
+        animation: blogListPulse 1.3s ease-in-out infinite;
+        background: linear-gradient(90deg, rgba(225, 236, 228, 0.8), rgba(250, 253, 250, 0.96), rgba(225, 236, 228, 0.8));
+        background-size: 220% 100%;
+    }
+
+    .blog-loading-media {
+        height: 220px;
+    }
+
+    .blog-loading-body {
+        padding: 24px;
+    }
+
+    .blog-loading-line {
+        border-radius: 999px;
+        height: 16px;
+        margin-bottom: 14px;
+    }
+
+    .blog-loading-line.short {
+        width: 58%;
+    }
+
+    @keyframes blogListPulse {
+        0% { background-position: 0 0; }
+        100% { background-position: -220% 0; }
+    }
+
+    @media (max-width: 900px) {
+        .blog-loading-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
 </head>
 <body data-blog-page="listing">
 ${renderHeader('blog')}
@@ -500,6 +571,43 @@ ${renderHeader('blog')}
                 <div class="blog-hero-actions">
                     <a class="btn" href="/menu">ดูเมนู</a>
                     <a class="btn btn-outline" href="${SITE.mapUrl}" target="_blank" rel="noopener noreferrer">เปิดแผนที่</a>
+                </div>
+            </div>
+        </div>
+    </section>
+    <section class="blog-listing blog-listing-loading" role="status" aria-live="polite">
+        <div class="container">
+            <div class="blog-listing-head">
+                <div>
+                    <span class="blog-eyebrow">Eden Cafe Blog</span>
+                    <h2>กำลังโหลดบทความจากระบบแอดมิน</h2>
+                </div>
+                <p>กำลังดึงบทความที่เผยแพร่ล่าสุด</p>
+            </div>
+            <div class="blog-loading-grid" aria-hidden="true">
+                <div class="blog-loading-card">
+                    <div class="blog-loading-media"></div>
+                    <div class="blog-loading-body">
+                        <div class="blog-loading-line"></div>
+                        <div class="blog-loading-line"></div>
+                        <div class="blog-loading-line short"></div>
+                    </div>
+                </div>
+                <div class="blog-loading-card">
+                    <div class="blog-loading-media"></div>
+                    <div class="blog-loading-body">
+                        <div class="blog-loading-line"></div>
+                        <div class="blog-loading-line"></div>
+                        <div class="blog-loading-line short"></div>
+                    </div>
+                </div>
+                <div class="blog-loading-card">
+                    <div class="blog-loading-media"></div>
+                    <div class="blog-loading-body">
+                        <div class="blog-loading-line"></div>
+                        <div class="blog-loading-line"></div>
+                        <div class="blog-loading-line short"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -540,7 +648,7 @@ ${renderHeader('blog')}
 </main>
 ${renderFooter()}
 ${renderMobileNavScript()}
-<script type="module" src="/js/blog.js?v=cms-3"></script>
+<script type="module" src="/js/blog.js?v=cms-4"></script>
 <script type="module" src="/js/marketing-consent.js?v=1"></script>
 <script src="/js/cart.js?v=1"></script>
 <script type="module" src="/js/auth.js?v=7"></script>
@@ -655,7 +763,7 @@ ${renderHeader('blog')}
 </main>
 ${renderFooter()}
 ${renderMobileNavScript()}
-<script type="module" src="/js/blog.js?v=cms-3"></script>
+<script type="module" src="/js/blog.js?v=cms-4"></script>
 <script type="module" src="/js/marketing-consent.js?v=1"></script>
 <script src="/js/cart.js?v=1"></script>
 <script type="module" src="/js/auth.js?v=7"></script>
