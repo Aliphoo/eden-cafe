@@ -1,4 +1,5 @@
 import { auth, db, storage } from './firebase-config.js';
+import { runAdminImageUploadFlow } from './admin-upload-modal.js';
 import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
     addDoc,
@@ -1541,14 +1542,28 @@ async function savePostNow(statusOverride = '', options = {}) {
 
 async function uploadMediaFile(file, meta = {}) {
     if (!file) return null;
-    if (!/^image\/(webp|jpeg|jpg|png|gif)/i.test(file.type)) throw new Error('กรุณาเลือกไฟล์รูปภาพ webp, jpg, png หรือ gif');
-    if (file.size > 10 * 1024 * 1024) throw new Error('รูปต้องไม่เกิน 10MB');
-    const uploaded = await runFirestoreStep('spaceship.blogs.upload', () => uploadBlogImageToHosting(file));
+    let uploaded = null;
+    const uploadedUrl = await runAdminImageUploadFlow({
+        file,
+        surface: meta.surface || 'Blog media',
+        subtitle: meta.subtitle || 'Spaceship hosting / blogs',
+        targetField: meta.targetField || 'blog media URL',
+        maxSize: 10 * 1024 * 1024,
+        validate: selectedFile => {
+            if (!/^image\/(webp|jpeg|jpg|png|gif)/i.test(selectedFile.type || '')) {
+                throw new Error('กรุณาเลือกไฟล์รูปภาพ webp, jpg, png หรือ gif');
+            }
+        },
+        upload: async () => {
+            uploaded = await runFirestoreStep('spaceship.blogs.upload', () => uploadBlogImageToHosting(file));
+            return uploaded.url;
+        }
+    });
     const payload = {
         filename: file.name,
-        url: uploaded.url,
-        hosting_path: uploaded.path || '',
-        provider: uploaded.provider || 'spaceship_hosting',
+        url: uploadedUrl,
+        hosting_path: uploaded?.path || '',
+        provider: uploaded?.provider || 'spaceship_hosting',
         alt_text: meta.alt_text || '',
         caption: meta.caption || '',
         size: file.size,
@@ -1651,7 +1666,12 @@ function bindEvents() {
         if (!file) return;
         await runAction(event.target, 'upload-cover', async () => {
             await ensureEditablePostDocument('Cover upload');
-            const asset = await uploadMediaFile(file, { alt_text: $('#blog-cover-alt')?.value || $('#blog-title')?.value });
+            const asset = await uploadMediaFile(file, {
+                alt_text: $('#blog-cover-alt')?.value || $('#blog-title')?.value,
+                surface: 'Blog cover',
+                subtitle: 'post editor cover image',
+                targetField: 'blog-cover-url'
+            });
             const url = assertBlogHostingUrl(asset.url, 'Cover');
             await persistCoverAsset({ ...asset, url });
             if (asset.metadata_warning) {
@@ -1703,7 +1723,12 @@ async function insertImageBlock(editor) {
         try {
             await ensureEditablePostDocument('Content image insert');
             setStatus('Uploading image...', 'info');
-            const asset = await uploadMediaFile(file, { alt_text: $('#blog-title')?.value || file.name });
+            const asset = await uploadMediaFile(file, {
+                alt_text: $('#blog-title')?.value || file.name,
+                surface: 'Blog content image',
+                subtitle: 'post editor content',
+                targetField: 'blog-content-editor'
+            });
             const url = assertBlogHostingUrl(asset.url, 'Content image');
             insertImageHTML(editor, url, asset.alt_text || file.name.replace(/\.[^.]+$/, ''));
             await persistContentImage(url);
@@ -1910,7 +1935,13 @@ async function saveTagManager() {
 async function uploadMediaManager() {
     const file = $('#media-upload')?.files?.[0];
     if (!file) throw new BlogValidationError('อัปโหลดรูปภาพไม่สำเร็จ ยังขาด: ไฟล์รูปภาพ', ['ไฟล์รูปภาพ']);
-    const asset = await uploadMediaFile(file, { alt_text: $('#media-alt')?.value, caption: $('#media-caption')?.value });
+    const asset = await uploadMediaFile(file, {
+        alt_text: $('#media-alt')?.value,
+        caption: $('#media-caption')?.value,
+        surface: 'Blog media',
+        subtitle: 'media library image',
+        targetField: 'media-upload'
+    });
     if (asset) {
         await refreshData();
         render();

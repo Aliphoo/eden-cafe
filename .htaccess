@@ -21,16 +21,15 @@ RewriteRule ^index\.html$ / [R=301,L]
 RewriteCond %{THE_REQUEST} \s/+(.+?)\.html[\s?] [NC]
 RewriteRule ^(.+)\.html$ /$1 [R=301,L,NE]
 
-# Blog CMS routes. These intentionally run before real-file checks so old
-# generated blog HTML files no longer serve stale hardcoded articles.
-RewriteRule ^blog/?$ blog.html [L,QSA]
-RewriteRule ^blog/(category|tag|author)/([^/]+)/?$ blog.html?$1=$2 [L,QSA,B]
-RewriteRule ^blog/([^/]+)/?$ blog-post.html?slug=$1 [L,QSA,B]
-
 # Let real files/assets pass through untouched before trying clean URL routing.
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
 RewriteRule ^ - [L]
+
+# Blog CMS slugs that do not have a generated static file use the public reader.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^blog/[^/]+/?$ blog-post.html [L]
 
 # Serve extensionless URLs from their .html files, e.g. /shop -> /shop.html
 RewriteCond %{REQUEST_FILENAME} !-d

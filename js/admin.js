@@ -2,6 +2,7 @@ import { auth, provider, db } from './firebase-config.js';
 import { getMemberTier, getTierBenefits } from './membership.js';
 import { BLOG_POSTS, SITE, getBlogUrl } from './blog-data.mjs';
 import { renderSkeleton } from './ui-skeleton.js';
+import { runAdminFileOperationFlow, runAdminImageUploadFlow } from './admin-upload-modal.js';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp, writeBatch, runTransaction, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -176,6 +177,34 @@ async function uploadAdminImage(blob, folder, fileName) {
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.url) throw new Error(result.error || 'Spaceship image upload failed');
     return result.url;
+}
+
+async function uploadAdminImageFromFile(file, folder, fileName, options = {}) {
+    return runAdminImageUploadFlow({
+        file,
+        folder,
+        fileName,
+        surface: options.surface || 'Admin image',
+        subtitle: options.subtitle || folder,
+        targetField: options.targetField || 'imageUrl',
+        maxSize: ADMIN_IMAGE_MAX_FILE_SIZE,
+        transform: selectedFile => compressToWebP(selectedFile, options.quality ?? 0.8),
+        upload: webpBlob => uploadAdminImage(webpBlob, folder, fileName),
+        verifyUrl: options.verifyUrl !== false
+    });
+}
+
+async function runAdminXLSXImportFlow(file, categoryKey, options = {}) {
+    return runAdminFileOperationFlow({
+        file,
+        surface: options.surface || 'XLSX import',
+        subtitle: options.subtitle || categoryKey || 'Admin data import',
+        targetField: options.targetField || 'xlsx-upload-input',
+        processLabel: 'Importing',
+        processDetail: options.processDetail || 'read workbook and write rows',
+        operation: selectedFile => uploadCategoryDataFromXLSX(categoryKey, selectedFile),
+        resultText: result => `Imported ${result.total} rows (created ${result.created}, updated ${result.updated})`
+    });
 }
 
 async function callAdminFunction(functionName, payload = {}) {
@@ -1013,7 +1042,11 @@ function initXLSXTools() {
         try {
             btnUpload.disabled = true;
             btnUpload.textContent = 'กำลังอัปโหลด...';
-            const result = await uploadCategoryDataFromXLSX(select.value, fileInput.files?.[0]);
+            const result = await runAdminXLSXImportFlow(fileInput.files?.[0], select.value, {
+                surface: 'XLSX import',
+                subtitle: select.options[select.selectedIndex]?.textContent || select.value,
+                targetField: 'xlsx-upload-input'
+            });
             alert(`อัปโหลดสำเร็จ รวม ${result.total} รายการ (เพิ่ม ${result.created}, อัปเดต ${result.updated})`);
             fileInput.value = '';
         } catch (error) {
@@ -4571,8 +4604,12 @@ async function saveArcheryPageSettings(event) {
         let heroImageUrl = document.getElementById('archery-page-hero-url')?.value.trim() || DEFAULT_ARCHERY_PAGE_SETTINGS.heroImageUrl;
         if (file) {
             archeryPageSettingsStatus('Uploading hero image...');
-            const blob = await compressToWebP(file, 0.84);
-            heroImageUrl = await uploadAdminImage(blob, 'archery', `archery-hero-${Date.now()}.webp`);
+            heroImageUrl = await uploadAdminImageFromFile(file, 'archery', `archery-hero-${Date.now()}.webp`, {
+                surface: 'Archery hero',
+                subtitle: 'public archery page',
+                targetField: 'archery-page-hero-url',
+                quality: 0.84
+            });
             const heroInput = document.getElementById('archery-page-hero-url');
             const preview = document.getElementById('archery-page-hero-preview');
             if (heroInput) heroInput.value = heroImageUrl;
@@ -6938,9 +6975,11 @@ roomForm.addEventListener('submit', async (e) => {
             
             // Convert and upload to Spaceship hosting
             submitBtn.innerText = 'กำลังแปลงรูปภาพ...';
-            const webpBlob = await compressToWebP(file, 0.8);
-            submitBtn.innerText = 'กำลังอัปโหลดรูปภาพ...';
-            finalImageUrl = await uploadAdminImage(webpBlob, 'rooms', code + '_' + Date.now() + '.webp');
+            finalImageUrl = await uploadAdminImageFromFile(file, 'rooms', code + '_' + Date.now() + '.webp', {
+                surface: 'Room image',
+                subtitle: 'booking room gallery',
+                targetField: 'roomImageUrl'
+            });
         }
 
         const roomData = {
@@ -7529,7 +7568,11 @@ function bindProductManagerControls() {
         upload.addEventListener('change', async () => {
             if (!upload.files?.[0]) return;
             try {
-                const result = await uploadCategoryDataFromXLSX('products', upload.files[0]);
+                const result = await runAdminXLSXImportFlow(upload.files[0], 'products', {
+                    surface: 'Product XLSX import',
+                    subtitle: 'products / menu items',
+                    targetField: 'product-xlsx-upload'
+                });
                 alert(`Upload complete: ${result.total} rows (created ${result.created}, updated ${result.updated})`);
             } catch (error) {
                 alert(safeAdminError('Upload failed'));
@@ -8037,9 +8080,11 @@ productForm.addEventListener('submit', async (e) => {
         
         if (imageFile) {
             submitBtn.innerText = 'กำลังแปลงรูปภาพ...';
-            const webpBlob = await compressToWebP(imageFile, 0.8);
-            submitBtn.innerText = 'กำลังอัปโหลดรูปภาพ...';
-            finalImageUrl = await uploadAdminImage(webpBlob, 'products', Date.now() + '_image.webp');
+            finalImageUrl = await uploadAdminImageFromFile(imageFile, 'products', Date.now() + '_image.webp', {
+                surface: 'Product image',
+                subtitle: 'products / menu item',
+                targetField: 'productImage'
+            });
         }
 
         if (!finalImageUrl) {
@@ -8432,9 +8477,11 @@ blogForm?.addEventListener('submit', async (e) => {
         if (fileInput.files.length > 0) {
             const file = fileInput.files[0];
             submitBtn.innerText = 'กำลังแปลงรูปภาพ...';
-            const webpBlob = await compressToWebP(file, 0.8);
-            submitBtn.innerText = 'กำลังอัปโหลดรูปภาพ...';
-            imageUrl = await uploadAdminImage(webpBlob, 'blogs', Date.now() + '.webp');
+            imageUrl = await uploadAdminImageFromFile(file, 'blogs', Date.now() + '.webp', {
+                surface: 'Blog cover',
+                subtitle: 'legacy admin blog editor',
+                targetField: 'blogImageUrl'
+            });
         }
 
         const blogData = {
@@ -11313,9 +11360,13 @@ indexField('index-hero-image-file')?.addEventListener('change', async (event) =>
     if (!file) return;
     try {
         setIndexStatus('\u0e01\u0e33\u0e25\u0e31\u0e07\u0e2d\u0e31\u0e1b\u0e42\u0e2b\u0e25\u0e14 Hero image...');
-        const blob = await compressToWebP(file, 0.84);
         const safeName = (file.name || 'index-hero.webp').replace(/\.[^.]+$/, '') + '.webp';
-        const url = await uploadAdminImage(blob, 'index', safeName);
+        const url = await uploadAdminImageFromFile(file, 'index', safeName, {
+            surface: 'Index hero',
+            subtitle: 'homepage settings',
+            targetField: 'index-hero-image-url',
+            quality: 0.84
+        });
         setIndexField('index-hero-image-url', url);
         window.updateIndexPreview();
         setIndexStatus('\u0e2d\u0e31\u0e1b\u0e42\u0e2b\u0e25\u0e14 Hero image \u0e41\u0e25\u0e49\u0e27');

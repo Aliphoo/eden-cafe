@@ -1,358 +1,648 @@
-import { db } from './firebase-config.js';
-import { collection, getDocs } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { BLOG_POSTS, BLOG_POST_BY_SLUG, SITE, getBlogUrl } from './blog-data.mjs';
 
-const SITE_URL = 'https://www.edencafe.co';
-const DEFAULT_IMAGE = '/Hero/Hero.webp';
+const BLOG_COLLECTION = 'blogs';
+const FIRESTORE_MODULE_URL = 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+let cmsPostsPromise = null;
 
-function text(value = '') {
-    return String(value ?? '').trim();
+function normalizeSlug(value) {
+    return String(value || '')
+        .trim()
+        .replace(/^\/+|\/+$/g, '')
+        .split('/')
+        .pop();
 }
 
-function escapeHTML(value = '') {
+function setupLegacyRedirect() {
+    const params = new URLSearchParams(window.location.search);
+    const candidate = normalizeSlug(params.get('slug') || params.get('id'));
+    if (candidate && BLOG_POST_BY_SLUG[candidate] && !location.pathname.startsWith('/blog/')) {
+        window.location.replace(getBlogUrl(BLOG_POST_BY_SLUG[candidate]));
+    }
+}
+
+function escapeHTML(value) {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
+        .replace(/'/g, '&#039;');
 }
 
-function slugify(value = '') {
-    return text(value)
-        .toLowerCase()
-        .normalize('NFKD')
-        .replace(/[^\p{L}\p{N}\s-]/gu, '')
-        .replace(/\s+/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '');
+function text(value, fallback = '') {
+    if (value === null || value === undefined) return fallback;
+    const cleaned = String(value).trim();
+    return cleaned || fallback;
 }
 
-function plainText(html = '') {
-    const div = document.createElement('div');
-    div.innerHTML = html;
-    return text(div.textContent || div.innerText || '');
+function arrayOfText(value) {
+    if (Array.isArray(value)) return value.map(item => text(item)).filter(Boolean);
+    if (typeof value === 'string') return value.split(',').map(item => text(item)).filter(Boolean);
+    return [];
 }
 
-function countWords(html = '') {
-    const value = plainText(html);
-    const thaiChars = ((value.match(/[\u0E00-\u0E7F]+/g) || []).join('')).length;
-    const latinWords = (value.match(/[A-Za-z0-9]+/g) || []).length;
-    return latinWords + Math.ceil(thaiChars / 5);
+function dateFrom(value) {
+    if (!value) return null;
+    if (typeof value.toDate === 'function') return value.toDate();
+    if (typeof value.seconds === 'number') return new Date(value.seconds * 1000);
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function readingTime(html = '') {
-    return Math.max(1, Math.ceil(countWords(html) / 220));
+function isoDate(value) {
+    const date = dateFrom(value);
+    return date ? date.toISOString() : '';
 }
 
-function dateValue(value) {
-    if (!value) return '';
-    if (typeof value?.toDate === 'function') return value.toDate().toISOString();
-    return String(value);
-}
-
-function formatDate(value) {
-    const raw = dateValue(value);
-    if (!raw) return '';
-    const date = new Date(raw);
-    if (Number.isNaN(date.getTime())) return '';
-    return date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
-}
-
-function normalizePost(id, data = {}) {
-    const title = text(data.title);
-    const content = text(data.content || data.body);
-    const slug = slugify(data.slug || id || title);
-    const categoryName = text(data.category_name || data.categoryName || data.category || 'Blog');
-    const tags = Array.isArray(data.tags) ? data.tags.map(text).filter(Boolean) : text(data.tags).split(',').map(text).filter(Boolean);
-    return {
-        id,
-        title,
-        slug,
-        excerpt: text(data.excerpt || data.seo_description || plainText(content).slice(0, 180)),
-        content,
-        cover: text(data.cover_image_url || data.coverImageUrl || data.imageUrl || data.og_image_url || DEFAULT_IMAGE),
-        coverAlt: text(data.cover_image_alt || data.coverAlt || title),
-        coverCaption: text(data.cover_image_caption || data.coverCaption),
-        status: text(data.status || 'draft').toLowerCase(),
-        categoryId: text(data.category_id || data.categoryId || slugify(categoryName)),
-        categoryName,
-        tags,
-        tagIds: Array.isArray(data.tag_ids) ? data.tag_ids.map(text) : tags.map(slugify),
-        authorId: text(data.author_id || data.authorId || 'eden'),
-        authorName: text(data.author_name || data.authorName || data.author || 'Eden Cafe'),
-        authorBio: text(data.author_bio || data.authorBio),
-        seoTitle: text(data.seo_title || data.seoTitle || title),
-        seoDescription: text(data.seo_description || data.seoDescription || data.metaDescription || ''),
-        canonicalUrl: text(data.canonical_url || data.canonicalUrl),
-        ogTitle: text(data.og_title || data.ogTitle || data.seo_title || title),
-        ogDescription: text(data.og_description || data.ogDescription || data.seo_description || data.excerpt || ''),
-        ogImage: text(data.og_image_url || data.ogImageUrl || data.cover_image_url || data.imageUrl || DEFAULT_IMAGE),
-        twitterTitle: text(data.twitter_title || data.twitterTitle || data.og_title || title),
-        twitterDescription: text(data.twitter_description || data.twitterDescription || data.og_description || data.excerpt || ''),
-        twitterImage: text(data.twitter_image_url || data.twitterImageUrl || data.og_image_url || data.imageUrl || DEFAULT_IMAGE),
-        focusKeyword: text(data.focus_keyword || data.focusKeyword),
-        schemaType: text(data.schema_type || data.schemaType || 'BlogPosting'),
-        faqs: Array.isArray(data.faqs) ? data.faqs : [],
-        brandContext: text(data.brand_context || data.brandContext),
-        businessContext: text(data.business_context || data.businessContext),
-        isFeatured: data.is_featured === true || data.isFeatured === true,
-        publishedAt: dateValue(data.published_at || data.publishedAt || data.createdAt || data.created_at),
-        updatedAt: dateValue(data.updated_at || data.updatedAt),
-        readingTime: Number(data.reading_time || data.readingTime) || readingTime(content),
-        wordCount: Number(data.word_count || data.wordCount) || countWords(content)
-    };
-}
-
-async function loadCollection(name) {
-    const snap = await getDocs(collection(db, name));
-    return snap.docs.map((item) => ({ id: item.id, ...item.data() }));
-}
-
-async function loadBlogData() {
-    const [postRows, categoryRows, tagRows] = await Promise.all([
-        loadCollection('blogs'),
-        loadCollection('blog_categories').catch(() => []),
-        loadCollection('blog_tags').catch(() => [])
-    ]);
-    const posts = postRows.map((item) => normalizePost(item.id, item))
-        .filter((post) => post.status === 'published')
-        .sort((a, b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')));
-    const categoryMap = new Map();
-    categoryRows.forEach((item) => categoryMap.set(item.id, { id: item.id, name: text(item.name), slug: slugify(item.slug || item.id || item.name) }));
-    posts.forEach((post) => {
-        if (!categoryMap.has(post.categoryId)) categoryMap.set(post.categoryId, { id: post.categoryId, name: post.categoryName, slug: slugify(post.categoryId || post.categoryName) });
+function formatThaiDate(value) {
+    const date = dateFrom(value);
+    if (!date) return '';
+    return date.toLocaleDateString('th-TH', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
     });
-    const tagMap = new Map();
-    tagRows.forEach((item) => tagMap.set(item.id, { id: item.id, name: text(item.name), slug: slugify(item.slug || item.id || item.name) }));
-    posts.forEach((post) => post.tags.forEach((name) => tagMap.set(slugify(name), { id: slugify(name), name, slug: slugify(name) })));
-    return { posts, categories: [...categoryMap.values()].filter((item) => item.name), tags: [...tagMap.values()].filter((item) => item.name) };
 }
 
-function postUrl(post) {
+function absoluteUrl(value) {
+    const raw = text(value);
+    if (!raw) return SITE.defaultImage;
+    if (/^https?:\/\//i.test(raw)) return raw;
+    return `${SITE.origin}${raw.startsWith('/') ? raw : `/${raw}`}`;
+}
+
+function blogUrl(post) {
     return `/blog/${encodeURIComponent(post.slug)}`;
 }
 
-function cardHTML(post) {
+function postSortTime(post) {
+    return dateFrom(post.publishedAt || post.updatedAt || post.createdAt)?.getTime() || 0;
+}
+
+function readingTimeText(value) {
+    if (typeof value === 'number' && Number.isFinite(value)) return `${Math.max(1, Math.round(value))} นาที`;
+    const raw = text(value);
+    if (!raw) return '';
+    if (/^\d+$/.test(raw)) return `${raw} นาที`;
+    return raw;
+}
+
+function normalizeFaqs(value) {
+    if (!Array.isArray(value)) return [];
+    return value
+        .map(item => ({
+            question: text(item?.question),
+            answer: text(item?.answer)
+        }))
+        .filter(item => item.question && item.answer);
+}
+
+function normalizeCmsPost(id, data = {}) {
+    const title = text(data.title);
+    const category = text(data.category_name || data.categoryName || data.category || data.category_id || data.categoryId || 'Blog');
+    const publishedAt = data.published_at || data.publishedAt || data.publishedDate || data.created_at || data.createdAt || '';
+    const updatedAt = data.updated_at || data.updatedAt || data.updatedDate || publishedAt;
+    const content = text(data.content || data.body);
+    const tags = arrayOfText(data.tags);
+
+    return {
+        id,
+        source: 'firestore',
+        slug: normalizeSlug(data.slug || id),
+        title,
+        seoTitle: text(data.seo_title || data.seoTitle || title),
+        seoDescription: text(data.seo_description || data.seoDescription || data.excerpt || ''),
+        excerpt: text(data.excerpt || data.seo_description || data.seoDescription || ''),
+        content,
+        category,
+        categoryId: text(data.category_id || data.categoryId || category),
+        tags,
+        tagIds: Array.isArray(data.tag_ids) ? data.tag_ids.map(item => text(item)).filter(Boolean) : tags.map(normalizeSlug),
+        coverImageUrl: text(data.cover_image_url || data.coverImageUrl || data.imageUrl || data.og_image_url || data.ogImage || SITE.defaultImage),
+        coverImageAlt: text(data.cover_image_alt || data.coverAlt || data.imageAlt || title),
+        publishedAt,
+        updatedAt,
+        createdAt: data.created_at || data.createdAt || '',
+        readingTime: readingTimeText(data.reading_time || data.readingTime),
+        isFeatured: data.is_featured === true || data.isFeatured === true,
+        summary: arrayOfText(data.summary),
+        faqs: normalizeFaqs(data.faqs),
+        canonicalUrl: text(data.canonical_url || data.canonicalUrl),
+        authorName: text(data.author_name || data.authorName || data.author || SITE.author),
+        cta: data.cta || null
+    };
+}
+
+function renderStaticBlocks(blocks = []) {
+    return blocks.map(block => {
+        if (block.type === 'h2' || block.type === 'h3') {
+            const id = block.id ? ` id="${escapeHTML(block.id)}"` : '';
+            return `<${block.type}${id}>${escapeHTML(block.text)}</${block.type}>`;
+        }
+        if (block.type === 'ul' && Array.isArray(block.items)) {
+            return `<ul>${block.items.map(item => `<li>${escapeHTML(item)}</li>`).join('')}</ul>`;
+        }
+        return `<p>${escapeHTML(block.text || '')}</p>`;
+    }).join('');
+}
+
+function normalizeStaticPost(post) {
+    if (!post) return null;
+    return {
+        id: post.slug,
+        source: 'static',
+        slug: post.slug,
+        title: post.title,
+        seoTitle: post.seoTitle || post.title,
+        seoDescription: post.metaDescription || post.excerpt || '',
+        excerpt: post.excerpt || post.metaDescription || '',
+        content: renderStaticBlocks(post.blocks || []),
+        category: post.category || 'Blog',
+        categoryId: normalizeSlug(post.category || 'blog'),
+        tags: [post.focusKeyword, ...(post.secondaryKeywords || [])].filter(Boolean),
+        tagIds: [],
+        coverImageUrl: post.image?.src || SITE.defaultImage,
+        coverImageAlt: post.image?.alt || post.title,
+        publishedAt: post.publishedDate,
+        updatedAt: post.updatedDate || post.publishedDate,
+        createdAt: post.publishedDate,
+        readingTime: post.readingTime || '',
+        isFeatured: false,
+        summary: Array.isArray(post.summary) ? post.summary : [],
+        faqs: Array.isArray(post.faqs) ? post.faqs : [],
+        canonicalUrl: `${SITE.origin}${getBlogUrl(post)}`,
+        authorName: SITE.author,
+        cta: post.cta || null
+    };
+}
+
+function getStaticPosts() {
+    return BLOG_POSTS.map(normalizeStaticPost).filter(Boolean);
+}
+
+async function fetchPublishedCmsPosts() {
+    if (!cmsPostsPromise) {
+        cmsPostsPromise = (async () => {
+            const [{ db }, firestore] = await Promise.all([
+                import('./firebase-config.js'),
+                import(FIRESTORE_MODULE_URL)
+            ]);
+            const q = firestore.query(
+                firestore.collection(db, BLOG_COLLECTION),
+                firestore.where('status', '==', 'published')
+            );
+            const snapshot = await firestore.getDocs(q);
+            return snapshot.docs
+                .map(item => normalizeCmsPost(item.id, item.data()))
+                .filter(post => post.slug && post.title)
+                .sort((a, b) => postSortTime(b) - postSortTime(a));
+        })();
+    }
+    return cmsPostsPromise;
+}
+
+function setupTocHighlight() {
+    const links = [...document.querySelectorAll('.toc-box a[href^="#"]')];
+    if (!links.length || !('IntersectionObserver' in window)) return;
+
+    const byId = links.reduce((acc, link) => {
+        const id = decodeURIComponent(link.getAttribute('href').slice(1));
+        acc[id] = link;
+        return acc;
+    }, {});
+
+    const observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+            if (!entry.isIntersecting) return;
+            links.forEach(link => link.classList.remove('active'));
+            byId[entry.target.id]?.classList.add('active');
+        });
+    }, {
+        rootMargin: '-20% 0px -70% 0px',
+        threshold: 0.01
+    });
+
+    Object.keys(byId).forEach(id => {
+        const target = document.getElementById(id);
+        if (target) observer.observe(target);
+    });
+}
+
+function setupListingFilters() {
+    const grid = document.querySelector('.blog-grid');
+    const filters = [...document.querySelectorAll('[data-blog-category]')];
+    if (!grid || !filters.length) return;
+
+    filters.forEach(button => {
+        button.addEventListener('click', () => {
+            const category = button.dataset.blogCategory;
+            filters.forEach(item => item.classList.toggle('active', item === button));
+            document.querySelectorAll('.blog-card[data-category]').forEach(card => {
+                card.hidden = category !== 'all' && card.dataset.category !== category;
+            });
+        });
+    });
+}
+
+function exposeBlogDataForDebugging(posts = getStaticPosts(), source = 'static-fallback') {
+    window.EdenCafeBlog = Object.freeze({
+        source,
+        posts: posts.map(post => ({
+            slug: post.slug,
+            title: post.title,
+            url: blogUrl(post),
+            category: post.category,
+            publishedAt: isoDate(post.publishedAt)
+        }))
+    });
+}
+
+function renderListingFilters(posts) {
+    const categories = [...new Set(posts.map(post => post.category).filter(Boolean))];
     return `
-        <article class="blog-cms-card">
-            <a href="${postUrl(post)}"><img src="${escapeHTML(post.cover)}" alt="${escapeHTML(post.coverAlt || post.title)}" loading="lazy"></a>
-            <div class="blog-cms-card-body">
-                <div class="blog-cms-meta"><span>${escapeHTML(post.categoryName)}</span><span>${formatDate(post.publishedAt)}</span></div>
-                <h2><a href="${postUrl(post)}">${escapeHTML(post.title)}</a></h2>
-                <p>${escapeHTML(post.excerpt)}</p>
-                <div class="blog-cms-card-foot"><span>${post.readingTime} นาทีอ่าน</span><a href="${postUrl(post)}">อ่านต่อ</a></div>
+            <div class="blog-filter-bar" aria-label="กรองบทความตามหมวดหมู่">
+                <button type="button" class="active" data-blog-category="all">ทั้งหมด</button>
+                ${categories.map(category => `<button type="button" data-blog-category="${escapeHTML(category)}">${escapeHTML(category)}</button>`).join('')}
+            </div>`;
+}
+
+function renderListingCard(post, index = 0) {
+    const dateText = formatThaiDate(post.publishedAt || post.createdAt);
+    return `
+    <article class="blog-card${index === 0 ? ' blog-card-featured' : ''}" data-category="${escapeHTML(post.category)}">
+        <a href="${escapeHTML(blogUrl(post))}" aria-label="อ่าน ${escapeHTML(post.title)}">
+            <img loading="lazy" src="${escapeHTML(post.coverImageUrl || SITE.defaultImage)}" alt="${escapeHTML(post.coverImageAlt || post.title)}" class="blog-card-img">
+        </a>
+        <div class="blog-card-content">
+            <div class="blog-card-kicker">
+                <span class="blog-category-pill">${escapeHTML(post.category)}</span>
+                ${dateText ? `<span>${escapeHTML(dateText)}</span>` : ''}
             </div>
-        </article>
-    `;
+            <h3><a href="${escapeHTML(blogUrl(post))}">${escapeHTML(post.title)}</a></h3>
+            <p>${escapeHTML(post.excerpt || post.seoDescription)}</p>
+            <div class="blog-card-footer">
+                <span>${escapeHTML(post.readingTime || 'อ่านบทความ')}</span>
+                <a href="${escapeHTML(blogUrl(post))}" class="blog-read-link">อ่านต่อ</a>
+            </div>
+        </div>
+    </article>`;
 }
 
-function fillSelect(select, rows, label) {
-    if (!select) return;
-    select.innerHTML = `<option value="all">${label}</option>` + rows.map((row) => `<option value="${escapeHTML(row.id)}">${escapeHTML(row.name)}</option>`).join('');
+function renderCmsListing(posts) {
+    const grid = document.querySelector('.blog-grid');
+    if (!grid || !posts.length) return;
+
+    const existingFilter = document.querySelector('.blog-filter-bar');
+    if (existingFilter) {
+        existingFilter.outerHTML = renderListingFilters(posts);
+    } else {
+        grid.insertAdjacentHTML('beforebegin', renderListingFilters(posts));
+    }
+
+    grid.innerHTML = posts.map(renderListingCard).join('');
+
+    const count = document.querySelector('.blog-quick-grid strong');
+    if (count) count.textContent = String(posts.length);
+    const label = count?.nextElementSibling;
+    if (label) label.textContent = 'บทความเผยแพร่';
+
+    document.body.dataset.blogSource = 'firestore';
+    exposeBlogDataForDebugging(posts, 'firestore');
+    setupListingFilters();
 }
 
-function installPublicStyles() {
-    if (document.getElementById('blog-cms-public-style')) return;
-    const style = document.createElement('style');
-    style.id = 'blog-cms-public-style';
-    style.textContent = `
-        .blog-cms-public{background:#f6f9f6;color:#17231d}
-        .blog-cms-hero{padding:72px 0 34px;background:#fff;border-bottom:1px solid #e4ece6}
-        .blog-cms-hero h1{max-width:840px;font-size:clamp(2rem,4vw,4rem);line-height:1.05;margin:10px 0 14px;color:#163522}
-        .blog-cms-hero p{max-width:760px;color:#536159;line-height:1.8}
-        .blog-cms-searchbar{display:grid;grid-template-columns:minmax(240px,1fr)220px 190px;gap:10px;margin-top:24px}
-        .blog-cms-searchbar input,.blog-cms-searchbar select{min-height:46px;border:1px solid #dce7df;border-radius:8px;padding:0 13px;font:inherit;background:#fff}
-        .blog-cms-listing{padding:32px 0 70px}
-        .blog-cms-state{padding:18px;border:1px solid #dce7df;border-radius:10px;background:#fff;color:#536159;font-weight:700}
-        .blog-cms-featured{margin-bottom:20px}
-        .blog-cms-featured .blog-cms-card{display:grid;grid-template-columns:minmax(280px,1.05fr)minmax(280px,.95fr);align-items:stretch}
-        .blog-cms-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
-        .blog-cms-card{overflow:hidden;border:1px solid #dde8df;border-radius:10px;background:#fff;box-shadow:0 12px 28px rgba(24,70,41,.07)}
-        .blog-cms-card img{width:100%;aspect-ratio:16/9;object-fit:cover;background:#eaf0eb}
-        .blog-cms-card-body{padding:18px;display:grid;gap:11px}
-        .blog-cms-card h2{font-size:1.16rem;line-height:1.35;margin:0}.blog-cms-card h2 a{color:#16291d;text-decoration:none}
-        .blog-cms-card p{color:#536159;line-height:1.7;margin:0}.blog-cms-meta,.blog-cms-card-foot{display:flex;justify-content:space-between;gap:10px;color:#6d7a72;font-size:.86rem;font-weight:700}
-        .blog-cms-meta span:first-child{color:#16633d;background:#e9f6ed;border-radius:999px;padding:4px 10px}
-        .blog-cms-card-foot a{color:#16633d;font-weight:800}
-        .blog-cms-detail{background:#fff}.blog-cms-detail-header{padding:52px 20px 24px}.blog-cms-detail-inner{max-width:1120px;margin:0 auto;display:grid;grid-template-columns:240px minmax(0,1fr);gap:34px;padding:28px 20px 70px}
-        .blog-cms-article{max-width:760px}.blog-cms-article h1{font-size:clamp(2rem,4vw,3.8rem);line-height:1.08;margin:10px 0}.blog-cms-article .lede{font-size:1.08rem;color:#536159;line-height:1.8}
-        .blog-cms-cover{max-width:1120px;margin:0 auto;padding:0 20px}.blog-cms-cover img{width:100%;max-height:560px;object-fit:cover;border-radius:14px}
-        .blog-cms-prose{font-size:1.02rem;line-height:1.9;color:#25352d}.blog-cms-prose h2,.blog-cms-prose h3{color:#173522;margin-top:1.8em}.blog-cms-prose img{max-width:100%;border-radius:12px}.blog-cms-prose blockquote{border-left:4px solid #4caf50;padding-left:16px;color:#536159}
-        .blog-cms-toc{position:sticky;top:18px;border:1px solid #dce7df;border-radius:10px;background:#fbfffb;padding:14px}.blog-cms-toc a{display:block;color:#375044;text-decoration:none;margin:8px 0;font-size:.92rem}
-        .blog-cms-faq,.blog-cms-author,.blog-cms-cta{border:1px solid #dce7df;border-radius:10px;background:#fbfffb;padding:18px;margin-top:24px}
-        .blog-cms-related-wrap{padding:0 20px 70px}
-        @media(max-width:920px){.blog-cms-searchbar,.blog-cms-featured .blog-cms-card,.blog-cms-detail-inner{grid-template-columns:1fr}.blog-cms-grid{grid-template-columns:1fr 1fr}.blog-cms-toc{position:static}}
-        @media(max-width:640px){.blog-cms-grid{grid-template-columns:1fr}.blog-cms-hero{padding-top:44px}}
-    `;
-    document.head.appendChild(style);
+function currentRouteSlug() {
+    const params = new URLSearchParams(window.location.search);
+    const querySlug = normalizeSlug(params.get('slug') || params.get('id'));
+    if (querySlug) return querySlug;
+
+    const pathname = window.location.pathname.replace(/\/+$/g, '');
+    if (!pathname.startsWith('/blog/')) return '';
+    return normalizeSlug(pathname);
 }
 
-function updateMeta(post) {
-    document.title = post.seoTitle || post.title;
-    const metaDescription = document.querySelector('meta[name="description"]');
-    if (metaDescription) metaDescription.setAttribute('content', post.seoDescription || post.excerpt);
-    const canonical = document.querySelector('link[rel="canonical"]') || document.head.appendChild(Object.assign(document.createElement('link'), { rel: 'canonical' }));
-    canonical.setAttribute('href', post.canonicalUrl || `${SITE_URL}${postUrl(post)}`);
+function slugifyHeading(value) {
+    return text(value)
+        .toLowerCase()
+        .replace(/[^\w\u0E00-\u0E7F]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        || 'section';
 }
 
-function jsonLdForPost(post) {
-    const url = `${SITE_URL}${postUrl(post)}`;
+function sanitizeHtml(html) {
+    const template = document.createElement('template');
+    template.innerHTML = html || '';
+    template.content.querySelectorAll('script, style, iframe, object, embed, form, input, button').forEach(node => node.remove());
+    template.content.querySelectorAll('*').forEach(node => {
+        [...node.attributes].forEach(attribute => {
+            const name = attribute.name.toLowerCase();
+            const value = attribute.value || '';
+            if (name.startsWith('on')) node.removeAttribute(attribute.name);
+            if ((name === 'href' || name === 'src') && /^\s*javascript:/i.test(value)) node.removeAttribute(attribute.name);
+        });
+        if (node.tagName.toLowerCase() === 'a') {
+            node.setAttribute('rel', 'noopener noreferrer');
+        }
+    });
+    return template.innerHTML;
+}
+
+function prepareArticleContent(post) {
+    const fallback = post.excerpt ? `<p>${escapeHTML(post.excerpt)}</p>` : '';
+    const wrapper = document.createElement('article');
+    wrapper.innerHTML = sanitizeHtml(post.content || fallback);
+
+    const usedIds = new Set();
+    const tocItems = [];
+    wrapper.querySelectorAll('h2, h3').forEach((heading, index) => {
+        const title = text(heading.textContent);
+        let id = text(heading.id) || slugifyHeading(title);
+        while (usedIds.has(id)) id = `${id}-${index + 1}`;
+        usedIds.add(id);
+        heading.id = id;
+        if (title) tocItems.push({ id, title, level: heading.tagName.toLowerCase() });
+    });
+
+    return { html: wrapper.innerHTML, tocItems };
+}
+
+function defaultCta(post) {
+    return {
+        label: post.cta?.label || 'เปิดแผนที่ Eden Cafe',
+        href: post.cta?.href || SITE.mapUrl,
+        secondaryLabel: post.cta?.secondaryLabel || 'ดูเมนูทั้งหมด',
+        secondaryHref: post.cta?.secondaryHref || '/menu'
+    };
+}
+
+function relatedPosts(post, posts) {
+    const sameTopic = posts
+        .filter(item => item.slug !== post.slug)
+        .filter(item => item.category === post.category || item.tagIds.some(tag => post.tagIds.includes(tag)) || item.tags.some(tag => post.tags.includes(tag)));
+    const rest = posts.filter(item => item.slug !== post.slug && !sameTopic.some(match => match.slug === item.slug));
+    return [...sameTopic, ...rest].slice(0, 3);
+}
+
+function summaryHTML(post) {
+    if (!post.summary?.length) return '';
+    return `
+                <section class="summary-box" aria-labelledby="quick-summary">
+                    <h2 id="quick-summary">สรุปสั้น</h2>
+                    <ul>
+                        ${post.summary.map(item => `<li>${escapeHTML(item)}</li>`).join('')}
+                    </ul>
+                </section>`;
+}
+
+function faqHTML(post) {
+    if (!post.faqs?.length) return '';
+    return `
+                <section class="faq blog-faq" aria-labelledby="faq-heading">
+                    <h2 id="faq-heading">FAQ</h2>
+                    <div class="faq-grid">
+                        ${post.faqs.map(item => `
+                            <div class="faq-item">
+                                <button type="button" class="faq-question">${escapeHTML(item.question)}</button>
+                                <div class="faq-answer"><p>${escapeHTML(item.answer)}</p></div>
+                            </div>`).join('')}
+                    </div>
+                </section>`;
+}
+
+function linkPanelHTML(post, related) {
+    const links = [
+        { label: 'กลับไปหน้าบทความ', href: '/blog' },
+        { label: 'ดูเมนู', href: '/menu' },
+        { label: 'จองโต๊ะหรือห้องรับรอง', href: '/booking' },
+        ...related.map(item => ({ label: item.title, href: blogUrl(item) }))
+    ];
+    return `
+                <section class="blog-link-panel" aria-labelledby="internal-links">
+                    <h2 id="internal-links">อ่านต่อและลิงก์ที่เกี่ยวข้อง</h2>
+                    <ul>
+                        ${links.map(link => `<li><a href="${escapeHTML(link.href)}">${escapeHTML(link.label)}</a></li>`).join('')}
+                    </ul>
+                </section>`;
+}
+
+function tocHTML(items) {
+    if (!items.length) return '<p>บทความนี้ไม่มีสารบัญย่อย</p>';
+    return `<ol>${items.map(item => `<li class="${item.level === 'h3' ? 'toc-subitem' : ''}"><a href="#${escapeHTML(item.id)}">${escapeHTML(item.title)}</a></li>`).join('')}</ol>`;
+}
+
+function renderCmsDetail(post, posts) {
+    const main = document.querySelector('main');
+    if (!main) return;
+
+    const { html, tocItems } = prepareArticleContent(post);
+    const cta = defaultCta(post);
+    const related = relatedPosts(post, posts);
+    const dateText = formatThaiDate(post.publishedAt || post.createdAt);
+    const externalCta = /^https?:\/\//i.test(cta.href) ? ' target="_blank" rel="noopener noreferrer"' : '';
+
+    main.className = 'blog-post blog-post-static';
+    main.innerHTML = `
+    <div class="container">
+        <nav class="breadcrumb" aria-label="Breadcrumb">
+            <a href="/">หน้าแรก</a>
+            <span>/</span>
+            <a href="/blog">บทความ</a>
+            <span>/</span>
+            <span>${escapeHTML(post.title)}</span>
+        </nav>
+        <header class="blog-header blog-article-header">
+            <span class="blog-chip">${escapeHTML(post.category)}</span>
+            <h1>${escapeHTML(post.title)}</h1>
+            <p>${escapeHTML(post.excerpt || post.seoDescription)}</p>
+            <div class="blog-article-meta">
+                ${dateText ? `<span>เผยแพร่ ${escapeHTML(dateText)}</span>` : ''}
+                <span>ผู้เขียน: ${escapeHTML(post.authorName || SITE.author)}</span>
+                ${post.readingTime ? `<span>${escapeHTML(post.readingTime)}</span>` : ''}
+            </div>
+        </header>
+        <img loading="eager" src="${escapeHTML(post.coverImageUrl || SITE.defaultImage)}" alt="${escapeHTML(post.coverImageAlt || post.title)}" class="blog-post-img">
+        <div class="article-layout">
+            <aside class="article-sidebar" aria-label="สารบัญบทความ">
+                <div class="toc-box">
+                    <h2>สารบัญ</h2>
+                    ${tocHTML(tocItems)}
+                </div>
+                <div class="toc-box">
+                    <h2>วางแผนแวะร้าน</h2>
+                    <a href="${escapeHTML(SITE.mapUrl)}" target="_blank" rel="noopener noreferrer">เปิด Google Maps</a>
+                </div>
+            </aside>
+            <article class="blog-content article-main">
+                ${summaryHTML(post)}
+                ${html}
+                ${linkPanelHTML(post, related)}
+                <section class="blog-cta-panel">
+                    <h2>วางแผนแวะ Eden Cafe</h2>
+                    <p>ดูเมนูล่าสุด เปิดแผนที่ หรือจองโต๊ะก่อนเดินทาง เพื่อให้ทริปเชียงรายของคุณราบรื่นขึ้น</p>
+                    <div class="blog-cta-actions">
+                        <a class="btn" href="${escapeHTML(cta.href)}"${externalCta}>${escapeHTML(cta.label)}</a>
+                        <a class="btn btn-outline" href="${escapeHTML(cta.secondaryHref)}">${escapeHTML(cta.secondaryLabel)}</a>
+                    </div>
+                </section>
+                ${faqHTML(post)}
+            </article>
+        </div>
+    </div>`;
+
+    document.body.dataset.blogPage = post.source === 'firestore' ? 'cms-detail' : 'static-detail-fallback';
+    updateHead(post);
+    injectJsonLd(post);
+    setupTocHighlight();
+}
+
+function renderMissingPost(slug, message = 'ไม่พบบทความที่เผยแพร่แล้วสำหรับ URL นี้') {
+    const main = document.querySelector('main');
+    if (!main) return;
+    main.className = 'blog-post blog-post-static';
+    main.innerHTML = `
+    <div class="container">
+        <div class="blog-header">
+            <span class="blog-chip">Eden Cafe Blog</span>
+            <h1>${escapeHTML(message)}</h1>
+            <p>${escapeHTML(slug ? `Slug: ${slug}` : 'โปรดลองกลับไปเลือกบทความจากหน้ารวมบทความ')}</p>
+            <a class="btn" href="/blog">กลับไปหน้าบทความ</a>
+        </div>
+    </div>`;
+}
+
+function setMeta(selector, value) {
+    const element = document.querySelector(selector);
+    if (element) element.setAttribute('content', value);
+}
+
+function updateHead(post) {
+    const title = `${post.seoTitle || post.title} | Eden Cafe`;
+    const description = post.seoDescription || post.excerpt || post.title;
+    const url = post.canonicalUrl || `${SITE.origin}${blogUrl(post)}`;
+    const image = absoluteUrl(post.coverImageUrl);
+
+    document.title = title;
+    setMeta('meta[name="description"]', description);
+    setMeta('meta[property="og:title"]', title);
+    setMeta('meta[property="og:description"]', description);
+    setMeta('meta[property="og:url"]', url);
+    setMeta('meta[property="og:image"]', image);
+    setMeta('meta[name="twitter:title"]', title);
+    setMeta('meta[name="twitter:description"]', description);
+    setMeta('meta[name="twitter:image"]', image);
+
+    let canonical = document.querySelector('link[rel="canonical"]');
+    if (!canonical) {
+        canonical = document.createElement('link');
+        canonical.rel = 'canonical';
+        document.head.appendChild(canonical);
+    }
+    canonical.href = url;
+}
+
+function injectJsonLd(post) {
+    document.querySelectorAll('script[type="application/ld+json"]').forEach(script => script.remove());
     const graph = [
         {
-            '@type': post.schemaType || 'BlogPosting',
-            '@id': `${url}#article`,
-            headline: post.seoTitle || post.title,
+            '@type': 'BlogPosting',
+            '@id': `${SITE.origin}${blogUrl(post)}#blogposting`,
+            headline: post.title,
             description: post.seoDescription || post.excerpt,
-            image: post.ogImage || post.cover,
-            datePublished: post.publishedAt,
-            dateModified: post.updatedAt || post.publishedAt,
-            author: { '@type': 'Person', name: post.authorName || 'Eden Cafe' },
-            mainEntityOfPage: url
+            image: absoluteUrl(post.coverImageUrl),
+            datePublished: isoDate(post.publishedAt || post.createdAt),
+            dateModified: isoDate(post.updatedAt || post.publishedAt || post.createdAt),
+            author: { '@type': 'Organization', name: post.authorName || SITE.author },
+            publisher: {
+                '@type': 'Organization',
+                name: SITE.name,
+                logo: { '@type': 'ImageObject', url: SITE.logo }
+            },
+            mainEntityOfPage: `${SITE.origin}${blogUrl(post)}`
         },
         {
             '@type': 'BreadcrumbList',
             itemListElement: [
-                { '@type': 'ListItem', position: 1, name: 'หน้าแรก', item: SITE_URL },
-                { '@type': 'ListItem', position: 2, name: 'บทความ', item: `${SITE_URL}/blog` },
-                { '@type': 'ListItem', position: 3, name: post.title, item: url }
+                { '@type': 'ListItem', position: 1, name: 'หน้าแรก', item: SITE.origin },
+                { '@type': 'ListItem', position: 2, name: 'บทความ', item: `${SITE.origin}/blog` },
+                { '@type': 'ListItem', position: 3, name: post.title, item: `${SITE.origin}${blogUrl(post)}` }
             ]
         }
     ];
-    if (post.faqs.length) {
-        graph.push({ '@type': 'FAQPage', mainEntity: post.faqs.map((faq) => ({ '@type': 'Question', name: text(faq.question), acceptedAnswer: { '@type': 'Answer', text: text(faq.answer) } })) });
+    if (post.faqs?.length) {
+        graph.push({
+            '@type': 'FAQPage',
+            mainEntity: post.faqs.map(item => ({
+                '@type': 'Question',
+                name: item.question,
+                acceptedAnswer: { '@type': 'Answer', text: item.answer }
+            }))
+        });
     }
-    if (post.businessContext) graph.push({ '@type': 'LocalBusiness', name: 'Eden Cafe', description: post.businessContext });
-    return { '@context': 'https://schema.org', '@graph': graph };
-}
 
-function injectJsonLd(data) {
-    document.querySelectorAll('script[data-blog-jsonld]').forEach((item) => item.remove());
     const script = document.createElement('script');
     script.type = 'application/ld+json';
-    script.dataset.blogJsonld = 'true';
-    script.textContent = JSON.stringify(data);
+    script.dataset.dynamicBlogJsonld = 'true';
+    script.textContent = JSON.stringify({ '@context': 'https://schema.org', '@graph': graph });
     document.head.appendChild(script);
 }
 
-function renderListing(data) {
-    const status = document.getElementById('blog-status');
-    const grid = document.getElementById('blog-grid');
-    const featured = document.getElementById('blog-featured');
-    const search = document.getElementById('blog-search-input');
-    const category = document.getElementById('blog-category-filter');
-    const tag = document.getElementById('blog-tag-filter');
-    const params = new URLSearchParams(window.location.search);
-    const authorFilter = slugify(params.get('author') || '');
-    fillSelect(category, data.categories, 'ทุกหมวดหมู่');
-    fillSelect(tag, data.tags, 'ทุก Tags');
-    if (category && params.get('category')) category.value = params.get('category');
-    if (tag && params.get('tag')) tag.value = params.get('tag');
-
-    function draw() {
-        const q = text(search?.value).toLowerCase();
-        const categoryId = category?.value || 'all';
-        const tagId = tag?.value || 'all';
-        const rows = data.posts.filter((post) => {
-            const haystack = `${post.title} ${post.excerpt} ${post.categoryName} ${post.tags.join(' ')}`.toLowerCase();
-            return (!q || haystack.includes(q))
-                && (categoryId === 'all' || post.categoryId === categoryId)
-                && (tagId === 'all' || post.tagIds.includes(tagId) || post.tags.map(slugify).includes(tagId))
-                && (!authorFilter || slugify(post.authorId) === authorFilter || slugify(post.authorName) === authorFilter);
-        });
-        if (status) status.style.display = rows.length ? 'none' : 'block';
-        if (status) status.textContent = data.posts.length ? 'ไม่พบบทความตามเงื่อนไขนี้' : 'ยังไม่มีบทความ published ในระบบ';
-        const featuredPost = rows.find((post) => post.isFeatured) || rows[0];
-        if (featured) featured.innerHTML = featuredPost ? cardHTML(featuredPost) : '';
-        if (grid) grid.innerHTML = rows.filter((post) => post.id !== featuredPost?.id).map(cardHTML).join('');
-    }
-    [search, category, tag].forEach((el) => el?.addEventListener('input', draw));
-    [category, tag].forEach((el) => el?.addEventListener('change', draw));
-    injectJsonLd({
-        '@context': 'https://schema.org',
-        '@type': 'Blog',
-        name: 'Eden Cafe Blog',
-        url: `${SITE_URL}/blog`,
-        blogPost: data.posts.map((post) => ({ '@type': 'BlogPosting', headline: post.title, url: `${SITE_URL}${postUrl(post)}`, datePublished: post.publishedAt, image: post.cover }))
-    });
-    draw();
+async function hydrateCmsListing() {
+    const posts = await fetchPublishedCmsPosts();
+    if (posts.length) renderCmsListing(posts);
 }
 
-function currentSlug() {
-    const params = new URLSearchParams(window.location.search);
-    const fromQuery = params.get('slug') || params.get('id');
-    if (fromQuery) return slugify(fromQuery);
-    const parts = window.location.pathname.replace(/^\/+|\/+$/g, '').split('/');
-    return slugify(parts[parts.length - 1] || '');
-}
+async function hydrateCmsDetail() {
+    const slug = currentRouteSlug();
+    if (!slug) return;
 
-function renderDetail(data) {
-    const slug = currentSlug();
-    const status = document.getElementById('blog-detail-status');
-    const container = document.getElementById('blog-detail');
-    const relatedEl = document.getElementById('blog-related');
-    const post = data.posts.find((item) => item.slug === slug || item.id === slug);
-    if (!post) {
-        if (status) status.textContent = 'ไม่พบบทความ หรือบทความยังไม่ได้ Published';
+    const staticPost = normalizeStaticPost(BLOG_POST_BY_SLUG[slug]);
+    let cmsPosts = [];
+    try {
+        cmsPosts = await fetchPublishedCmsPosts();
+    } catch (error) {
+        if (staticPost) {
+            renderCmsDetail(staticPost, getStaticPosts());
+            return;
+        }
+        renderMissingPost(slug, `โหลดบทความจากระบบไม่สำเร็จ: ${error.message || error}`);
         return;
     }
-    if (status) status.style.display = 'none';
-    updateMeta(post);
-    injectJsonLd(jsonLdForPost(post));
-    const headings = [...post.content.matchAll(/<h([23])[^>]*>(.*?)<\/h[23]>/gi)].map((match, index) => ({ id: `section-${index + 1}`, text: plainText(match[2]) }));
-    let headingIndex = 0;
-    const content = post.content.replace(/<h([23])([^>]*)>(.*?)<\/h[23]>/gi, (full, level, attrs, inner) => {
-        const heading = headings[headingIndex++] || { id: `section-${headingIndex}` };
-        const cleanAttrs = String(attrs || '').replace(/\sid=(["']).*?\1/i, '');
-        return `<h${level} id="${heading.id}"${cleanAttrs}>${inner}</h${level}>`;
-    });
-    container.innerHTML = `
-        <header class="blog-cms-detail-header">
-            <div class="container blog-cms-article">
-                <a href="/blog" class="blog-read-link">← บทความทั้งหมด</a>
-                <div class="blog-cms-meta"><span>${escapeHTML(post.categoryName)}</span><span>${formatDate(post.publishedAt)}</span></div>
-                <h1>${escapeHTML(post.title)}</h1>
-                <p class="lede">${escapeHTML(post.excerpt)}</p>
-                <div class="blog-cms-card-foot"><span>${escapeHTML(post.authorName)}</span><span>${post.readingTime} นาทีอ่าน</span><span>${post.wordCount} words</span></div>
-            </div>
-        </header>
-        <div class="blog-cms-cover"><img src="${escapeHTML(post.cover)}" alt="${escapeHTML(post.coverAlt || post.title)}">${post.coverCaption ? `<p>${escapeHTML(post.coverCaption)}</p>` : ''}</div>
-        <div class="blog-cms-detail-inner">
-            <aside class="blog-cms-toc">
-                <strong>Table of Contents</strong>
-                ${headings.length ? headings.map((heading) => `<a href="#${heading.id}">${escapeHTML(heading.text)}</a>`).join('') : '<p>บทความนี้ยังไม่มี H2/H3</p>'}
-                <button class="btn btn-outline" type="button" id="blog-share-button">Share</button>
-            </aside>
-            <div class="blog-cms-article">
-                <div class="blog-cms-prose">${content}</div>
-                ${post.faqs.length ? `<section class="blog-cms-faq"><h2>FAQ</h2>${post.faqs.map((faq) => `<details><summary>${escapeHTML(faq.question)}</summary><p>${escapeHTML(faq.answer)}</p></details>`).join('')}</section>` : ''}
-                <section class="blog-cms-cta"><h2>สนใจมา Eden Cafe?</h2><p>ดูเมนูหรือจองโต๊ะ/กิจกรรมได้จากหน้าเว็บไซต์ของเรา</p><p><a class="btn" href="/menu">ดูเมนู</a> <a class="btn btn-outline" href="/booking">จองบริการ</a></p></section>
-                <section class="blog-cms-author"><h2>Author Box</h2><p><strong>${escapeHTML(post.authorName)}</strong></p><p>${escapeHTML(post.authorBio || 'ทีม Eden Cafe เขียนบทความนี้เพื่อแบ่งปันข้อมูลที่ช่วยให้ผู้อ่านวางแผนและตัดสินใจได้ง่ายขึ้น')}</p></section>
-            </div>
-        </div>
-    `;
-    document.getElementById('blog-share-button')?.addEventListener('click', async () => {
-        const url = window.location.href;
-        if (navigator.share) await navigator.share({ title: post.title, url });
-        else {
-            await navigator.clipboard.writeText(url);
-            alert('คัดลอกลิงก์แล้ว');
-        }
-    });
-    const related = data.posts.filter((item) => item.id !== post.id && (item.categoryId === post.categoryId || item.tagIds.some((tag) => post.tagIds.includes(tag)))).slice(0, 3);
-    if (relatedEl) relatedEl.innerHTML = related.map(cardHTML).join('');
+
+    const cmsPost = cmsPosts.find(post => post.slug === slug);
+    if (cmsPost) {
+        renderCmsDetail(cmsPost, cmsPosts);
+        exposeBlogDataForDebugging(cmsPosts, 'firestore');
+        return;
+    }
+    if (staticPost) {
+        renderCmsDetail(staticPost, getStaticPosts());
+        return;
+    }
+    renderMissingPost(slug);
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
-    installPublicStyles();
-    const page = document.body.dataset.blogPage;
-    try {
-        const data = await loadBlogData();
-        if (page === 'detail') renderDetail(data);
-        else renderListing(data);
-        window.EdenCafeBlog = Object.freeze({ posts: data.posts });
-    } catch (error) {
-        const target = page === 'detail' ? document.getElementById('blog-detail-status') : document.getElementById('blog-status');
-        if (target) target.textContent = `โหลดบทความไม่สำเร็จ: ${error.message || error}`;
-        console.error('Blog CMS public load failed:', error);
+async function hydratePublicBlogFromCms() {
+    const page = document.body?.dataset.blogPage;
+    if (page === 'listing') {
+        await hydrateCmsListing();
+    } else if (page === 'legacy-detail') {
+        await hydrateCmsDetail();
     }
-});
+}
+
+function initBlogPage() {
+    if (location.pathname.includes('blog-en')) return;
+    setupLegacyRedirect();
+    setupTocHighlight();
+    setupListingFilters();
+    exposeBlogDataForDebugging();
+    hydratePublicBlogFromCms().catch(error => {
+        console.warn('Public blog CMS hydration failed:', error);
+    });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initBlogPage);
+} else {
+    initBlogPage();
+}
