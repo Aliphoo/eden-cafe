@@ -2360,11 +2360,15 @@ function syncDashboardFilterControls() {
 
     const startDate = document.getElementById('dashboard-start-date');
     const endDate = document.getElementById('dashboard-end-date');
+    const salesStartDate = document.getElementById('sales-report-start-date');
+    const salesEndDate = document.getElementById('sales-report-end-date');
     const startTime = document.getElementById('dashboard-time-start');
     const endTime = document.getElementById('dashboard-time-end');
     const employee = document.getElementById('dashboard-employee-filter');
     if (startDate && startDate.value !== filters.startKey) startDate.value = filters.startKey;
     if (endDate && endDate.value !== filters.endKey) endDate.value = filters.endKey;
+    if (salesStartDate && salesStartDate.value !== filters.startKey) salesStartDate.value = filters.startKey;
+    if (salesEndDate && salesEndDate.value !== filters.endKey) salesEndDate.value = filters.endKey;
     if (startTime && startTime.value !== filters.timeStart) startTime.value = filters.timeStart;
     if (endTime && endTime.value !== filters.timeEnd) endTime.value = filters.timeEnd;
     if (employee && employee.value !== filters.employee) employee.value = filters.employee;
@@ -2388,6 +2392,20 @@ function setDashboardDatePreset(preset = 'today') {
         const range = dashboardPresetRange(safePreset);
         filters.startKey = range.startKey;
         filters.endKey = range.endKey;
+    }
+    renderDashboardAfterFilterChange();
+}
+
+function setDashboardCustomDateBoundary(boundary, value) {
+    const filters = ensureDashboardFilters();
+    const nextValue = value || (boundary === 'end' ? filters.endKey : filters.startKey);
+    filters.datePreset = 'custom';
+    if (boundary === 'end') {
+        filters.endKey = nextValue;
+        if (filters.startKey > filters.endKey) filters.startKey = filters.endKey;
+    } else {
+        filters.startKey = nextValue;
+        if (filters.startKey > filters.endKey) filters.endKey = filters.startKey;
     }
     renderDashboardAfterFilterChange();
 }
@@ -2422,20 +2440,10 @@ function bindDashboardFilters() {
         const button = event.target.closest('[data-dashboard-source]');
         if (button) setDashboardSource(button.dataset.dashboardSource);
     });
-    document.getElementById('dashboard-start-date')?.addEventListener('change', event => {
-        const filters = ensureDashboardFilters();
-        filters.datePreset = 'custom';
-        filters.startKey = event.target.value || filters.startKey;
-        if (filters.startKey > filters.endKey) filters.endKey = filters.startKey;
-        renderDashboardAfterFilterChange();
-    });
-    document.getElementById('dashboard-end-date')?.addEventListener('change', event => {
-        const filters = ensureDashboardFilters();
-        filters.datePreset = 'custom';
-        filters.endKey = event.target.value || filters.endKey;
-        if (filters.startKey > filters.endKey) filters.startKey = filters.endKey;
-        renderDashboardAfterFilterChange();
-    });
+    document.getElementById('dashboard-start-date')?.addEventListener('change', event => setDashboardCustomDateBoundary('start', event.target.value));
+    document.getElementById('dashboard-end-date')?.addEventListener('change', event => setDashboardCustomDateBoundary('end', event.target.value));
+    document.getElementById('sales-report-start-date')?.addEventListener('change', event => setDashboardCustomDateBoundary('start', event.target.value));
+    document.getElementById('sales-report-end-date')?.addEventListener('change', event => setDashboardCustomDateBoundary('end', event.target.value));
     document.getElementById('dashboard-time-start')?.addEventListener('change', event => {
         const filters = ensureDashboardFilters();
         filters.timePreset = 'custom';

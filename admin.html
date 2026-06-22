@@ -175,16 +175,12 @@
         /* Sales Dashboard */
         .sales-dashboard-shell { background: #f5f6f6; border-radius: 10px; overflow: hidden; box-shadow: 0 10px 30px rgba(17, 38, 30, 0.08); border: 1px solid #e4e8e5; }
         .sales-dashboard-topbar { min-height: 56px; background: #43ad4f; color: white; display: flex; align-items: center; gap: 18px; padding: 0 22px; box-shadow: 0 2px 7px rgba(0,0,0,0.18); }
-        .sales-dashboard-menu-btn { width: 34px; height: 34px; border: 0; border-radius: 4px; background: transparent; color: white; font-size: 1.55rem; line-height: 1; cursor: pointer; }
         .sales-dashboard-topbar h2 { font-size: 1.25rem; font-weight: 700; margin: 0; }
-        .sales-dashboard-body { display: grid; grid-template-columns: 64px minmax(0, 1fr); min-height: 760px; }
-        .sales-dashboard-rail { background: #fff; border-right: 1px solid #e3e7e3; display: grid; align-content: start; justify-items: center; padding-top: 14px; gap: 10px; }
-        .sales-rail-btn { width: 52px; height: 52px; border: 0; border-left: 4px solid transparent; background: transparent; color: #8a9490; display: grid; font-size: 1.35rem; place-items: center; user-select: none; cursor: default; }
-        .sales-rail-btn.active { border-left-color: #43ad4f; background: #f0f7f1; color: #43ad4f; }
+        .sales-dashboard-body { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 760px; }
         .sales-dashboard-main { padding: 22px; overflow: hidden; }
         .sales-dashboard-toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
-        .sales-filter-btn, .sales-filter-select {
-            min-height: 42px;
+        .sales-filter-btn, .sales-filter-select, .sales-date-range-filter {
+            min-height: 44px;
             border: 1px solid #e2e7e2;
             background: #fff;
             box-shadow: 0 2px 8px rgba(0,0,0,0.08);
@@ -197,6 +193,10 @@
         .sales-filter-btn { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
         .sales-filter-btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .sales-filter-select { min-width: 170px; }
+        .sales-date-range-filter { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .sales-date-range-filter > span:first-child { color: #6f7d75; }
+        .sales-date-range-input { min-height: 34px; border: 1px solid #dfe6df; border-radius: 4px; color: #25302b; font: inherit; font-weight: 600; padding: 0 8px; }
+        .sales-date-range-separator { color: #7c8781; font-size: 0.9rem; font-weight: 600; }
         .sales-dashboard-layout { display: grid; grid-template-columns: 285px minmax(0, 1fr); gap: 0; align-items: start; }
         .sales-report-card { background: #fff; min-height: 320px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); border: 1px solid #e8ece8; z-index: 1; }
         .sales-report-title { display: none; }
@@ -251,7 +251,6 @@
         }
         @media (max-width: 880px) {
             .sales-dashboard-body { grid-template-columns: 1fr; }
-            .sales-dashboard-rail { display: none; }
             .sales-dashboard-main { padding: 14px; }
             .sales-dashboard-layout { grid-template-columns: 1fr; gap: 14px; }
             .sales-chart-filter-row { justify-content: flex-start; flex-wrap: wrap; gap: 12px; }
@@ -261,7 +260,8 @@
         @media (max-width: 560px) {
             .sales-kpi-grid { grid-template-columns: 1fr; }
             .sales-dashboard-toolbar { gap: 8px; }
-            .sales-filter-select { width: 100%; }
+            .sales-filter-select, .sales-date-range-filter { width: 100%; }
+            .sales-date-range-input { flex: 1 1 140px; min-width: 0; }
         }
 
         /* Charts & Tables Section */
@@ -726,7 +726,7 @@
         body { min-height: 100vh; min-height: 100dvh; height: 100vh; height: 100dvh; overflow: hidden; }
         .sidebar { height: 100vh; height: 100dvh; max-height: 100vh; max-height: 100dvh; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable; }
         .main-content { min-width: 0; min-height: 0; height: 100vh; height: 100dvh; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
-        .dashboard-segmented button,.sales-report-nav button,.sales-filter-btn,.sales-filter-select,.sales-export-btn,.sales-table-page-input,.promptpay-mini-btn,.dashboard-link-btn { min-height: 44px; }
+        .dashboard-segmented button,.sales-report-nav button,.sales-filter-btn,.sales-filter-select,.sales-date-range-filter,.sales-export-btn,.sales-table-page-input,.promptpay-mini-btn,.dashboard-link-btn { min-height: 44px; }
         .dashboard-link-btn,.sales-export-btn,.sales-table-icon-btn,.promptpay-mini-btn { align-items: center; display: inline-flex; justify-content: center; }
         .sales-table-icon-btn { min-height: 44px; min-width: 44px; }
         @media (max-width: 820px) {
@@ -743,10 +743,10 @@
             .admin-profile { width: 100%; justify-content: space-between; }
             .section-container { border-radius: 10px; padding: 16px; }
             .btn-action, .google-btn, .email-login-btn, .admin-refresh-btn { align-items: center; display: inline-flex; justify-content: center; min-height: 44px; padding: 10px 14px; }
-            .data-tools-row button, .data-tools-row select, .data-tools-row input[type="file"], .dashboard-field-row input, .dashboard-control-group select, .sales-filter-btn, .sales-filter-select, .sales-mini-select, .map-admin-toolbar input, .map-admin-toolbar select, .map-admin-reset, .apk-admin-form input, .apk-admin-form select, .apk-admin-form textarea { min-height: 44px; }
+            .data-tools-row button, .data-tools-row select, .data-tools-row input[type="file"], .dashboard-field-row input, .dashboard-control-group select, .sales-filter-btn, .sales-filter-select, .sales-date-range-filter, .sales-mini-select, .map-admin-toolbar input, .map-admin-toolbar select, .map-admin-reset, .apk-admin-form input, .apk-admin-form select, .apk-admin-form textarea { min-height: 44px; }
             .sales-dashboard-topbar { flex-wrap: wrap; gap: 10px; padding: 10px 14px; }
             .sales-dashboard-main { overflow: visible; }
-            .sales-dashboard-menu-btn, .sales-table-page-btn, .map-admin-page-btn, .menu-page-btn { min-height: 44px; min-width: 44px; }
+            .sales-table-page-btn, .map-admin-page-btn, .menu-page-btn { min-height: 44px; min-width: 44px; }
             .sales-table-head { align-items: flex-start; flex-direction: column; padding: 14px; }
             .sales-table-actions { justify-content: flex-start; }
             .sales-table-scroll, .map-admin-table-scroll, .apk-admin-table-wrap, .menu-pos-table-wrap, .product-variant-table-wrap, .discount-table-wrap { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -1095,26 +1095,19 @@
 
             <section class="sales-dashboard-shell" aria-label="รายงานยอดขายเชิงลึก">
                 <header class="sales-dashboard-topbar">
-                    <button class="sales-dashboard-menu-btn" type="button" aria-label="รายงาน">▦</button>
                     <h2>รายงานยอดขายเชิงลึก</h2>
                 </header>
 
                 <div class="sales-dashboard-body">
-                    <aside class="sales-dashboard-rail" aria-hidden="true">
-                        <span class="sales-rail-btn">●</span>
-                        <span class="sales-rail-btn active">▥</span>
-                        <span class="sales-rail-btn">◆</span>
-                        <span class="sales-rail-btn">▱</span>
-                        <span class="sales-rail-btn">♟</span>
-                        <span class="sales-rail-btn">⚙</span>
-                    </aside>
-
                     <div class="sales-dashboard-main">
                         <div class="sales-dashboard-toolbar" aria-label="ตัวกรองรายงานยอดขาย">
-                            <button class="sales-filter-btn" type="button" disabled>
+                            <div class="sales-date-range-filter">
                                 <span>ช่วงข้อมูล</span>
                                 <span id="sales-report-range-label">-</span>
-                            </button>
+                                <input class="sales-date-range-input" id="sales-report-start-date" type="date" aria-label="วันเริ่มต้นรายงานยอดขาย">
+                                <span class="sales-date-range-separator">ถึง</span>
+                                <input class="sales-date-range-input" id="sales-report-end-date" type="date" aria-label="วันสิ้นสุดรายงานยอดขาย">
+                            </div>
                             <button class="sales-filter-btn" type="button" onclick="openDashboardTab('orders')">เปิด Orders</button>
                             <button class="sales-filter-btn" type="button" onclick="openDashboardTab('products')">เปิด Products</button>
                         </div>
