@@ -1,5 +1,5 @@
 import { auth, db, storage } from './firebase-config.js';
-import { runAdminImageUploadFlow } from './admin-upload-modal.js';
+import { enhanceAdminFileInputs, runAdminImageUploadFlow } from './admin-upload-modal.js?v=admin-file-picker-1';
 import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
     addDoc,
@@ -1624,6 +1624,7 @@ function render() {
     if (!el) return;
     el.innerHTML = layoutHTML(activeHTML());
     bindEvents();
+    enhanceAdminFileInputs(el);
     if (state.tab === 'editor') {
         updateEditorStats();
         bindEditorAutosave();

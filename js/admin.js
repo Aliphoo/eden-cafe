@@ -2,7 +2,7 @@ import { auth, provider, db } from './firebase-config.js';
 import { getMemberTier, getTierBenefits } from './membership.js';
 import { BLOG_POSTS, SITE, getBlogUrl } from './blog-data.mjs';
 import { renderSkeleton } from './ui-skeleton.js';
-import { runAdminFileOperationFlow, runAdminImageUploadFlow } from './admin-upload-modal.js';
+import { enhanceAdminFileInputs, runAdminFileOperationFlow, runAdminImageUploadFlow } from './admin-upload-modal.js?v=admin-file-picker-1';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp, writeBatch, runTransaction, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -1049,6 +1049,7 @@ function initXLSXTools() {
             });
             alert(`อัปโหลดสำเร็จ รวม ${result.total} รายการ (เพิ่ม ${result.created}, อัปเดต ${result.updated})`);
             fileInput.value = '';
+            enhanceAdminFileInputs();
         } catch (error) {
             alert(safeAdminError("อัปโหลดไม่สำเร็จ"));
         } finally {
@@ -1070,6 +1071,7 @@ const loginError = document.getElementById('login-error');
 
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
+    enhanceAdminFileInputs();
     bindSalesReportNav();
     renderDashboardSalesReport();
 

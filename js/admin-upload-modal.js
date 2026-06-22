@@ -421,6 +421,63 @@ function ensureModalStyle() {
             height: 18px;
             flex: 0 0 auto;
         }
+        .eden-file-control {
+            position: relative;
+            width: 100%;
+            min-width: 0;
+            display: grid;
+            gap: 7px;
+            color: #20342d;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        .eden-file-native {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            overflow: hidden;
+            pointer-events: none;
+        }
+        .eden-file-trigger {
+            min-height: 44px;
+            width: 100%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 9px;
+            border: 1px solid rgba(37, 208, 185, 0.36);
+            border-radius: 8px;
+            padding: 10px 12px;
+            color: #eaf7f6;
+            background:
+                radial-gradient(circle at 50% 20%, rgba(37, 208, 185, 0.16), transparent 12rem),
+                linear-gradient(180deg, rgba(15, 24, 30, 0.98), rgba(8, 13, 18, 0.98));
+            box-shadow: 0 10px 26px rgba(4, 11, 13, 0.16), inset 0 0 0 1px rgba(255,255,255,0.03);
+            font: inherit;
+            font-weight: 850;
+            line-height: 1.15;
+            letter-spacing: 0;
+            cursor: pointer;
+        }
+        .eden-file-trigger:hover,
+        .eden-file-control.is-dragging .eden-file-trigger {
+            border-color: rgba(37, 208, 185, 0.72);
+            box-shadow: 0 12px 30px rgba(4, 11, 13, 0.18), 0 0 24px rgba(37, 208, 185, 0.14);
+        }
+        .eden-file-control.is-selected .eden-file-trigger {
+            border-color: rgba(104, 211, 145, 0.58);
+        }
+        .eden-file-meta {
+            min-width: 0;
+            display: block;
+            color: #66776f;
+            font-size: 0.79rem;
+            font-weight: 750;
+            line-height: 1.25;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
         @media (max-width: 820px) {
             .eden-upload-backdrop { padding: 10px; }
             .eden-upload-dialog { max-height: calc(100vh - 20px); }
@@ -444,6 +501,82 @@ function ensureModalStyle() {
 
 function uploadIcon(path) {
     return `<svg class="eden-upload-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">${path}</svg>`;
+}
+
+function filePickerLabel(input) {
+    const accept = String(input.getAttribute('accept') || '').toLowerCase();
+    const id = String(input.id || '').toLowerCase();
+    if (accept.includes('.xls') || id.includes('xlsx')) return 'Select XLSX file';
+    if (accept.includes('image') || id.includes('image') || id.includes('hero') || id.includes('cover')) return 'Select image';
+    return 'Select file';
+}
+
+function syncFileControl(input) {
+    const control = input.closest('.eden-file-control');
+    if (!control) return;
+    const meta = control.querySelector('[data-eden-file-meta]');
+    const file = input.files?.[0] || null;
+    control.classList.toggle('is-selected', Boolean(file));
+    if (meta) meta.textContent = fileLabel(file);
+}
+
+function shouldSkipFileInput(input) {
+    if (!input || input.dataset.edenFileEnhanced === 'true') return true;
+    if (input.hidden) return true;
+    if (String(input.style.display || '').toLowerCase() === 'none') return true;
+    return false;
+}
+
+export function enhanceAdminFileInputs(root = document) {
+    ensureModalStyle();
+    const scope = root instanceof Element || root instanceof Document ? root : document;
+    scope.querySelectorAll('input[type="file"]').forEach(input => {
+        if (input.dataset.edenFileEnhanced === 'true') {
+            syncFileControl(input);
+            return;
+        }
+        if (shouldSkipFileInput(input)) return;
+
+        const control = document.createElement('div');
+        control.className = 'eden-file-control';
+        const label = input.id ? input.closest('label') : null;
+        if (label && label.contains(input)) {
+            label.htmlFor = input.id;
+            label.insertAdjacentElement('afterend', control);
+        } else {
+            input.insertAdjacentElement('beforebegin', control);
+        }
+
+        input.dataset.edenFileEnhanced = 'true';
+        input.classList.add('eden-file-native');
+        control.appendChild(input);
+        control.insertAdjacentHTML('beforeend', `
+            <button class="eden-file-trigger" type="button" data-eden-file-trigger>
+                ${uploadIcon('<path d="M12 19V5m0 0-5 5m5-5 5 5" stroke="currentColor" stroke-width="2.35" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 19h14" stroke="currentColor" stroke-width="2.35" stroke-linecap="round"/>')}
+                <span>${escapeHTML(filePickerLabel(input))}</span>
+            </button>
+            <span class="eden-file-meta" data-eden-file-meta>No file selected</span>
+        `);
+
+        control.querySelector('[data-eden-file-trigger]')?.addEventListener('click', () => input.click());
+        input.addEventListener('change', () => syncFileControl(input));
+        ['dragenter', 'dragover'].forEach(type => {
+            control.addEventListener(type, event => {
+                event.preventDefault();
+                control.classList.add('is-dragging');
+            });
+        });
+        ['dragleave', 'dragend', 'drop'].forEach(type => {
+            control.addEventListener(type, () => control.classList.remove('is-dragging'));
+        });
+        control.addEventListener('drop', event => {
+            event.preventDefault();
+            if (!event.dataTransfer?.files?.length) return;
+            input.files = event.dataTransfer.files;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        syncFileControl(input);
+    });
 }
 
 function ensureModal() {
