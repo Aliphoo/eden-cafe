@@ -366,6 +366,7 @@ let loyaltyConfigUnsubscribe = null;
 let loyaltyLedgerUnsubscribe = null;
 let loyaltyFormsBound = false;
 let dashboardOrdersData = [];
+let dashboardOrdersLoaded = false;
 let dashboardBookingsData = [];
 let dashboardStatsData = {};
 let dashboardPromptPaySettings = null;
@@ -2762,6 +2763,299 @@ function buildDashboardSalesReportRows(type, orders = dashboardRevenueOrders()) 
     return sortedSalesReportGroups(groups);
 }
 
+function salesReportSku(item = {}) {
+    return item.sku || item.variantSku || item.productSku || '';
+}
+
+function salesReportOptionLabel(item = {}) {
+    return item.variantName || item.optionName || item.optionLabel || item.modifierName || '';
+}
+
+function salesReportProductRows(orders = dashboardRevenueOrders()) {
+    const groups = new Map();
+    orders.forEach(order => {
+        orderReportItems(order).forEach(item => {
+            const product = orderItemName(item);
+            const option = salesReportOptionLabel(item);
+            const sku = salesReportSku(item);
+            const key = [product, option, sku].join('||');
+            const current = groups.get(key) || { product, option, sku, quantity: 0, sales: 0, cost: 0, profit: 0 };
+            const amount = itemReportAmount(item);
+            const cost = itemReportCost(item);
+            current.quantity += Math.max(0, safeNumber(item.quantity, 1));
+            current.sales += amount;
+            current.cost += cost;
+            current.profit += amount - cost;
+            groups.set(key, current);
+        });
+    });
+    return Array.from(groups.values()).sort((a, b) => (b.sales - a.sales) || String(a.product).localeCompare(String(b.product), 'th'));
+}
+
+function salesReportCategoryRows(orders = dashboardRevenueOrders()) {
+    const groups = new Map();
+    orders.forEach(order => {
+        orderReportItems(order).forEach(item => {
+            const categoryKey = orderItemCategoryKey(item);
+            const category = orderItemCategoryLabel(item);
+            const current = groups.get(categoryKey) || { category, quantity: 0, sales: 0 };
+            current.quantity += Math.max(0, safeNumber(item.quantity, 1));
+            current.sales += itemReportAmount(item);
+            groups.set(categoryKey, current);
+        });
+    });
+    return Array.from(groups.values()).sort((a, b) => (b.sales - a.sales) || String(a.category).localeCompare(String(b.category), 'th'));
+}
+
+function salesReportStaffRows(orders = dashboardRevenueOrders()) {
+    const groups = new Map();
+    orders.forEach(order => {
+        const key = salesReportEmployeeKey(order);
+        const current = groups.get(key) || { staff: salesReportEmployeeName(order), receiptCount: 0, sales: 0 };
+        current.receiptCount += 1;
+        current.sales += orderReportTotal(order);
+        groups.set(key, current);
+    });
+    return Array.from(groups.values()).sort((a, b) => (b.sales - a.sales) || String(a.staff).localeCompare(String(b.staff), 'th'));
+}
+
+function salesReportPaymentRows(orders = dashboardRevenueOrders()) {
+    const groups = new Map();
+    orders.forEach(order => {
+        const method = order.paymentLabel || salesReportPaymentLabel(order.paymentMethod);
+        const current = groups.get(method) || { method, receiptCount: 0, sales: 0 };
+        current.receiptCount += 1;
+        current.sales += orderReportTotal(order);
+        groups.set(method, current);
+    });
+    return Array.from(groups.values()).sort((a, b) => (b.sales - a.sales) || String(a.method).localeCompare(String(b.method), 'th'));
+}
+
+function salesReportReceiptDetailRows(orders = dashboardRevenueOrders()) {
+    return orders
+        .slice()
+        .sort((a, b) => orderReportDateValue(b) - orderReportDateValue(a))
+        .map(order => ({
+            receiptNo: salesReportReceiptNo(order),
+            date: salesReportOrderDateText(order),
+            customer: order.customerName || order.name || 'Walk-in Customer',
+            staff: salesReportEmployeeName(order),
+            payment: order.paymentLabel || salesReportPaymentLabel(order.paymentMethod),
+            gross: orderReportGross(order),
+            discount: orderReportDiscount(order),
+            tax: orderReportTax(order),
+            net: orderReportTotal(order)
+        }));
+}
+
+function salesReportOptionRows(orders = dashboardRevenueOrders()) {
+    const groups = new Map();
+    orders.forEach(order => {
+        orderReportItems(order).forEach(item => {
+            const option = salesReportOptionLabel(item) || 'ไม่มีตัวเลือกเพิ่มเติม';
+            const current = groups.get(option) || { option, quantity: 0, sales: 0 };
+            current.quantity += Math.max(0, safeNumber(item.quantity, 1));
+            current.sales += itemReportAmount(item);
+            groups.set(option, current);
+        });
+    });
+    return Array.from(groups.values()).sort((a, b) => (b.sales - a.sales) || String(a.option).localeCompare(String(b.option), 'th'));
+}
+
+function salesReportDiscountRows(orders = dashboardRevenueOrders()) {
+    const groups = new Map();
+    orders.forEach(order => {
+        const discountAmount = orderReportDiscount(order);
+        if (!discountAmount) return;
+        const discount = order.totals?.discountLabel || order.discountLabel || 'ส่วนลดหน้าร้าน';
+        const current = groups.get(discount) || { discount, useCount: 0, discountAmount: 0 };
+        current.useCount += 1;
+        current.discountAmount += discountAmount;
+        groups.set(discount, current);
+    });
+    return Array.from(groups.values()).sort((a, b) => (b.discountAmount - a.discountAmount) || String(a.discount).localeCompare(String(b.discount), 'th'));
+}
+
+function salesReportTaxRows(orders = dashboardRevenueOrders()) {
+    return orders
+        .slice()
+        .sort((a, b) => orderReportDateValue(b) - orderReportDateValue(a))
+        .map(order => {
+            const tax = orderReportTax(order);
+            return {
+                receiptDate: [salesReportReceiptNo(order), salesReportOrderDateText(order)].filter(Boolean).join(' / '),
+                taxBase: Math.max(0, orderReportTotal(order) - tax),
+                tax
+            };
+        })
+        .filter(row => row.tax > 0);
+}
+
+const SALES_REPORT_DEFINITIONS = {
+    summary: {
+        label: SALES_REPORT_LABELS.summary,
+        sheetName: 'summary',
+        filenameKey: 'summary',
+        labelKey: 'date',
+        amountKey: 'net',
+        showTotal: false,
+        columns: [
+            { key: 'date', label: 'วันที่', type: 'text' },
+            { key: 'gross', label: 'ยอดขาย', type: 'money', total: 'sum' },
+            { key: 'refunds', label: 'คืนเงิน', type: 'money', total: 'sum' },
+            { key: 'discounts', label: 'ส่วนลด', type: 'money', total: 'sum' },
+            { key: 'net', label: 'ยอดขายสุทธิ', type: 'money', total: 'sum' },
+            { key: 'cost', label: 'ต้นทุนของสินค้า', type: 'money', total: 'sum' },
+            { key: 'profit', label: 'กำไรรวม', type: 'money', total: 'sum' },
+            { key: 'margin', label: 'ผลต่าง (%)', type: 'percent' },
+            { key: 'tax', label: 'ภาษี', type: 'money', total: 'sum' }
+        ],
+        buildRows: () => buildDailySalesRows().map(row => ({
+            date: salesReportDateLabel(row.date),
+            gross: row.gross,
+            refunds: row.refunds,
+            discounts: row.discounts,
+            net: row.net,
+            cost: row.cost,
+            profit: row.profit,
+            margin: Number(row.margin.toFixed(2)),
+            tax: row.tax
+        }))
+    },
+    product: {
+        label: SALES_REPORT_LABELS.product,
+        sheetName: 'products',
+        filenameKey: 'product',
+        labelKey: 'product',
+        amountKey: 'sales',
+        columns: [
+            { key: 'product', label: 'สินค้า', type: 'text' },
+            { key: 'option', label: 'ตัวเลือก', type: 'text' },
+            { key: 'sku', label: 'SKU', type: 'text' },
+            { key: 'quantity', label: 'จำนวน', type: 'number', total: 'sum' },
+            { key: 'sales', label: 'ยอดขาย', type: 'money', total: 'sum' },
+            { key: 'cost', label: 'ต้นทุน', type: 'money', total: 'sum' },
+            { key: 'profit', label: 'กำไร', type: 'money', total: 'sum' }
+        ],
+        buildRows: () => salesReportProductRows()
+    },
+    category: {
+        label: SALES_REPORT_LABELS.category,
+        sheetName: 'categories',
+        filenameKey: 'category',
+        labelKey: 'category',
+        amountKey: 'sales',
+        totalLabel: 'ยอดขายรวม',
+        columns: [
+            { key: 'category', label: 'หมวดหมู่', type: 'text' },
+            { key: 'quantity', label: 'จำนวน', type: 'number', total: 'sum' },
+            { key: 'sales', label: 'ยอดขาย', type: 'money', total: 'sum' }
+        ],
+        buildRows: () => salesReportCategoryRows()
+    },
+    staff: {
+        label: SALES_REPORT_LABELS.staff,
+        sheetName: 'staff',
+        filenameKey: 'staff',
+        labelKey: 'staff',
+        amountKey: 'sales',
+        columns: [
+            { key: 'staff', label: 'พนักงาน', type: 'text' },
+            { key: 'receiptCount', label: 'จำนวนใบเสร็จ', type: 'number', total: 'sum' },
+            { key: 'sales', label: 'ยอดขาย', type: 'money', total: 'sum' }
+        ],
+        buildRows: () => salesReportStaffRows()
+    },
+    payment: {
+        label: SALES_REPORT_LABELS.payment,
+        sheetName: 'payments',
+        filenameKey: 'payment',
+        labelKey: 'method',
+        amountKey: 'sales',
+        columns: [
+            { key: 'method', label: 'วิธีชำระเงิน', type: 'text' },
+            { key: 'receiptCount', label: 'จำนวนใบเสร็จ', type: 'number', total: 'sum' },
+            { key: 'sales', label: 'ยอดขาย', type: 'money', total: 'sum' }
+        ],
+        buildRows: () => salesReportPaymentRows()
+    },
+    receipts: {
+        label: SALES_REPORT_LABELS.receipts,
+        sheetName: 'receipts',
+        filenameKey: 'receipts',
+        labelKey: 'receiptNo',
+        amountKey: 'net',
+        columns: [
+            { key: 'receiptNo', label: 'เลขที่ใบเสร็จ', type: 'text' },
+            { key: 'date', label: 'วันที่', type: 'text' },
+            { key: 'customer', label: 'ลูกค้า', type: 'text' },
+            { key: 'staff', label: 'พนักงาน', type: 'text' },
+            { key: 'payment', label: 'วิธีชำระเงิน', type: 'text' },
+            { key: 'gross', label: 'ยอดก่อนส่วนลด', type: 'money', total: 'sum' },
+            { key: 'discount', label: 'ส่วนลด', type: 'money', total: 'sum' },
+            { key: 'tax', label: 'ภาษี', type: 'money', total: 'sum' },
+            { key: 'net', label: 'ยอดสุทธิ', type: 'money', total: 'sum' }
+        ],
+        buildRows: () => salesReportReceiptDetailRows()
+    },
+    options: {
+        label: SALES_REPORT_LABELS.options,
+        sheetName: 'options',
+        filenameKey: 'options',
+        labelKey: 'option',
+        amountKey: 'sales',
+        columns: [
+            { key: 'option', label: 'ตัวเลือกเพิ่มเติม', type: 'text' },
+            { key: 'quantity', label: 'จำนวน', type: 'number', total: 'sum' },
+            { key: 'sales', label: 'ยอดขาย', type: 'money', total: 'sum' }
+        ],
+        buildRows: () => salesReportOptionRows()
+    },
+    discounts: {
+        label: SALES_REPORT_LABELS.discounts,
+        sheetName: 'discounts',
+        filenameKey: 'discounts',
+        labelKey: 'discount',
+        amountKey: 'discountAmount',
+        columns: [
+            { key: 'discount', label: 'ชื่อส่วนลด', type: 'text' },
+            { key: 'useCount', label: 'จำนวนครั้ง', type: 'number', total: 'sum' },
+            { key: 'discountAmount', label: 'ยอดส่วนลด', type: 'money', total: 'sum' }
+        ],
+        buildRows: () => salesReportDiscountRows()
+    },
+    taxes: {
+        label: SALES_REPORT_LABELS.taxes,
+        sheetName: 'taxes',
+        filenameKey: 'taxes',
+        labelKey: 'receiptDate',
+        amountKey: 'tax',
+        columns: [
+            { key: 'receiptDate', label: 'เลขใบเสร็จ / วันที่', type: 'text' },
+            { key: 'taxBase', label: 'ฐานภาษี', type: 'money', total: 'sum' },
+            { key: 'tax', label: 'ภาษี', type: 'money', total: 'sum' }
+        ],
+        buildRows: () => salesReportTaxRows()
+    }
+};
+
+function getSalesReportDefinition(type = activeSalesReport) {
+    return SALES_REPORT_DEFINITIONS[type] || SALES_REPORT_DEFINITIONS.summary;
+}
+
+function buildSalesReportRows(type = activeSalesReport) {
+    const definition = getSalesReportDefinition(type);
+    return typeof definition.buildRows === 'function' ? definition.buildRows() : [];
+}
+
+function salesReportRowLabel(row = {}, definition = getSalesReportDefinition()) {
+    return row[definition.labelKey] || row.label || '';
+}
+
+function salesReportRowAmount(row = {}, definition = getSalesReportDefinition()) {
+    return safeNumber(row[definition.amountKey] ?? row.amount ?? row.sales ?? row.net);
+}
+
 function updateSalesReportEmployeeOptions() {
     const select = document.getElementById('dashboard-employee-filter') || document.getElementById('sales-report-employee-filter');
     if (!select) return;
@@ -2822,9 +3116,10 @@ function renderSalesSummaryChart() {
     const values = rows.map(row => safeNumber(row.net));
     const chartType = activeSalesReport === 'summary' ? 'line' : 'bar';
     const datasetLabel = SALES_REPORT_LABELS[activeSalesReport] || SALES_REPORT_LABELS.summary;
-    const reportRows = activeSalesReport === 'summary' ? [] : buildDashboardSalesReportRows(activeSalesReport).slice(0, 10);
-    const finalLabels = activeSalesReport === 'summary' ? labels : (reportRows.length ? reportRows.map(row => row.label) : ['ยังไม่มีข้อมูล']);
-    const finalValues = activeSalesReport === 'summary' ? values : (reportRows.length ? reportRows.map(row => safeNumber(row.amount)) : [0]);
+    const reportDefinition = getSalesReportDefinition(activeSalesReport);
+    const reportRows = activeSalesReport === 'summary' ? [] : buildSalesReportRows(activeSalesReport).slice(0, 10);
+    const finalLabels = activeSalesReport === 'summary' ? labels : (reportRows.length ? reportRows.map(row => salesReportRowLabel(row, reportDefinition)) : ['ยังไม่มีข้อมูล']);
+    const finalValues = activeSalesReport === 'summary' ? values : (reportRows.length ? reportRows.map(row => salesReportRowAmount(row, reportDefinition)) : [0]);
     const needsRecreate = !salesSummaryChart || salesSummaryChart.config.type !== chartType;
 
     if (needsRecreate && salesSummaryChart) {
@@ -2886,84 +3181,60 @@ function renderSalesSummaryChart() {
     });
 }
 
+function formatSalesReportValue(value, column = {}, target = 'table') {
+    if (column.type === 'money') return target === 'excel' ? safeNumber(value) : adminMoney(value);
+    if (column.type === 'number') return target === 'excel' ? safeNumber(value) : safeNumber(value).toLocaleString('th-TH');
+    if (column.type === 'percent') {
+        const amount = safeNumber(value);
+        return target === 'excel' ? amount : `${amount.toLocaleString('th-TH', { maximumFractionDigits: 2 })}%`;
+    }
+    return value ?? '';
+}
+
+function buildSalesReportTotalRow(definition, rows = []) {
+    const total = {};
+    definition.columns.forEach((column, index) => {
+        if (index === 0) {
+            total[column.key] = definition.totalLabel || 'รวมทั้งหมด';
+            return;
+        }
+        if (column.total === 'sum') {
+            total[column.key] = rows.reduce((sum, row) => sum + safeNumber(row[column.key]), 0);
+            return;
+        }
+        total[column.key] = '';
+    });
+    return total;
+}
+
+function renderSalesReportRowHTML(row, columns = []) {
+    return `<tr>${columns.map((column, index) => {
+        const className = index === 0 ? ' class="sales-date-cell"' : '';
+        return `<td${className}>${escapeHTML(formatSalesReportValue(row[column.key], column, 'table'))}</td>`;
+    }).join('')}</tr>`;
+}
+
 function renderSalesSummaryTable() {
     const head = document.getElementById('sales-summary-table-head');
     const body = document.getElementById('sales-summary-table-body');
     if (!body) return;
 
-    if (activeSalesReport !== 'summary') {
-        const rows = buildDashboardSalesReportRows(activeSalesReport);
-        const totalAmount = rows.reduce((sum, row) => sum + safeNumber(row.amount), 0);
-        const totalQuantity = rows.reduce((sum, row) => sum + safeNumber(row.quantity), 0);
-        if (head) {
-            head.innerHTML = `
-                <tr>
-                    <th>รายการ</th>
-                    <th>จำนวน</th>
-                    <th>ยอดขาย</th>
-                    <th>วันที่ / ช่วงเวลา</th>
-                </tr>
-            `;
-        }
-        const totalLabel = activeSalesReport === 'category' ? 'ยอดขายรวม' : 'รวมทั้งหมด';
-        const totalRow = `
-            <tr>
-                <td class="sales-date-cell">${escapeHTML(totalLabel)}</td>
-                <td>${totalQuantity ? totalQuantity.toLocaleString('th-TH') : rows.length.toLocaleString('th-TH')}</td>
-                <td>${adminMoney(totalAmount)}</td>
-                <td>${escapeHTML(dashboardReportDateLabel())}</td>
-            </tr>
-        `;
-        if (!rows.length) {
-            body.innerHTML = totalRow + `<tr><td colspan="4" class="sales-report-empty">ยังไม่มีข้อมูล ${escapeHTML(SALES_REPORT_LABELS[activeSalesReport] || 'รายงานนี้')}</td></tr>`;
-            return;
-        }
-        body.innerHTML = totalRow + rows.slice(0, 40).map(row => `
-            <tr>
-                <td class="sales-date-cell">${escapeHTML(row.label)}</td>
-                <td>${safeNumber(row.quantity).toLocaleString('th-TH')}</td>
-                <td>${adminMoney(row.amount)}</td>
-                <td>${escapeHTML(row.meta || dashboardReportDateLabel())}</td>
-            </tr>
-        `).join('');
+    const definition = getSalesReportDefinition(activeSalesReport);
+    const columns = definition.columns || [];
+    const rows = buildSalesReportRows(activeSalesReport);
+    if (head) {
+        head.innerHTML = `<tr>${columns.map(column => `<th>${escapeHTML(column.label)}</th>`).join('')}</tr>`;
+    }
+
+    if (!rows.length) {
+        body.innerHTML = `<tr><td colspan="${Math.max(1, columns.length)}" class="sales-report-empty">ยังไม่มีข้อมูล ${escapeHTML(definition.label || 'รายงานนี้')}</td></tr>`;
         const pageTotal = document.getElementById('sales-table-page-total');
-        if (pageTotal) pageTotal.textContent = `จาก ${Math.max(1, Math.ceil(rows.length / 10)).toLocaleString('th-TH')}`;
+        if (pageTotal) pageTotal.textContent = 'จาก 1';
         return;
     }
 
-    if (head) {
-        head.innerHTML = `
-            <tr>
-                <th>วันที่</th>
-                <th>ยอดขาย</th>
-                <th>คืนเงิน</th>
-                <th>ส่วนลด</th>
-                <th>ยอดขายสุทธิ</th>
-                <th>ต้นทุนของสินค้า</th>
-                <th>กำไรรวม</th>
-                <th>ผลต่าง</th>
-                <th>ภาษี</th>
-            </tr>
-        `;
-    }
-    const rows = buildDailySalesRows();
-    if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="9" class="sales-report-empty">ยังไม่มีข้อมูลยอดขาย</td></tr>';
-        return;
-    }
-    body.innerHTML = rows.map(row => `
-        <tr>
-            <td class="sales-date-cell">${escapeHTML(salesReportDateLabel(row.date))}</td>
-            <td>${adminMoney(row.gross)}</td>
-            <td>${adminMoney(row.refunds)}</td>
-            <td>${adminMoney(row.discounts)}</td>
-            <td>${adminMoney(row.net)}</td>
-            <td>${adminMoney(row.cost)}</td>
-            <td>${adminMoney(row.profit)}</td>
-            <td>${row.margin.toLocaleString('th-TH', { maximumFractionDigits: 2 })}%</td>
-            <td>${adminMoney(row.tax)}</td>
-        </tr>
-    `).join('');
+    const totalRow = definition.showTotal === false ? '' : renderSalesReportRowHTML(buildSalesReportTotalRow(definition, rows), columns);
+    body.innerHTML = totalRow + rows.slice(0, 40).map(row => renderSalesReportRowHTML(row, columns)).join('');
     const pageTotal = document.getElementById('sales-table-page-total');
     if (pageTotal) pageTotal.textContent = `จาก ${Math.max(1, Math.ceil(rows.length / 10)).toLocaleString('th-TH')}`;
 }
@@ -3363,11 +3634,28 @@ function salesReportSheetName(name) {
     return String(name || 'sales').replace(/[\\/?*[\]:]/g, '').slice(0, 31) || 'sales';
 }
 
-function salesReportExcelSheet(rows) {
-    const worksheet = worksheetFromData(rows.length ? rows : [{ note: 'ยังไม่มีข้อมูลยอดขายในช่วงที่เลือก' }]);
-    const keys = Object.keys(rows[0] || { note: '' });
+function salesReportExcelRow(row = {}, columns = []) {
+    return columns.reduce((output, column) => {
+        output[column.label] = formatSalesReportValue(row[column.key], column, 'excel');
+        return output;
+    }, {});
+}
+
+function salesReportExcelSheet(rows, columns = null) {
+    const exportRows = Array.isArray(columns)
+        ? rows.map(row => salesReportExcelRow(row, columns))
+        : rows;
+    const emptyRow = Array.isArray(columns)
+        ? columns.reduce((output, column) => {
+            output[column.label] = '';
+            return output;
+        }, {})
+        : { note: 'ยังไม่มีข้อมูลยอดขายในช่วงที่เลือก' };
+    const sheetRows = exportRows.length ? exportRows : [emptyRow];
+    const worksheet = worksheetFromData(sheetRows);
+    const keys = Object.keys(sheetRows[0] || { note: '' });
     worksheet['!cols'] = keys.map((key) => {
-        const maxLength = rows.reduce((max, row) => Math.max(max, String(row[key] ?? '').length), String(key).length);
+        const maxLength = sheetRows.reduce((max, row) => Math.max(max, String(row[key] ?? '').length), String(key).length);
         return { wch: Math.min(Math.max(maxLength + 3, 12), 42) };
     });
     return worksheet;
@@ -3387,100 +3675,14 @@ function salesReportReceiptNo(order = {}) {
     return order.receiptNo || order.orderNumber || order.id || order.firestoreId || '';
 }
 
-function currentSalesReportExportRows(type = activeSalesReport) {
-    if (type === 'summary') {
-        return buildDailySalesRows().map(row => ({
-            'วันที่': salesReportDateLabel(row.date),
-            'ยอดขาย': row.gross,
-            'คืนเงิน': row.refunds,
-            'ส่วนลด': row.discounts,
-            'ยอดขายสุทธิ': row.net,
-            'ต้นทุนของสินค้า': row.cost,
-            'กำไรรวม': row.profit,
-            'ผลต่าง (%)': Number(row.margin.toFixed(2)),
-            'ภาษี': row.tax
-        }));
-    }
-    return buildDashboardSalesReportRows(type).map(row => ({
-        'รายงาน': SALES_REPORT_LABELS[type] || 'รายงานยอดขาย',
-        'รายการ': row.label || '',
-        'จำนวน': safeNumber(row.quantity),
-        'ยอดขาย': safeNumber(row.amount),
-        'วันที่ / ช่วงเวลา': row.meta || dashboardReportDateLabel()
-    }));
-}
-
-function salesReportReceiptRows() {
-    return dashboardRevenueOrders()
-        .slice()
-        .sort((a, b) => orderReportDateValue(b) - orderReportDateValue(a))
-        .map(order => {
-            const total = orderReportTotal(order);
-            const cost = orderReportCost(order);
-            return {
-                'เลขที่ใบเสร็จ': salesReportReceiptNo(order),
-                'วันที่': salesReportOrderDateText(order),
-                'ลูกค้า': order.customerName || 'Walk-in Customer',
-                'เบอร์โทร': order.phone || '',
-                'พนักงาน': salesReportEmployeeName(order),
-                'วิธีชำระเงิน': order.paymentLabel || salesReportPaymentLabel(order.paymentMethod),
-                'สถานะ': order.status || '',
-                'ยอดก่อนส่วนลด': orderReportGross(order),
-                'ส่วนลด': orderReportDiscount(order),
-                'ภาษี': orderReportTax(order),
-                'ยอดสุทธิ': total,
-                'ต้นทุน': cost,
-                'กำไร': total - cost,
-                'หมายเหตุ': order.note || '',
-                'Firestore ID': order.firestoreId || order.id || ''
-            };
-        });
-}
-
-function salesReportItemRows() {
-    const rows = [];
-    dashboardRevenueOrders()
-        .slice()
-        .sort((a, b) => orderReportDateValue(b) - orderReportDateValue(a))
-        .forEach(order => {
-            orderReportItems(order).forEach(item => {
-                const quantity = Math.max(0, safeNumber(item.quantity, 1));
-                const lineTotal = itemReportAmount(item);
-                const cost = itemReportCost(item);
-                rows.push({
-                    'เลขที่ใบเสร็จ': salesReportReceiptNo(order),
-                    'วันที่': salesReportOrderDateText(order),
-                    'สินค้า': item.name || item.productName || 'ไม่ระบุสินค้า',
-                    'ตัวเลือก': item.variantName || item.optionName || '',
-                    'SKU': item.sku || item.variantSku || '',
-                    'หมวดหมู่': item.categoryName || categoriesData[item.category || item.categoryId || '']?.name || item.category || item.categoryId || '',
-                    'จำนวน': quantity,
-                    'ราคาต่อหน่วย': safeNumber(item.unitPrice ?? item.price ?? item.basePrice),
-                    'ส่วนลดรายการ': safeNumber(item.lineDiscount ?? item.discount),
-                    'ยอดรวม': lineTotal,
-                    'ต้นทุนรวม': cost,
-                    'กำไรรวม': lineTotal - cost,
-                    'ลูกค้า': order.customerName || 'Walk-in Customer',
-                    'พนักงาน': salesReportEmployeeName(order)
-                });
-            });
-        });
-    return rows;
-}
-
-function exportSalesWorkbook(type = activeSalesReport) {
-    const XLSX = window.XLSX;
-    if (!XLSX) throw new Error('ไม่พบไลบรารี Excel กรุณารีเฟรชหน้าแล้วลองอีกครั้ง');
-    if (!canAdmin('orders')) throw new Error('บัญชีนี้ไม่มีสิทธิ์ดาวน์โหลดข้อมูลยอดขาย');
-
-    const workbook = XLSX.utils.book_new();
-    const activeLabel = SALES_REPORT_LABELS[type] || 'รายงานยอดขาย';
+function salesReportOverviewRows(definition, reportRows = []) {
     const totals = reportSummaryTotals();
-    const overviewRows = [{
-        'รายงาน': activeLabel,
+    return [{
+        'รายงาน': definition.label || 'รายงานยอดขาย',
         'ช่วงวันที่': salesReportRangeLabel(),
         'ช่วงเวลา': salesReportTimeFilter === 'all' ? 'ตลอดทั้งวัน' : salesReportTimeFilter,
         'พนักงาน': salesReportEmployeeFilter === 'all' ? 'พนักงานทั้งหมด' : salesReportEmployeeFilter,
+        'จำนวนแถวในรายงาน': reportRows.length,
         'จำนวนใบเสร็จ': totals.count,
         'ยอดขาย': totals.gross,
         'คืนเงิน': totals.refunds,
@@ -3492,25 +3694,33 @@ function exportSalesWorkbook(type = activeSalesReport) {
         'ภาษี': totals.tax,
         'ส่งออกเมื่อ': new Date().toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })
     }];
+}
 
-    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(overviewRows), 'overview');
-    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(currentSalesReportExportRows(type)), salesReportSheetName(activeLabel));
-    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(buildDashboardSalesReportRows('category').map(row => ({
-        'หมวดหมู่': row.label,
-        'จำนวน': safeNumber(row.quantity),
-        'ยอดขาย': safeNumber(row.amount),
-        'ช่วงวันที่': dashboardReportDateLabel()
-    }))), 'categories');
-    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(buildDashboardSalesReportRows('product').map(row => ({
-        'สินค้า': row.label,
-        'จำนวน': safeNumber(row.quantity),
-        'ยอดขาย': safeNumber(row.amount),
-        'ช่วงวันที่': dashboardReportDateLabel()
-    }))), 'products');
-    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(salesReportReceiptRows()), 'receipts');
-    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(salesReportItemRows()), 'items');
+function ensureSalesReportOrdersReady() {
+    if (dashboardOrdersLoaded) return;
+    if (!ordersUnsubscribe && (canAdmin('orders') || canAdmin('pos'))) setupRealtimeOrders();
+    throw new Error('กำลังโหลดข้อมูลออเดอร์ กรุณารอสักครู่แล้วลองดาวน์โหลดอีกครั้ง');
+}
 
-    XLSX.writeFile(workbook, `eden-sales-${type}-${salesReportRange().startKey}-to-${salesReportRange().endKey}.xlsx`);
+function salesReportFileName(definition) {
+    const range = salesReportRange();
+    return `eden-sales-${definition.filenameKey || 'report'}-${range.startKey}-to-${range.endKey}.xlsx`;
+}
+
+function exportSalesWorkbook(type = activeSalesReport) {
+    const XLSX = window.XLSX;
+    if (!XLSX) throw new Error('ไม่พบไลบรารี Excel กรุณารีเฟรชหน้าแล้วลองอีกครั้ง');
+    if (!canAdmin('orders')) throw new Error('บัญชีนี้ไม่มีสิทธิ์ดาวน์โหลดข้อมูลยอดขาย');
+    ensureSalesReportOrdersReady();
+
+    const workbook = XLSX.utils.book_new();
+    const definition = getSalesReportDefinition(type);
+    const reportRows = buildSalesReportRows(type);
+
+    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(salesReportOverviewRows(definition, reportRows)), 'overview');
+    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(reportRows, definition.columns), salesReportSheetName(definition.sheetName || definition.label));
+
+    XLSX.writeFile(workbook, salesReportFileName(definition));
 }
 
 window.exportSalesReportXLSX = () => {
@@ -3524,7 +3734,7 @@ window.exportSalesReportXLSX = () => {
         exportSalesWorkbook(activeSalesReport);
     } catch (error) {
         console.error('Export sales XLSX failed:', error);
-        alert(safeAdminError("ดาวน์โหลดข้อมูลยอดขายไม่สำเร็จ"));
+        alert(error?.message || safeAdminError("ดาวน์โหลดข้อมูลยอดขายไม่สำเร็จ"));
     } finally {
         if (button) {
             button.disabled = false;
@@ -3615,6 +3825,7 @@ function setupRealtimeOrdersLegacy() {
         ordersUnsubscribe();
         ordersUnsubscribe = null;
     }
+    dashboardOrdersLoaded = false;
     const q = query(collection(db, "orders"), orderBy("timestamp", "desc"));
     ordersUnsubscribe = onSnapshot(q, (snapshot) => {
         const tbody = document.getElementById('orders-table-body');
@@ -3629,6 +3840,7 @@ function setupRealtimeOrdersLegacy() {
         if (snapshot.empty) {
             tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">ไม่มีข้อมูลออเดอร์</td></tr>';
             dashboardOrdersData = [];
+            dashboardOrdersLoaded = true;
             renderDashboardSalesReport();
             document.getElementById('stat-orders').innerText = todayOrders;
             document.getElementById('stat-revenue').innerText = '฿' + todayRevenue.toLocaleString();
@@ -3678,11 +3890,13 @@ function setupRealtimeOrdersLegacy() {
 
         // Update Dashboard Stats
         dashboardOrdersData = reportOrders;
+        dashboardOrdersLoaded = true;
         renderDashboardSalesReport();
         document.getElementById('stat-orders').innerText = todayOrders;
         document.getElementById('stat-revenue').innerText = '฿' + todayRevenue.toLocaleString();
     }, (error) => {
         console.error("Error listening to orders:", error);
+        dashboardOrdersLoaded = false;
         const tbody = document.getElementById('orders-table-body');
         if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:red;">ไม่มีสิทธิ์เข้าถึงข้อมูล หรือเกิดข้อผิดพลาด</td></tr>';
     });
@@ -4182,6 +4396,7 @@ function setupRealtimeOrders() {
         ordersUnsubscribe();
         ordersUnsubscribe = null;
     }
+    dashboardOrdersLoaded = false;
     mountOrdersProScaffold();
     const q = query(collection(db, "orders"), orderBy("timestamp", "desc"));
     ordersUnsubscribe = onSnapshot(q, (snapshot) => {
@@ -4204,6 +4419,7 @@ function setupRealtimeOrders() {
 
         ordersData = reportOrders;
         dashboardOrdersData = reportOrders;
+        dashboardOrdersLoaded = true;
         renderDashboardSalesReport();
         const statOrders = document.getElementById('stat-orders');
         const statRevenue = document.getElementById('stat-revenue');
@@ -4212,6 +4428,7 @@ function setupRealtimeOrders() {
         renderOrdersProView();
     }, (error) => {
         console.error("Error listening to orders:", error);
+        dashboardOrdersLoaded = false;
         const tbody = document.getElementById('orders-table-body');
         if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:red;">ไม่มีสิทธิ์เข้าถึงข้อมูล หรือเกิดข้อผิดพลาด</td></tr>';
     });
