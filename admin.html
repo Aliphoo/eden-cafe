@@ -1525,6 +1525,19 @@
                                 <label>สิทธิ์การใช้งาน</label>
                                 <div id="access-permissions" class="access-permission-grid"></div>
                             </div>
+                            <div class="form-group" id="access-archery-settings" style="display:none;">
+                                <label>Eden Archery access</label>
+                                <div class="access-password-grid">
+                                    <input type="text" id="access-archery-branch" value="BKK_MAIN" placeholder="Branch ID">
+                                    <select id="access-archery-role">
+                                        <option value="OWNER">Owner</option>
+                                        <option value="MANAGER">Manager</option>
+                                        <option value="ARCHERY_STAFF">Archery Staff</option>
+                                        <option value="CASHIER">Cashier</option>
+                                    </select>
+                                </div>
+                                <div class="access-field-help">Used by live Archery bookings, payment watch, walk-ins, and lane actions.</div>
+                            </div>
                             <button type="submit" class="btn-submit">บันทึกสิทธิ์</button>
                             <button type="button" class="btn-action" style="width:100%; margin-top:10px; background:#789;" onclick="resetAdminAccessForm()">ล้างฟอร์ม</button>
                         </form>

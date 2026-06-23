@@ -41,6 +41,8 @@ const ADMIN_EMAILS = new Set([
 const ADMIN_PERMISSION_FALLBACKS = {
   archery: ['bookings'],
 };
+const ADMIN_ARCHERY_BRANCH_DEFAULT = 'BKK_MAIN';
+const ADMIN_ARCHERY_ROLE_VALUES = new Set(['OWNER', 'MANAGER', 'ARCHERY_STAFF', 'CASHIER']);
 const IMAGE_REMOTE_ROOT = 'Images/uploads';
 const IMAGE_PUBLIC_BASE_URL = 'https://www.edencafe.co/Images/uploads';
 const SPACESHIP_FTP_FALLBACK_HOSTS = [
@@ -583,6 +585,66 @@ function normalizeAdminPermissions(role, raw = {}) {
   const all = Object.fromEntries(allowed.map(key => [key, true]));
   if (role === 'owner' || role === 'head_manager') return all;
   return Object.fromEntries(allowed.map(key => [key, raw && raw[key] === true]));
+}
+
+function hasAdminArcheryPermission(role, permissions = {}) {
+  return role === 'owner' || role === 'head_manager' || permissions?.archery === true;
+}
+
+function normalizeBranchIds(value) {
+  const rawValues = Array.isArray(value)
+    ? value
+    : String(value || '').split(',');
+  const seen = new Set();
+  const branchIds = [];
+  rawValues.forEach(item => {
+    const branchId = cleanString(item, 40);
+    if (!branchId || seen.has(branchId)) return;
+    seen.add(branchId);
+    branchIds.push(branchId);
+  });
+  return branchIds.slice(0, 20);
+}
+
+function normalizeAdminArcheryRole(role, value) {
+  if (role === 'owner') return 'OWNER';
+  const archeryRole = cleanString(value || '', 40).toUpperCase();
+  if (ADMIN_ARCHERY_ROLE_VALUES.has(archeryRole) && archeryRole !== 'OWNER') return archeryRole;
+  return 'MANAGER';
+}
+
+function normalizeAdminArcheryAccess(role, permissions, body = {}, existing = {}) {
+  if (!hasAdminArcheryPermission(role, permissions)) return {};
+
+  const requestedPrimary = cleanString(
+    body.primary_branch_id
+      || body.primaryBranchId
+      || body.branch_id
+      || body.branchId
+      || body.archeryBranchId
+      || '',
+    40
+  );
+  const existingPrimary = cleanString(existing.primary_branch_id || existing.branch_id || '', 40);
+  const requestedBranchIds = normalizeBranchIds(
+    body.branch_ids
+      || body.branchIds
+      || body.archery_branch_ids
+      || body.archeryBranchIds
+      || []
+  );
+  const existingBranchIds = normalizeBranchIds(existing.branch_ids || []);
+  const primaryBranchId = requestedPrimary
+    || requestedBranchIds[0]
+    || existingPrimary
+    || existingBranchIds[0]
+    || ADMIN_ARCHERY_BRANCH_DEFAULT;
+  const branchIds = normalizeBranchIds([primaryBranchId, ...requestedBranchIds, ...existingBranchIds]);
+  return {
+    primary_branch_id: primaryBranchId,
+    branch_ids: branchIds.length ? branchIds : [ADMIN_ARCHERY_BRANCH_DEFAULT],
+    archery_role: normalizeAdminArcheryRole(role, body.archery_role || body.archeryRole || existing.archery_role || existing.archeryRole),
+  };
 }
 
 function hasPasswordProvider(userRecord) {
@@ -1377,6 +1439,7 @@ exports.upsertAdminAccessUser = onRequest(
       const now = admin.firestore.FieldValue.serverTimestamp();
       const accessRef = db.collection('admin_users').doc(userRecord.uid);
       const accessSnap = await accessRef.get();
+      const existingAccess = accessSnap.exists ? accessSnap.data() || {} : {};
       const accessPayload = {
         uid: userRecord.uid,
         email,
@@ -1389,6 +1452,7 @@ exports.upsertAdminAccessUser = onRequest(
         authManagedBy: owner.uid || '',
         updatedAt: now,
         updatedBy: owner.uid || '',
+        ...normalizeAdminArcheryAccess(role, permissions, body, existingAccess),
       };
       if (passwordUpdated) accessPayload.passwordUpdatedAt = now;
       if (!accessSnap.exists) {
@@ -1422,6 +1486,9 @@ exports.upsertAdminAccessUser = onRequest(
         createdAuthUser,
         passwordUpdated,
         passwordLoginEnabled: accessPayload.passwordLoginEnabled,
+        primary_branch_id: accessPayload.primary_branch_id || '',
+        branch_ids: Array.isArray(accessPayload.branch_ids) ? accessPayload.branch_ids : [],
+        archery_role: accessPayload.archery_role || '',
       });
     } catch (error) {
       const status = error.statusCode || (/required|valid|password|uid|email/i.test(error.message) ? 400 : 500);

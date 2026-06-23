@@ -317,6 +317,8 @@ const ADMIN_TAB_PERMISSIONS = {
 const ADMIN_PERMISSION_FALLBACKS = {
     archery: ['bookings']
 };
+const ADMIN_ARCHERY_BRANCH_DEFAULT = 'BKK_MAIN';
+const ADMIN_ARCHERY_ROLE_VALUES = ['OWNER', 'MANAGER', 'ARCHERY_STAFF', 'CASHIER'];
 
 function normalizeEmail(value) {
     return String(value ?? '').trim().toLowerCase();
@@ -4962,6 +4964,16 @@ function archeryBranchId() {
     return ARCHERY_BRANCH_FALLBACK;
 }
 
+function archeryAdminAccessIssue() {
+    if (!canAdmin('archery') || isOwnerAccess()) return '';
+    const access = currentAdminAccess || {};
+    const hasBranch = !!(access.primary_branch_id || access.branch_id || (Array.isArray(access.branch_ids) && access.branch_ids.length));
+    if (!hasBranch) {
+        return `Archery access is missing branch access. Owner must save this admin with branch ${ARCHERY_BRANCH_FALLBACK}.`;
+    }
+    return '';
+}
+
 function archeryAdminRole() {
     const access = currentAdminAccess || {};
     const raw = String(access.archery_role || access.archeryRole || access.role || '').trim();
@@ -6162,6 +6174,14 @@ function setupRealtimeArcheryBookings() {
         archeryBookingsUnsubscribe = null;
     }
     if (!canAdmin('archery')) return;
+    const setupIssue = archeryAdminAccessIssue();
+    if (setupIssue) {
+        archeryBookingsData = [];
+        renderArcheryAdmin([]);
+        const tbody = document.getElementById('archery-bookings-table-body');
+        if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#c62828;">${escapeHTML(setupIssue)}</td></tr>`;
+        return;
+    }
     const branchId = archeryBranchId();
     const q = query(
         collection(db, 'bookings'),
@@ -6200,6 +6220,13 @@ function setupRealtimeArcheryPayments() {
         renderArcheryPaymentWatch(archeryBookingsData);
         return;
     }
+    const setupIssue = archeryAdminAccessIssue();
+    if (setupIssue) {
+        archeryPaymentsData = [];
+        const panel = document.getElementById('archery-payment-watch');
+        if (panel) panel.innerHTML = `<p class="archery-status error">${escapeHTML(setupIssue)}</p>`;
+        return;
+    }
     const q = query(
         collection(db, 'payments'),
         where('branch_id', '==', archeryBranchId()),
@@ -6233,6 +6260,13 @@ function setupRealtimeArcheryWebhookEvents() {
         renderArcheryWebhookEvents();
         return;
     }
+    const setupIssue = archeryAdminAccessIssue();
+    if (setupIssue) {
+        archeryWebhookEventsData = [];
+        const panel = document.getElementById('archery-webhook-events');
+        if (panel) panel.innerHTML = `<p class="archery-status error">${escapeHTML(setupIssue)}</p>`;
+        return;
+    }
     const q = query(
         collection(db, 'payment_webhook_events'),
         where('branch_id', '==', archeryBranchId()),
@@ -6262,6 +6296,13 @@ function setupRealtimeArcheryReconciliation() {
         renderArcheryReconciliationPanel();
         return;
     }
+    const setupIssue = archeryAdminAccessIssue();
+    if (setupIssue) {
+        archeryReconciliationData = [];
+        const panel = document.getElementById('archery-reconciliation-panel');
+        if (panel) panel.innerHTML = `<p class="archery-status error">${escapeHTML(setupIssue)}</p>`;
+        return;
+    }
     const q = query(
         collection(db, 'payment_reconciliation_queue'),
         where('branch_id', '==', archeryBranchId()),
@@ -6287,6 +6328,12 @@ function setupRealtimeArcheryAuditLogs() {
         archeryAuditUnsubscribe = null;
     }
     if (!archeryCan('viewAuditTrail')) {
+        archeryAuditLogsData = [];
+        renderArcheryAuditTrail();
+        return;
+    }
+    const setupIssue = archeryAdminAccessIssue();
+    if (setupIssue) {
         archeryAuditLogsData = [];
         renderArcheryAuditTrail();
         return;
@@ -9405,6 +9452,10 @@ function renderAdminPermissionInputs(selected = adminRoleDefaults('manager'), di
         </label>
     `;
     }).join('');
+    container.querySelectorAll('[data-access-permission]').forEach(input => {
+        input.addEventListener('change', () => syncAdminArcheryAccessFields());
+    });
+    syncAdminArcheryAccessFields();
 }
 
 function getSelectedAdminPermissions() {
@@ -9413,6 +9464,67 @@ function getSelectedAdminPermissions() {
         permissions[input.dataset.accessPermission] = input.checked === true;
     });
     return permissions;
+}
+
+function adminAccessHasArchery(role, permissions = {}) {
+    return role === 'owner' || role === 'head_manager' || permissions?.archery === true;
+}
+
+function adminAccessPrimaryBranch(access = {}, fallback = '') {
+    if (access.primary_branch_id) return String(access.primary_branch_id).trim();
+    if (access.branch_id) return String(access.branch_id).trim();
+    if (Array.isArray(access.branch_ids) && access.branch_ids.length) return String(access.branch_ids[0]).trim();
+    return fallback;
+}
+
+function adminAccessDefaultArcheryRole(role) {
+    if (role === 'owner') return 'OWNER';
+    return 'MANAGER';
+}
+
+function normalizeAdminAccessArcheryRole(role, value) {
+    const upper = String(value || '').trim().toUpperCase();
+    if (role === 'owner') return 'OWNER';
+    if (ADMIN_ARCHERY_ROLE_VALUES.includes(upper) && upper !== 'OWNER') return upper;
+    return adminAccessDefaultArcheryRole(role);
+}
+
+function syncAdminArcheryAccessFields(options = {}) {
+    const section = document.getElementById('access-archery-settings');
+    const branchEl = document.getElementById('access-archery-branch');
+    const roleEl = document.getElementById('access-archery-role');
+    if (!section || !branchEl || !roleEl) return;
+
+    const role = document.getElementById('access-role')?.value || 'manager';
+    const permissions = getSelectedAdminPermissions();
+    const enabled = adminAccessHasArchery(role, permissions);
+    section.style.display = enabled ? '' : 'none';
+    branchEl.disabled = !enabled;
+    roleEl.disabled = !enabled || role === 'owner';
+    if (enabled && (!branchEl.value || options.reset)) branchEl.value = ADMIN_ARCHERY_BRANCH_DEFAULT;
+    if (enabled && (!roleEl.value || options.reset)) roleEl.value = adminAccessDefaultArcheryRole(role);
+    roleEl.value = normalizeAdminAccessArcheryRole(role, roleEl.value);
+}
+
+function collectAdminArcheryAccessPayload(role, permissions) {
+    if (!adminAccessHasArchery(role, permissions)) return {};
+    const branchId = (document.getElementById('access-archery-branch')?.value || ADMIN_ARCHERY_BRANCH_DEFAULT).trim() || ADMIN_ARCHERY_BRANCH_DEFAULT;
+    const archeryRole = normalizeAdminAccessArcheryRole(role, document.getElementById('access-archery-role')?.value);
+    return {
+        primary_branch_id: branchId,
+        branch_ids: [branchId],
+        archery_role: archeryRole
+    };
+}
+
+function adminAccessArcherySummaryHTML(access = {}) {
+    if (!adminAccessHasArchery(access.role, access.permissions || {})) return '';
+    const branchId = adminAccessPrimaryBranch(access, '');
+    if (!branchId) {
+        return '<br><small style="color:#c62828; font-weight:700;">Archery missing branch access</small>';
+    }
+    const role = normalizeAdminAccessArcheryRole(access.role, access.archery_role || access.archeryRole);
+    return `<br><small style="color:#607466; font-weight:700;">Archery: ${escapeHTML(branchId)} / ${escapeHTML(role)}</small>`;
 }
 
 function setAdminAccessStats(rows) {
@@ -9454,7 +9566,7 @@ function renderAdminAccessTable() {
             <tr>
                 <td><strong>${escapeHTML(row.displayName || 'Manager')}</strong><br><small>${escapeHTML(row.email || '-')}<br>UID: ${escapeHTML(row.uid)}</small></td>
                 <td>${adminRoleBadgeHTML(row.role)}</td>
-                <td style="max-width:260px;">${escapeHTML(permissionText)}</td>
+                <td style="max-width:260px;">${escapeHTML(permissionText)}${adminAccessArcherySummaryHTML(row)}</td>
                 <td><span class="access-auth-status ${row.passwordLoginEnabled ? '' : 'pending'}">${escapeHTML(passwordLoginText)}</span></td>
                 <td><span class="access-status-${row.status === 'active' ? 'active' : 'paused'}">${escapeHTML(row.status || 'active')}</span></td>
                 <td>${formatDate(row.updatedAt || row.createdAt)}</td>
@@ -9489,6 +9601,7 @@ function bindAdminAccessForm() {
         roleEl.addEventListener('change', () => {
             const role = roleEl.value;
             renderAdminPermissionInputs(adminRoleDefaults(role), role === 'owner' || role === 'head_manager');
+            syncAdminArcheryAccessFields({ reset: true });
         });
     }
 
@@ -9551,13 +9664,15 @@ async function saveAdminAccessFromForm() {
 
 
     const permissions = normalizePermissions(role, getSelectedAdminPermissions());
+    const archeryAccess = collectAdminArcheryAccessPayload(role, permissions);
     const payload = {
         uid,
         email,
         displayName,
         role,
         status,
-        permissions
+        permissions,
+        ...archeryAccess
     };
     if (password) payload.password = password;
     try {
@@ -9571,6 +9686,9 @@ async function saveAdminAccessFromForm() {
             role,
             status,
             permissions,
+            primary_branch_id: result.primary_branch_id || payload.primary_branch_id || '',
+            branch_ids: Array.isArray(result.branch_ids) ? result.branch_ids : (payload.branch_ids || []),
+            archery_role: result.archery_role || payload.archery_role || '',
             passwordLoginEnabled: result.passwordLoginEnabled !== false,
             updatedAt: new Date().toISOString()
         };
@@ -9597,6 +9715,11 @@ window.editAdminAccess = (uid) => {
     document.getElementById('access-role').value = data.role || 'manager';
     document.getElementById('access-status').value = data.status || 'active';
     renderAdminPermissionInputs(normalizePermissions(data.role, data.permissions), data.role === 'owner' || data.role === 'head_manager');
+    const branchEl = document.getElementById('access-archery-branch');
+    const archeryRoleEl = document.getElementById('access-archery-role');
+    if (branchEl) branchEl.value = adminAccessPrimaryBranch(data, ADMIN_ARCHERY_BRANCH_DEFAULT);
+    if (archeryRoleEl) archeryRoleEl.value = normalizeAdminAccessArcheryRole(data.role, data.archery_role || data.archeryRole);
+    syncAdminArcheryAccessFields();
 };
 
 window.deleteAdminAccess = async (uid) => {
@@ -9621,7 +9744,12 @@ window.resetAdminAccessForm = () => {
     if (uidEl) uidEl.value = '';
     if (passwordEl) passwordEl.value = '';
     if (confirmEl) confirmEl.value = '';
+    const branchEl = document.getElementById('access-archery-branch');
+    const archeryRoleEl = document.getElementById('access-archery-role');
+    if (branchEl) branchEl.value = ADMIN_ARCHERY_BRANCH_DEFAULT;
+    if (archeryRoleEl) archeryRoleEl.value = 'MANAGER';
     renderAdminPermissionInputs(adminRoleDefaults('manager'));
+    syncAdminArcheryAccessFields();
 };
 
 window.refreshAdminAccess = () => window.refreshAdminSection('admin-access');
