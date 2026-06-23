@@ -7,17 +7,35 @@ const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunction
 const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
 const PHONE_AUTH_EMAIL_DOMAIN = 'phone.edencafe.co';
 
-async function getAuthHeaders({ json = false } = {}) {
+function wait(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForCurrentUser(timeoutMs = 6000) {
+    const startedAt = Date.now();
+    let user = auth?.currentUser || null;
+    while (!user && Date.now() - startedAt < timeoutMs) {
+        await wait(100);
+        user = auth?.currentUser || null;
+    }
+    return user;
+}
+
+async function getAuthHeaders({ json = false, requireAuth = false } = {}) {
     const headers = {};
     if (json) headers['Content-Type'] = 'application/json';
-    const user = auth?.currentUser;
+    const user = requireAuth ? await waitForCurrentUser() : auth?.currentUser;
     if (user && typeof user.getIdToken === 'function') {
         headers.Authorization = 'Bearer ' + await user.getIdToken();
+    } else if (requireAuth) {
+        const error = new Error('Authentication is required');
+        error.status = 401;
+        throw error;
     }
     return headers;
 }
 
-async function edenApiRequest(path, { method = 'GET', query: queryParams = {}, body = null } = {}) {
+async function edenApiRequest(path, { method = 'GET', query: queryParams = {}, body = null, authenticated = false } = {}) {
     const url = new URL(FUNCTIONS_BASE_URL + path);
     Object.entries(queryParams || {}).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, value);
@@ -25,7 +43,7 @@ async function edenApiRequest(path, { method = 'GET', query: queryParams = {}, b
 
     const response = await fetch(url.toString(), {
         method,
-        headers: await getAuthHeaders({ json: !!body }),
+        headers: await getAuthHeaders({ json: !!body, requireAuth: authenticated }),
         body: body ? JSON.stringify(body) : undefined
     });
 
@@ -67,16 +85,19 @@ window.EdenApi = {
         return edenApiRequest('/getArcheryPaymentStatus', { method: 'POST', body: params });
     },
     createShopOrderDraft(orderData) {
-        return edenApiRequest('/createShopOrderDraft', { method: 'POST', body: orderData });
+        return edenApiRequest('/createShopOrderDraft', { method: 'POST', body: orderData, authenticated: true });
     },
     createPaymentIntent(paymentData) {
-        return edenApiRequest('/createPaymentIntent', { method: 'POST', body: paymentData });
+        return edenApiRequest('/createPaymentIntent', { method: 'POST', body: paymentData, authenticated: true });
     },
     getPaymentStatus(params = {}) {
-        return edenApiRequest('/getPaymentStatus', { method: 'POST', body: params });
+        return edenApiRequest('/getPaymentStatus', { method: 'POST', body: params, authenticated: true });
     },
     cancelPendingPayment(paymentData) {
-        return edenApiRequest('/cancelPendingPayment', { method: 'POST', body: paymentData });
+        return edenApiRequest('/cancelPendingPayment', { method: 'POST', body: paymentData, authenticated: true });
+    },
+    getMyProfile() {
+        return edenApiRequest('/getMyProfile', { method: 'POST', authenticated: true });
     }
 };
 

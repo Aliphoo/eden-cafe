@@ -8,7 +8,7 @@ import {
     requestPhoneChangeOtp,
     updateMyProfile,
     verifyPhoneChangeOtp
-} from './member-auth-service.js';
+} from './member-auth-service.js?v=checkout-phone-sync-20260623-1';
 import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 (() => {
@@ -195,7 +195,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             'สมาชิก Eden'
         );
         const nameParts = splitDisplayName(displayName);
-        const phoneE164 = firstNonEmpty(
+        const verifiedPhoneE164 = firstNonEmpty(
             profile.phone_number,
             profile.phoneE164,
             savedProfile.phone_number,
@@ -214,6 +214,38 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             previous.phone_verified_at,
             user.phoneVerifiedAt,
             user.phone_verified_at
+        );
+        const phoneVerifiedExplicitFalse = profile.phoneVerified === false
+            || profile.phone_verified === false
+            || savedProfile.phoneVerified === false
+            || savedProfile.phone_verified === false;
+        const phoneVerified = profile.phoneVerified === true
+            || profile.phone_verified === true
+            || savedProfile.phoneVerified === true
+            || savedProfile.phone_verified === true
+            || !!phoneVerifiedAt
+            || (!phoneVerifiedExplicitFalse && (previous.phoneVerified === true || user.phoneVerified === true));
+        const phoneE164 = phoneVerified ? verifiedPhoneE164 : '';
+        const checkoutPhone = firstNonEmpty(
+            profile.checkoutPhone,
+            profile.checkout_phone,
+            profile.contactPhone,
+            profile.contact_phone,
+            savedProfile.checkoutPhone,
+            savedProfile.checkout_phone,
+            savedProfile.contactPhone,
+            savedProfile.contact_phone,
+            previous.checkoutPhone,
+            previous.checkout_phone,
+            previous.contactPhone,
+            previous.contact_phone,
+            user.checkoutPhone,
+            user.checkout_phone,
+            user.contactPhone,
+            user.contact_phone,
+            !verifiedPhoneE164 ? profile.phone : '',
+            !verifiedPhoneE164 ? savedProfile.phone : '',
+            !verifiedPhoneE164 ? user.phone : ''
         );
         const shippingAddressStructured = buildProfileAddress(profile, savedProfile, user);
         const shippingAddress = firstNonEmpty(
@@ -239,9 +271,13 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             emailVerified: profile.emailVerified === true || profile.email_verified === true || savedProfile.emailVerified === true || savedProfile.email_verified === true || previous.emailVerified === true || user.emailVerified === true,
             emailVerifiedAt: firstNonEmpty(profile.emailVerifiedAt, profile.email_verified_at, savedProfile.emailVerifiedAt, savedProfile.email_verified_at, previous.emailVerifiedAt, user.emailVerifiedAt),
             photoURL: firstNonEmpty(profile.avatar_url, profile.photoURL, savedProfile.avatar_url, savedProfile.photoURL, previous.photoURL, user.avatar, user.photoURL, '/Images/Logo.webp'),
-            phone: firstNonEmpty(profile.phone_display, profile.phone, savedProfile.phone_display, savedProfile.phone, previous.phone, user.phone, displayThaiPhone(phoneE164)),
+            phone: firstNonEmpty(profile.phone_display, profile.phone, savedProfile.phone_display, savedProfile.phone, previous.phone, user.phone, displayThaiPhone(verifiedPhoneE164), checkoutPhone),
             phoneE164,
-            phoneVerified: profile.phoneVerified === true || profile.phone_verified === true || savedProfile.phoneVerified === true || savedProfile.phone_verified === true || previous.phoneVerified === true || user.phoneVerified === true || !!phoneVerifiedAt || !!phoneE164,
+            checkoutPhone,
+            checkout_phone: checkoutPhone,
+            contactPhone: checkoutPhone,
+            contact_phone: checkoutPhone,
+            phoneVerified,
             phoneVerifiedAt,
             shippingAddress,
             shippingAddressStructured,
@@ -851,8 +887,12 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             lastName: firstNonEmpty(user.lastName, nameParts.lastName),
             email: user.email || '',
             photoURL: user.avatar || user.photoURL || currentAuthUser?.photoURL || '/Images/Logo.webp',
-            phone: user.phone || '',
-            phoneE164: user.phoneNumber || '',
+            phone: user.phone || user.checkoutPhone || user.contactPhone || '',
+            phoneE164: user.phoneVerified === true ? (user.phoneNumber || '') : '',
+            checkoutPhone: user.checkoutPhone || user.checkout_phone || user.contactPhone || user.contact_phone || '',
+            checkout_phone: user.checkoutPhone || user.checkout_phone || user.contactPhone || user.contact_phone || '',
+            contactPhone: user.checkoutPhone || user.checkout_phone || user.contactPhone || user.contact_phone || '',
+            contact_phone: user.checkoutPhone || user.checkout_phone || user.contactPhone || user.contact_phone || '',
             phoneVerified: user.phoneVerified === true,
             phoneVerifiedAt: user.phoneVerifiedAt || '',
             shippingAddress: user.shippingAddress || user.address || '',
@@ -1698,7 +1738,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const emailVerified = !emailVerificationState.email && !!email && cloudProfile?.emailVerified === true && cleanString(cloudProfile?.email, 180).toLowerCase() === cleanString(email, 180).toLowerCase();
         const emailStatusClass = emailVerified ? 'is-verified' : 'is-unverified';
         const emailStatusText = emailVerified ? labels.emailVerified : labels.emailUnverified;
-        const phoneVerified = !!storedPhone && !phoneVerificationState.verificationId && (cloudProfile?.phoneVerified === true || !!cloudProfile?.phoneVerifiedAt || !!cloudProfile?.phoneE164);
+        const phoneVerified = !!storedPhone && !phoneVerificationState.verificationId && (cloudProfile?.phoneVerified === true || !!cloudProfile?.phoneVerifiedAt);
         const phoneStatusClass = phoneVerified ? 'is-verified' : 'is-unverified';
         const phoneStatusText = phoneVerified ? (labels.phoneVerified || 'ยืนยันเบอร์โทรแล้ว') : (labels.phoneUnverified || 'ต้องยืนยัน OTP ก่อนเปลี่ยนเบอร์');
         const pendingPhoneChange = !!phoneVerificationState.verificationId;
@@ -1940,7 +1980,8 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             error.userMessage = true;
             throw error;
         }
-        if (requireChanged && phone === currentPhone) {
+        const currentPhoneVerified = cloudProfile?.phoneVerified === true || !!cloudProfile?.phoneVerifiedAt;
+        if (requireChanged && currentPhoneVerified && phone === currentPhone) {
             const error = new Error(isEnglishPage() ? 'This phone number is already verified.' : 'เบอร์นี้ยืนยันแล้ว ไม่ต้องกดยืนยันซ้ำ');
             error.userMessage = true;
             throw error;
@@ -1972,7 +2013,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         if (!input || !actions || !button) return;
         const changed = cleanString(input.value, 40) !== cleanString(input.dataset.currentPhone || '', 40);
         const phone = cleanString(input.value, 40);
-        const verified = !!input.dataset.currentPhone && (cloudProfile?.phoneVerified === true || !!cloudProfile?.phoneVerifiedAt || !!cloudProfile?.phoneE164);
+        const verified = !!input.dataset.currentPhone && (cloudProfile?.phoneVerified === true || !!cloudProfile?.phoneVerifiedAt);
         const pending = !!phoneVerificationState.verificationId;
         const shouldShow = profileEditing && !!phone && (!verified || changed || pending);
         actions.hidden = !shouldShow;
@@ -2118,6 +2159,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 displayName: profile.display_name || profile.displayName || cloudProfile?.displayName || '',
                 phone: profile.phone_display || result.phoneDisplay || phoneVerificationState.phoneDisplay,
                 phoneE164: profile.phone_number || result.phoneNumber || phoneVerificationState.phoneNumber,
+                checkoutPhone: '',
+                checkout_phone: '',
+                contactPhone: '',
+                contact_phone: '',
                 phoneVerified: true,
                 phoneVerifiedAt: profile.phoneVerifiedAt || new Date().toISOString()
             };
@@ -2196,8 +2241,16 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 displayName: profile.display_name || profile.displayName || payload.displayName,
                 firstName: profile.firstName || payload.firstName,
                 lastName: profile.lastName || payload.lastName,
-                phone: profile.phone_display || cloudProfile?.phone || user.phone || '',
-                phoneE164: profile.phone_number || cloudProfile?.phoneE164 || '',
+                phone: profile.phone_display || profile.phone || cloudProfile?.phone || user.phone || '',
+                phoneE164: profile.phoneVerified === true || profile.phone_verified === true || profile.phoneVerifiedAt || profile.phone_verified_at
+                    ? (profile.phone_number || cloudProfile?.phoneE164 || '')
+                    : '',
+                checkoutPhone: profile.checkoutPhone || profile.checkout_phone || cloudProfile?.checkoutPhone || user.checkoutPhone || '',
+                checkout_phone: profile.checkoutPhone || profile.checkout_phone || cloudProfile?.checkout_phone || user.checkout_phone || '',
+                contactPhone: profile.contactPhone || profile.contact_phone || cloudProfile?.contactPhone || user.contactPhone || '',
+                contact_phone: profile.contactPhone || profile.contact_phone || cloudProfile?.contact_phone || user.contact_phone || '',
+                phoneVerified: profile.phoneVerified === true || profile.phone_verified === true || !!(profile.phoneVerifiedAt || profile.phone_verified_at),
+                phoneVerifiedAt: profile.phoneVerifiedAt || profile.phone_verified_at || '',
                 shippingAddress: profile.shippingAddress || payload.shippingAddress,
                 shippingAddressStructured: normalizeShippingAddressStructured(
                     profile.shippingAddressStructured || profile.shipping_address_structured || payload.shippingAddressStructured,

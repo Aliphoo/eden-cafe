@@ -69,6 +69,19 @@ export function profileToStoredUser(profile = {}) {
         profile.shippingAddressStructured || profile.shipping_address_structured || {},
         profile.shippingAddress || profile.address || ''
     );
+    const verifiedPhoneNumber = cleanString(profile.phone_number || profile.phoneE164 || '', 40);
+    const phoneVerified = profile.phoneVerified === true
+        || profile.phone_verified === true
+        || !!(profile.phoneVerifiedAt || profile.phone_verified_at);
+    const checkoutPhone = cleanString(
+        profile.checkoutPhone
+        || profile.checkout_phone
+        || profile.contactPhone
+        || profile.contact_phone
+        || (!verifiedPhoneNumber ? profile.phone : ''),
+        40
+    );
+    const phoneDisplay = cleanString(profile.phone_display || displayThaiPhone(verifiedPhoneNumber), 40);
     return {
         uid: profile.uid || profile.id || '',
         name: displayName,
@@ -77,9 +90,13 @@ export function profileToStoredUser(profile = {}) {
         lastName: profile.lastName || profile.last_name || '',
         email: profile.email || '',
         avatar,
-        phone: profile.phone_display || displayThaiPhone(profile.phone_number || ''),
-        phoneNumber: profile.phone_number || '',
-        phoneVerified: profile.phoneVerified === true || profile.phone_verified === true || !!(profile.phoneVerifiedAt || profile.phone_verified_at),
+        phone: phoneDisplay || checkoutPhone,
+        phoneNumber: verifiedPhoneNumber,
+        checkoutPhone,
+        checkout_phone: checkoutPhone,
+        contactPhone: checkoutPhone,
+        contact_phone: checkoutPhone,
+        phoneVerified,
         phoneVerifiedAt: profile.phoneVerifiedAt || profile.phone_verified_at || '',
         memberLevel: profile.member_level || 'Silver',
         points: Number(profile.points || 0),
