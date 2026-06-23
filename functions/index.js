@@ -1082,6 +1082,11 @@ exports.updateMyProfile = onRequest(
   memberAuthHandlers.updateMyProfile
 );
 
+exports.checkPhoneChange = onRequest(
+  { region: 'asia-southeast1' },
+  memberAuthHandlers.checkPhoneChange
+);
+
 exports.requestPhoneChangeOtp = onRequest(
   {
     region: 'asia-southeast1',
@@ -3627,7 +3632,7 @@ async function assertEmailAvailableForUid(email, uid) {
   for (const snap of checks) {
     for (const doc of snap.docs) {
       if (doc.id !== uid) {
-        throw publicClientError('This email is already used by another member.', 400);
+        throw publicClientError('This email is already used by another member.', 409);
       }
     }
   }
@@ -3635,17 +3640,67 @@ async function assertEmailAvailableForUid(email, uid) {
   try {
     const authUser = await admin.auth().getUserByEmail(email);
     if (authUser.uid !== uid) {
-      logger.warn('Email belongs to another Firebase Auth identity; continuing with Eden member email check', {
+      logger.warn('Email belongs to another Firebase Auth identity', {
         requestedUid: uid,
         authUid: authUser.uid,
         email,
       });
+      throw publicClientError('This email is already linked to another Firebase account.', 409);
     }
   } catch (error) {
     if (error.publicMessage) throw error;
     if (error.code !== 'auth/user-not-found') throw error;
   }
 }
+
+exports.checkEmailVerification = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'checkEmailVerification', 30, 15 * 60 * 1000);
+      const decoded = await requireSignedInUser(req);
+      checkRateLimitKey(`checkEmailVerificationUid:${decoded.uid}`, 30, 15 * 60 * 1000);
+      const email = normalizePublicEmail(req.body?.email);
+      if (!email) {
+        throw publicClientError('Please enter a valid email address.', 400);
+      }
+
+      await assertEmailAvailableForUid(email, decoded.uid);
+      const userSnap = await db.collection('users').doc(decoded.uid).get();
+      const userData = userSnap.exists ? userSnap.data() || {} : {};
+      const existingEmail = normalizePublicEmail(userData.email || userData.email_lower || '');
+      if (existingEmail === email && userData.emailVerified === true) {
+        res.json({
+          ok: true,
+          alreadyVerified: true,
+          needsOtp: false,
+          email,
+        });
+        return;
+      }
+
+      res.json({
+        ok: true,
+        available: true,
+        needsOtp: true,
+        email,
+      });
+    } catch (error) {
+      const status = error.statusCode || (/email|required/i.test(error.message) ? 400 : 500);
+      logger.warn('Email verification precheck failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, error.publicMessage || 'Unable to check email.');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
 
 exports.sendEmailVerificationCode = onRequest(
   {

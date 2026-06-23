@@ -272,6 +272,13 @@ export function requestPhoneChangeOtp(phoneNumber) {
     });
 }
 
+export function checkPhoneChange(phoneNumber) {
+    return edenAuthRequest('/checkPhoneChange', {
+        authenticated: true,
+        body: { phoneNumber: normalizeThaiPhone(phoneNumber) }
+    });
+}
+
 export function verifyPhoneChangeOtp({ verificationId, phoneNumber, otp }) {
     return edenAuthRequest('/verifyPhoneChangeOtp', {
         authenticated: true,
