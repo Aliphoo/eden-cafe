@@ -528,6 +528,10 @@ function createMemberAuthHandlers({
     }
   }
 
+  function phoneOwnedByAnotherAccountError() {
+    return createPublicError('เบอร์นี้ผูกกับบัญชีสมาชิก Eden อื่นแล้ว กรุณาเข้าสู่ระบบด้วยบัญชีนั้น หรือให้แอดมินรวมบัญชีก่อน', 409);
+  }
+
   function phoneNumberFromFirebaseToken(decoded = {}) {
     const identities = decoded.firebase?.identities || {};
     const candidates = [
@@ -575,13 +579,13 @@ function createMemberAuthHandlers({
   async function ensurePhoneIsAvailableForUid(phoneNumber, allowedUid) {
     const existing = await findUserByPhone(phoneNumber);
     if (existing && existing.uid !== allowedUid) {
-      throw createPublicError('เบอร์นี้มีในระบบแล้ว กรุณาเข้าสู่ระบบ', 409);
+      throw phoneOwnedByAnotherAccountError();
     }
 
     try {
       const authUser = await admin.auth().getUserByPhoneNumber(phoneNumber);
       if (authUser.uid !== allowedUid) {
-        throw createPublicError('เบอร์นี้มีในระบบแล้ว กรุณาเข้าสู่ระบบ', 409);
+        throw phoneOwnedByAnotherAccountError();
       }
     } catch (error) {
       if (error.publicMessage) throw error;
@@ -1487,7 +1491,7 @@ function createMemberAuthHandlers({
 
       checkRateLimitKey(`requestPhoneChangeOtp:${member.uid}`, 3, 10 * 60 * 1000);
       checkRateLimitKey(`requestPhoneChangeOtpPhone:${phoneIndexKey(phoneNumber)}`, 3, 10 * 60 * 1000);
-      await ensurePhoneIsAvailable(phoneNumber);
+      await ensurePhoneIsAvailableForUid(phoneNumber, member.uid);
 
       const code = randomOtpCode();
       const now = admin.firestore.Timestamp.now();
@@ -1613,7 +1617,7 @@ function createMemberAuthHandlers({
 
         const phoneIndex = phoneIndexSnap.exists ? phoneIndexSnap.data() || {} : {};
         if (phoneIndexSnap.exists && phoneIndex.uid && phoneIndex.uid !== member.uid) {
-          publicFailure = createPublicError('เบอร์นี้มีในระบบแล้ว กรุณาใช้เบอร์อื่น', 409);
+          publicFailure = phoneOwnedByAnotherAccountError();
           return;
         }
 

@@ -157,6 +157,8 @@ async function edenAuthRequest(path, { method = 'POST', body = null, authenticat
     if (!response.ok) {
         const error = new Error(data.error || 'ไม่สามารถดำเนินการได้ กรุณาลองใหม่อีกครั้ง');
         error.status = response.status;
+        error.userMessage = true;
+        error.responseBody = data;
         throw error;
     }
 
