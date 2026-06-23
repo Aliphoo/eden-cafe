@@ -3,7 +3,7 @@ import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase
 import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 const SETTINGS_REF = doc(db, 'site_settings', 'archery');
-const HERO_FALLBACK = 'https://www.edencafe.co/Images/uploads/archery/2026-06/1781174524924-archery-hero-1781174549114.webp';
+const HERO_FALLBACK = 'https://www.edencafe.co/Images/uploads/archery/2026-06/1782188813037-archery-hero-1782188809834.webp';
 const HERO_CACHE_KEY = 'eden_archery_hero_url';
 
 function safeImageURL(value, fallback = HERO_FALLBACK) {
@@ -39,6 +39,14 @@ function normalizePackage(item = {}, index = 0) {
         description: String(item.description || '').trim(),
         conditions
     };
+}
+
+function hasPublicPackageContent(item = {}) {
+    const defaultTitle = `${item.durationMinutes || 60} min`;
+    return Number(item.price || 0) > 0
+        || String(item.description || '').trim()
+        || (Array.isArray(item.conditions) && item.conditions.length > 0)
+        || String(item.title || '').trim() !== defaultTitle;
 }
 
 function revealHeroImage(heroImg) {
@@ -106,7 +114,7 @@ function renderPackages(settings = {}) {
     const leadEl = document.querySelector('.archery-band .archery-section-lead');
     if (lead && leadEl) leadEl.textContent = lead;
 
-    const packages = sourcePackages.map(normalizePackage).filter(item => item.durationMinutes > 0);
+    const packages = sourcePackages.map(normalizePackage).filter(item => item.durationMinutes > 0 && hasPublicPackageContent(item));
     if (!packages.length) return;
 
     packageGrid.classList.add('archery-dynamic-list');

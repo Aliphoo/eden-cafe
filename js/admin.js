@@ -4579,7 +4579,7 @@ const ARCHERY_AUDIT_ACTIONS = new Set([
 ]);
 const ARCHERY_PAGE_SETTINGS_REF = () => doc(db, 'site_settings', 'archery');
 const DEFAULT_ARCHERY_PAGE_SETTINGS = {
-    heroImageUrl: '/Images/archery/archery-hero.png',
+    heroImageUrl: 'https://www.edencafe.co/Images/uploads/archery/2026-06/1782188813037-archery-hero-1782188809834.webp',
     packageLead: 'Open daily 10:00-20:00. Choose 60 / 120 / 180 minute packages.',
     packages: [
         {
