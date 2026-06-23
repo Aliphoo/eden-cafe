@@ -46,6 +46,8 @@ const els = {
     passwordKicker: document.getElementById('register-password-kicker'),
     otp: document.getElementById('register-otp'),
     resend: document.getElementById('register-resend'),
+    firstName: document.getElementById('register-first-name'),
+    lastName: document.getElementById('register-last-name'),
     password: document.getElementById('register-password'),
     passwordConfirm: document.getElementById('register-password-confirm')
 };
@@ -139,7 +141,7 @@ function isGoogleUser(user) {
 
 function setPasswordStepForPhone() {
     if (els.passwordKicker) els.passwordKicker.textContent = 'ขั้นตอนที่ 3';
-    if (els.passwordTitle) els.passwordTitle.textContent = 'ตั้งรหัสผ่าน';
+    if (els.passwordTitle) els.passwordTitle.textContent = 'ตั้งชื่อและรหัสผ่าน';
     if (els.identityNote) {
         els.identityNote.innerHTML = `เบอร์ที่ยืนยันแล้ว: <strong id="register-confirmed-phone">${state.phoneDisplay || '-'}</strong>`;
         els.confirmedPhone = document.getElementById('register-confirmed-phone');
@@ -151,7 +153,7 @@ function setPasswordStepForPhone() {
 function setPasswordStepForGoogle() {
     const label = state.googleEmail || 'บัญชี Google ของคุณ';
     if (els.passwordKicker) els.passwordKicker.textContent = 'Google verified';
-    if (els.passwordTitle) els.passwordTitle.textContent = 'ตั้งรหัสผ่านสำหรับ Email Login';
+    if (els.passwordTitle) els.passwordTitle.textContent = 'ตั้งชื่อและรหัสผ่านสำหรับ Email Login';
     if (els.identityNote) {
         els.identityNote.innerHTML = `อีเมล Google ที่ยืนยันแล้ว: <strong id="register-confirmed-phone">${label}</strong>`;
         els.confirmedPhone = document.getElementById('register-confirmed-phone');
@@ -174,6 +176,11 @@ async function beginGooglePasswordSetup(firebaseUser) {
     state.googleEmail = firebaseUser.email || '';
     state.googleName = firebaseUser.displayName || '';
     state.firebaseIdToken = await firebaseUser.getIdToken(true);
+    if (state.googleName && !els.firstName?.value && !els.lastName?.value) {
+        const parts = state.googleName.trim().split(/\s+/);
+        if (els.firstName) els.firstName.value = parts.shift() || '';
+        if (els.lastName) els.lastName.value = parts.join(' ');
+    }
 
     setPasswordStepForGoogle();
     activateStep('profile');
@@ -229,6 +236,17 @@ function validatePassword() {
     if (password.length < 8) throw new Error('Password ต้องมีความยาวอย่างน้อย 8 ตัวอักษร');
     if (password !== confirmPassword) throw new Error('Password และ Confirm Password ไม่ตรงกัน');
     return { password, confirmPassword };
+}
+
+function validateProfileName() {
+    const firstName = String(els.firstName?.value || '').trim();
+    const lastName = String(els.lastName?.value || '').trim();
+    if (!firstName || !lastName) throw new Error('กรุณากรอกชื่อและนามสกุล');
+    return {
+        firstName,
+        lastName,
+        displayName: [firstName, lastName].filter(Boolean).join(' ')
+    };
 }
 
 els.googleButton?.addEventListener('click', async () => {
@@ -317,11 +335,13 @@ els.profileForm?.addEventListener('submit', async event => {
     setBusy(els.profileForm, true, 'กำลังสมัครสมาชิก...');
     setStatus('กำลังสร้างบัญชีสมาชิก...', 'info');
     try {
+        const profileName = validateProfileName();
         const { password, confirmPassword } = validatePassword();
         if (!state.firebaseIdToken) throw new Error('ยังไม่ได้ยืนยันบัญชี กรุณายืนยันเบอร์โทรศัพท์หรือ Google ก่อน');
 
         const payload = {
             firebaseIdToken: state.firebaseIdToken,
+            ...profileName,
             password,
             confirmPassword
         };

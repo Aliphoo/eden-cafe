@@ -531,6 +531,27 @@ exports.getMyProfile = onRequest(
   memberAuthHandlers.getMyProfile
 );
 
+exports.updateMyProfile = onRequest(
+  { region: 'asia-southeast1' },
+  memberAuthHandlers.updateMyProfile
+);
+
+exports.requestPhoneChangeOtp = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [AUTH_OTP_PEPPER, OTP_SMS_API_URL, OTP_SMS_API_KEY, OTP_SMS_SENDER],
+  },
+  memberAuthHandlers.requestPhoneChangeOtp
+);
+
+exports.verifyPhoneChangeOtp = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [AUTH_OTP_PEPPER],
+  },
+  memberAuthHandlers.verifyPhoneChangeOtp
+);
+
 function normalizeAdminRole(role) {
   return ['owner', 'head_manager', 'manager'].includes(role) ? role : 'manager';
 }

@@ -117,8 +117,18 @@
 
                     <form class="register-form" id="profile-register-form">
                         <p class="register-form-kicker" id="register-password-kicker">ขั้นตอนที่ 3</p>
-                        <h2 id="register-password-title">ตั้งรหัสผ่าน</h2>
+                        <h2 id="register-password-title">ตั้งชื่อและรหัสผ่าน</h2>
                         <p class="register-muted" id="register-identity-note">เบอร์ที่ยืนยันแล้ว: <strong id="register-confirmed-phone">-</strong></p>
+                        <label>
+                            <span>ชื่อ</span>
+                            <input id="register-first-name" name="firstName" type="text" autocomplete="given-name"
+                                maxlength="80" placeholder="ชื่อของคุณ" required>
+                        </label>
+                        <label>
+                            <span>นามสกุล</span>
+                            <input id="register-last-name" name="lastName" type="text" autocomplete="family-name"
+                                maxlength="80" placeholder="นามสกุลของคุณ" required>
+                        </label>
                         <label>
                             <span>Password</span>
                             <input id="register-password" name="password" type="password" autocomplete="new-password"
@@ -164,7 +174,7 @@
             });
         }
     </script>
-    <script type="module" src="js/register.js?v=member-auth-reset-20260605"></script>
+    <script type="module" src="js/register.js?v=profile-address-20260623-1"></script>
     <script type="module" src="js/auth.js?v=mobile-login-slot-20260620-1"></script>
 </body>
 </html>
