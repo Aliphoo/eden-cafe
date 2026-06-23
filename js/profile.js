@@ -8,7 +8,7 @@ import {
     requestPhoneChangeOtp,
     updateMyProfile,
     verifyPhoneChangeOtp
-} from './member-auth-service.js?v=checkout-phone-sync-20260623-1';
+} from './member-auth-service.js?v=profile-otp-fix-20260623-1';
 import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 (() => {
@@ -28,6 +28,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     let cloudProfileSaving = false;
     let cloudProfileError = '';
     let profileEditing = false;
+    let profileFormDraft = null;
     let emailVerificationBusy = false;
     let emailVerificationCooldownUntil = 0;
     let emailVerificationState = {
@@ -487,6 +488,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             phoneVerification: 'Phone verification',
             phoneVerified: 'Phone verified',
             phoneUnverified: 'Verify by OTP before changing this number.',
+            phoneVerifiedLocked: 'Phone verified. No extra action is needed.',
             sendPhoneCode: 'Send OTP',
             phoneCode: 'Phone OTP',
             phoneCodePlaceholder: '123456',
@@ -496,6 +498,9 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             phoneCodeSent: 'OTP sent. Please enter the 6-digit code.',
             phoneCodeVerified: 'Phone number verified successfully.',
             phoneCodeFailed: 'Unable to verify phone right now.',
+            phoneCodeConflict: 'This phone number is linked to another Eden member account. Please sign in with that account or contact staff to merge accounts.',
+            phoneCodeRateLimited: 'Too many OTP requests. Please wait a few minutes before trying again.',
+            phoneCodeProviderFailed: 'The SMS provider could not send the OTP right now. Please try again later.',
             verificationCooldown: 'Please wait 5 minutes before requesting another code.',
             shippingAddress: 'Shipping address',
             birthDate: 'Birthday',
@@ -623,6 +628,23 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             emailCodeVerified: 'ยืนยันอีเมลเรียบร้อยแล้ว',
             emailCodeFailed: 'ยังไม่สามารถยืนยันอีเมลได้ในขณะนี้',
             phone: 'เบอร์โทร',
+            phoneVerification: 'ยืนยันเบอร์โทร',
+            phoneVerified: 'ยืนยันเบอร์โทรแล้ว',
+            phoneUnverified: 'ต้องยืนยัน OTP ก่อนเปลี่ยนเบอร์',
+            phoneVerifiedLocked: 'ยืนยันเบอร์โทรแล้ว ไม่ต้องกดยืนยันซ้ำ',
+            sendPhoneCode: 'ส่ง OTP',
+            phoneCode: 'OTP เบอร์โทร',
+            phoneCodePlaceholder: '123456',
+            verifyPhoneCode: 'ยืนยันเบอร์',
+            sendingPhoneCode: 'กำลังส่ง OTP...',
+            verifyingPhoneCode: 'กำลังยืนยันเบอร์...',
+            phoneCodeSent: 'ส่ง OTP แล้ว กรุณากรอกรหัส 6 หลัก',
+            phoneCodeVerified: 'ยืนยันเบอร์โทรเรียบร้อยแล้ว',
+            phoneCodeFailed: 'ยังไม่สามารถส่งหรือยืนยัน OTP เบอร์โทรได้ในขณะนี้',
+            phoneCodeConflict: 'เบอร์นี้ผูกกับบัญชีสมาชิก Eden อื่นแล้ว กรุณาเข้าสู่ระบบด้วยบัญชีนั้น หรือให้แอดมินรวมบัญชีก่อน',
+            phoneCodeRateLimited: 'ขอ OTP หลายครั้งเกินไป กรุณารอสักครู่ก่อนลองใหม่',
+            phoneCodeProviderFailed: 'ผู้ให้บริการ SMS ยังส่ง OTP ไม่สำเร็จ กรุณาลองใหม่ภายหลัง',
+            verificationCooldown: 'กรุณารอ 5 นาทีก่อนขอรหัสใหม่',
             shippingAddress: 'ที่อยู่จัดส่ง',
             birthDate: 'วันเกิด',
             allergies: 'แพ้อาหาร',
@@ -663,6 +685,52 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             };
         }
         return stored && typeof stored === 'object' ? stored : null;
+    }
+
+    const PROFILE_FORM_DRAFT_LIMITS = {
+        firstName: 80,
+        lastName: 80,
+        email: 180,
+        emailCode: 6,
+        phone: 40,
+        phoneCode: 6,
+        lineId: 80,
+        birthDate: 20,
+        allergies: 200,
+        addressLine: 500,
+        subdistrict: 80,
+        district: 80,
+        province: 80,
+        zipcode: 10,
+        healthNote: 500
+    };
+
+    function captureProfileFormDraft() {
+        if (!profileEditing) return;
+        const form = document.getElementById('member-profile-form');
+        if (!form) return;
+        const nextDraft = { ...(profileFormDraft || {}) };
+        Object.entries(PROFILE_FORM_DRAFT_LIMITS).forEach(([name, maxLength]) => {
+            const field = form.elements?.[name];
+            if (!field || typeof field.value === 'undefined') return;
+            nextDraft[name] = cleanString(field.value, maxLength);
+        });
+        profileFormDraft = nextDraft;
+    }
+
+    function updateProfileFormDraft(values = {}) {
+        if (!profileEditing) return;
+        profileFormDraft = { ...(profileFormDraft || {}), ...values };
+    }
+
+    function clearProfileFormDraft() {
+        profileFormDraft = null;
+    }
+
+    function profileDraftValue(name, fallback = '') {
+        if (!profileEditing || !profileFormDraft) return fallback;
+        if (!Object.prototype.hasOwnProperty.call(profileFormDraft, name)) return fallback;
+        return profileFormDraft[name];
     }
 
     function readOrders() {
@@ -1716,18 +1784,25 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
     function renderProfileForm(user, labels) {
         const storedPhone = profileValue('phone', user.phone || '');
-        const phone = phoneVerificationState.phoneDisplay || storedPhone;
-        const shippingAddress = profileShippingAddress(user);
+        const phone = profileDraftValue('phone', phoneVerificationState.phoneDisplay || storedPhone);
+        const baseShippingAddress = profileShippingAddress(user);
+        const shippingAddress = {
+            addressLine: profileDraftValue('addressLine', baseShippingAddress.addressLine),
+            subdistrict: profileDraftValue('subdistrict', baseShippingAddress.subdistrict),
+            district: profileDraftValue('district', baseShippingAddress.district),
+            province: profileDraftValue('province', baseShippingAddress.province),
+            zipcode: profileDraftValue('zipcode', baseShippingAddress.zipcode)
+        };
         const displayName = profileTextValue('displayName', user.name || user.displayName || labels.member);
         const nameParts = splitDisplayName(displayName);
-        const firstName = profileTextValue('firstName', user.firstName || nameParts.firstName);
-        const lastName = profileTextValue('lastName', user.lastName || nameParts.lastName);
-        const birthDate = profileTextValue('birthDate', user.birthDate || '');
-        const allergies = profileTextValue('allergies', user.allergies || '');
-        const healthNote = profileTextValue('healthNote', user.healthNote || '');
-        const lineId = profileTextValue('lineId', user.lineId || '');
+        const firstName = profileDraftValue('firstName', profileTextValue('firstName', user.firstName || nameParts.firstName));
+        const lastName = profileDraftValue('lastName', profileTextValue('lastName', user.lastName || nameParts.lastName));
+        const birthDate = profileDraftValue('birthDate', profileTextValue('birthDate', user.birthDate || ''));
+        const allergies = profileDraftValue('allergies', profileTextValue('allergies', user.allergies || ''));
+        const healthNote = profileDraftValue('healthNote', profileTextValue('healthNote', user.healthNote || ''));
+        const lineId = profileDraftValue('lineId', profileTextValue('lineId', user.lineId || ''));
         const storedEmail = profileValue('email', publicEmail(user.email || ''));
-        const email = emailVerificationState.email || storedEmail;
+        const email = profileDraftValue('email', emailVerificationState.email || storedEmail);
         const avatar = profileValue('photoURL', user.avatar || user.photoURL || '/Images/Logo.webp');
         const loadingText = cloudProfileLoading ? `<p class="profile-save-message">${escapeHTML(labels.loadingProfile)}</p>` : '';
         const isEditing = profileEditing === true;
@@ -1758,7 +1833,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             : `<div class="profile-email-actions" id="email-verification-actions" ${emailActionsHidden ? 'hidden' : ''}>
                 <button class="btn btn-outline" id="email-verification-request" type="button" onclick="sendMemberEmailVerificationCode()" ${!email || emailVerificationBusy || emailCooldown || (emailVerified && !pendingEmailVerification) ? 'disabled' : ''}>${escapeHTML(emailActionLabel)}</button>
                 ${pendingEmailVerification ? `
-                    <input name="emailCode" type="text" inputmode="numeric" maxlength="6" placeholder="${escapeHTML(labels.emailCodePlaceholder)}" aria-label="${escapeHTML(labels.emailCode)}">
+                    <input name="emailCode" type="text" inputmode="numeric" maxlength="6" value="${escapeHTML(profileDraftValue('emailCode', ''))}" placeholder="${escapeHTML(labels.emailCodePlaceholder)}" aria-label="${escapeHTML(labels.emailCode)}">
                     <button class="btn" type="button" onclick="verifyMemberEmailCode()" ${emailVerificationBusy ? 'disabled' : ''}>${escapeHTML(emailVerificationBusy ? labels.verifyingEmailCode : labels.verifyEmailCode)}</button>
                 ` : ''}
             </div>`;
@@ -1767,7 +1842,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             : `<div class="profile-email-actions" id="phone-verification-actions" ${phoneActionsHidden ? 'hidden' : ''}>
                 <button class="btn btn-outline" id="phone-change-request" type="button" onclick="sendMemberPhoneVerificationCode()" ${!phone || phoneVerificationBusy || phoneCooldown || (phoneVerified && !pendingPhoneChange) ? 'disabled' : ''}>${escapeHTML(phoneActionLabel)}</button>
                 ${pendingPhoneChange ? `
-                    <input name="phoneCode" type="text" inputmode="numeric" maxlength="6" placeholder="${escapeHTML(labels.phoneCodePlaceholder || '123456')}" aria-label="${escapeHTML(labels.phoneCode || 'OTP เบอร์โทร')}">
+                    <input name="phoneCode" type="text" inputmode="numeric" maxlength="6" value="${escapeHTML(profileDraftValue('phoneCode', ''))}" placeholder="${escapeHTML(labels.phoneCodePlaceholder || '123456')}" aria-label="${escapeHTML(labels.phoneCode || 'OTP เบอร์โทร')}">
                     <button class="btn" type="button" onclick="verifyMemberPhoneCode()" ${phoneVerificationBusy ? 'disabled' : ''}>${escapeHTML(phoneVerificationBusy ? (labels.verifyingPhoneCode || 'กำลังยืนยันเบอร์...') : (labels.verifyPhoneCode || 'ยืนยันเบอร์'))}</button>
                 ` : ''}
             </div>`;
@@ -1927,7 +2002,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
     function setProfileEditing(isEditing) {
         profileEditing = isEditing === true;
-        if (!profileEditing) {
+        if (profileEditing) {
+            clearProfileFormDraft();
+        } else {
+            clearProfileFormDraft();
             emailVerificationState = { email: '' };
             phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
         }
@@ -1989,6 +2067,13 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         return phone;
     }
 
+    function phoneOtpErrorMessage(error, labels, fallback) {
+        if (error?.status === 409) return labels.phoneCodeConflict || error.message || fallback;
+        if (error?.status === 429) return labels.phoneCodeRateLimited || labels.verificationCooldown || error.message || fallback;
+        if (error?.status === 502 || error?.status === 503) return labels.phoneCodeProviderFailed || error.message || fallback;
+        return error?.userMessage ? error.message : fallback;
+    }
+
     function syncEmailVerificationAction() {
         const form = document.getElementById('member-profile-form');
         const input = form?.querySelector('input[name="email"]');
@@ -2040,6 +2125,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 finalMessage = labels.emailVerifiedLocked || labels.emailCodeVerified;
             } else {
                 emailVerificationState = { email };
+                updateProfileFormDraft({ email, emailCode: '' });
                 emailVerificationCooldownUntil = Date.now() + (5 * 60 * 1000);
                 window.setTimeout(renderProfile, 5 * 60 * 1000);
             }
@@ -2113,12 +2199,13 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                     phoneNumber: result.phoneNumber || phone,
                     phoneDisplay: result.phoneDisplay || phone
                 };
+                updateProfileFormDraft({ phone: result.phoneDisplay || phone, phoneCode: '' });
                 phoneVerificationCooldownUntil = Date.now() + (5 * 60 * 1000);
                 window.setTimeout(renderProfile, 5 * 60 * 1000);
             }
         } catch (error) {
             logClientError('Phone verification send failed:', error);
-            finalMessage = error?.userMessage ? error.message : (labels.phoneCodeFailed || labels.saveFailed);
+            finalMessage = phoneOtpErrorMessage(error, labels, labels.phoneCodeFailed || labels.saveFailed);
             finalError = true;
         } finally {
             phoneVerificationBusy = false;
@@ -2171,7 +2258,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             phoneVerificationCooldownUntil = 0;
         } catch (error) {
             logClientError('Phone verification failed:', error);
-            finalMessage = error?.userMessage ? error.message : (labels.phoneCodeFailed || labels.saveFailed);
+            finalMessage = phoneOtpErrorMessage(error, labels, labels.phoneCodeFailed || labels.saveFailed);
             finalError = true;
         } finally {
             phoneVerificationBusy = false;
@@ -2269,6 +2356,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 : labels.saved;
             cloudProfileSaving = false;
             profileEditing = false;
+            clearProfileFormDraft();
             renderProfile();
             requestAnimationFrame(() => showSaveMessage(savedMessage));
         } catch (error) {
@@ -2298,6 +2386,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     function renderProfile() {
         const container = document.getElementById('profile-content');
         if (!container) return;
+        captureProfileFormDraft();
         const labels = getLabels();
         const user = readUser();
         if (!user || !user.uid) {
@@ -2334,6 +2423,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     window.verifyMemberEmailCode = verifyMemberEmailCode;
     window.sendMemberPhoneVerificationCode = sendMemberPhoneVerificationCode;
     window.verifyMemberPhoneCode = verifyMemberPhoneCode;
+    window.syncEmailVerificationAction = syncEmailVerificationAction;
     window.syncPhoneVerificationAction = syncPhoneVerificationAction;
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -2354,6 +2444,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 cloudProfileUid = '';
                 cloudProfileError = '';
                 profileEditing = false;
+                clearProfileFormDraft();
                 emailVerificationState = { email: '' };
                 emailVerificationCooldownUntil = 0;
                 phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
@@ -2376,6 +2467,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         cloudProfileUid = '';
         cloudProfileError = '';
         profileEditing = false;
+        clearProfileFormDraft();
         emailVerificationState = { email: '' };
         emailVerificationCooldownUntil = 0;
         phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
