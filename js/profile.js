@@ -47,6 +47,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         checkedPhoneInput: '',
         checkedPhoneNumber: ''
     };
+    let phoneVerificationNotice = { message: '', isError: false };
     let phoneRemovalBusy = false;
     let phoneRemovalCooldownUntil = 0;
     let phoneRemovalState = {
@@ -56,6 +57,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         identifierDisplay: '',
         phoneDisplay: ''
     };
+    let phoneRemovalNotice = { message: '', isError: false };
     let loyaltyConfig = null;
     let loyaltyLedger = [];
     let loyaltySummary = null;
@@ -540,7 +542,8 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             phoneCodeFailed: 'Unable to verify phone right now.',
             phoneCodeConflict: 'This phone number is linked to another Eden member account. Please sign in with that account or contact staff to merge accounts.',
             phoneCodeRateLimited: 'Too many OTP requests. Please wait a few minutes before trying again.',
-            phoneCodeProviderFailed: 'The SMS provider could not send the OTP right now. Please try again later.',
+            phoneCodeProviderFailed: 'The SMS provider could not send the OTP right now. Please try again later or use verified email if available.',
+            phoneCodeReused: 'OTP was already sent. Please enter the 6-digit code or wait before requesting another one.',
             removePhone: 'Remove phone',
             removePhoneTitle: 'Remove phone number',
             removePhoneLead: 'After removing this phone number, you cannot sign in or reset your password with it until you verify a new phone.',
@@ -554,6 +557,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             verifyRemovePhoneCode: 'Confirm removal',
             verifyingRemovePhoneCode: 'Removing phone...',
             removePhoneCodeSent: 'OTP sent. Please enter the 6-digit code to remove your phone number.',
+            removePhoneCodeReused: 'OTP was already sent. Please enter the 6-digit code or wait before requesting another one.',
             removePhoneSuccess: 'Phone number removed successfully.',
             removePhoneFailed: 'Unable to remove phone number right now.',
             cancelRemovePhone: 'Cancel',
@@ -708,7 +712,8 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             phoneCodeFailed: 'ยังไม่สามารถส่งหรือยืนยัน OTP เบอร์โทรได้ในขณะนี้',
             phoneCodeConflict: 'เบอร์นี้ผูกกับบัญชีสมาชิก Eden อื่นแล้ว กรุณาเข้าสู่ระบบด้วยบัญชีนั้น หรือให้แอดมินรวมบัญชีก่อน',
             phoneCodeRateLimited: 'ขอ OTP หลายครั้งเกินไป กรุณารอสักครู่ก่อนลองใหม่',
-            phoneCodeProviderFailed: 'ผู้ให้บริการ SMS ยังส่ง OTP ไม่สำเร็จ กรุณาลองใหม่ภายหลัง',
+            phoneCodeProviderFailed: 'ระบบส่ง SMS ยังส่ง OTP ไม่สำเร็จ กรุณาลองใหม่ภายหลัง หรือใช้อีเมลที่ยืนยันแล้วถ้ามี',
+            phoneCodeReused: 'ส่ง OTP ไปแล้ว กรุณากรอกรหัส 6 หลัก หรือรอก่อนขอรหัสใหม่',
             removePhone: 'ลบเบอร์โทร',
             removePhoneTitle: 'ลบเบอร์โทรออกจากบัญชี',
             removePhoneLead: 'หลังลบเบอร์นี้ คุณจะไม่สามารถเข้าสู่ระบบหรือรีเซ็ตรหัสผ่านด้วยเบอร์นี้ได้ จนกว่าจะยืนยันเบอร์ใหม่อีกครั้ง',
@@ -722,6 +727,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             verifyRemovePhoneCode: 'ยืนยันลบเบอร์',
             verifyingRemovePhoneCode: 'กำลังลบเบอร์...',
             removePhoneCodeSent: 'ส่ง OTP แล้ว กรุณากรอกรหัส 6 หลักเพื่อลบเบอร์โทร',
+            removePhoneCodeReused: 'ส่ง OTP ไปแล้ว กรุณากรอกรหัส 6 หลัก หรือรอก่อนขอรหัสใหม่',
             removePhoneSuccess: 'ลบเบอร์โทรเรียบร้อยแล้ว',
             removePhoneFailed: 'ยังไม่สามารถลบเบอร์โทรได้ในขณะนี้',
             cancelRemovePhone: 'ยกเลิก',
@@ -775,6 +781,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         emailCode: 6,
         phone: 40,
         phoneCode: 6,
+        phoneRemovalCode: 6,
         lineId: 80,
         birthDate: 20,
         allergies: 200,
@@ -800,7 +807,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     }
 
     function updateProfileFormDraft(values = {}) {
-        if (!profileEditing) return;
+        if (!profileEditing && !Object.prototype.hasOwnProperty.call(values, 'phoneRemovalCode')) return;
         profileFormDraft = { ...(profileFormDraft || {}), ...values };
     }
 
@@ -811,6 +818,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     function resetPhoneRemovalState() {
         phoneRemovalBusy = false;
         phoneRemovalCooldownUntil = 0;
+        setPhoneRemovalNotice();
         phoneRemovalState = {
             open: false,
             channel: 'phone',
@@ -821,7 +829,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     }
 
     function profileDraftValue(name, fallback = '') {
-        if (!profileEditing || !profileFormDraft) return fallback;
+        if ((!profileEditing && name !== 'phoneRemovalCode') || !profileFormDraft) return fallback;
         if (!Object.prototype.hasOwnProperty.call(profileFormDraft, name)) return fallback;
         return profileFormDraft[name];
     }
@@ -1888,6 +1896,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             ? (labels.verifyingRemovePhoneCode || labels.verifyingPhoneCode)
             : (labels.verifyRemovePhoneCode || 'ยืนยันลบเบอร์');
         const identifierDisplay = phoneRemovalState.identifierDisplay || (channel === 'email' ? context.email : context.phone);
+        const inlineNotice = renderInlineNotice(phoneRemovalNotice);
         return `
             <div class="modal-overlay show profile-phone-removal-modal" role="dialog" aria-modal="true" aria-labelledby="phone-removal-title">
                 <div class="modal-content profile-phone-removal-content">
@@ -1918,6 +1927,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                     ` : `
                         <button class="btn" type="button" onclick="sendMemberPhoneRemovalCode()" ${phoneRemovalBusy || cooldown ? 'disabled' : ''}>${escapeHTML(sendLabel)}</button>
                     `}
+                    ${inlineNotice}
                     <button class="btn btn-outline" type="button" onclick="closePhoneRemovalModal()" ${phoneRemovalBusy ? 'disabled' : ''}>${escapeHTML(labels.cancelRemovePhone || 'ยกเลิก')}</button>
                 </div>
             </div>
@@ -1979,6 +1989,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const phoneActionLabel = phoneCooldown
             ? `${labels.sendPhoneCode || 'ส่ง OTP'} (${cooldownMinutes(phoneVerificationCooldownUntil)}m)`
             : (phoneVerificationBusy ? (labels.sendingPhoneCode || 'กำลังส่ง OTP...') : (labels.sendPhoneCode || 'ส่ง OTP'));
+        const phoneInlineNotice = renderInlineNotice(phoneVerificationNotice);
         const phoneRemovalButton = phoneVerified
             ? `<button class="btn btn-outline profile-phone-remove-button" type="button" onclick="openPhoneRemovalModal()" ${phoneRemovalBusy ? 'disabled' : ''}>${escapeHTML(labels.removePhone || 'ลบเบอร์โทร')}</button>`
             : '';
@@ -2016,6 +2027,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                     <input name="phoneCode" type="text" inputmode="numeric" maxlength="6" value="${escapeHTML(profileDraftValue('phoneCode', ''))}" placeholder="${escapeHTML(labels.phoneCodePlaceholder || '123456')}" aria-label="${escapeHTML(labels.phoneCode || 'OTP เบอร์โทร')}">
                     <button class="btn" type="button" onclick="verifyMemberPhoneCode()" ${phoneVerificationBusy ? 'disabled' : ''}>${escapeHTML(phoneVerificationBusy ? (labels.verifyingPhoneCode || 'กำลังยืนยันเบอร์...') : (labels.verifyPhoneCode || 'ยืนยันเบอร์'))}</button>
                 ` : ''}
+                ${phoneInlineNotice}
             </div>`;
 
         return `
@@ -2166,6 +2178,39 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         el.style.color = isError ? '#b42318' : 'var(--primary-color)';
     }
 
+    function setPhoneVerificationNotice(message = '', isError = false) {
+        phoneVerificationNotice = {
+            message: cleanString(message, 320),
+            isError: isError === true
+        };
+    }
+
+    function setPhoneRemovalNotice(message = '', isError = false) {
+        phoneRemovalNotice = {
+            message: cleanString(message, 320),
+            isError: isError === true
+        };
+    }
+
+    function renderInlineNotice(notice) {
+        if (!notice?.message) return '';
+        const color = notice.isError ? '#b42318' : 'var(--primary-color)';
+        return `<p class="profile-privacy-note" role="status" aria-live="polite" style="color:${color};">${escapeHTML(notice.message)}</p>`;
+    }
+
+    function retryAfterSeconds(error) {
+        const seconds = Number(error?.responseBody?.retryAfterSeconds || error?.retryAfterSeconds || 0);
+        return Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : 0;
+    }
+
+    function retryAfterText(error) {
+        const seconds = retryAfterSeconds(error);
+        if (!seconds) return '';
+        const minutes = Math.max(1, Math.ceil(seconds / 60));
+        if (isEnglishPage()) return ` Please wait about ${minutes} minute${minutes > 1 ? 's' : ''}.`;
+        return ` กรุณารอประมาณ ${minutes} นาที`;
+    }
+
     function setProfileSavingState(form, isSaving, labels) {
         const submitBtn = form?.querySelector('button[type="submit"]');
         if (!submitBtn) return;
@@ -2181,6 +2226,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             clearProfileFormDraft();
             emailVerificationState = { email: '', checkedEmail: '' };
             phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '', checkedPhoneInput: '', checkedPhoneNumber: '' };
+            setPhoneVerificationNotice();
         }
         renderProfile();
     }
@@ -2242,13 +2288,13 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
     function phoneOtpErrorMessage(error, labels, fallback) {
         if (error?.status === 409) return labels.phoneCodeConflict || error.message || fallback;
-        if (error?.status === 429) return labels.phoneCodeRateLimited || labels.verificationCooldown || error.message || fallback;
+        if (error?.status === 429) return `${labels.phoneCodeRateLimited || labels.verificationCooldown || error.message || fallback}${retryAfterText(error)}`;
         if (error?.status === 502 || error?.status === 503) return labels.phoneCodeProviderFailed || error.message || fallback;
         return error?.userMessage ? error.message : fallback;
     }
 
     function phoneRemovalErrorMessage(error, labels) {
-        if (error?.status === 429) return labels.verificationCooldown || labels.removePhoneFailed;
+        if (error?.status === 429) return `${labels.verificationCooldown || labels.removePhoneFailed}${retryAfterText(error)}`;
         if (error?.status === 502 || error?.status === 503) return labels.phoneCodeProviderFailed || labels.removePhoneFailed;
         return error?.userMessage ? error.message : (labels.removePhoneFailed || labels.saveFailed);
     }
@@ -2269,6 +2315,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             identifierDisplay: '',
             phoneDisplay: phone
         };
+        setPhoneRemovalNotice();
         updateProfileFormDraft({ phoneRemovalCode: '' });
         renderProfile();
         return false;
@@ -2298,6 +2345,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             verificationId: '',
             identifierDisplay: ''
         };
+        setPhoneRemovalNotice();
         updateProfileFormDraft({ phoneRemovalCode: '' });
         renderProfile();
         return false;
@@ -2307,15 +2355,22 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const labels = getLabels();
         if (phoneRemovalBusy) return false;
         if (cooldownSeconds(phoneRemovalCooldownUntil) > 0) {
-            showSaveMessage(labels.verificationCooldown || labels.removePhoneFailed, true);
+            const message = labels.verificationCooldown || labels.removePhoneFailed;
+            setPhoneRemovalNotice(message, true);
+            showSaveMessage(message, true);
+            renderProfile();
             return false;
         }
         phoneRemovalBusy = true;
-        showSaveMessage(labels.sendingRemovePhoneCode || labels.sendingPhoneCode);
+        const sendingMessage = labels.sendingRemovePhoneCode || labels.sendingPhoneCode;
+        setPhoneRemovalNotice(sendingMessage);
+        showSaveMessage(sendingMessage);
+        renderProfile();
         let finalMessage = labels.removePhoneCodeSent || labels.phoneCodeSent;
         let finalError = false;
         try {
             const result = await requestPhoneRemovalOtp(phoneRemovalState.channel || 'phone');
+            const resendSeconds = Math.max(1, Number(result.resendAfterSeconds || result.expiresInSeconds || 300));
             phoneRemovalState = {
                 open: true,
                 channel: result.channel || phoneRemovalState.channel || 'phone',
@@ -2324,14 +2379,21 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 phoneDisplay: result.phoneDisplay || phoneRemovalState.phoneDisplay || ''
             };
             updateProfileFormDraft({ phoneRemovalCode: '' });
-            phoneRemovalCooldownUntil = Date.now() + (5 * 60 * 1000);
-            window.setTimeout(renderProfile, 5 * 60 * 1000);
+            phoneRemovalCooldownUntil = Date.now() + (resendSeconds * 1000);
+            window.setTimeout(renderProfile, resendSeconds * 1000);
+            if (result.reused) finalMessage = labels.removePhoneCodeReused || finalMessage;
         } catch (error) {
             logClientError('Phone removal OTP send failed:', error);
+            const retrySeconds = retryAfterSeconds(error);
+            if (error?.status === 429 && retrySeconds) {
+                phoneRemovalCooldownUntil = Date.now() + (retrySeconds * 1000);
+                window.setTimeout(renderProfile, retrySeconds * 1000);
+            }
             finalMessage = phoneRemovalErrorMessage(error, labels);
             finalError = true;
         } finally {
             phoneRemovalBusy = false;
+            setPhoneRemovalNotice(finalMessage, finalError);
             renderProfile();
             requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
         }
@@ -2343,16 +2405,27 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         if (phoneRemovalBusy) return false;
         const code = cleanString(document.querySelector('input[name="phoneRemovalCode"]')?.value, 6);
         if (!phoneRemovalState.verificationId) {
-            showSaveMessage(labels.removePhoneCodeSent || labels.phoneCodeFailed, true);
+            const message = labels.removePhoneCodeSent || labels.phoneCodeFailed;
+            setPhoneRemovalNotice(message, true);
+            showSaveMessage(message, true);
+            renderProfile();
             return false;
         }
         if (!/^\d{6}$/.test(code)) {
-            showSaveMessage(isEnglishPage() ? 'Please enter the 6-digit code.' : 'กรุณากรอกรหัส 6 หลัก', true);
+            const message = isEnglishPage() ? 'Please enter the 6-digit code.' : 'กรุณากรอกรหัส 6 หลัก';
+            updateProfileFormDraft({ phoneRemovalCode: code });
+            setPhoneRemovalNotice(message, true);
+            showSaveMessage(message, true);
+            renderProfile();
             return false;
         }
 
         phoneRemovalBusy = true;
-        showSaveMessage(labels.verifyingRemovePhoneCode || labels.verifyingPhoneCode);
+        updateProfileFormDraft({ phoneRemovalCode: code });
+        const verifyingMessage = labels.verifyingRemovePhoneCode || labels.verifyingPhoneCode;
+        setPhoneRemovalNotice(verifyingMessage);
+        showSaveMessage(verifyingMessage);
+        renderProfile();
         let finalMessage = labels.removePhoneSuccess || labels.saved;
         let finalError = false;
         try {
@@ -2389,6 +2462,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             finalError = true;
         } finally {
             phoneRemovalBusy = false;
+            if (finalError) setPhoneRemovalNotice(finalMessage, true);
             renderProfile();
             requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
         }
@@ -2608,11 +2682,12 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         if (!profileEditing) return false;
         if (phoneVerificationBusy) return false;
         if (cooldownSeconds(phoneVerificationCooldownUntil) > 0) {
-            showSaveMessage(labels.verificationCooldown || 'กรุณารอ 5 นาทีก่อนขอรหัสใหม่', true);
+            const message = labels.verificationCooldown || 'กรุณารอ 5 นาทีก่อนขอรหัสใหม่';
+            setPhoneVerificationNotice(message, true);
+            showSaveMessage(message, true);
+            renderProfile();
             return false;
         }
-        phoneVerificationBusy = true;
-        showSaveMessage(labels.sendingPhoneCode || 'กำลังส่ง OTP...');
         let finalMessage = labels.phoneCodeSent || 'ส่ง OTP แล้ว กรุณากรอกรหัส 6 หลัก';
         let finalError = false;
         try {
@@ -2621,14 +2696,20 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             if (checkedPhone !== cleanString(phone, 40)) {
                 finalMessage = labels.checkPhoneFirst || 'กรุณาตรวจสอบเบอร์ก่อนส่ง OTP';
                 finalError = true;
-                phoneVerificationBusy = false;
                 return false;
             }
+            captureProfileFormDraft();
+            phoneVerificationBusy = true;
+            const sendingMessage = labels.sendingPhoneCode || 'กำลังส่ง OTP...';
+            setPhoneVerificationNotice(sendingMessage);
+            showSaveMessage(sendingMessage);
+            renderProfile();
             const result = await requestPhoneChangeOtp(phone);
             if (result.alreadyVerified) {
                 phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '', checkedPhoneInput: '', checkedPhoneNumber: '' };
                 finalMessage = labels.phoneVerified || 'ยืนยันเบอร์โทรแล้ว';
             } else {
+                const resendSeconds = Math.max(1, Number(result.resendAfterSeconds || result.expiresInSeconds || 300));
                 phoneVerificationState = {
                     verificationId: result.verificationId || '',
                     phoneNumber: result.phoneNumber || phone,
@@ -2637,15 +2718,22 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                     checkedPhoneNumber: result.phoneNumber || ''
                 };
                 updateProfileFormDraft({ phone: result.phoneDisplay || phone, phoneCode: '' });
-                phoneVerificationCooldownUntil = Date.now() + (5 * 60 * 1000);
-                window.setTimeout(renderProfile, 5 * 60 * 1000);
+                phoneVerificationCooldownUntil = Date.now() + (resendSeconds * 1000);
+                window.setTimeout(renderProfile, resendSeconds * 1000);
+                if (result.reused) finalMessage = labels.phoneCodeReused || finalMessage;
             }
         } catch (error) {
             logClientError('Phone verification send failed:', error);
+            const retrySeconds = retryAfterSeconds(error);
+            if (error?.status === 429 && retrySeconds) {
+                phoneVerificationCooldownUntil = Date.now() + (retrySeconds * 1000);
+                window.setTimeout(renderProfile, retrySeconds * 1000);
+            }
             finalMessage = phoneOtpErrorMessage(error, labels, labels.phoneCodeFailed || labels.saveFailed);
             finalError = true;
         } finally {
             phoneVerificationBusy = false;
+            setPhoneVerificationNotice(finalMessage, finalError);
             renderProfile();
             requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
         }
@@ -2658,16 +2746,27 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const form = document.getElementById('member-profile-form');
         const code = cleanString(form?.querySelector('input[name="phoneCode"]')?.value, 6);
         if (!phoneVerificationState.verificationId) {
-            showSaveMessage(isEnglishPage() ? 'Please request a phone OTP first.' : 'กรุณาขอ OTP ก่อน', true);
+            const message = isEnglishPage() ? 'Please request a phone OTP first.' : 'กรุณาขอ OTP ก่อน';
+            setPhoneVerificationNotice(message, true);
+            showSaveMessage(message, true);
+            renderProfile();
             return false;
         }
         if (!/^\d{6}$/.test(code)) {
-            showSaveMessage(isEnglishPage() ? 'Please enter the 6-digit code.' : 'กรุณากรอกรหัส 6 หลัก', true);
+            const message = isEnglishPage() ? 'Please enter the 6-digit code.' : 'กรุณากรอกรหัส 6 หลัก';
+            updateProfileFormDraft({ phoneCode: code });
+            setPhoneVerificationNotice(message, true);
+            showSaveMessage(message, true);
+            renderProfile();
             return false;
         }
 
         phoneVerificationBusy = true;
-        showSaveMessage(labels.verifyingPhoneCode || 'กำลังยืนยันเบอร์...');
+        updateProfileFormDraft({ phoneCode: code });
+        const verifyingMessage = labels.verifyingPhoneCode || 'กำลังยืนยันเบอร์...';
+        setPhoneVerificationNotice(verifyingMessage);
+        showSaveMessage(verifyingMessage);
+        renderProfile();
         let finalMessage = labels.phoneCodeVerified || 'ยืนยันเบอร์โทรเรียบร้อยแล้ว';
         let finalError = false;
         try {
@@ -2699,6 +2798,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             finalError = true;
         } finally {
             phoneVerificationBusy = false;
+            setPhoneVerificationNotice(finalMessage, finalError);
             renderProfile();
             requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
         }
