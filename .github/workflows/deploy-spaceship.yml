@@ -31,13 +31,28 @@ jobs:
             **/.github/**
             **/node_modules/**
             functions/**
+            blog-cms/**
+            docs/**
+            tools/**
+            scripts/**
+            backups/**
+            reports/**
+            firebase-default-hosting-minimal/**
+            canonical-html-fix-package/**
+            htaccess-www-to-apex-package/**
+            og-jsonld-host-fix-package/**
+            eden-pos-apk/**
+            admin/**
             .firebase/**
             *.zip
             *.log
             README.md
             firebase.json
             firestore.rules
+            firestore.indexes.json
             storage.rules
             .firebaserc
             package.json
             package-lock.json
+            db_en.js
+            db_en.json

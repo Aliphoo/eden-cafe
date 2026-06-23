@@ -10630,7 +10630,8 @@ window.saveMemberAdminFields = async (event, uid) => {
         status: document.getElementById('member-admin-status')?.value || 'active',
         adminTags,
         adminNote: document.getElementById('member-admin-note')?.value || '',
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
+        updatedBy: auth.currentUser?.uid || ''
     };
 
     try {

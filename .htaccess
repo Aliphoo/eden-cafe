@@ -21,6 +21,9 @@ RewriteRule ^index\.html$ / [R=301,L]
 RewriteCond %{THE_REQUEST} \s/+(.+?)\.html[\s?] [NC]
 RewriteRule ^(.+)\.html$ /$1 [R=301,L,NE]
 
+# Legacy Firebase Hosting member profile route used by older app links.
+RewriteRule ^member/profile/?$ /profile [R=301,L]
+
 # Let real files/assets pass through untouched before trying clean URL routing.
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d

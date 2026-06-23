@@ -1468,6 +1468,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             uid: user.uid,
             displayName: cleanString(user.name || currentAuthUser?.displayName || labels.member, 120),
             email,
+            email_lower: email,
             photoURL: cleanString(user.avatar || currentAuthUser?.photoURL || '', 500),
             phone: cleanString(formData.get('phone'), 40),
             shippingAddress: cleanString(formData.get('shippingAddress'), 500),

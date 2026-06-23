@@ -385,11 +385,11 @@ service cloud.firestore {
     // Publicly readable collections (content)
     match /shop_products/{docId} {
       allow read: if true;
-      allow write: if hasAdminPermission('shop');
+      allow write: if hasAdminPermission('products');
     }
     match /shop_categories/{docId} {
       allow read: if true;
-      allow write: if hasAdminPermission('shop');
+      allow write: if hasAdminPermission('products');
     }
     match /tables/{docId} {
       allow read: if true;

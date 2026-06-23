@@ -847,7 +847,7 @@ function cleanString(value, maxLength) {
 
 function permissionFromImageFolder(folder) {
   const value = cleanString(folder, 40).toLowerCase();
-  if (value === 'shop_products') return 'shop';
+  if (value === 'shop_products') return 'products';
   if (value === 'blogs') return 'blogs';
   if (value === 'rooms') return 'rooms';
   if (value === 'archery') return 'archery';
