@@ -70,6 +70,7 @@ export function profileToStoredUser(profile = {}) {
         profile.shippingAddress || profile.address || ''
     );
     const verifiedPhoneNumber = cleanString(profile.phone_number || profile.phoneE164 || '', 40);
+    const phoneRemovedAt = profile.phoneRemovedAt || profile.phone_removed_at || '';
     const phoneVerified = profile.phoneVerified === true
         || profile.phone_verified === true
         || !!(profile.phoneVerifiedAt || profile.phone_verified_at);
@@ -81,6 +82,7 @@ export function profileToStoredUser(profile = {}) {
         || (!verifiedPhoneNumber ? profile.phone : ''),
         40
     );
+    const phoneRemoved = !!phoneRemovedAt && !verifiedPhoneNumber && !checkoutPhone;
     const phoneDisplay = cleanString(profile.phone_display || displayThaiPhone(verifiedPhoneNumber), 40);
     return {
         uid: profile.uid || profile.id || '',
@@ -90,14 +92,16 @@ export function profileToStoredUser(profile = {}) {
         lastName: profile.lastName || profile.last_name || '',
         email: profile.email || '',
         avatar,
-        phone: phoneDisplay || checkoutPhone,
-        phoneNumber: verifiedPhoneNumber,
+        phone: phoneRemoved ? '' : (phoneDisplay || checkoutPhone),
+        phoneNumber: phoneRemoved ? '' : verifiedPhoneNumber,
         checkoutPhone,
         checkout_phone: checkoutPhone,
         contactPhone: checkoutPhone,
         contact_phone: checkoutPhone,
         phoneVerified,
         phoneVerifiedAt: profile.phoneVerifiedAt || profile.phone_verified_at || '',
+        phoneRemovedAt,
+        phone_removed_at: phoneRemovedAt,
         memberLevel: profile.member_level || 'Silver',
         points: Number(profile.points || 0),
         emailVerified: profile.emailVerified === true || profile.email_verified === true,
@@ -285,6 +289,24 @@ export function verifyPhoneChangeOtp({ verificationId, phoneNumber, otp }) {
         body: {
             verificationId: cleanString(verificationId, 160),
             phoneNumber: normalizeThaiPhone(phoneNumber),
+            otp: cleanString(otp, 6)
+        }
+    });
+}
+
+export function requestPhoneRemovalOtp(channel = 'phone') {
+    const normalizedChannel = cleanString(channel, 20).toLowerCase() === 'email' ? 'email' : 'phone';
+    return edenAuthRequest('/requestPhoneRemovalOtp', {
+        authenticated: true,
+        body: { channel: normalizedChannel }
+    });
+}
+
+export function verifyPhoneRemovalOtp({ verificationId, otp }) {
+    return edenAuthRequest('/verifyPhoneRemovalOtp', {
+        authenticated: true,
+        body: {
+            verificationId: cleanString(verificationId, 160),
             otp: cleanString(otp, 6)
         }
     });
