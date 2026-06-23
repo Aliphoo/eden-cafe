@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Profile | Eden Cafe</title>
-    <link rel="icon" type="image/webp" href="Images/Logo.webp">
-    <link rel="stylesheet" href="style.css?v=member-auth-reset-20260605">
+    <link rel="icon" type="image/webp" href="/Images/Logo.webp">
+    <link rel="stylesheet" href="/style.css?v=profile-restore-20260621-1">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
         .profile-container {
@@ -62,8 +62,13 @@
             <a href="/" class="logo">
                 <img src="Images/Logo.webp" alt="Eden Cafe Logo" class="logo-img">
             </a>
+            <button class="menu-toggle" id="mobile-menu" type="button" aria-label="Open menu" aria-controls="primary-navigation" aria-expanded="false">
+                <span class="bar"></span>
+                <span class="bar"></span>
+                <span class="bar"></span>
+            </button>
             <nav>
-                <ul class="nav-links">
+                <ul class="nav-links" id="primary-navigation">
                     <li><a href="/en#home">Home</a></li>
                     <li><a href="/en#about">About Us</a></li>
                     <li><a href="/menu-en">Menu</a></li>
@@ -203,9 +208,10 @@
 
         if (menu) {
             menu.addEventListener('click', function () {
-                menu.classList.toggle('is-active');
-                navLinks.classList.toggle('active');
-                navActions.classList.toggle('active');
+                const isOpen = menu.classList.toggle('is-active');
+                navLinks.classList.toggle('active', isOpen);
+                navActions.classList.toggle('active', isOpen);
+                menu.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
             });
 
             // Close menu when a link is clicked
@@ -215,12 +221,15 @@
                     menu.classList.remove('is-active');
                     navLinks.classList.remove('active');
                     navActions.classList.remove('active');
+                    menu.setAttribute('aria-expanded', 'false');
                 });
             });
         }
     </script>
-    <script type="module" src="js/profile.js?v=archery-mvp-1"></script>
-    <script type="module" src="js/auth.js?v=archery-mvp-1"></script>
+    <script src="/db_bilingual.js?v=1"></script>
+    <script src="/js/address-autocomplete.js?v=profile-address-20260623-1"></script>
+    <script type="module" src="/js/profile.js?v=checkout-phone-sync-20260623-1"></script>
+    <script type="module" src="/js/auth.js?v=profile-restore-20260621-1"></script>
     <!-- Cookie Consent Banner -->
     <div id="cookie-consent"
         style="display: none; position: fixed; bottom: 20px; left: 20px; right: 20px; max-width: 600px; margin: 0 auto; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); padding: 20px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); z-index: 9999; border: 1px solid rgba(0,0,0,0.05); text-align: left;">
@@ -252,17 +261,13 @@
             });
         });
     </script>
-    <script type="module" src="js/marketing-consent.js?v=1"></script>
-<script src="js/cart.js?v=1"></script>
+    <script type="module" src="js/marketing-consent.js?v=mobile-ux-20260619"></script>
+<script src="js/cart.js?v=mobile-cart-20260619"></script>
     <script type="module" src="js/footer-settings.js?v=2"></script>
     <script src="js/reviews.js?v=6"></script>
 <script type="module" src="js/counter.js?v=5"></script>
 </body>
 </html>
-
-
-
-
 
 
 

@@ -82,6 +82,207 @@
         }
     }
 
+    function setUser(user) {
+        if (!user?.uid) return;
+        localStorage.setItem('eden_user', JSON.stringify(user));
+        window.dispatchEvent(new CustomEvent('eden:user-changed'));
+    }
+
+    function cleanString(value, maxLength = 300) {
+        return String(value ?? '').trim().slice(0, maxLength);
+    }
+
+    function normalizeShippingAddressStructured(value = {}, fallbackText = '') {
+        const source = value && typeof value === 'object' ? value : {};
+        const normalized = {
+            addressLine: cleanString(source.addressLine || source.address_line || source.line1 || source.address || '', 250),
+            subdistrict: cleanString(source.subdistrict || source.subdistrictName || source.subdistrict_name || '', 80),
+            district: cleanString(source.district || source.districtName || source.district_name || '', 80),
+            province: cleanString(source.province || source.provinceName || source.province_name || '', 80),
+            zipcode: cleanString(source.zipcode || source.postalCode || source.postal_code || source.zip || '', 10)
+        };
+        if (!Object.values(normalized).some(Boolean) && fallbackText) {
+            normalized.addressLine = cleanString(fallbackText, 250);
+        }
+        return normalized;
+    }
+
+    function checkoutAddressFields() {
+        return normalizeShippingAddressStructured({
+            addressLine: document.getElementById('address')?.value,
+            subdistrict: document.getElementById('subdistrict')?.value,
+            district: document.getElementById('district')?.value,
+            province: document.getElementById('province')?.value,
+            zipcode: document.getElementById('zipcode')?.value
+        });
+    }
+
+    function formatShippingAddress(address = {}) {
+        return [
+            address.addressLine,
+            address.subdistrict,
+            address.district,
+            address.province,
+            address.zipcode
+        ].map(part => cleanString(part, 250)).filter(Boolean).join(', ');
+    }
+
+    function displayThaiPhone(phoneNumber = '') {
+        const phone = cleanString(phoneNumber, 40);
+        return phone.startsWith('+66') ? '0' + phone.slice(3) : phone;
+    }
+
+    function firstNonEmpty(...values) {
+        for (const value of values) {
+            const text = cleanString(value, 500);
+            if (text) return text;
+        }
+        return '';
+    }
+
+    function profileAddressForCheckout(user = getUser()) {
+        if (!user) return normalizeShippingAddressStructured();
+        return normalizeShippingAddressStructured(
+            user.shippingAddressStructured || user.shipping_address_structured || user,
+            user.shippingAddress || user.address || ''
+        );
+    }
+
+    function profileNameForCheckout(user = getUser()) {
+        if (!user) return '';
+        return firstNonEmpty(
+            user.name,
+            user.displayName,
+            [user.firstName, user.lastName].filter(Boolean).join(' ')
+        );
+    }
+
+    function profilePhoneForCheckout(user = getUser()) {
+        if (!user) return '';
+        const verifiedPhone = user.phoneVerified === true || !!user.phoneVerifiedAt || !!user.phone_number;
+        const phoneNumberDisplay = displayThaiPhone(user.phoneNumber || user.phone_number || user.phoneE164 || '');
+        return firstNonEmpty(
+            verifiedPhone ? user.phone : '',
+            verifiedPhone ? phoneNumberDisplay : '',
+            user.checkoutPhone,
+            user.checkout_phone,
+            user.contactPhone,
+            user.contact_phone,
+            user.phone,
+            phoneNumberDisplay
+        );
+    }
+
+    function mergeProfileIntoCheckoutCache(profile = {}) {
+        const user = getUser();
+        if (!user?.uid || !profile || typeof profile !== 'object') return;
+        const address = normalizeShippingAddressStructured(
+            profile.shippingAddressStructured || profile.shipping_address_structured || {},
+            profile.shippingAddress || profile.address || ''
+        );
+        const verifiedPhoneNumber = cleanString(profile.phone_number || profile.phoneE164 || '', 40);
+        const checkoutPhone = cleanString(
+            profile.checkoutPhone
+            || profile.checkout_phone
+            || profile.contactPhone
+            || profile.contact_phone
+            || (!verifiedPhoneNumber ? profile.phone : ''),
+            40
+        );
+        const phoneDisplay = cleanString(profile.phone_display || displayThaiPhone(verifiedPhoneNumber), 40);
+        const phoneVerified = profile.phoneVerified === true
+            || profile.phone_verified === true
+            || !!(profile.phoneVerifiedAt || profile.phone_verified_at);
+        const nextUser = {
+            ...user,
+            name: firstNonEmpty(profile.display_name, profile.displayName, user.name),
+            displayName: firstNonEmpty(profile.display_name, profile.displayName, user.displayName),
+            firstName: firstNonEmpty(profile.firstName, profile.first_name, user.firstName),
+            lastName: firstNonEmpty(profile.lastName, profile.last_name, user.lastName),
+            email: firstNonEmpty(profile.email, user.email),
+            phone: phoneDisplay || checkoutPhone || user.phone || '',
+            phoneNumber: verifiedPhoneNumber || user.phoneNumber || '',
+            checkoutPhone: checkoutPhone || user.checkoutPhone || '',
+            checkout_phone: checkoutPhone || user.checkout_phone || '',
+            contactPhone: checkoutPhone || user.contactPhone || '',
+            contact_phone: checkoutPhone || user.contact_phone || '',
+            phoneVerified,
+            phoneVerifiedAt: profile.phoneVerifiedAt || profile.phone_verified_at || user.phoneVerifiedAt || '',
+            shippingAddress: profile.shippingAddress || user.shippingAddress || '',
+            address: profile.shippingAddress || profile.address || user.address || '',
+            shippingAddressStructured: Object.values(address).some(Boolean) ? address : user.shippingAddressStructured,
+            addressLine: address.addressLine || user.addressLine || '',
+            subdistrict: address.subdistrict || user.subdistrict || '',
+            district: address.district || user.district || '',
+            province: address.province || user.province || '',
+            zipcode: address.zipcode || user.zipcode || ''
+        };
+        setUser(nextUser);
+    }
+
+    function setCheckoutFieldIfEmpty(id, value) {
+        const field = document.getElementById(id);
+        if (!field || cleanString(field.value, 500)) return;
+        field.value = value || '';
+    }
+
+    function prefillCheckoutContactFromProfile() {
+        const user = getUser();
+        if (!user) return;
+        setCheckoutFieldIfEmpty('fname', profileNameForCheckout(user));
+        setCheckoutFieldIfEmpty('phone', profilePhoneForCheckout(user));
+    }
+
+    function prefillCheckoutAddressFromProfile() {
+        if (getFulfillmentMethod() !== 'delivery') return;
+        const address = profileAddressForCheckout();
+        if (!Object.values(address).some(Boolean)) return;
+        setCheckoutFieldIfEmpty('address', address.addressLine);
+        setCheckoutFieldIfEmpty('subdistrict', address.subdistrict);
+        setCheckoutFieldIfEmpty('district', address.district);
+        setCheckoutFieldIfEmpty('province', address.province);
+        setCheckoutFieldIfEmpty('zipcode', address.zipcode);
+    }
+
+    function syncCheckoutAddressToProfileCache(address, addressText) {
+        const user = getUser();
+        if (!user?.uid) return;
+        setUser({
+            ...user,
+            shippingAddress: addressText,
+            address: addressText,
+            shippingAddressStructured: address,
+            addressLine: address.addressLine,
+            subdistrict: address.subdistrict,
+            district: address.district,
+            province: address.province,
+            zipcode: address.zipcode
+        });
+    }
+
+    function syncCheckoutPhoneToProfileCache(phone, profile = null) {
+        if (profile && typeof profile === 'object') {
+            mergeProfileIntoCheckoutCache(profile);
+            return;
+        }
+        const user = getUser();
+        if (!user?.uid) return;
+        const verifiedPhone = user.phoneVerified === true || !!user.phoneVerifiedAt || !!cleanString(user.phoneNumber, 40);
+        if (verifiedPhone) return;
+        const checkoutPhone = cleanString(phone, 40);
+        if (!checkoutPhone) return;
+        setUser({
+            ...user,
+            phone: checkoutPhone,
+            checkoutPhone,
+            checkout_phone: checkoutPhone,
+            contactPhone: checkoutPhone,
+            contact_phone: checkoutPhone,
+            phoneVerified: false,
+            phoneVerifiedAt: ''
+        });
+    }
+
     function subtotal(cart) {
         return cart.reduce((sum, item) => sum + ((Number(item.price) || 0) * (Number(item.quantity) || 0)), 0);
     }
@@ -191,6 +392,7 @@
             }
         });
         updateShippingLineUI();
+        if (!pickup) prefillCheckoutAddressFromProfile();
     }
 
     function renderCheckout() {
@@ -276,6 +478,23 @@
         return null;
     }
 
+    async function refreshCheckoutProfileFromCloud() {
+        const user = getUser();
+        if (!user?.uid) return;
+        const api = await waitForPaymentApi();
+        if (!api?.getMyProfile) return;
+        try {
+            const result = await api.getMyProfile();
+            if (result?.profile) {
+                mergeProfileIntoCheckoutCache(result.profile);
+                prefillCheckoutContactFromProfile();
+                prefillCheckoutAddressFromProfile();
+            }
+        } catch (error) {
+            console.warn('Checkout profile sync failed:', error);
+        }
+    }
+
     function paymentStatusFromResult(result = {}) {
         return String(result.source?.payment_status || result.payment?.payment_status || result.payment?.status || '').toUpperCase();
     }
@@ -356,14 +575,20 @@
         }
 
         if (fulfillmentMethod === 'delivery') {
-            const addressParts = ['address', 'subdistrict', 'district', 'province', 'zipcode']
-                .map(id => document.getElementById(id)?.value.trim())
-                .filter(Boolean);
+            const shippingAddressStructured = checkoutAddressFields();
+            const addressParts = [
+                shippingAddressStructured.addressLine,
+                shippingAddressStructured.subdistrict,
+                shippingAddressStructured.district,
+                shippingAddressStructured.province,
+                shippingAddressStructured.zipcode
+            ].filter(Boolean);
             if (addressParts.length < 5) {
                 alert(t('กรุณากรอกข้อมูลจัดส่งให้ครบถ้วน', 'Please complete shipping information.'));
                 return;
             }
-            addressText = addressParts.join(', ');
+            addressText = formatShippingAddress(shippingAddressStructured);
+            syncCheckoutAddressToProfileCache(shippingAddressStructured, addressText);
         } else {
             addressText = t('รับที่ร้าน', 'Pickup at Store');
         }
@@ -394,6 +619,7 @@
                 ...draftPayload,
                 idempotency_key: idempotencyKey
             });
+            syncCheckoutPhoneToProfileCache(phone, draft.profile || null);
 
             if (button) button.textContent = t('Opening Beam...', 'Opening Beam...');
             const payment = await api.createPaymentIntent({
@@ -445,10 +671,16 @@
 
     window.applyPromoCode = applyPromoCode;
     window.confirmOrder = confirmOrder;
+    window.addEventListener('eden:user-changed', () => {
+        prefillCheckoutContactFromProfile();
+        prefillCheckoutAddressFromProfile();
+    });
 
     document.addEventListener('DOMContentLoaded', async () => {
         injectFulfillmentUI();
         updateFulfillmentFormUI();
+        prefillCheckoutContactFromProfile();
+        refreshCheckoutProfileFromCloud();
         await handlePaymentReturn();
         renderCheckout();
     });

@@ -383,6 +383,51 @@ function normalizeCustomerPhone(value) {
   return phone;
 }
 
+async function syncCheckoutPhoneToProfile(transaction, db, uid, phone) {
+  const safeUid = cleanString(uid, 160);
+  const checkoutPhone = cleanString(phone, 40);
+  if (!safeUid || !checkoutPhone) return { synced: false };
+
+  const userRef = db.collection('users').doc(safeUid);
+  const userSnap = await transaction.get(userRef);
+  const existing = userSnap.exists ? userSnap.data() || {} : {};
+  const verifiedPhone = cleanString(existing.phone_number || existing.phoneE164 || '', 40);
+  const hasVerifiedPhone = !!verifiedPhone
+    || existing.phoneVerified === true
+    || existing.phone_verified === true
+    || !!(existing.phoneVerifiedAt || existing.phone_verified_at);
+  if (hasVerifiedPhone) return { synced: false, reason: 'verified_phone_exists' };
+
+  const now = FieldValue.serverTimestamp();
+  const profilePatch = {
+    uid: safeUid,
+    checkoutPhone,
+    checkout_phone: checkoutPhone,
+    contactPhone: checkoutPhone,
+    contact_phone: checkoutPhone,
+    checkoutPhoneSource: 'checkout',
+    checkoutPhoneVerified: false,
+    phoneVerified: false,
+    phone_verified: false,
+    updated_at: now,
+    updatedAt: now,
+  };
+  transaction.set(userRef, profilePatch, { merge: true });
+
+  return {
+    synced: true,
+    profile: {
+      checkoutPhone,
+      checkout_phone: checkoutPhone,
+      contactPhone: checkoutPhone,
+      contact_phone: checkoutPhone,
+      checkoutPhoneVerified: false,
+      phoneVerified: false,
+      phone_verified: false,
+    },
+  };
+}
+
 function shopOrderDisplayId(sourceId) {
   return `#ED${sha256(sourceId).slice(0, 8).toUpperCase()}`;
 }
@@ -598,7 +643,7 @@ async function createBeamPaymentLink(config, context, paymentId, idempotencyKey,
   const redirect = safeReturnUrl(returnUrl, config);
   const body = {
     collectDeliveryAddress: false,
-    collectPhoneNumber: true,
+    collectPhoneNumber: context.source_type !== 'SHOP_ORDER',
     expiresAt: (context.expires_at || new Date(Date.now() + (15 * 60 * 1000))).toISOString(),
     linkSettings: config.production ? {
       card: { isEnabled: false },
@@ -898,6 +943,7 @@ const createShopOrderDraft = httpFunction(async ({ db, data, actor, requestId })
 
     const orderRef = db.collection('orders').doc(paymentDocId('shop_order', `${branchId}:${actor.uid}:${idempotencyKey}`));
     const orderSnap = await transaction.get(orderRef);
+    const profilePhoneSync = await syncCheckoutPhoneToProfile(transaction, db, actor.uid, phone);
     if (orderSnap.exists) {
       const existing = orderSnap.data() || {};
       if (existing.customerUid !== actor.uid && existing.uid !== actor.uid) {
@@ -912,6 +958,8 @@ const createShopOrderDraft = httpFunction(async ({ db, data, actor, requestId })
         currency: existing.currency || 'THB',
         status: existing.status || 'pending',
         payment_status: existing.payment_status || existing.paymentStatus || 'UNPAID',
+        profile_phone_synced: profilePhoneSync.synced === true,
+        profile: profilePhoneSync.profile || null,
       };
     }
 
@@ -976,6 +1024,8 @@ const createShopOrderDraft = httpFunction(async ({ db, data, actor, requestId })
       currency: 'THB',
       status: 'pending',
       payment_status: 'UNPAID',
+      profile_phone_synced: profilePhoneSync.synced === true,
+      profile: profilePhoneSync.profile || null,
       totals: {
         subtotal,
         discount,

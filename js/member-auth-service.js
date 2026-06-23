@@ -7,6 +7,28 @@ function cleanString(value, maxLength = 300) {
     return String(value ?? '').trim().slice(0, maxLength);
 }
 
+function wait(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function createAuthRequiredError() {
+    const error = new Error('กรุณาเข้าสู่ระบบอีกครั้งเพื่อดำเนินการต่อ');
+    error.status = 401;
+    error.code = 'auth-required';
+    error.userMessage = true;
+    return error;
+}
+
+async function waitForCurrentUser(timeoutMs = 6000) {
+    const startedAt = Date.now();
+    let user = auth?.currentUser || null;
+    while (!user && Date.now() - startedAt < timeoutMs) {
+        await wait(100);
+        user = auth?.currentUser || null;
+    }
+    return user;
+}
+
 export function normalizeThaiPhone(value) {
     const raw = cleanString(value, 40);
     const compact = raw.replace(/[^\d+]/g, '');
@@ -25,20 +47,73 @@ export function displayThaiPhone(phoneNumber) {
     return phone.startsWith('+66') ? '0' + phone.slice(3) : phone;
 }
 
+function normalizeShippingAddressStructured(value = {}, fallbackText = '') {
+    const source = value && typeof value === 'object' ? value : {};
+    const normalized = {
+        addressLine: cleanString(source.addressLine || source.address_line || source.line1 || source.address || '', 250),
+        subdistrict: cleanString(source.subdistrict || source.subdistrictName || source.subdistrict_name || '', 80),
+        district: cleanString(source.district || source.districtName || source.district_name || '', 80),
+        province: cleanString(source.province || source.provinceName || source.province_name || '', 80),
+        zipcode: cleanString(source.zipcode || source.postalCode || source.postal_code || source.zip || '', 10)
+    };
+    if (!Object.values(normalized).some(Boolean) && fallbackText) {
+        normalized.addressLine = cleanString(fallbackText, 250);
+    }
+    return normalized;
+}
+
 export function profileToStoredUser(profile = {}) {
-    const displayName = profile.display_name || 'สมาชิก Eden';
+    const displayName = profile.display_name || profile.displayName || 'สมาชิก Eden';
     const avatar = profile.avatar_url || 'Images/Logo.webp';
+    const shippingAddressStructured = normalizeShippingAddressStructured(
+        profile.shippingAddressStructured || profile.shipping_address_structured || {},
+        profile.shippingAddress || profile.address || ''
+    );
+    const verifiedPhoneNumber = cleanString(profile.phone_number || profile.phoneE164 || '', 40);
+    const phoneVerified = profile.phoneVerified === true
+        || profile.phone_verified === true
+        || !!(profile.phoneVerifiedAt || profile.phone_verified_at);
+    const checkoutPhone = cleanString(
+        profile.checkoutPhone
+        || profile.checkout_phone
+        || profile.contactPhone
+        || profile.contact_phone
+        || (!verifiedPhoneNumber ? profile.phone : ''),
+        40
+    );
+    const phoneDisplay = cleanString(profile.phone_display || displayThaiPhone(verifiedPhoneNumber), 40);
     return {
         uid: profile.uid || profile.id || '',
         name: displayName,
+        displayName,
+        firstName: profile.firstName || profile.first_name || '',
+        lastName: profile.lastName || profile.last_name || '',
         email: profile.email || '',
         avatar,
-        phone: profile.phone_display || displayThaiPhone(profile.phone_number || ''),
-        phoneNumber: profile.phone_number || '',
+        phone: phoneDisplay || checkoutPhone,
+        phoneNumber: verifiedPhoneNumber,
+        checkoutPhone,
+        checkout_phone: checkoutPhone,
+        contactPhone: checkoutPhone,
+        contact_phone: checkoutPhone,
+        phoneVerified,
+        phoneVerifiedAt: profile.phoneVerifiedAt || profile.phone_verified_at || '',
         memberLevel: profile.member_level || 'Silver',
         points: Number(profile.points || 0),
         emailVerified: profile.emailVerified === true || profile.email_verified === true,
         emailVerifiedAt: profile.emailVerifiedAt || profile.email_verified_at || '',
+        shippingAddress: profile.shippingAddress || '',
+        address: profile.shippingAddress || '',
+        shippingAddressStructured,
+        addressLine: shippingAddressStructured.addressLine,
+        subdistrict: shippingAddressStructured.subdistrict,
+        district: shippingAddressStructured.district,
+        province: shippingAddressStructured.province,
+        zipcode: shippingAddressStructured.zipcode,
+        birthDate: profile.birthDate || '',
+        allergies: profile.allergies || '',
+        healthNote: profile.healthNote || '',
+        lineId: profile.lineId || '',
         passwordLoginEnabled: profile.password_login_enabled === true || profile.passwordLoginEnabled === true,
         authProviderIds: Array.isArray(profile.auth_provider_ids) ? profile.auth_provider_ids : [],
         isAdmin: false,
@@ -53,17 +128,19 @@ export function storeProfile(profile) {
     return storedUser;
 }
 
-async function authHeaders() {
+async function authHeaders({ requireAuth = false } = {}) {
     const headers = { 'Content-Type': 'application/json' };
-    const user = auth?.currentUser;
+    const user = requireAuth ? await waitForCurrentUser() : auth?.currentUser;
     if (user && typeof user.getIdToken === 'function') {
         headers.Authorization = 'Bearer ' + await user.getIdToken();
+    } else if (requireAuth) {
+        throw createAuthRequiredError();
     }
     return headers;
 }
 
 async function edenAuthRequest(path, { method = 'POST', body = null, authenticated = false } = {}) {
-    const headers = authenticated ? await authHeaders() : { 'Content-Type': 'application/json' };
+    const headers = authenticated ? await authHeaders({ requireAuth: true }) : { 'Content-Type': 'application/json' };
     const response = await fetch(FUNCTIONS_BASE_URL + path, {
         method,
         headers,
@@ -104,8 +181,14 @@ export function verifyRegisterOtp({ verificationId, phoneNumber, otp }) {
     });
 }
 
-export function completeRegister({ verificationId, registrationToken, phoneNumber, password, confirmPassword, firebaseIdToken }) {
-    const body = { password, confirmPassword };
+export function completeRegister({ verificationId, registrationToken, phoneNumber, password, confirmPassword, firebaseIdToken, firstName, lastName, displayName }) {
+    const body = {
+        password,
+        confirmPassword,
+        firstName: cleanString(firstName, 80),
+        lastName: cleanString(lastName, 80),
+        displayName: cleanString(displayName || [firstName, lastName].filter(Boolean).join(' '), 120)
+    };
     if (firebaseIdToken) body.firebaseIdToken = cleanString(firebaseIdToken, 4000);
     if (verificationId) body.verificationId = cleanString(verificationId, 160);
     if (registrationToken) body.registrationToken = cleanString(registrationToken, 1200);
@@ -156,5 +239,44 @@ export function getMyProfile() {
     return edenAuthRequest('/getMyProfile', {
         method: 'GET',
         authenticated: true
+    });
+}
+
+export function updateMyProfile(profile = {}) {
+    const shippingAddressStructured = normalizeShippingAddressStructured(
+        profile.shippingAddressStructured || profile,
+        profile.shippingAddress || profile.address || ''
+    );
+    return edenAuthRequest('/updateMyProfile', {
+        authenticated: true,
+        body: {
+            firstName: cleanString(profile.firstName, 80),
+            lastName: cleanString(profile.lastName, 80),
+            displayName: cleanString(profile.displayName || [profile.firstName, profile.lastName].filter(Boolean).join(' '), 120),
+            shippingAddress: cleanString(profile.shippingAddress, 500),
+            shippingAddressStructured,
+            birthDate: cleanString(profile.birthDate, 20),
+            allergies: cleanString(profile.allergies, 200),
+            healthNote: cleanString(profile.healthNote, 500),
+            lineId: cleanString(profile.lineId, 80)
+        }
+    });
+}
+
+export function requestPhoneChangeOtp(phoneNumber) {
+    return edenAuthRequest('/requestPhoneChangeOtp', {
+        authenticated: true,
+        body: { phoneNumber: normalizeThaiPhone(phoneNumber) }
+    });
+}
+
+export function verifyPhoneChangeOtp({ verificationId, phoneNumber, otp }) {
+    return edenAuthRequest('/verifyPhoneChangeOtp', {
+        authenticated: true,
+        body: {
+            verificationId: cleanString(verificationId, 160),
+            phoneNumber: normalizeThaiPhone(phoneNumber),
+            otp: cleanString(otp, 6)
+        }
     });
 }

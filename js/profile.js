@@ -1,8 +1,15 @@
 import { auth, db } from './firebase-config.js';
 import { onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { collection, doc, getDoc, getDocs, query, setDoc, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, doc, getDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getTierRules } from './membership.js';
-import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
+import {
+    getMyProfile,
+    profileToStoredUser,
+    requestPhoneChangeOtp,
+    updateMyProfile,
+    verifyPhoneChangeOtp
+} from './member-auth-service.js?v=checkout-phone-sync-20260623-1';
+import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 (() => {
     const USER_KEY = 'eden_user';
@@ -19,7 +26,20 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
     let cloudProfileUid = '';
     let cloudProfileLoading = false;
     let cloudProfileSaving = false;
+    let cloudProfileError = '';
+    let profileEditing = false;
     let emailVerificationBusy = false;
+    let emailVerificationCooldownUntil = 0;
+    let emailVerificationState = {
+        email: ''
+    };
+    let phoneVerificationBusy = false;
+    let phoneVerificationCooldownUntil = 0;
+    let phoneVerificationState = {
+        verificationId: '',
+        phoneNumber: '',
+        phoneDisplay: ''
+    };
     let loyaltyConfig = null;
     let loyaltyLedger = [];
     let loyaltySummary = null;
@@ -28,6 +48,11 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
     let currentAuthUser = null;
     let authStateResolved = false;
     let selectedPreviewTier = '';
+    let activeProfileTab = 'points';
+    let activeHistoryFilter = 'all';
+    let historyExpanded = false;
+    const PROFILE_TABS = ['points', 'history', 'account'];
+    const HISTORY_FILTERS = ['all', 'orders', 'bookings', 'archery'];
     const CAN_LOG_CLIENT_ERRORS = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
 
     const DEFAULT_LOYALTY_CONFIG = {
@@ -71,6 +96,217 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
 
     function cleanString(value, maxLength = 300) {
         return String(value ?? '').trim().slice(0, maxLength);
+    }
+
+    function normalizeShippingAddressStructured(value = {}, fallbackText = '') {
+        const source = value && typeof value === 'object' ? value : {};
+        const normalized = {
+            addressLine: cleanString(source.addressLine || source.address_line || source.line1 || source.address || '', 250),
+            subdistrict: cleanString(source.subdistrict || source.subdistrictName || source.subdistrict_name || '', 80),
+            district: cleanString(source.district || source.districtName || source.district_name || '', 80),
+            province: cleanString(source.province || source.provinceName || source.province_name || '', 80),
+            zipcode: cleanString(source.zipcode || source.postalCode || source.postal_code || source.zip || '', 10)
+        };
+        if (!Object.values(normalized).some(Boolean) && fallbackText) {
+            normalized.addressLine = cleanString(fallbackText, 250);
+        }
+        return normalized;
+    }
+
+    function formatShippingAddress(address = {}) {
+        return [
+            address.addressLine,
+            address.subdistrict,
+            address.district,
+            address.province,
+            address.zipcode
+        ].map(part => cleanString(part, 250)).filter(Boolean).join(', ');
+    }
+
+    function hasStructuredAddressValue(value = {}) {
+        return Object.values(normalizeShippingAddressStructured(value)).some(Boolean);
+    }
+
+    function firstNonEmpty(...values) {
+        for (const value of values) {
+            const text = cleanString(value);
+            if (text) return text;
+        }
+        return '';
+    }
+
+    function splitDisplayName(value = '') {
+        const parts = cleanString(value, 120).split(/\s+/).filter(Boolean);
+        return {
+            firstName: parts[0] || '',
+            lastName: parts.slice(1).join(' ')
+        };
+    }
+
+    function displayThaiPhone(phoneNumber = '') {
+        const phone = cleanString(phoneNumber, 40);
+        return phone.startsWith('+66') ? '0' + phone.slice(3) : phone;
+    }
+
+    function profileTextValue(key, fallback = '') {
+        const value = cloudProfile && cloudProfile[key] != null ? cloudProfile[key] : '';
+        return firstNonEmpty(value, fallback);
+    }
+
+    function buildProfileAddress(profile = {}, savedProfile = {}, user = {}) {
+        const fallbackText = firstNonEmpty(
+            profile.shippingAddress,
+            profile.address,
+            savedProfile.shippingAddress,
+            savedProfile.address,
+            cloudProfile?.shippingAddress,
+            user.shippingAddress,
+            user.address
+        );
+        const structuredSources = [
+            profile.shippingAddressStructured,
+            profile.shipping_address_structured,
+            savedProfile.shippingAddressStructured,
+            savedProfile.shipping_address_structured,
+            cloudProfile?.shippingAddressStructured,
+            cloudProfile?.shipping_address_structured,
+            user.shippingAddressStructured,
+            user.shipping_address_structured,
+            user
+        ];
+        const structuredSource = structuredSources.find(hasStructuredAddressValue) || {};
+        return normalizeShippingAddressStructured(structuredSource, fallbackText);
+    }
+
+    function buildCloudProfile(profile = {}, user = {}, savedProfile = {}) {
+        const previous = cloudProfile || {};
+        const displayName = firstNonEmpty(
+            profile.display_name,
+            profile.displayName,
+            profile.name,
+            savedProfile.display_name,
+            savedProfile.displayName,
+            savedProfile.name,
+            previous.displayName,
+            previous.display_name,
+            user.displayName,
+            user.name,
+            currentAuthUser?.displayName,
+            'สมาชิก Eden'
+        );
+        const nameParts = splitDisplayName(displayName);
+        const verifiedPhoneE164 = firstNonEmpty(
+            profile.phone_number,
+            profile.phoneE164,
+            savedProfile.phone_number,
+            savedProfile.phoneE164,
+            previous.phoneE164,
+            previous.phone_number,
+            user.phoneNumber,
+            user.phoneE164
+        );
+        const phoneVerifiedAt = firstNonEmpty(
+            profile.phoneVerifiedAt,
+            profile.phone_verified_at,
+            savedProfile.phoneVerifiedAt,
+            savedProfile.phone_verified_at,
+            previous.phoneVerifiedAt,
+            previous.phone_verified_at,
+            user.phoneVerifiedAt,
+            user.phone_verified_at
+        );
+        const phoneVerifiedExplicitFalse = profile.phoneVerified === false
+            || profile.phone_verified === false
+            || savedProfile.phoneVerified === false
+            || savedProfile.phone_verified === false;
+        const phoneVerified = profile.phoneVerified === true
+            || profile.phone_verified === true
+            || savedProfile.phoneVerified === true
+            || savedProfile.phone_verified === true
+            || !!phoneVerifiedAt
+            || (!phoneVerifiedExplicitFalse && (previous.phoneVerified === true || user.phoneVerified === true));
+        const phoneE164 = phoneVerified ? verifiedPhoneE164 : '';
+        const checkoutPhone = firstNonEmpty(
+            profile.checkoutPhone,
+            profile.checkout_phone,
+            profile.contactPhone,
+            profile.contact_phone,
+            savedProfile.checkoutPhone,
+            savedProfile.checkout_phone,
+            savedProfile.contactPhone,
+            savedProfile.contact_phone,
+            previous.checkoutPhone,
+            previous.checkout_phone,
+            previous.contactPhone,
+            previous.contact_phone,
+            user.checkoutPhone,
+            user.checkout_phone,
+            user.contactPhone,
+            user.contact_phone,
+            !verifiedPhoneE164 ? profile.phone : '',
+            !verifiedPhoneE164 ? savedProfile.phone : '',
+            !verifiedPhoneE164 ? user.phone : ''
+        );
+        const shippingAddressStructured = buildProfileAddress(profile, savedProfile, user);
+        const shippingAddress = firstNonEmpty(
+            profile.shippingAddress,
+            profile.address,
+            savedProfile.shippingAddress,
+            savedProfile.address,
+            previous.shippingAddress,
+            user.shippingAddress,
+            user.address,
+            formatShippingAddress(shippingAddressStructured)
+        );
+
+        return {
+            ...previous,
+            ...savedProfile,
+            ...profile,
+            displayName,
+            display_name: displayName,
+            firstName: firstNonEmpty(profile.firstName, profile.first_name, savedProfile.firstName, savedProfile.first_name, previous.firstName, user.firstName, nameParts.firstName),
+            lastName: firstNonEmpty(profile.lastName, profile.last_name, savedProfile.lastName, savedProfile.last_name, previous.lastName, user.lastName, nameParts.lastName),
+            email: firstNonEmpty(profile.email, profile.email_lower, savedProfile.email, savedProfile.email_lower, previous.email, user.email),
+            emailVerified: profile.emailVerified === true || profile.email_verified === true || savedProfile.emailVerified === true || savedProfile.email_verified === true || previous.emailVerified === true || user.emailVerified === true,
+            emailVerifiedAt: firstNonEmpty(profile.emailVerifiedAt, profile.email_verified_at, savedProfile.emailVerifiedAt, savedProfile.email_verified_at, previous.emailVerifiedAt, user.emailVerifiedAt),
+            photoURL: firstNonEmpty(profile.avatar_url, profile.photoURL, savedProfile.avatar_url, savedProfile.photoURL, previous.photoURL, user.avatar, user.photoURL, '/Images/Logo.webp'),
+            phone: firstNonEmpty(profile.phone_display, profile.phone, savedProfile.phone_display, savedProfile.phone, previous.phone, user.phone, displayThaiPhone(verifiedPhoneE164), checkoutPhone),
+            phoneE164,
+            checkoutPhone,
+            checkout_phone: checkoutPhone,
+            contactPhone: checkoutPhone,
+            contact_phone: checkoutPhone,
+            phoneVerified,
+            phoneVerifiedAt,
+            shippingAddress,
+            shippingAddressStructured,
+            shipping_address_structured: shippingAddressStructured,
+            birthDate: firstNonEmpty(profile.birthDate, savedProfile.birthDate, previous.birthDate, user.birthDate),
+            allergies: firstNonEmpty(profile.allergies, savedProfile.allergies, previous.allergies, user.allergies),
+            healthNote: firstNonEmpty(profile.healthNote, savedProfile.healthNote, previous.healthNote, user.healthNote),
+            lineId: firstNonEmpty(profile.lineId, savedProfile.lineId, previous.lineId, user.lineId),
+            tier: firstNonEmpty(profile.member_level, profile.tier, savedProfile.member_level, savedProfile.tier, previous.member_level, previous.tier, user.memberLevel, user.member_level, 'Silver'),
+            member_level: firstNonEmpty(profile.member_level, profile.tier, savedProfile.member_level, savedProfile.tier, previous.member_level, previous.tier, user.memberLevel, user.member_level, 'Silver'),
+            points: Number(profile.points ?? savedProfile.points ?? previous.points ?? user.points ?? 0),
+            createdAt: firstNonEmpty(profile.created_at, profile.createdAt, savedProfile.created_at, savedProfile.createdAt, previous.createdAt),
+            updatedAt: firstNonEmpty(profile.updated_at, profile.updatedAt, savedProfile.updated_at, savedProfile.updatedAt, previous.updatedAt),
+            lastLoginAt: firstNonEmpty(profile.last_login_at, profile.lastLoginAt, savedProfile.last_login_at, savedProfile.lastLoginAt, previous.lastLoginAt),
+            password_login_enabled: profile.password_login_enabled === true || profile.passwordLoginEnabled === true || savedProfile.password_login_enabled === true || savedProfile.passwordLoginEnabled === true || previous.password_login_enabled === true || previous.passwordLoginEnabled === true || user.password_login_enabled === true || user.passwordLoginEnabled === true,
+            passwordLoginEnabled: profile.password_login_enabled === true || profile.passwordLoginEnabled === true || savedProfile.password_login_enabled === true || savedProfile.passwordLoginEnabled === true || previous.password_login_enabled === true || previous.passwordLoginEnabled === true || user.password_login_enabled === true || user.passwordLoginEnabled === true
+        };
+    }
+
+    function profileShippingAddress(user = {}) {
+        return buildProfileAddress(cloudProfile || {}, {}, user);
+    }
+
+    function cooldownSeconds(until) {
+        return Math.max(0, Math.ceil((Number(until || 0) - Date.now()) / 1000));
+    }
+
+    function cooldownMinutes(until) {
+        return Math.max(1, Math.ceil(cooldownSeconds(until) / 60));
     }
 
     function isInternalPhoneEmail(email) {
@@ -151,6 +387,35 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             orders: 'Orders',
             bookings: 'Bookings',
             account: 'Account',
+            pointsTab: 'Points',
+            history: 'History',
+            dashboardTitle: 'Member Dashboard',
+            dashboardLead: 'Manage your Eden profile, points, rewards, and recent activity in one place.',
+            memberSummary: 'Member summary',
+            quickActions: 'Quick actions',
+            greetingPrefix: 'Hey',
+            youHave: 'You have',
+            edenPoints: 'Eden Points',
+            memberCard: 'Member card',
+            tierProgress: 'Tier progress',
+            howItWorks: 'How it works',
+            howItWorksEarn: 'Earn points from eligible Eden Cafe orders and bookings.',
+            howItWorksRedeem: 'Use points and member benefits with Eden promotions.',
+            howItWorksTier: 'Grow your tier from Silver to Gold and Platinum as you spend, collect points, or visit.',
+            bookArchery: 'Book Archery',
+            historyAll: 'All',
+            historyOrders: 'Orders',
+            historyBookings: 'Table / Room',
+            historyArchery: 'Archery',
+            recentActivity: 'Recent activity',
+            noHistory: 'No activity yet.',
+            showAll: 'View all',
+            showLess: 'Show less',
+            activityStatus: 'Status',
+            tableBooking: 'Table booking',
+            roomBooking: 'Room booking',
+            archeryBooking: 'Archery booking',
+            generalBooking: 'Booking',
             memberId: 'Member ID',
             points: 'Reward Points',
             totalSpent: 'Total Spent',
@@ -161,6 +426,8 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             loyaltyRule: 'Earning & redemption rules',
             loyaltyHistory: 'Recent point history',
             loyaltyLoading: 'Loading loyalty information...',
+            refreshLoyalty: 'Refresh points',
+            refreshingLoyalty: 'Refreshing...',
             noLoyaltyHistory: 'No point movement yet.',
             pointsAsCash: '{points} points = THB {value} credit',
             earnRule: 'Earn 1 point for every THB {spend}. Gold x{gold}, Platinum x{platinum}.',
@@ -199,11 +466,14 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             googleInfo: 'Member Account',
             editableInfo: 'Additional customer information',
             name: 'Name',
+            firstName: 'First name',
+            lastName: 'Last name',
             email: 'Email',
             emailVerification: 'Email verification',
             emailVerified: 'Verified',
             emailUnverified: 'Not verified',
             emailOptional: 'We will send a 6-digit code to this email. After verification, you can use this email with your existing password.',
+            emailVerifiedLocked: 'Email verified. No extra action is needed.',
             emailCode: 'Verification code',
             emailCodePlaceholder: '123456',
             sendEmailCode: 'Send code',
@@ -214,6 +484,19 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             emailCodeVerified: 'Email verified successfully.',
             emailCodeFailed: 'Unable to verify email right now.',
             phone: 'Phone number',
+            phoneVerification: 'Phone verification',
+            phoneVerified: 'Phone verified',
+            phoneUnverified: 'Verify by OTP before changing this number.',
+            sendPhoneCode: 'Send OTP',
+            phoneCode: 'Phone OTP',
+            phoneCodePlaceholder: '123456',
+            verifyPhoneCode: 'Verify phone',
+            sendingPhoneCode: 'Sending OTP...',
+            verifyingPhoneCode: 'Verifying phone...',
+            phoneCodeSent: 'OTP sent. Please enter the 6-digit code.',
+            phoneCodeVerified: 'Phone number verified successfully.',
+            phoneCodeFailed: 'Unable to verify phone right now.',
+            verificationCooldown: 'Please wait 5 minutes before requesting another code.',
             shippingAddress: 'Shipping address',
             birthDate: 'Birthday',
             allergies: 'Food allergies',
@@ -248,6 +531,35 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             orders: 'คำสั่งซื้อ',
             bookings: 'การจอง',
             account: 'บัญชีของฉัน',
+            pointsTab: 'แต้ม',
+            history: 'ประวัติ',
+            dashboardTitle: 'แดชบอร์ดสมาชิก',
+            dashboardLead: 'จัดการข้อมูลสมาชิก แต้ม สิทธิประโยชน์ และประวัติการใช้งานของคุณในที่เดียว',
+            memberSummary: 'สรุปสมาชิก',
+            quickActions: 'เมนูลัด',
+            greetingPrefix: 'สวัสดี',
+            youHave: 'คุณมี',
+            edenPoints: 'Eden Points',
+            memberCard: 'บัตรสมาชิก',
+            tierProgress: 'ความคืบหน้าระดับสมาชิก',
+            howItWorks: 'วิธีใช้งาน',
+            howItWorksEarn: 'สะสมแต้มจากคำสั่งซื้อและการจองที่เข้าร่วมของ Eden Cafe',
+            howItWorksRedeem: 'ใช้แต้มและสิทธิ์สมาชิกกับโปรโมชันของ Eden',
+            howItWorksTier: 'ขยับระดับจาก Silver ไป Gold และ Platinum เมื่อยอดใช้จ่าย แต้ม หรือจำนวนครั้งเข้าเงื่อนไข',
+            bookArchery: 'จองยิงธนู',
+            historyAll: 'ทั้งหมด',
+            historyOrders: 'คำสั่งซื้อ',
+            historyBookings: 'โต๊ะ / ห้อง',
+            historyArchery: 'ยิงธนู',
+            recentActivity: 'กิจกรรมล่าสุด',
+            noHistory: 'ยังไม่มีประวัติการใช้งาน',
+            showAll: 'ดูทั้งหมด',
+            showLess: 'ย่อรายการ',
+            activityStatus: 'สถานะ',
+            tableBooking: 'จองโต๊ะ',
+            roomBooking: 'จองห้อง',
+            archeryBooking: 'จองยิงธนู',
+            generalBooking: 'การจอง',
             memberId: 'รหัสสมาชิก',
             points: 'คะแนนสะสม',
             totalSpent: 'ยอดใช้จ่ายสะสม',
@@ -366,14 +678,72 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         return Array.isArray(history) ? history.slice(0, 10) : [];
     }
 
+    function historyTimestampMillis(item = {}) {
+        const value = item.paidAt || item.closedAt || item.completedAt || item.timestamp || item.createdAt || item.updatedAt || item.date;
+        if (value?.toDate) return value.toDate().getTime();
+        const parsed = new Date(value || 0).getTime();
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function sortHistoryDesc(items) {
+        return items.sort((a, b) => historyTimestampMillis(b) - historyTimestampMillis(a));
+    }
+
+    function mapCloudOrder(docSnap) {
+        const data = docSnap.data() || {};
+        return {
+            firestoreId: docSnap.id,
+            id: data.id || data.receiptNo || data.orderNumber || docSnap.id,
+            ...data
+        };
+    }
+
+    async function fetchProfileOrdersFromCloud(uid) {
+        if (!db || !uid) return [];
+        const [customerSnap, legacySnap] = await Promise.all([
+            getDocs(query(collection(db, 'orders'), where('customerUid', '==', uid))).catch(() => ({ docs: [] })),
+            getDocs(query(collection(db, 'orders'), where('uid', '==', uid))).catch(() => ({ docs: [] }))
+        ]);
+        const ordersByDocId = new Map();
+        [...customerSnap.docs, ...legacySnap.docs].forEach(docSnap => {
+            const data = docSnap.data() || {};
+            const customerUid = String(data.customerUid || '').trim();
+            const orderUid = String(data.uid || '').trim();
+            const source = String(data.source || '').toLowerCase();
+            if (data.isTestOrder === true) return;
+            if (customerUid ? customerUid !== uid : (orderUid !== uid || source === 'pos')) return;
+            ordersByDocId.set(docSnap.id, mapCloudOrder(docSnap));
+        });
+        return sortHistoryDesc(Array.from(ordersByDocId.values())).slice(0, 20);
+    }
+
+    async function fetchProfileBookingsFromCloud(uid) {
+        if (!db || !uid) return [];
+        const [uidSnap, customerSnap, memberSnap] = await Promise.all([
+            getDocs(query(collection(db, 'bookings'), where('uid', '==', uid))).catch(() => ({ docs: [] })),
+            getDocs(query(collection(db, 'bookings'), where('customerUid', '==', uid))).catch(() => ({ docs: [] })),
+            getDocs(query(collection(db, 'bookings'), where('member_id', '==', uid))).catch(() => ({ docs: [] }))
+        ]);
+        const bookingsByDocId = new Map();
+        [...uidSnap.docs, ...customerSnap.docs, ...memberSnap.docs].forEach(docSnap => {
+            bookingsByDocId.set(docSnap.id, { id: docSnap.id, ...docSnap.data() });
+        });
+        return sortHistoryDesc(Array.from(bookingsByDocId.values())).slice(0, 20);
+    }
+
     async function refreshCloudHistory(user) {
         if (!user?.uid || cloudHistoryLoading || cloudHistoryUid === user.uid) return;
-        if (typeof window.fetchUserOrdersFromCloud !== 'function' || typeof window.fetchUserBookingsFromCloud !== 'function') return;
+        const fetchOrders = typeof window.fetchUserOrdersFromCloud === 'function'
+            ? window.fetchUserOrdersFromCloud
+            : fetchProfileOrdersFromCloud;
+        const fetchBookings = typeof window.fetchUserBookingsFromCloud === 'function'
+            ? window.fetchUserBookingsFromCloud
+            : fetchProfileBookingsFromCloud;
         cloudHistoryLoading = true;
         try {
             const [orders, bookings] = await Promise.all([
-                window.fetchUserOrdersFromCloud(user.uid),
-                window.fetchUserBookingsFromCloud(user.uid)
+                fetchOrders(user.uid),
+                fetchBookings(user.uid)
             ]);
             cloudOrders = Array.isArray(orders) ? orders : [];
             cloudBookings = Array.isArray(bookings) ? bookings : [];
@@ -383,6 +753,33 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             logClientError('Unable to load profile history from cloud:', error);
         } finally {
             cloudHistoryLoading = false;
+        }
+    }
+
+    function profileHasSavedFields(profile = {}) {
+        return [
+            profile.firstName,
+            profile.first_name,
+            profile.lastName,
+            profile.last_name,
+            profile.shippingAddress,
+            profile.address,
+            profile.birthDate,
+            profile.allergies,
+            profile.healthNote,
+            profile.lineId
+        ].some(value => !!cleanString(value)) ||
+            hasStructuredAddressValue(profile.shippingAddressStructured || profile.shipping_address_structured || {});
+    }
+
+    async function fetchSavedUserProfile(user) {
+        if (!db || !user?.uid) return null;
+        try {
+            const snap = await getDoc(doc(db, 'users', user.uid));
+            return snap.exists() ? { uid: snap.id, ...(snap.data() || {}) } : null;
+        } catch (error) {
+            logClientError('Unable to load saved user profile document:', error);
+            return null;
         }
     }
 
@@ -402,32 +799,30 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                 redirectToPasswordSetup();
                 return;
             }
-            cloudProfile = {
-                ...profile,
-                displayName: profile.display_name || 'สมาชิก Eden',
-                photoURL: profile.avatar_url || '/Images/Logo.webp',
-                phone: profile.phone_display || '',
-                phoneE164: profile.phone_number || '',
-                tier: profile.member_level || 'Silver',
-                member_level: profile.member_level || 'Silver',
-                points: Number(profile.points || 0),
-                createdAt: profile.created_at || '',
-                updatedAt: profile.updated_at || '',
-                lastLoginAt: profile.last_login_at || ''
-            };
-            localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(profile)));
+            cloudProfileError = '';
+            const savedProfile = profileHasSavedFields(profile) ? null : await fetchSavedUserProfile(user);
+            cloudProfile = buildCloudProfile(profile, user, savedProfile || {});
+            localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(cloudProfile)));
             cloudProfileUid = user.uid;
-            renderProfile();
         } catch (error) {
             logClientError('Unable to load member profile:', error);
+            cloudProfileError = profileLoadFailedMessage();
+            cloudProfile = {
+                ...(cloudProfile || {}),
+                ...buildProfileFallback(user)
+            };
+            cloudProfileUid = user.uid;
         } finally {
             cloudProfileLoading = false;
+            if (cloudProfileUid === user.uid) renderProfile();
         }
     }
 
-    async function refreshLoyaltyData(user) {
-        if (!db || !user?.uid || loyaltyLoading || loyaltyUid === user.uid) return;
+    async function refreshLoyaltyData(user, options = {}) {
+        const force = options.force === true;
+        if (!db || !user?.uid || loyaltyLoading || (!force && loyaltyUid === user.uid)) return;
         loyaltyLoading = true;
+        if (force) renderProfile();
         try {
             const [configSnap, summarySnap, ledgerSnap] = await Promise.all([
                 getDoc(doc(db, 'site_settings', 'loyalty')),
@@ -453,6 +848,13 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         }
     }
 
+    async function refreshProfileLoyalty() {
+        const user = readUser();
+        if (!user?.uid) return;
+        loyaltyUid = '';
+        await refreshLoyaltyData(user, { force: true });
+    }
+
     function cartCount() {
         const cart = readJSON(CART_KEY, []);
         return Array.isArray(cart) ? cart.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) : 0;
@@ -467,6 +869,47 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
 
     function profileValue(key, fallback = '') {
         return cloudProfile && cloudProfile[key] != null ? cloudProfile[key] : fallback;
+    }
+
+    function profileLoadFailedMessage() {
+        return isEnglishPage()
+            ? 'Unable to load saved profile. Showing your current session details.'
+            : 'โหลดข้อมูลโปรไฟล์ไม่สำเร็จ กำลังแสดงข้อมูลจากเซสชันปัจจุบัน';
+    }
+
+    function buildProfileFallback(user = {}) {
+        const displayName = user.name || currentAuthUser?.displayName || 'Eden Member';
+        const nameParts = splitDisplayName(displayName);
+        return {
+            uid: user.uid || currentAuthUser?.uid || '',
+            displayName,
+            firstName: firstNonEmpty(user.firstName, nameParts.firstName),
+            lastName: firstNonEmpty(user.lastName, nameParts.lastName),
+            email: user.email || '',
+            photoURL: user.avatar || user.photoURL || currentAuthUser?.photoURL || '/Images/Logo.webp',
+            phone: user.phone || user.checkoutPhone || user.contactPhone || '',
+            phoneE164: user.phoneVerified === true ? (user.phoneNumber || '') : '',
+            checkoutPhone: user.checkoutPhone || user.checkout_phone || user.contactPhone || user.contact_phone || '',
+            checkout_phone: user.checkoutPhone || user.checkout_phone || user.contactPhone || user.contact_phone || '',
+            contactPhone: user.checkoutPhone || user.checkout_phone || user.contactPhone || user.contact_phone || '',
+            contact_phone: user.checkoutPhone || user.checkout_phone || user.contactPhone || user.contact_phone || '',
+            phoneVerified: user.phoneVerified === true,
+            phoneVerifiedAt: user.phoneVerifiedAt || '',
+            shippingAddress: user.shippingAddress || user.address || '',
+            shippingAddressStructured: normalizeShippingAddressStructured(
+                user.shippingAddressStructured || user.shipping_address_structured || user,
+                user.shippingAddress || user.address || ''
+            ),
+            birthDate: user.birthDate || '',
+            allergies: user.allergies || '',
+            healthNote: user.healthNote || '',
+            lineId: user.lineId || '',
+            tier: user.memberLevel || user.member_level || 'Silver',
+            member_level: user.memberLevel || user.member_level || 'Silver',
+            points: Number(user.points || 0),
+            password_login_enabled: true,
+            passwordLoginEnabled: true
+        };
     }
 
     function formatNumber(value) {
@@ -574,11 +1017,6 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                     </div>
                     <div class="member-id">${escapeHTML(labels.memberId)}: ${escapeHTML(membershipUser.memberCode || memberId(user))}</div>
                 </div>
-                <div class="member-metrics-row">
-                    <span>${escapeHTML(labels.points)} <strong>${formatNumber(membershipUser.points)}</strong></span>
-                    <span>${escapeHTML(labels.totalSpent)} <strong>฿${formatBaht(membershipUser.totalSpent)}</strong></span>
-                    <span>${escapeHTML(labels.visits)} <strong>${formatNumber(membershipUser.visitCount)}</strong></span>
-                </div>
                 <div class="member-progress-container">
                     <div class="member-progress-text"><span>${escapeHTML(progressLabel)}</span><span>${percent}%</span></div>
                     <div class="member-progress-bar"><div class="member-progress-fill" style="width:${percent}%"></div></div>
@@ -619,7 +1057,10 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
 
         return `
             <div class="membership-panel" id="profile-loyalty-wallet">
-                <h2>${escapeHTML(labels.loyaltyWallet)}</h2>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                    <h2 style="margin:0;">${escapeHTML(labels.loyaltyWallet)}</h2>
+                    <button class="btn btn-outline" type="button" onclick="refreshProfileLoyalty()" ${loyaltyLoading ? 'disabled' : ''}>${escapeHTML(loyaltyLoading ? (labels.refreshingLoyalty || 'Refreshing...') : (labels.refreshLoyalty || 'Refresh points'))}</button>
+                </div>
                 <div class="stats-grid">
                     <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.points)}</div><div class="stat-label">${escapeHTML(labels.points)}</div></div>
                     <div class="stat-box"><div class="stat-value">฿${formatBaht(pointCashValue)}</div><div class="stat-label">${escapeHTML(labels.pointValue)}</div></div>
@@ -639,14 +1080,20 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         `;
     }
 
-    function renderBenefits(tier, labels) {
+    function renderBenefitGrid(tier) {
         const benefits = getTierBenefits(tier, isEnglishPage() ? 'en' : 'th');
+        return `
+            <div class="benefit-grid">
+                ${benefits.map(item => `<div class="benefit-pill">${escapeHTML(item)}</div>`).join('')}
+            </div>
+        `;
+    }
+
+    function renderBenefits(tier, labels) {
         return `
             <div class="membership-panel">
                 <h2>${escapeHTML(labels.benefits)}</h2>
-                <div class="benefit-grid">
-                    ${benefits.map(item => `<div class="benefit-pill">${escapeHTML(item)}</div>`).join('')}
-                </div>
+                ${renderBenefitGrid(tier)}
             </div>
         `;
     }
@@ -750,19 +1197,22 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         return orders.map(order => {
             const items = Array.isArray(order.items) ? order.items : [];
             const paymentStatus = String(order.paymentStatus || order.payment_status || '').toLowerCase();
-            const orderStatus = String(order.status || order.order_status || '').toLowerCase();
+            const orderStatus = String(order.billStatus || order.status || order.order_status || '').toLowerCase();
             const status = paymentStatus === 'paid' || paymentStatus === 'paid_online' || orderStatus === 'paid' || orderStatus === 'completed'
                 ? labels.paid
                 : labels.pending;
+            const displayId = order.receiptNo || order.orderNumber || order.id || order.firestoreId || '-';
+            const orderDate = order.paidAt || order.closedAt || order.completedAt || order.timestamp || order.createdAt || order.date || order.updatedAt;
+            const total = order.totalAmount ?? order.payableTotal ?? order.totalBeforeLoyalty ?? order.total ?? order.netTotal ?? 0;
             return `
                 <div class="order-card">
                     <div class="order-card-header">
-                        <strong>${escapeHTML(labels.orderId)} ${escapeHTML(order.id || '-')}</strong>
+                        <strong>${escapeHTML(labels.orderId)} ${escapeHTML(displayId)}</strong>
                         <span style="color:var(--primary-color);font-weight:600;">${escapeHTML(status)}</span>
                     </div>
-                    <p style="margin:0 0 8px;color:#666;">${formatDate(order.date || order.timestamp)}</p>
+                    <p style="margin:0 0 8px;color:#666;">${formatDate(orderDate)}</p>
                     <p style="margin:0 0 8px;">${escapeHTML(labels.items)}: ${items.map(item => escapeHTML(item.name || '')).join(', ') || '-'}</p>
-                    <strong>${escapeHTML(labels.total)}: ${money(order.totalAmount || order.total || 0)}</strong>
+                    <strong>${escapeHTML(labels.total)}: ${money(total)}</strong>
                 </div>
             `;
         }).join('');
@@ -873,6 +1323,360 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         `).join('');
     }
 
+    function profileTabLabel(tab, labels) {
+        return {
+            points: labels.pointsTab,
+            history: labels.history,
+            account: labels.account
+        }[tab] || labels.pointsTab;
+    }
+
+    function renderProfileTabs(labels) {
+        return `
+            <div class="profile-tabs" role="tablist" aria-label="${escapeHTML(labels.dashboardTitle)}">
+                ${PROFILE_TABS.map(tab => `
+                    <button
+                        class="profile-tab ${activeProfileTab === tab ? 'active' : ''}"
+                        type="button"
+                        role="tab"
+                        data-profile-tab="${escapeHTML(tab)}"
+                        aria-selected="${activeProfileTab === tab ? 'true' : 'false'}"
+                        aria-controls="profile-tab-${escapeHTML(tab)}"
+                        onclick="setProfileTab('${escapeHTML(tab)}')">
+                        ${escapeHTML(profileTabLabel(tab, labels))}
+                    </button>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    function setProfileTab(tab) {
+        if (!PROFILE_TABS.includes(tab)) return false;
+        activeProfileTab = tab;
+        renderProfile();
+        requestAnimationFrame(() => {
+            document.getElementById(`profile-tab-${tab}`)?.focus?.({ preventScroll: true });
+        });
+        return false;
+    }
+
+    function setProfileHistoryFilter(filter) {
+        if (!HISTORY_FILTERS.includes(filter)) return false;
+        activeHistoryFilter = filter;
+        activeProfileTab = 'history';
+        historyExpanded = false;
+        renderProfile();
+        return false;
+    }
+
+    function toggleProfileHistoryExpanded() {
+        historyExpanded = !historyExpanded;
+        activeProfileTab = 'history';
+        renderProfile();
+        return false;
+    }
+
+    function tierPointTarget(tier) {
+        const rules = getTierRules();
+        return Number(rules[tier.toUpperCase()]?.minPoints || 0) || 0;
+    }
+
+    function renderTierJourney(membershipUser, labels) {
+        const currentTier = getMemberTier(membershipUser);
+        const tiers = ['Silver', 'Gold', 'Platinum'];
+        const maxPoints = Math.max(1, tierPointTarget('Platinum'));
+        const pointsForRail = Math.max(Number(membershipUser.points) || 0, tierPointTarget(currentTier));
+        const progressPercent = Math.max(0, Math.min(100, Math.round(pointsForRail / maxPoints * 100)));
+        const progressScale = (progressPercent / 100).toFixed(2);
+        return `
+            <section class="membership-panel profile-tier-journey" aria-label="${escapeHTML(labels.tierProgress)}">
+                <div class="profile-tier-heading">
+                    <div>
+                        <span class="profile-kicker">${escapeHTML(labels.tierProgress)}</span>
+                        <h2>${escapeHTML(currentTier)}</h2>
+                    </div>
+                    <strong>${formatNumber(membershipUser.points)} ${escapeHTML(labels.points)}</strong>
+                </div>
+                <div class="profile-tier-track" style="--profile-tier-progress:${progressScale}">
+                    <span class="profile-tier-track-fill" aria-hidden="true"></span>
+                    ${tiers.map(tier => {
+                        const unlocked = tierRank(tier) <= tierRank(currentTier);
+                        const active = tier === currentTier;
+                        return `
+                            <div class="profile-tier-step ${unlocked ? 'is-unlocked' : 'is-locked'} ${active ? 'is-active' : ''}">
+                                <span class="profile-tier-diamond" aria-hidden="true"></span>
+                                <strong>${escapeHTML(tier)}</strong>
+                                <small>${formatNumber(tierPointTarget(tier))} ${escapeHTML(labels.points)}</small>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                <p class="membership-rule-lead">${escapeHTML(progressMessage(getNextTierProgress(membershipUser), labels))}</p>
+            </section>
+        `;
+    }
+
+    function renderHowItWorks(labels) {
+        const steps = [labels.howItWorksEarn, labels.howItWorksRedeem, labels.howItWorksTier];
+        return `
+            <section class="membership-panel profile-how-panel" aria-label="${escapeHTML(labels.howItWorks)}">
+                <h2>${escapeHTML(labels.howItWorks)}</h2>
+                <div class="profile-how-list">
+                    ${steps.map((step, index) => `
+                        <div class="profile-how-step">
+                            <span>${index + 1}</span>
+                            <p>${escapeHTML(step)}</p>
+                        </div>
+                    `).join('')}
+                </div>
+            </section>
+        `;
+    }
+
+    function renderProfileSummary(user, labels, membershipUser, tier, avatar, displayName, email) {
+        const theme = getTierTheme(tier);
+        return `
+            <aside class="profile-sidebar profile-dashboard-sidebar" aria-label="${escapeHTML(labels.memberSummary)}">
+                <section class="profile-summary-card profile-summary-card-premium">
+                    <div class="profile-summary-top">
+                        <span class="profile-tier-chip ${theme.badgeClass}">${escapeHTML(tier)} ${escapeHTML(labels.member)}</span>
+                        <h2>${escapeHTML(labels.greetingPrefix)} ${escapeHTML(displayName || labels.member)}</h2>
+                        <p>${escapeHTML(labels.youHave)}</p>
+                        <strong class="profile-summary-points">${formatNumber(membershipUser.points)}</strong>
+                        <small>${escapeHTML(labels.edenPoints)}</small>
+                    </div>
+                    <div class="profile-mini-card" aria-label="${escapeHTML(labels.memberCard)}">
+                        <div>
+                            <strong>${escapeHTML(displayName || labels.member)}</strong>
+                            <span>${escapeHTML(membershipUser.memberCode || memberId(user))}</span>
+                            <span>UID: ${escapeHTML(user.uid || membershipUser.id || '-')}</span>
+                        </div>
+                        <span class="profile-mini-tier">${escapeHTML(tier)}</span>
+                        <b>${formatNumber(membershipUser.points)} ${escapeHTML(labels.points)}</b>
+                    </div>
+                </section>
+
+                ${renderTierJourney(membershipUser, labels)}
+
+                <div class="profile-quick-actions" aria-label="${escapeHTML(labels.quickActions)}">
+                    <a class="profile-action-card" href="${isEnglishPage() ? '/shop-en' : '/shop'}"><span aria-hidden="true"></span>${escapeHTML(labels.shopNow)}</a>
+                    <a class="profile-action-card" href="${isEnglishPage() ? '/booking-en' : '/booking'}"><span aria-hidden="true"></span>${escapeHTML(labels.bookTable)}</a>
+                    <a class="profile-action-card" href="/archery/"><span aria-hidden="true"></span>${escapeHTML(labels.bookArchery)}</a>
+                </div>
+
+                ${renderProfileTabs(labels)}
+            </aside>
+        `;
+    }
+
+    function renderDashboardMetrics(membershipUser, labels) {
+        const metrics = [
+            { value: formatNumber(membershipUser.points), label: labels.points },
+            { value: '฿' + formatBaht(membershipUser.totalSpent), label: labels.totalSpent },
+            { value: formatNumber(membershipUser.visitCount), label: labels.visits },
+            { value: formatNumber(membershipUser.cartItemCount), label: labels.cartItems }
+        ];
+        return `
+            <div class="stats-grid profile-metric-grid" aria-label="${escapeHTML(labels.overview)}">
+                ${metrics.map(metric => `
+                    <div class="stat-box profile-metric-card">
+                        <div class="stat-value">${escapeHTML(metric.value)}</div>
+                        <div class="stat-label">${escapeHTML(metric.label)}</div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    function timestampMillis(value) {
+        if (!value) return 0;
+        if (value.toMillis) return value.toMillis();
+        if (value.toDate) return value.toDate().getTime();
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+    }
+
+    function isArcheryBooking(booking = {}) {
+        const type = String(booking.service_type || booking.serviceType || booking.bookingType || booking.type || '').toLowerCase();
+        return type.includes('archery')
+            || Array.isArray(booking.assigned_lane_numbers)
+            || Array.isArray(booking.assigned_resource_ids)
+            || booking.required_lane_count != null
+            || booking.duration_minutes != null
+            || booking.package_amount != null;
+    }
+
+    function bookingKindLabel(booking, labels) {
+        if (isArcheryBooking(booking)) return labels.archeryBooking;
+        const bookingType = String(booking.bookingType || booking.booking_type || '').toLowerCase();
+        if (bookingType === 'table') return labels.tableBooking;
+        if (bookingType === 'room') return labels.roomBooking;
+        return labels.generalBooking;
+    }
+
+    function bookingTimeText(booking) {
+        const date = booking.booking_date || booking.date || '';
+        const start = booking.start_time || booking.startTime || booking.arrivalTime || '';
+        const end = booking.end_time || booking.endTime || '';
+        const range = [start, end].filter(Boolean).join(' - ');
+        return [date, range].filter(Boolean).join(' | ') || '-';
+    }
+
+    function bookingDetailText(booking) {
+        const laneNumbers = Array.isArray(booking.assigned_lane_numbers)
+            ? booking.assigned_lane_numbers.map(number => `Lane ${number}`).join(', ')
+            : '';
+        const laneIds = !laneNumbers && Array.isArray(booking.assigned_resource_ids)
+            ? booking.assigned_resource_ids.join(', ')
+            : '';
+        return [
+            laneNumbers || laneIds,
+            booking.tableZone || booking.tableNo || booking.roomType || booking.zone || booking.table,
+            booking.party_size ? `${booking.party_size} people` : '',
+            booking.guests ? `${booking.guests} people` : '',
+            booking.duration_minutes ? `${booking.duration_minutes} min` : ''
+        ].filter(Boolean).join(' / ');
+    }
+
+    function buildHistoryItems(orders, bookings, labels) {
+        const orderItems = orders.map(order => {
+            const items = Array.isArray(order.items) ? order.items.map(item => item.name || '').filter(Boolean).join(', ') : '';
+            const paymentStatus = String(order.paymentStatus || order.payment_status || '').toLowerCase();
+            const orderStatus = String(order.status || order.order_status || '').toLowerCase();
+            const status = paymentStatus === 'paid' || paymentStatus === 'paid_online' || orderStatus === 'paid' || orderStatus === 'completed'
+                ? labels.paid
+                : labels.pending;
+            return {
+                category: 'orders',
+                title: `${labels.orderId} ${order.id || '-'}`,
+                typeLabel: labels.orders,
+                status,
+                meta: formatDate(order.date || order.timestamp || order.createdAt),
+                detail: items || '-',
+                amount: money(order.totalAmount || order.total || 0),
+                timestamp: timestampMillis(order.timestamp || order.createdAt || order.date)
+            };
+        });
+        const bookingItems = bookings.map(booking => {
+            const archery = isArcheryBooking(booking);
+            return {
+                category: archery ? 'archery' : 'bookings',
+                title: bookingKindLabel(booking, labels),
+                typeLabel: archery ? labels.historyArchery : labels.historyBookings,
+                status: booking.status || booking.paymentStatus || booking.payment_status || 'confirmed',
+                meta: bookingTimeText(booking),
+                detail: bookingDetailText(booking) || booking.id || '-',
+                amount: booking.total ? money(booking.total) : booking.price || '',
+                timestamp: timestampMillis(booking.timestamp || booking.createdAt || booking.booking_date || booking.date)
+            };
+        });
+        return [...orderItems, ...bookingItems].sort((a, b) => b.timestamp - a.timestamp);
+    }
+
+    function filteredHistoryItems(items) {
+        if (activeHistoryFilter === 'all') return items;
+        return items.filter(item => item.category === activeHistoryFilter);
+    }
+
+    function renderHistoryFilters(labels) {
+        const filterLabels = {
+            all: labels.historyAll,
+            orders: labels.historyOrders,
+            bookings: labels.historyBookings,
+            archery: labels.historyArchery
+        };
+        return `
+            <div class="profile-history-filters" role="toolbar" aria-label="${escapeHTML(labels.history)}">
+                ${HISTORY_FILTERS.map(filter => `
+                    <button
+                        class="profile-history-filter ${activeHistoryFilter === filter ? 'active' : ''}"
+                        type="button"
+                        data-history-filter="${escapeHTML(filter)}"
+                        onclick="setProfileHistoryFilter('${escapeHTML(filter)}')">
+                        ${escapeHTML(filterLabels[filter])}
+                    </button>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    function renderHistoryTimeline(items, labels) {
+        if (!items.length) {
+            return `<div class="profile-empty-state">${escapeHTML(labels.noHistory)}</div>`;
+        }
+        return `
+            <div class="profile-timeline">
+                ${items.map(item => `
+                    <article class="profile-timeline-item profile-timeline-item--${escapeHTML(item.category)}">
+                        <span class="profile-timeline-dot" aria-hidden="true"></span>
+                        <div class="profile-timeline-main">
+                            <div class="profile-timeline-top">
+                                <span>${escapeHTML(item.typeLabel)}</span>
+                                <strong>${escapeHTML(item.status)}</strong>
+                            </div>
+                            <h3>${escapeHTML(item.title)}</h3>
+                            <p>${escapeHTML(item.meta)}</p>
+                            <small>${escapeHTML(item.detail)}</small>
+                            ${item.amount ? `<b>${escapeHTML(item.amount)}</b>` : ''}
+                        </div>
+                    </article>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    function renderPointsTab(labels, membershipUser, tier) {
+        return `
+            <section class="profile-tab-panel" id="profile-tab-points" role="tabpanel" tabindex="-1">
+                ${renderLoyaltyWallet(membershipUser, labels)}
+            </section>
+        `;
+    }
+
+    function renderHistoryTab(labels, historyItems) {
+        const visibleItems = filteredHistoryItems(historyItems);
+        const limitedItems = historyExpanded ? visibleItems : visibleItems.slice(0, 5);
+        const hasMore = visibleItems.length > 5;
+        return `
+            <section class="profile-tab-panel" id="profile-tab-history" role="tabpanel" tabindex="-1">
+                <div class="profile-panel-heading">
+                    <div>
+                        <span class="profile-kicker">${escapeHTML(labels.history)}</span>
+                        <h2>${escapeHTML(labels.recentActivity)}</h2>
+                    </div>
+                </div>
+                ${renderHistoryFilters(labels)}
+                ${renderHistoryTimeline(limitedItems, labels)}
+                ${hasMore ? `
+                    <button class="btn btn-outline profile-history-more" type="button" onclick="toggleProfileHistoryExpanded()">
+                        ${escapeHTML(historyExpanded ? labels.showLess : labels.showAll)}
+                    </button>
+                ` : ''}
+            </section>
+        `;
+    }
+
+    function renderAccountTab(user, labels) {
+        return `
+            <section class="profile-tab-panel" id="profile-tab-account" role="tabpanel" tabindex="-1">
+                <div class="profile-panel-heading">
+                    <div>
+                        <span class="profile-kicker">${escapeHTML(labels.account)}</span>
+                        <h2>${escapeHTML(labels.editableInfo)}</h2>
+                    </div>
+                </div>
+                ${renderProfileForm(user, labels)}
+            </section>
+        `;
+    }
+
+    function renderActiveProfilePanel(user, labels, membershipUser, tier, historyItems) {
+        if (activeProfileTab === 'points') return renderPointsTab(labels, membershipUser, tier);
+        if (activeProfileTab === 'history') return renderHistoryTab(labels, historyItems);
+        if (activeProfileTab === 'account') return renderAccountTab(user, labels);
+        return renderPointsTab(labels, membershipUser, tier);
+    }
+
     function renderMemberIdentity(user, labels) {
         const en = isEnglishPage();
         const displayName = profileValue('displayName', profileValue('display_name', user.name || labels.member)) || labels.member;
@@ -911,19 +1715,62 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
     }
 
     function renderProfileForm(user, labels) {
-        const phone = profileValue('phone', user.phone || '');
-        const shippingAddress = profileValue('shippingAddress', user.shippingAddress || user.address || '');
-        const birthDate = profileValue('birthDate', '');
-        const allergies = profileValue('allergies', '');
-        const healthNote = profileValue('healthNote', '');
-        const lineId = profileValue('lineId', '');
-        const displayName = profileValue('displayName', user.name || labels.member);
-        const email = profileValue('email', publicEmail(user.email || ''));
+        const storedPhone = profileValue('phone', user.phone || '');
+        const phone = phoneVerificationState.phoneDisplay || storedPhone;
+        const shippingAddress = profileShippingAddress(user);
+        const displayName = profileTextValue('displayName', user.name || user.displayName || labels.member);
+        const nameParts = splitDisplayName(displayName);
+        const firstName = profileTextValue('firstName', user.firstName || nameParts.firstName);
+        const lastName = profileTextValue('lastName', user.lastName || nameParts.lastName);
+        const birthDate = profileTextValue('birthDate', user.birthDate || '');
+        const allergies = profileTextValue('allergies', user.allergies || '');
+        const healthNote = profileTextValue('healthNote', user.healthNote || '');
+        const lineId = profileTextValue('lineId', user.lineId || '');
+        const storedEmail = profileValue('email', publicEmail(user.email || ''));
+        const email = emailVerificationState.email || storedEmail;
         const avatar = profileValue('photoURL', user.avatar || user.photoURL || '/Images/Logo.webp');
         const loadingText = cloudProfileLoading ? `<p class="profile-save-message">${escapeHTML(labels.loadingProfile)}</p>` : '';
-        const emailVerified = !!email && cloudProfile?.emailVerified === true && cleanString(cloudProfile?.email, 180).toLowerCase() === cleanString(email, 180).toLowerCase();
+        const isEditing = profileEditing === true;
+        const formStateClass = isEditing ? 'is-editing' : 'is-readonly';
+        const readOnlyAttr = isEditing ? '' : 'readonly aria-readonly="true"';
+        const editProfileLabel = labels.editProfile || (isEnglishPage() ? 'Edit profile' : '\u0e41\u0e01\u0e49\u0e44\u0e02\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25');
+        const editToVerifyLabel = labels.editToVerify || (isEnglishPage() ? 'Edit profile to change or verify this information.' : '\u0e01\u0e14\u0e41\u0e01\u0e49\u0e44\u0e02\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e40\u0e1e\u0e37\u0e48\u0e2d\u0e40\u0e1b\u0e25\u0e35\u0e48\u0e22\u0e19\u0e2b\u0e23\u0e37\u0e2d\u0e22\u0e37\u0e19\u0e22\u0e31\u0e19');
+        const emailVerified = !emailVerificationState.email && !!email && cloudProfile?.emailVerified === true && cleanString(cloudProfile?.email, 180).toLowerCase() === cleanString(email, 180).toLowerCase();
         const emailStatusClass = emailVerified ? 'is-verified' : 'is-unverified';
         const emailStatusText = emailVerified ? labels.emailVerified : labels.emailUnverified;
+        const phoneVerified = !!storedPhone && !phoneVerificationState.verificationId && (cloudProfile?.phoneVerified === true || !!cloudProfile?.phoneVerifiedAt);
+        const phoneStatusClass = phoneVerified ? 'is-verified' : 'is-unverified';
+        const phoneStatusText = phoneVerified ? (labels.phoneVerified || 'ยืนยันเบอร์โทรแล้ว') : (labels.phoneUnverified || 'ต้องยืนยัน OTP ก่อนเปลี่ยนเบอร์');
+        const pendingPhoneChange = !!phoneVerificationState.verificationId;
+        const pendingEmailVerification = !!emailVerificationState.email;
+        const emailActionsHidden = !email || (emailVerified && !pendingEmailVerification);
+        const phoneActionsHidden = !phone || (phoneVerified && !pendingPhoneChange);
+        const emailCooldown = cooldownSeconds(emailVerificationCooldownUntil);
+        const phoneCooldown = cooldownSeconds(phoneVerificationCooldownUntil);
+        const emailActionLabel = emailCooldown
+            ? `${labels.sendEmailCode || 'ส่งโค้ด'} (${cooldownMinutes(emailVerificationCooldownUntil)}m)`
+            : (emailVerificationBusy ? labels.sendingEmailCode : labels.sendEmailCode);
+        const phoneActionLabel = phoneCooldown
+            ? `${labels.sendPhoneCode || 'ส่ง OTP'} (${cooldownMinutes(phoneVerificationCooldownUntil)}m)`
+            : (phoneVerificationBusy ? (labels.sendingPhoneCode || 'กำลังส่ง OTP...') : (labels.sendPhoneCode || 'ส่ง OTP'));
+        const emailActions = !isEditing
+            ? `<p class="profile-privacy-note">${escapeHTML(emailVerified ? (labels.emailVerifiedLocked || 'ยืนยันอีเมลแล้ว ไม่ต้องกดยืนยันซ้ำ') : editToVerifyLabel)}</p>`
+            : `<div class="profile-email-actions" id="email-verification-actions" ${emailActionsHidden ? 'hidden' : ''}>
+                <button class="btn btn-outline" id="email-verification-request" type="button" onclick="sendMemberEmailVerificationCode()" ${!email || emailVerificationBusy || emailCooldown || (emailVerified && !pendingEmailVerification) ? 'disabled' : ''}>${escapeHTML(emailActionLabel)}</button>
+                ${pendingEmailVerification ? `
+                    <input name="emailCode" type="text" inputmode="numeric" maxlength="6" placeholder="${escapeHTML(labels.emailCodePlaceholder)}" aria-label="${escapeHTML(labels.emailCode)}">
+                    <button class="btn" type="button" onclick="verifyMemberEmailCode()" ${emailVerificationBusy ? 'disabled' : ''}>${escapeHTML(emailVerificationBusy ? labels.verifyingEmailCode : labels.verifyEmailCode)}</button>
+                ` : ''}
+            </div>`;
+        const phoneActions = !isEditing
+            ? `<p class="profile-privacy-note">${escapeHTML(phoneVerified ? (labels.phoneVerifiedLocked || 'ยืนยันเบอร์โทรแล้ว ไม่ต้องกดยืนยันซ้ำ') : editToVerifyLabel)}</p>`
+            : `<div class="profile-email-actions" id="phone-verification-actions" ${phoneActionsHidden ? 'hidden' : ''}>
+                <button class="btn btn-outline" id="phone-change-request" type="button" onclick="sendMemberPhoneVerificationCode()" ${!phone || phoneVerificationBusy || phoneCooldown || (phoneVerified && !pendingPhoneChange) ? 'disabled' : ''}>${escapeHTML(phoneActionLabel)}</button>
+                ${pendingPhoneChange ? `
+                    <input name="phoneCode" type="text" inputmode="numeric" maxlength="6" placeholder="${escapeHTML(labels.phoneCodePlaceholder || '123456')}" aria-label="${escapeHTML(labels.phoneCode || 'OTP เบอร์โทร')}">
+                    <button class="btn" type="button" onclick="verifyMemberPhoneCode()" ${phoneVerificationBusy ? 'disabled' : ''}>${escapeHTML(phoneVerificationBusy ? (labels.verifyingPhoneCode || 'กำลังยืนยันเบอร์...') : (labels.verifyPhoneCode || 'ยืนยันเบอร์'))}</button>
+                ` : ''}
+            </div>`;
 
         return `
             <div class="profile-account-card">
@@ -936,11 +1783,19 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                     </div>
                 </div>
                 ${loadingText}
-                <form class="profile-edit-form" id="member-profile-form" onsubmit="return saveMemberProfile(event)">
+                <form class="profile-edit-form ${formStateClass}" id="member-profile-form" onsubmit="return saveMemberProfile(event)">
                     <div class="profile-form-grid">
                         <label>
+                            <span>${escapeHTML(labels.firstName || 'ชื่อ')}</span>
+                            <input name="firstName" type="text" autocomplete="given-name" maxlength="80" value="${escapeHTML(firstName)}" placeholder="${escapeHTML(labels.firstName || 'ชื่อ')}" ${readOnlyAttr}>
+                        </label>
+                        <label>
+                            <span>${escapeHTML(labels.lastName || 'นามสกุล')}</span>
+                            <input name="lastName" type="text" autocomplete="family-name" maxlength="80" value="${escapeHTML(lastName)}" placeholder="${escapeHTML(labels.lastName || 'นามสกุล')}" ${readOnlyAttr}>
+                        </label>
+                        <label>
                             <span>${escapeHTML(labels.email)}</span>
-                            <input name="email" type="email" autocomplete="email" maxlength="180" value="${escapeHTML(email)}" placeholder="name@example.com">
+                            <input name="email" type="email" autocomplete="email" maxlength="180" value="${escapeHTML(email)}" placeholder="name@example.com" oninput="syncEmailVerificationAction()" ${readOnlyAttr}>
                         </label>
                         <div class="profile-email-verify profile-form-full ${emailStatusClass}">
                             <div>
@@ -948,46 +1803,81 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                                 <span>${escapeHTML(emailStatusText)}</span>
                                 <small>${escapeHTML(labels.emailOptional)}</small>
                             </div>
-                            <div class="profile-email-actions">
-                                <button class="btn btn-outline" type="button" onclick="sendMemberEmailVerificationCode()" ${emailVerificationBusy ? 'disabled' : ''}>${escapeHTML(emailVerificationBusy ? labels.sendingEmailCode : labels.sendEmailCode)}</button>
-                                <input name="emailCode" type="text" inputmode="numeric" maxlength="6" placeholder="${escapeHTML(labels.emailCodePlaceholder)}" aria-label="${escapeHTML(labels.emailCode)}">
-                                <button class="btn" type="button" onclick="verifyMemberEmailCode()" ${emailVerificationBusy ? 'disabled' : ''}>${escapeHTML(emailVerificationBusy ? labels.verifyingEmailCode : labels.verifyEmailCode)}</button>
-                            </div>
+                            ${emailActions}
                         </div>
                         <label>
                             <span>${escapeHTML(labels.phone)}</span>
-                            <input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="40" value="${escapeHTML(phone)}" placeholder="${escapeHTML(labels.phonePlaceholder)}">
+                            <input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="40" value="${escapeHTML(phone)}" data-current-phone="${escapeHTML(storedPhone)}" oninput="syncPhoneVerificationAction()" placeholder="${escapeHTML(labels.phonePlaceholder)}" ${readOnlyAttr}>
                         </label>
+                        <div class="profile-email-verify profile-form-full ${phoneStatusClass}">
+                            <div>
+                                <strong>${escapeHTML(labels.phoneVerification || 'ยืนยันเบอร์โทร')}</strong>
+                                <span>${escapeHTML(phoneStatusText)}</span>
+                                <small>${escapeHTML(labels.phoneUnverified || 'หากเปลี่ยนเบอร์ ต้องยืนยัน OTP ก่อนบันทึกเบอร์ใหม่')}</small>
+                            </div>
+                            ${phoneActions}
+                        </div>
                         <label>
                             <span>${escapeHTML(labels.lineId)}</span>
-                            <input name="lineId" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(lineId)}" placeholder="${escapeHTML(labels.linePlaceholder)}">
+                            <input name="lineId" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(lineId)}" placeholder="${escapeHTML(labels.linePlaceholder)}" ${readOnlyAttr}>
                         </label>
                         <label>
                             <span>${escapeHTML(labels.birthDate)}</span>
-                            <input name="birthDate" type="date" value="${escapeHTML(birthDate)}" aria-label="${escapeHTML(labels.birthPlaceholder)}">
+                            <input name="birthDate" type="date" value="${escapeHTML(birthDate)}" aria-label="${escapeHTML(labels.birthPlaceholder)}" ${readOnlyAttr}>
                         </label>
                         <label>
                             <span>${escapeHTML(labels.allergies)}</span>
-                            <input name="allergies" type="text" maxlength="200" value="${escapeHTML(allergies)}" placeholder="${escapeHTML(labels.allergiesPlaceholder)}">
+                            <input name="allergies" type="text" maxlength="200" value="${escapeHTML(allergies)}" placeholder="${escapeHTML(labels.allergiesPlaceholder)}" ${readOnlyAttr}>
                         </label>
                         <label class="profile-form-full">
-                            <span>${escapeHTML(labels.shippingAddress)}</span>
-                            <textarea name="shippingAddress" maxlength="500" rows="3" placeholder="${escapeHTML(labels.addressPlaceholder)}">${escapeHTML(shippingAddress)}</textarea>
+                            <span>${escapeHTML(labels.addressLine || labels.shippingAddress)}</span>
+                            <textarea id="profile-address-line" name="addressLine" autocomplete="street-address" maxlength="250" rows="2" placeholder="${escapeHTML(labels.addressPlaceholder)}" ${readOnlyAttr}>${escapeHTML(shippingAddress.addressLine)}</textarea>
+                        </label>
+                        <label>
+                            <span>${escapeHTML(labels.subdistrict || 'Subdistrict / ตำบล/แขวง')}</span>
+                            <input id="profile-subdistrict" name="subdistrict" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(shippingAddress.subdistrict)}" ${readOnlyAttr}>
+                        </label>
+                        <label>
+                            <span>${escapeHTML(labels.district || 'District / อำเภอ/เขต')}</span>
+                            <input id="profile-district" name="district" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(shippingAddress.district)}" ${readOnlyAttr}>
+                        </label>
+                        <label>
+                            <span>${escapeHTML(labels.province || 'Province / จังหวัด')}</span>
+                            <input id="profile-province" name="province" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(shippingAddress.province)}" ${readOnlyAttr}>
+                        </label>
+                        <label>
+                            <span>${escapeHTML(labels.zipcode || 'Zipcode / รหัสไปรษณีย์')}</span>
+                            <input id="profile-zipcode" name="zipcode" type="text" inputmode="numeric" autocomplete="postal-code" maxlength="10" value="${escapeHTML(shippingAddress.zipcode)}" ${readOnlyAttr}>
                         </label>
                         <label class="profile-form-full">
                             <span>${escapeHTML(labels.healthNote)}</span>
-                            <textarea name="healthNote" maxlength="500" rows="3" placeholder="${escapeHTML(labels.healthPlaceholder)}">${escapeHTML(healthNote)}</textarea>
+                            <textarea name="healthNote" maxlength="500" rows="3" placeholder="${escapeHTML(labels.healthPlaceholder)}" ${readOnlyAttr}>${escapeHTML(healthNote)}</textarea>
                         </label>
                     </div>
                     <p class="profile-privacy-note">${escapeHTML(labels.privacyNote)}</p>
                     <div class="profile-form-actions">
-                        <button class="btn" type="submit" ${cloudProfileSaving ? 'disabled' : ''}>${escapeHTML(cloudProfileSaving ? labels.saving : labels.save)}</button>
-                        <button class="btn btn-outline" type="button" onclick="resetMemberProfileForm()">${escapeHTML(labels.reset)}</button>
+                        ${isEditing ? `
+                            <button class="btn" type="submit" ${cloudProfileSaving ? 'disabled' : ''}>${escapeHTML(cloudProfileSaving ? labels.saving : labels.save)}</button>
+                            <button class="btn btn-outline" type="button" onclick="resetMemberProfileForm()">${escapeHTML(labels.reset)}</button>
+                        ` : `
+                            <button class="btn" type="button" onclick="setProfileEditing(true)">${escapeHTML(editProfileLabel)}</button>
+                        `}
                     </div>
                     <p class="profile-save-message" id="profile-save-message" aria-live="polite"></p>
                 </form>
             </div>
         `;
+    }
+
+    function initProfileAddressAutocomplete() {
+        const initAddress = window.EdenAddressAutocomplete?.init || window.initAddressAutocomplete;
+        if (typeof initAddress !== 'function') return;
+        initAddress({
+            subdistrict: '#profile-subdistrict',
+            district: '#profile-district',
+            province: '#profile-province',
+            zipcode: '#profile-zipcode'
+        });
     }
 
     function renderSignedIn(container, user, labels) {
@@ -999,65 +1889,23 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         const avatar = profileValue('photoURL', user.avatar || user.photoURL || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user.name || labels.member) + '&background=4caf50&color=fff');
         const displayName = profileValue('displayName', user.name || labels.member);
         const email = profileValue('email', user.email || '');
+        const historyItems = buildHistoryItems(orders, bookings, labels);
+        const profileLoadNotice = cloudProfileError
+            ? `<p class="profile-save-message" role="status">${escapeHTML(cloudProfileError)}</p>`
+            : '';
+        if (!PROFILE_TABS.includes(activeProfileTab)) activeProfileTab = 'points';
+        if (!HISTORY_FILTERS.includes(activeHistoryFilter)) activeHistoryFilter = 'all';
 
         container.innerHTML = `
-            <div class="profile-layout">
-                <aside class="profile-sidebar">
-                    <a class="profile-nav-item active" href="#profile-overview">${escapeHTML(labels.overview)}</a>
-                    <a class="profile-nav-item" href="#profile-orders">${escapeHTML(labels.orders)}</a>
-                    <a class="profile-nav-item" href="#profile-bookings">${escapeHTML(labels.bookings)}</a>
-                    <a class="profile-nav-item" href="#profile-account">${escapeHTML(labels.account)}</a>
-                    <a class="profile-nav-item" href="#" onclick="logout(); return false;">${escapeHTML(labels.logout)}</a>
-                </aside>
-                <section class="profile-main">
-                    <div class="profile-header">
-                        <img src="${escapeHTML(avatar)}" alt="Profile">
-                        <div>
-                            <h1 style="margin:0;">${escapeHTML(displayName || labels.member)}</h1>
-                            <p style="margin:5px 0 0;color:#666;">${escapeHTML(email || '')}</p>
-                        </div>
-                    </div>
-
-                    ${renderMemberIdentity(user, labels)}
-                    ${renderMemberCard(user, labels, membershipUser)}
-                    ${renderLoyaltyWallet(membershipUser, labels)}
-                    ${renderTierPreview(tier, labels)}
-
-                    <div class="stats-grid">
-                        <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.points)}</div><div class="stat-label">${escapeHTML(labels.points)}</div></div>
-                        <div class="stat-box"><div class="stat-value">฿${formatBaht(membershipUser.totalSpent)}</div><div class="stat-label">${escapeHTML(labels.totalSpent)}</div></div>
-                        <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.visitCount)}</div><div class="stat-label">${escapeHTML(labels.visits)}</div></div>
-                        <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.cartItemCount)}</div><div class="stat-label">${escapeHTML(labels.cartItems)}</div></div>
-                    </div>
-
-                    ${renderBenefits(tier, labels)}
-                    ${renderNextTierRequirements(membershipUser, labels)}
-
-                    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:30px;">
-                        <a class="btn" href="${isEnglishPage() ? '/shop-en' : '/shop'}">${escapeHTML(labels.shopNow)}</a>
-                        <a class="btn btn-outline" href="${isEnglishPage() ? '/booking-en' : '/booking'}">${escapeHTML(labels.bookTable)}</a>
-                        <a class="btn btn-outline" href="/archery/booking">Eden Archery</a>
-                    </div>
-
-                    <div class="order-history" id="profile-account">
-                        <h2>${escapeHTML(labels.editableInfo)}</h2>
-                        ${renderProfileForm(user, labels)}
-                    </div>
-
-                    <div class="order-history" id="profile-orders">
-                        <h2>${escapeHTML(labels.recentOrders)}</h2>
-                        ${renderOrderList(orders, labels)}
-                    </div>
-
-                    ${renderArcheryBookingSections(bookings)}
-
-                    <div class="order-history" id="profile-bookings">
-                        <h2>${escapeHTML(labels.bookings)}</h2>
-                        ${renderBookingList(nonArcheryBookings, labels)}
-                    </div>
+            <div class="profile-layout profile-dashboard">
+                ${renderProfileSummary(user, labels, membershipUser, tier, avatar, displayName, email)}
+                <section class="profile-main profile-dashboard-main">
+                    ${profileLoadNotice}
+                    ${renderActiveProfilePanel(user, labels, membershipUser, tier, historyItems)}
                 </section>
             </div>
         `;
+        if (profileEditing) initProfileAddressAutocomplete();
         refreshLoyaltyData(user);
         refreshCloudProfile(user);
         refreshCloudHistory(user);
@@ -1075,6 +1923,15 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         if (!submitBtn) return;
         submitBtn.disabled = isSaving;
         submitBtn.textContent = isSaving ? labels.saving : labels.save;
+    }
+
+    function setProfileEditing(isEditing) {
+        profileEditing = isEditing === true;
+        if (!profileEditing) {
+            emailVerificationState = { email: '' };
+            phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
+        }
+        renderProfile();
     }
 
     async function profileApiRequest(path, body) {
@@ -1113,16 +1970,79 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         return email;
     }
 
+    function getProfileFormPhone(requireChanged = false) {
+        const form = document.getElementById('member-profile-form');
+        const input = form?.querySelector('input[name="phone"]');
+        const phone = cleanString(input?.value, 40);
+        const currentPhone = cleanString(input?.dataset.currentPhone || cloudProfile?.phone || '', 40);
+        if (!phone) {
+            const error = new Error(isEnglishPage() ? 'Please enter a phone number first.' : 'กรุณากรอกเบอร์โทรศัพท์ก่อน');
+            error.userMessage = true;
+            throw error;
+        }
+        const currentPhoneVerified = cloudProfile?.phoneVerified === true || !!cloudProfile?.phoneVerifiedAt;
+        if (requireChanged && currentPhoneVerified && phone === currentPhone) {
+            const error = new Error(isEnglishPage() ? 'This phone number is already verified.' : 'เบอร์นี้ยืนยันแล้ว ไม่ต้องกดยืนยันซ้ำ');
+            error.userMessage = true;
+            throw error;
+        }
+        return phone;
+    }
+
+    function syncEmailVerificationAction() {
+        const form = document.getElementById('member-profile-form');
+        const input = form?.querySelector('input[name="email"]');
+        const actions = document.getElementById('email-verification-actions');
+        const button = document.getElementById('email-verification-request');
+        if (!input || !actions || !button) return;
+        const email = cleanString(input.value, 180).toLowerCase();
+        const currentEmail = cleanString(cloudProfile?.email || '', 180).toLowerCase();
+        const changed = email !== currentEmail;
+        const verified = !!email && !!currentEmail && email === currentEmail && cloudProfile?.emailVerified === true;
+        const pending = !!emailVerificationState.email;
+        const shouldShow = profileEditing && !!email && (!verified || changed || pending);
+        actions.hidden = !shouldShow;
+        button.disabled = !shouldShow || (!changed && verified && !pending) || emailVerificationBusy || cooldownSeconds(emailVerificationCooldownUntil) > 0;
+    }
+
+    function syncPhoneVerificationAction() {
+        const form = document.getElementById('member-profile-form');
+        const input = form?.querySelector('input[name="phone"]');
+        const actions = document.getElementById('phone-verification-actions');
+        const button = document.getElementById('phone-change-request');
+        if (!input || !actions || !button) return;
+        const changed = cleanString(input.value, 40) !== cleanString(input.dataset.currentPhone || '', 40);
+        const phone = cleanString(input.value, 40);
+        const verified = !!input.dataset.currentPhone && (cloudProfile?.phoneVerified === true || !!cloudProfile?.phoneVerifiedAt);
+        const pending = !!phoneVerificationState.verificationId;
+        const shouldShow = profileEditing && !!phone && (!verified || changed || pending);
+        actions.hidden = !shouldShow;
+        button.disabled = !shouldShow || (!changed && verified && !pending) || phoneVerificationBusy || cooldownSeconds(phoneVerificationCooldownUntil) > 0;
+    }
+
     async function sendMemberEmailVerificationCode() {
         const labels = getLabels();
+        if (!profileEditing) return false;
         if (emailVerificationBusy) return false;
+        if (cooldownSeconds(emailVerificationCooldownUntil) > 0) {
+            showSaveMessage(labels.verificationCooldown || 'กรุณารอ 5 นาทีก่อนขอรหัสใหม่', true);
+            return false;
+        }
         emailVerificationBusy = true;
         showSaveMessage(labels.sendingEmailCode);
         let finalMessage = labels.emailCodeSent;
         let finalError = false;
         try {
             const email = getProfileFormEmail();
-            await profileApiRequest('/sendEmailVerificationCode', { email });
+            const result = await profileApiRequest('/sendEmailVerificationCode', { email });
+            if (result.alreadyVerified) {
+                emailVerificationState = { email: '' };
+                finalMessage = labels.emailVerifiedLocked || labels.emailCodeVerified;
+            } else {
+                emailVerificationState = { email };
+                emailVerificationCooldownUntil = Date.now() + (5 * 60 * 1000);
+                window.setTimeout(renderProfile, 5 * 60 * 1000);
+            }
         } catch (error) {
             logClientError('Email verification send failed:', error);
             finalMessage = error?.userMessage ? error.message : labels.emailCodeFailed;
@@ -1153,13 +2073,10 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             const email = getProfileFormEmail();
             const result = await profileApiRequest('/verifyEmailCode', { email, code });
             cloudProfile = { ...(cloudProfile || {}), email, emailVerified: true, emailVerifiedAt: result.emailVerifiedAt || new Date().toISOString() };
+            emailVerificationState = { email: '' };
+            emailVerificationCooldownUntil = 0;
             const user = readUser() || {};
-            localStorage.setItem(USER_KEY, JSON.stringify({
-                ...user,
-                email,
-                emailVerified: true,
-                emailVerifiedAt: result.emailVerifiedAt || new Date().toISOString()
-            }));
+            localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser({ ...cloudProfile, uid: user.uid || cloudProfile?.uid || '', email })));
         } catch (error) {
             logClientError('Email verification failed:', error);
             finalMessage = error?.userMessage ? error.message : labels.emailCodeFailed;
@@ -1172,59 +2089,191 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         return false;
     }
 
+    async function sendMemberPhoneVerificationCode() {
+        const labels = getLabels();
+        if (!profileEditing) return false;
+        if (phoneVerificationBusy) return false;
+        if (cooldownSeconds(phoneVerificationCooldownUntil) > 0) {
+            showSaveMessage(labels.verificationCooldown || 'กรุณารอ 5 นาทีก่อนขอรหัสใหม่', true);
+            return false;
+        }
+        phoneVerificationBusy = true;
+        showSaveMessage(labels.sendingPhoneCode || 'กำลังส่ง OTP...');
+        let finalMessage = labels.phoneCodeSent || 'ส่ง OTP แล้ว กรุณากรอกรหัส 6 หลัก';
+        let finalError = false;
+        try {
+            const phone = getProfileFormPhone(true);
+            const result = await requestPhoneChangeOtp(phone);
+            if (result.alreadyVerified) {
+                phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
+                finalMessage = labels.phoneVerified || 'ยืนยันเบอร์โทรแล้ว';
+            } else {
+                phoneVerificationState = {
+                    verificationId: result.verificationId || '',
+                    phoneNumber: result.phoneNumber || phone,
+                    phoneDisplay: result.phoneDisplay || phone
+                };
+                phoneVerificationCooldownUntil = Date.now() + (5 * 60 * 1000);
+                window.setTimeout(renderProfile, 5 * 60 * 1000);
+            }
+        } catch (error) {
+            logClientError('Phone verification send failed:', error);
+            finalMessage = error?.userMessage ? error.message : (labels.phoneCodeFailed || labels.saveFailed);
+            finalError = true;
+        } finally {
+            phoneVerificationBusy = false;
+            renderProfile();
+            requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
+        }
+        return false;
+    }
+
+    async function verifyMemberPhoneCode() {
+        const labels = getLabels();
+        if (phoneVerificationBusy) return false;
+        const form = document.getElementById('member-profile-form');
+        const code = cleanString(form?.querySelector('input[name="phoneCode"]')?.value, 6);
+        if (!phoneVerificationState.verificationId) {
+            showSaveMessage(isEnglishPage() ? 'Please request a phone OTP first.' : 'กรุณาขอ OTP ก่อน', true);
+            return false;
+        }
+        if (!/^\d{6}$/.test(code)) {
+            showSaveMessage(isEnglishPage() ? 'Please enter the 6-digit code.' : 'กรุณากรอกรหัส 6 หลัก', true);
+            return false;
+        }
+
+        phoneVerificationBusy = true;
+        showSaveMessage(labels.verifyingPhoneCode || 'กำลังยืนยันเบอร์...');
+        let finalMessage = labels.phoneCodeVerified || 'ยืนยันเบอร์โทรเรียบร้อยแล้ว';
+        let finalError = false;
+        try {
+            const result = await verifyPhoneChangeOtp({
+                verificationId: phoneVerificationState.verificationId,
+                phoneNumber: phoneVerificationState.phoneNumber,
+                otp: code
+            });
+            const profile = result.profile || {};
+            cloudProfile = {
+                ...(cloudProfile || {}),
+                ...profile,
+                displayName: profile.display_name || profile.displayName || cloudProfile?.displayName || '',
+                phone: profile.phone_display || result.phoneDisplay || phoneVerificationState.phoneDisplay,
+                phoneE164: profile.phone_number || result.phoneNumber || phoneVerificationState.phoneNumber,
+                checkoutPhone: '',
+                checkout_phone: '',
+                contactPhone: '',
+                contact_phone: '',
+                phoneVerified: true,
+                phoneVerifiedAt: profile.phoneVerifiedAt || new Date().toISOString()
+            };
+            localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(cloudProfile)));
+            phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
+            phoneVerificationCooldownUntil = 0;
+        } catch (error) {
+            logClientError('Phone verification failed:', error);
+            finalMessage = error?.userMessage ? error.message : (labels.phoneCodeFailed || labels.saveFailed);
+            finalError = true;
+        } finally {
+            phoneVerificationBusy = false;
+            renderProfile();
+            requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
+        }
+        return false;
+    }
+
     async function saveMemberProfile(event) {
         event.preventDefault();
         const labels = getLabels();
         const user = readUser();
         const form = event.currentTarget;
         if (cloudProfileSaving) return false;
-        if (!db || !user?.uid) {
+        if (!user?.uid) {
             showSaveMessage(labels.saveFailed, true);
             return false;
         }
         const formData = new FormData(form);
         const email = cleanString(formData.get('email'), 180).toLowerCase();
         const previousEmail = cleanString(cloudProfile?.email, 180).toLowerCase();
+        const emailNeedsVerification = !!email && email !== previousEmail;
+        const requestedPhone = cleanString(formData.get('phone'), 40);
+        const currentPhone = cleanString(cloudProfile?.phone || user.phone || '', 40);
+        if (emailNeedsVerification) {
+            showSaveMessage(labels.emailOptional || (isEnglishPage() ? 'Please verify this email before saving.' : '\u0e01\u0e23\u0e38\u0e13\u0e32\u0e22\u0e37\u0e19\u0e22\u0e31\u0e19\u0e2d\u0e35\u0e40\u0e21\u0e25\u0e01\u0e48\u0e2d\u0e19\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01'), true);
+            return false;
+        }
+        if (requestedPhone && currentPhone && requestedPhone !== currentPhone) {
+            showSaveMessage(labels.phoneUnverified || 'หากเปลี่ยนเบอร์ ต้องยืนยัน OTP ก่อนบันทึกเบอร์ใหม่', true);
+            return false;
+        }
+        const firstName = cleanString(formData.get('firstName'), 80);
+        const lastName = cleanString(formData.get('lastName'), 80);
+        if (!firstName || !lastName) {
+            showSaveMessage(isEnglishPage() ? 'Please enter first and last name.' : 'กรุณากรอกชื่อและนามสกุล', true);
+            return false;
+        }
+        const shippingAddressStructured = normalizeShippingAddressStructured({
+            addressLine: formData.get('addressLine'),
+            subdistrict: formData.get('subdistrict'),
+            district: formData.get('district'),
+            province: formData.get('province'),
+            zipcode: formData.get('zipcode')
+        });
         const payload = {
-            uid: user.uid,
-            displayName: cleanString(user.name || currentAuthUser?.displayName || labels.member, 120),
-            email,
-            photoURL: cleanString(user.avatar || currentAuthUser?.photoURL || '', 500),
-            phone: cleanString(formData.get('phone'), 40),
-            shippingAddress: cleanString(formData.get('shippingAddress'), 500),
+            firstName,
+            lastName,
+            displayName: [firstName, lastName].filter(Boolean).join(' '),
+            shippingAddress: cleanString(formatShippingAddress(shippingAddressStructured), 500),
+            shippingAddressStructured,
             birthDate: cleanString(formData.get('birthDate'), 20),
             allergies: cleanString(formData.get('allergies'), 200),
             healthNote: cleanString(formData.get('healthNote'), 500),
-            lineId: cleanString(formData.get('lineId'), 80),
-            updatedAt: serverTimestamp()
+            lineId: cleanString(formData.get('lineId'), 80)
         };
-        if (email !== previousEmail) {
-            payload.emailVerified = false;
-            payload.emailVerifiedAt = null;
-        }
-
         cloudProfileSaving = true;
         setProfileSavingState(form, true, labels);
         showSaveMessage(labels.saving);
         try {
-            await setDoc(doc(db, 'users', user.uid), payload, { merge: true });
-            cloudProfile = { ...(cloudProfile || {}), ...payload };
-            cloudProfileUid = user.uid;
-            const mergedUser = {
-                ...user,
-                phone: payload.phone,
-                email: payload.email,
-                shippingAddress: payload.shippingAddress,
-                address: payload.shippingAddress,
-                lineId: payload.lineId
+            const result = await updateMyProfile(payload);
+            const profile = result.profile || {};
+            cloudProfile = {
+                ...(cloudProfile || {}),
+                ...profile,
+                displayName: profile.display_name || profile.displayName || payload.displayName,
+                firstName: profile.firstName || payload.firstName,
+                lastName: profile.lastName || payload.lastName,
+                phone: profile.phone_display || profile.phone || cloudProfile?.phone || user.phone || '',
+                phoneE164: profile.phoneVerified === true || profile.phone_verified === true || profile.phoneVerifiedAt || profile.phone_verified_at
+                    ? (profile.phone_number || cloudProfile?.phoneE164 || '')
+                    : '',
+                checkoutPhone: profile.checkoutPhone || profile.checkout_phone || cloudProfile?.checkoutPhone || user.checkoutPhone || '',
+                checkout_phone: profile.checkoutPhone || profile.checkout_phone || cloudProfile?.checkout_phone || user.checkout_phone || '',
+                contactPhone: profile.contactPhone || profile.contact_phone || cloudProfile?.contactPhone || user.contactPhone || '',
+                contact_phone: profile.contactPhone || profile.contact_phone || cloudProfile?.contact_phone || user.contact_phone || '',
+                phoneVerified: profile.phoneVerified === true || profile.phone_verified === true || !!(profile.phoneVerifiedAt || profile.phone_verified_at),
+                phoneVerifiedAt: profile.phoneVerifiedAt || profile.phone_verified_at || '',
+                shippingAddress: profile.shippingAddress || payload.shippingAddress,
+                shippingAddressStructured: normalizeShippingAddressStructured(
+                    profile.shippingAddressStructured || profile.shipping_address_structured || payload.shippingAddressStructured,
+                    profile.shippingAddress || payload.shippingAddress
+                ),
+                birthDate: profile.birthDate != null ? cleanString(profile.birthDate, 20) : payload.birthDate,
+                allergies: profile.allergies != null ? cleanString(profile.allergies, 200) : payload.allergies,
+                healthNote: profile.healthNote != null ? cleanString(profile.healthNote, 500) : payload.healthNote,
+                lineId: profile.lineId != null ? cleanString(profile.lineId, 80) : payload.lineId
             };
-            localStorage.setItem(USER_KEY, JSON.stringify(mergedUser));
-            showSaveMessage(labels.saved);
+            cloudProfileUid = user.uid;
+            cloudProfileError = '';
+            localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(cloudProfile)));
+            const savedMessage = emailNeedsVerification
+                ? `${labels.saved} ${labels.emailOptional || ''}`.trim()
+                : labels.saved;
+            cloudProfileSaving = false;
+            profileEditing = false;
+            renderProfile();
+            requestAnimationFrame(() => showSaveMessage(savedMessage));
         } catch (error) {
             logClientError('Profile save failed:', error);
-            const message = error?.code === 'permission-denied'
-                ? (isEnglishPage() ? 'Unable to save profile because profile permissions are not ready. Please try again after refresh.' : 'บันทึกไม่สำเร็จ: สิทธิ์โปรไฟล์ยังไม่พร้อม กรุณารีเฟรชแล้วลองใหม่อีกครั้ง')
-                : labels.saveFailed;
+            const message = error?.userMessage ? error.message : labels.saveFailed;
             showSaveMessage(message, true);
         } finally {
             cloudProfileSaving = false;
@@ -1234,7 +2283,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
     }
 
     function resetMemberProfileForm() {
-        renderProfile();
+        setProfileEditing(false);
     }
 
     function previewMemberTier(tier) {
@@ -1256,7 +2305,7 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                 window.location.href = '/login';
                 return;
             }
-            renderSignedOut(container, labels);
+            renderSkeleton(container, 'profile');
             return;
         }
         if (user.passwordLoginEnabled === false || user.password_login_enabled === false) {
@@ -1264,19 +2313,28 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
             return;
         }
         if (authStateResolved && currentAuthUser && !cloudProfile && cloudProfileUid !== user.uid) {
-            container.innerHTML = `<div class="profile-loading"><p>${escapeHTML(labels.loadingProfile)}</p></div>`;
+            renderSkeleton(container, 'profile');
             refreshCloudProfile(user);
             return;
         }
+        clearSkeleton(container);
         renderSignedIn(container, user, labels);
     }
 
     window.renderProfile = renderProfile;
+    window.setProfileEditing = setProfileEditing;
     window.saveMemberProfile = saveMemberProfile;
     window.resetMemberProfileForm = resetMemberProfileForm;
     window.previewMemberTier = previewMemberTier;
+    window.refreshProfileLoyalty = refreshProfileLoyalty;
+    window.setProfileTab = setProfileTab;
+    window.setProfileHistoryFilter = setProfileHistoryFilter;
+    window.toggleProfileHistoryExpanded = toggleProfileHistoryExpanded;
     window.sendMemberEmailVerificationCode = sendMemberEmailVerificationCode;
     window.verifyMemberEmailCode = verifyMemberEmailCode;
+    window.sendMemberPhoneVerificationCode = sendMemberPhoneVerificationCode;
+    window.verifyMemberPhoneCode = verifyMemberPhoneCode;
+    window.syncPhoneVerificationAction = syncPhoneVerificationAction;
 
     document.addEventListener('DOMContentLoaded', () => {
         renderProfile();
@@ -1294,6 +2352,12 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
                 cloudHistoryUid = '';
                 cloudProfile = null;
                 cloudProfileUid = '';
+                cloudProfileError = '';
+                profileEditing = false;
+                emailVerificationState = { email: '' };
+                emailVerificationCooldownUntil = 0;
+                phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
+                phoneVerificationCooldownUntil = 0;
                 loyaltyConfig = null;
                 loyaltyLedger = [];
                 loyaltySummary = null;
@@ -1310,6 +2374,12 @@ import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
         cloudHistoryUid = '';
         cloudProfile = null;
         cloudProfileUid = '';
+        cloudProfileError = '';
+        profileEditing = false;
+        emailVerificationState = { email: '' };
+        emailVerificationCooldownUntil = 0;
+        phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
+        phoneVerificationCooldownUntil = 0;
         loyaltyConfig = null;
         loyaltyLedger = [];
         loyaltySummary = null;
