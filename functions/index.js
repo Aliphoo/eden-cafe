@@ -143,22 +143,41 @@ function clientIp(req) {
 function checkRateLimit(req, bucketName, maxRequests, windowMs) {
   const now = Date.now();
   const key = `${bucketName}:${clientIp(req)}`;
-  checkRateLimitKey(key, maxRequests, windowMs, now);
+  return checkRateLimitKey(key, maxRequests, windowMs, now);
 }
 
 function checkRateLimitKey(key, maxRequests, windowMs, now = Date.now()) {
   const bucket = RATE_LIMIT_BUCKETS.get(key);
   if (!bucket || bucket.expiresAt <= now) {
-    RATE_LIMIT_BUCKETS.set(key, { count: 1, expiresAt: now + windowMs });
-    return;
+    const nextBucket = { count: 1, expiresAt: now + windowMs };
+    RATE_LIMIT_BUCKETS.set(key, nextBucket);
+    return {
+      retryAfterSeconds: Math.ceil(windowMs / 1000),
+      refund() {
+        const current = RATE_LIMIT_BUCKETS.get(key);
+        if (current !== nextBucket) return;
+        current.count = Math.max(0, current.count - 1);
+        if (current.count === 0) RATE_LIMIT_BUCKETS.delete(key);
+      },
+    };
   }
   if (bucket.count >= maxRequests) {
     const error = new Error('Too many requests');
     error.statusCode = 429;
     error.publicMessage = 'ขอ OTP บ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่อีกครั้ง';
+    error.retryAfterSeconds = Math.max(1, Math.ceil((bucket.expiresAt - now) / 1000));
     throw error;
   }
   bucket.count += 1;
+  return {
+    retryAfterSeconds: Math.max(1, Math.ceil((bucket.expiresAt - now) / 1000)),
+    refund() {
+      const current = RATE_LIMIT_BUCKETS.get(key);
+      if (current !== bucket) return;
+      current.count = Math.max(0, current.count - 1);
+      if (current.count === 0) RATE_LIMIT_BUCKETS.delete(key);
+    },
+  };
 }
 
 function publicApiError(error, fallback = 'Unable to process request') {

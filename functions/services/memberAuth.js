@@ -168,6 +168,17 @@ function timestampToIso(value) {
   return Number.isNaN(date.getTime()) ? '' : date.toISOString();
 }
 
+function timestampToMillis(value) {
+  if (!value) return 0;
+  const date = value.toDate ? value.toDate() : new Date(value);
+  const time = date.getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function secondsUntil(timeMs) {
+  return Math.max(1, Math.ceil((Number(timeMs) - Date.now()) / 1000));
+}
+
 function authMemberCode(uid) {
   const source = String(uid || '000000').replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase().padStart(6, '0');
   return `ED-${source}`;
@@ -311,14 +322,34 @@ function createMemberAuthHandlers({
   function jsonError(res, error, fallback = 'ไม่สามารถดำเนินการได้ กรุณาลองใหม่อีกครั้ง') {
     const status = error.statusCode || 500;
     const message = error.publicMessage || (status >= 500 ? fallback : error.message || fallback);
-    res.status(status).json({ error: message });
+    const payload = { error: message };
+    if (error.errorCode) payload.code = error.errorCode;
+    if (Number.isFinite(Number(error.retryAfterSeconds))) {
+      payload.retryAfterSeconds = Math.max(1, Math.ceil(Number(error.retryAfterSeconds)));
+    }
+    res.status(status).json(payload);
+  }
+
+  function createSmsOtpError(message = 'SMS OTP could not be sent right now.', statusCode = 503, details = {}) {
+    const error = createPublicError(message, statusCode);
+    error.errorCode = 'SMS_OTP_SEND_FAILED';
+    error.smsProviderFailed = true;
+    if (Number.isFinite(Number(details.providerStatus))) {
+      error.providerStatus = Number(details.providerStatus);
+    }
+    return error;
   }
 
   async function sendOtpSms(phoneNumber, code, purpose = 'register') {
     const config = getSmsConfig();
     const url = cleanString(config.url, 500);
+    const phoneHash = sha256(phoneNumber).slice(0, 12);
     if (!url) {
-      throw createPublicError('ยังไม่ได้ตั้งค่าผู้ให้บริการส่ง OTP', 503);
+      logger.error('OTP SMS provider config missing', {
+        purpose,
+        phoneHash,
+      });
+      throw createSmsOtpError('SMS OTP provider is not configured.', 503);
     }
 
     const sender = cleanString(config.sender || 'Eden Cafe', 80);
@@ -337,18 +368,41 @@ function createMemberAuthHandlers({
       headers.Authorization = /^(Basic|Bearer)\s+/i.test(apiKey) ? apiKey : `Bearer ${apiKey}`;
     }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ to: phoneNumber, sender, message }),
-    });
+    const startedAt = Date.now();
+    let response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ to: phoneNumber, sender, message }),
+      });
+    } catch (error) {
+      logger.error('OTP SMS provider request failed', {
+        purpose,
+        phoneHash,
+        latencyMs: Date.now() - startedAt,
+        message: cleanString(error.message, 160),
+      });
+      throw createSmsOtpError('SMS OTP provider could not be reached.', 503);
+    }
 
     if (!response.ok) {
+      let responsePreview = '';
+      try {
+        responsePreview = cleanString((await response.text()).replace(/\s+/g, ' '), 180);
+      } catch (_) {
+        responsePreview = '';
+      }
       logger.warn('OTP SMS provider failed', {
+        purpose,
         status: response.status,
-        phoneHash: sha256(phoneNumber).slice(0, 12),
+        latencyMs: Date.now() - startedAt,
+        phoneHash,
+        responsePreview,
       });
-      throw createPublicError('ส่ง OTP ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง', 502);
+      throw createSmsOtpError('SMS OTP provider rejected the request.', 503, {
+        providerStatus: response.status,
+      });
     }
   }
 
@@ -1205,6 +1259,49 @@ function createMemberAuthHandlers({
     await sendOtpEmail(identifierKey, code, { purpose: 'phone_removal' });
   }
 
+  function reserveRateLimitKeys(keys, maxRequests, windowMs) {
+    const tokens = [];
+    try {
+      keys.forEach(key => {
+        tokens.push(checkRateLimitKey(key, maxRequests, windowMs));
+      });
+    } catch (error) {
+      tokens.forEach(token => token?.refund?.());
+      throw error;
+    }
+    return () => tokens.forEach(token => token?.refund?.());
+  }
+
+  async function findActiveOtp({ uid, purpose, identifierKey, channel = '', targetPhoneNumber = '' }) {
+    const snap = await db.collection(OTP_COLLECTION).where('uid', '==', uid).get();
+    const now = Date.now();
+    const matches = [];
+    snap.forEach(doc => {
+      const data = doc.data() || {};
+      const expiresAt = timestampToMillis(data.expires_at);
+      if (
+        data.purpose !== purpose
+        || data.identifier_key !== identifierKey
+        || (channel && data.channel !== channel)
+        || (targetPhoneNumber && data.target_phone_number !== targetPhoneNumber)
+        || data.used_at
+        || data.verified_at
+        || !expiresAt
+        || expiresAt <= now
+      ) {
+        return;
+      }
+      matches.push({
+        id: doc.id,
+        data,
+        expiresAt,
+        createdAt: timestampToMillis(data.created_at),
+      });
+    });
+    matches.sort((left, right) => right.createdAt - left.createdAt);
+    return matches[0] || null;
+  }
+
   async function requestPasswordResetOtp(req, res) {
     if (handleOptions(req, res)) return;
     setCors(req, res);
@@ -1573,8 +1670,9 @@ function createMemberAuthHandlers({
       return;
     }
 
+    let requestRateToken = null;
     try {
-      checkRateLimit(req, 'requestPhoneChangeOtp', 10, 15 * 60 * 1000);
+      requestRateToken = checkRateLimit(req, 'requestPhoneChangeOtp', 10, 15 * 60 * 1000);
       const decoded = await requireSignedInUser(req);
       const member = await loadMemberByUid(decoded.uid);
       if (!member?.uid) throw createPublicError('ไม่พบข้อมูลสมาชิก', 404);
@@ -1597,33 +1695,55 @@ function createMemberAuthHandlers({
         return;
       }
 
-      checkRateLimitKey(`requestPhoneChangeOtp:${member.uid}`, 3, 10 * 60 * 1000);
-      checkRateLimitKey(`requestPhoneChangeOtpPhone:${phoneIndexKey(phoneNumber)}`, 3, 10 * 60 * 1000);
       await ensurePhoneIsAvailableForUid(phoneNumber, member.uid);
 
+      const activeOtp = await findActiveOtp({
+        uid: member.uid,
+        purpose: 'phone_change',
+        channel: 'phone',
+        identifierKey: phoneNumber,
+      });
+      if (activeOtp) {
+        res.json({
+          ok: true,
+          reused: true,
+          verificationId: activeOtp.id,
+          phoneNumber,
+          phoneDisplay: displayThaiPhone(phoneNumber),
+          expiresInSeconds: secondsUntil(activeOtp.expiresAt),
+          resendAfterSeconds: secondsUntil(activeOtp.expiresAt),
+        });
+        return;
+      }
+
+      const refundOtpRateLimits = reserveRateLimitKeys([
+        `requestPhoneChangeOtp:${member.uid}`,
+        `requestPhoneChangeOtpPhone:${phoneIndexKey(phoneNumber)}`,
+      ], 3, 10 * 60 * 1000);
       const code = randomOtpCode();
       const now = admin.firestore.Timestamp.now();
       const expiresAt = admin.firestore.Timestamp.fromDate(new Date(Date.now() + OTP_TTL_MS));
       const verificationRef = db.collection(OTP_COLLECTION).doc();
-      await verificationRef.set({
-        uid: member.uid,
-        purpose: 'phone_change',
-        channel: 'phone',
-        identifier_key: phoneNumber,
-        identifier_display: displayThaiPhone(phoneNumber),
-        old_phone_number: currentPhoneNumber || null,
-        otp_hash: otpHash(`phone_change:${member.uid}:${phoneNumber}`, code, getOtpPepper()),
-        expires_at: expiresAt,
-        verified_at: null,
-        used_at: null,
-        attempt_count: 0,
-        max_attempts: OTP_MAX_ATTEMPTS,
-        created_at: now,
-      });
 
       try {
+        await verificationRef.set({
+          uid: member.uid,
+          purpose: 'phone_change',
+          channel: 'phone',
+          identifier_key: phoneNumber,
+          identifier_display: displayThaiPhone(phoneNumber),
+          old_phone_number: currentPhoneNumber || null,
+          otp_hash: otpHash(`phone_change:${member.uid}:${phoneNumber}`, code, getOtpPepper()),
+          expires_at: expiresAt,
+          verified_at: null,
+          used_at: null,
+          attempt_count: 0,
+          max_attempts: OTP_MAX_ATTEMPTS,
+          created_at: now,
+        });
         await sendOtpSms(phoneNumber, code, 'phone_change');
       } catch (error) {
+        refundOtpRateLimits();
         await verificationRef.delete().catch(() => {});
         throw error;
       }
@@ -1636,9 +1756,12 @@ function createMemberAuthHandlers({
         expiresInSeconds: Math.floor(OTP_TTL_MS / 1000),
       });
     } catch (error) {
+      if (error?.smsProviderFailed) requestRateToken?.refund?.();
       logger.warn('Phone change OTP request failed', {
         message: error.message,
         status: error.statusCode || 500,
+        code: error.errorCode || '',
+        providerStatus: error.providerStatus || null,
       });
       jsonError(res, error, 'ไม่สามารถส่ง OTP ยืนยันเบอร์โทรศัพท์ได้ กรุณาลองใหม่อีกครั้ง');
     }
@@ -1826,12 +1949,12 @@ function createMemberAuthHandlers({
       return;
     }
 
+    let requestRateToken = null;
     try {
-      checkRateLimit(req, 'requestPhoneRemovalOtp', 10, 15 * 60 * 1000);
+      requestRateToken = checkRateLimit(req, 'requestPhoneRemovalOtp', 10, 15 * 60 * 1000);
       const decoded = await requireSignedInUser(req);
       const member = await loadMemberByUid(decoded.uid);
       if (!member?.uid) throw createPublicError('Member profile was not found.', 404);
-      checkRateLimitKey(`requestPhoneRemovalOtp:${member.uid}`, 3, 10 * 60 * 1000);
 
       const credential = await getCredential(member.uid);
       const phoneNumber = memberCurrentPhoneNumber(member.data || {}, credential);
@@ -1847,40 +1970,66 @@ function createMemberAuthHandlers({
       if (channel === 'email' && !email) {
         throw createPublicError('Please verify your email before using email OTP to remove your phone number.', 400);
       }
-      checkRateLimitKey(`requestPhoneRemovalOtp:${channel}:${sha256(identifierKey).slice(0, 48)}`, 3, 10 * 60 * 1000);
+
+      const activeOtp = await findActiveOtp({
+        uid: member.uid,
+        purpose: 'phone_removal',
+        channel,
+        identifierKey,
+        targetPhoneNumber: phoneNumber,
+      });
+      if (activeOtp) {
+        res.json({
+          ok: true,
+          reused: true,
+          verificationId: activeOtp.id,
+          channel,
+          identifierDisplay: channel === 'phone' ? displayThaiPhone(phoneNumber) : identifierKey,
+          phoneDisplay: displayThaiPhone(phoneNumber),
+          expiresInSeconds: secondsUntil(activeOtp.expiresAt),
+          resendAfterSeconds: secondsUntil(activeOtp.expiresAt),
+        });
+        return;
+      }
+
+      const refundOtpRateLimits = reserveRateLimitKeys([
+        `requestPhoneRemovalOtp:${member.uid}`,
+        `requestPhoneRemovalOtp:${channel}:${sha256(identifierKey).slice(0, 48)}`,
+      ], 3, 10 * 60 * 1000);
 
       const code = randomOtpCode();
       const now = admin.firestore.Timestamp.now();
       const expiresAt = admin.firestore.Timestamp.fromDate(new Date(Date.now() + OTP_TTL_MS));
       const resendAfter = admin.firestore.Timestamp.fromDate(new Date(Date.now() + OTP_TTL_MS));
       const verificationRef = db.collection(OTP_COLLECTION).doc();
-      await verificationRef.set({
-        uid: member.uid,
-        purpose: 'phone_removal',
-        channel,
-        identifier_key: identifierKey,
-        identifier_display: channel === 'phone' ? displayThaiPhone(phoneNumber) : identifierKey,
-        target_phone_number: phoneNumber,
-        target_phone_display: displayThaiPhone(phoneNumber),
-        target_email: email || null,
-        target_snapshot: {
-          phone_number: phoneNumber,
-          phone_index_key: phoneIndexKey(phoneNumber),
-          email: email || null,
-        },
-        otp_hash: otpHash(`phone_removal:${member.uid}:${channel}:${identifierKey}:${phoneNumber}`, code, getOtpPepper()),
-        expires_at: expiresAt,
-        resend_after: resendAfter,
-        verified_at: null,
-        used_at: null,
-        attempt_count: 0,
-        max_attempts: OTP_MAX_ATTEMPTS,
-        created_at: now,
-      });
 
       try {
+        await verificationRef.set({
+          uid: member.uid,
+          purpose: 'phone_removal',
+          channel,
+          identifier_key: identifierKey,
+          identifier_display: channel === 'phone' ? displayThaiPhone(phoneNumber) : identifierKey,
+          target_phone_number: phoneNumber,
+          target_phone_display: displayThaiPhone(phoneNumber),
+          target_email: email || null,
+          target_snapshot: {
+            phone_number: phoneNumber,
+            phone_index_key: phoneIndexKey(phoneNumber),
+            email: email || null,
+          },
+          otp_hash: otpHash(`phone_removal:${member.uid}:${channel}:${identifierKey}:${phoneNumber}`, code, getOtpPepper()),
+          expires_at: expiresAt,
+          resend_after: resendAfter,
+          verified_at: null,
+          used_at: null,
+          attempt_count: 0,
+          max_attempts: OTP_MAX_ATTEMPTS,
+          created_at: now,
+        });
         await sendPhoneRemovalOtp({ channel, identifierKey, code });
       } catch (error) {
+        refundOtpRateLimits();
         await verificationRef.delete().catch(() => {});
         throw error;
       }
@@ -1895,9 +2044,12 @@ function createMemberAuthHandlers({
         resendAfterSeconds: Math.floor(OTP_TTL_MS / 1000),
       });
     } catch (error) {
+      if (error?.smsProviderFailed) requestRateToken?.refund?.();
       logger.warn('Phone removal OTP request failed', {
         message: error.message,
         status: error.statusCode || 500,
+        code: error.errorCode || '',
+        providerStatus: error.providerStatus || null,
       });
       jsonError(res, error, 'Unable to send phone removal OTP. Please try again.');
     }
