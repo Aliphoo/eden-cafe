@@ -47,20 +47,56 @@ export function displayThaiPhone(phoneNumber) {
     return phone.startsWith('+66') ? '0' + phone.slice(3) : phone;
 }
 
+function normalizeShippingAddressStructured(value = {}, fallbackText = '') {
+    const source = value && typeof value === 'object' ? value : {};
+    const normalized = {
+        addressLine: cleanString(source.addressLine || source.address_line || source.line1 || source.address || '', 250),
+        subdistrict: cleanString(source.subdistrict || source.subdistrictName || source.subdistrict_name || '', 80),
+        district: cleanString(source.district || source.districtName || source.district_name || '', 80),
+        province: cleanString(source.province || source.provinceName || source.province_name || '', 80),
+        zipcode: cleanString(source.zipcode || source.postalCode || source.postal_code || source.zip || '', 10)
+    };
+    if (!Object.values(normalized).some(Boolean) && fallbackText) {
+        normalized.addressLine = cleanString(fallbackText, 250);
+    }
+    return normalized;
+}
+
 export function profileToStoredUser(profile = {}) {
-    const displayName = profile.display_name || 'สมาชิก Eden';
+    const displayName = profile.display_name || profile.displayName || 'สมาชิก Eden';
     const avatar = profile.avatar_url || 'Images/Logo.webp';
+    const shippingAddressStructured = normalizeShippingAddressStructured(
+        profile.shippingAddressStructured || profile.shipping_address_structured || {},
+        profile.shippingAddress || profile.address || ''
+    );
     return {
         uid: profile.uid || profile.id || '',
         name: displayName,
+        displayName,
+        firstName: profile.firstName || profile.first_name || '',
+        lastName: profile.lastName || profile.last_name || '',
         email: profile.email || '',
         avatar,
         phone: profile.phone_display || displayThaiPhone(profile.phone_number || ''),
         phoneNumber: profile.phone_number || '',
+        phoneVerified: profile.phoneVerified === true || profile.phone_verified === true || !!(profile.phoneVerifiedAt || profile.phone_verified_at),
+        phoneVerifiedAt: profile.phoneVerifiedAt || profile.phone_verified_at || '',
         memberLevel: profile.member_level || 'Silver',
         points: Number(profile.points || 0),
         emailVerified: profile.emailVerified === true || profile.email_verified === true,
         emailVerifiedAt: profile.emailVerifiedAt || profile.email_verified_at || '',
+        shippingAddress: profile.shippingAddress || '',
+        address: profile.shippingAddress || '',
+        shippingAddressStructured,
+        addressLine: shippingAddressStructured.addressLine,
+        subdistrict: shippingAddressStructured.subdistrict,
+        district: shippingAddressStructured.district,
+        province: shippingAddressStructured.province,
+        zipcode: shippingAddressStructured.zipcode,
+        birthDate: profile.birthDate || '',
+        allergies: profile.allergies || '',
+        healthNote: profile.healthNote || '',
+        lineId: profile.lineId || '',
         passwordLoginEnabled: profile.password_login_enabled === true || profile.passwordLoginEnabled === true,
         authProviderIds: Array.isArray(profile.auth_provider_ids) ? profile.auth_provider_ids : [],
         isAdmin: false,
@@ -128,8 +164,14 @@ export function verifyRegisterOtp({ verificationId, phoneNumber, otp }) {
     });
 }
 
-export function completeRegister({ verificationId, registrationToken, phoneNumber, password, confirmPassword, firebaseIdToken }) {
-    const body = { password, confirmPassword };
+export function completeRegister({ verificationId, registrationToken, phoneNumber, password, confirmPassword, firebaseIdToken, firstName, lastName, displayName }) {
+    const body = {
+        password,
+        confirmPassword,
+        firstName: cleanString(firstName, 80),
+        lastName: cleanString(lastName, 80),
+        displayName: cleanString(displayName || [firstName, lastName].filter(Boolean).join(' '), 120)
+    };
     if (firebaseIdToken) body.firebaseIdToken = cleanString(firebaseIdToken, 4000);
     if (verificationId) body.verificationId = cleanString(verificationId, 160);
     if (registrationToken) body.registrationToken = cleanString(registrationToken, 1200);
@@ -180,5 +222,44 @@ export function getMyProfile() {
     return edenAuthRequest('/getMyProfile', {
         method: 'GET',
         authenticated: true
+    });
+}
+
+export function updateMyProfile(profile = {}) {
+    const shippingAddressStructured = normalizeShippingAddressStructured(
+        profile.shippingAddressStructured || profile,
+        profile.shippingAddress || profile.address || ''
+    );
+    return edenAuthRequest('/updateMyProfile', {
+        authenticated: true,
+        body: {
+            firstName: cleanString(profile.firstName, 80),
+            lastName: cleanString(profile.lastName, 80),
+            displayName: cleanString(profile.displayName || [profile.firstName, profile.lastName].filter(Boolean).join(' '), 120),
+            shippingAddress: cleanString(profile.shippingAddress, 500),
+            shippingAddressStructured,
+            birthDate: cleanString(profile.birthDate, 20),
+            allergies: cleanString(profile.allergies, 200),
+            healthNote: cleanString(profile.healthNote, 500),
+            lineId: cleanString(profile.lineId, 80)
+        }
+    });
+}
+
+export function requestPhoneChangeOtp(phoneNumber) {
+    return edenAuthRequest('/requestPhoneChangeOtp', {
+        authenticated: true,
+        body: { phoneNumber: normalizeThaiPhone(phoneNumber) }
+    });
+}
+
+export function verifyPhoneChangeOtp({ verificationId, phoneNumber, otp }) {
+    return edenAuthRequest('/verifyPhoneChangeOtp', {
+        authenticated: true,
+        body: {
+            verificationId: cleanString(verificationId, 160),
+            phoneNumber: normalizeThaiPhone(phoneNumber),
+            otp: cleanString(otp, 6)
+        }
     });
 }

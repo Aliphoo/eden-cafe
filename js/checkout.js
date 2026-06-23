@@ -82,6 +82,92 @@
         }
     }
 
+    function setUser(user) {
+        if (!user?.uid) return;
+        localStorage.setItem('eden_user', JSON.stringify(user));
+        window.dispatchEvent(new CustomEvent('eden:user-changed'));
+    }
+
+    function cleanString(value, maxLength = 300) {
+        return String(value ?? '').trim().slice(0, maxLength);
+    }
+
+    function normalizeShippingAddressStructured(value = {}, fallbackText = '') {
+        const source = value && typeof value === 'object' ? value : {};
+        const normalized = {
+            addressLine: cleanString(source.addressLine || source.address_line || source.line1 || source.address || '', 250),
+            subdistrict: cleanString(source.subdistrict || source.subdistrictName || source.subdistrict_name || '', 80),
+            district: cleanString(source.district || source.districtName || source.district_name || '', 80),
+            province: cleanString(source.province || source.provinceName || source.province_name || '', 80),
+            zipcode: cleanString(source.zipcode || source.postalCode || source.postal_code || source.zip || '', 10)
+        };
+        if (!Object.values(normalized).some(Boolean) && fallbackText) {
+            normalized.addressLine = cleanString(fallbackText, 250);
+        }
+        return normalized;
+    }
+
+    function checkoutAddressFields() {
+        return normalizeShippingAddressStructured({
+            addressLine: document.getElementById('address')?.value,
+            subdistrict: document.getElementById('subdistrict')?.value,
+            district: document.getElementById('district')?.value,
+            province: document.getElementById('province')?.value,
+            zipcode: document.getElementById('zipcode')?.value
+        });
+    }
+
+    function formatShippingAddress(address = {}) {
+        return [
+            address.addressLine,
+            address.subdistrict,
+            address.district,
+            address.province,
+            address.zipcode
+        ].map(part => cleanString(part, 250)).filter(Boolean).join(', ');
+    }
+
+    function profileAddressForCheckout(user = getUser()) {
+        if (!user) return normalizeShippingAddressStructured();
+        return normalizeShippingAddressStructured(
+            user.shippingAddressStructured || user.shipping_address_structured || user,
+            user.shippingAddress || user.address || ''
+        );
+    }
+
+    function setCheckoutFieldIfEmpty(id, value) {
+        const field = document.getElementById(id);
+        if (!field || cleanString(field.value, 500)) return;
+        field.value = value || '';
+    }
+
+    function prefillCheckoutAddressFromProfile() {
+        if (getFulfillmentMethod() !== 'delivery') return;
+        const address = profileAddressForCheckout();
+        if (!Object.values(address).some(Boolean)) return;
+        setCheckoutFieldIfEmpty('address', address.addressLine);
+        setCheckoutFieldIfEmpty('subdistrict', address.subdistrict);
+        setCheckoutFieldIfEmpty('district', address.district);
+        setCheckoutFieldIfEmpty('province', address.province);
+        setCheckoutFieldIfEmpty('zipcode', address.zipcode);
+    }
+
+    function syncCheckoutAddressToProfileCache(address, addressText) {
+        const user = getUser();
+        if (!user?.uid) return;
+        setUser({
+            ...user,
+            shippingAddress: addressText,
+            address: addressText,
+            shippingAddressStructured: address,
+            addressLine: address.addressLine,
+            subdistrict: address.subdistrict,
+            district: address.district,
+            province: address.province,
+            zipcode: address.zipcode
+        });
+    }
+
     function subtotal(cart) {
         return cart.reduce((sum, item) => sum + ((Number(item.price) || 0) * (Number(item.quantity) || 0)), 0);
     }
@@ -191,6 +277,7 @@
             }
         });
         updateShippingLineUI();
+        if (!pickup) prefillCheckoutAddressFromProfile();
     }
 
     function renderCheckout() {
@@ -356,14 +443,20 @@
         }
 
         if (fulfillmentMethod === 'delivery') {
-            const addressParts = ['address', 'subdistrict', 'district', 'province', 'zipcode']
-                .map(id => document.getElementById(id)?.value.trim())
-                .filter(Boolean);
+            const shippingAddressStructured = checkoutAddressFields();
+            const addressParts = [
+                shippingAddressStructured.addressLine,
+                shippingAddressStructured.subdistrict,
+                shippingAddressStructured.district,
+                shippingAddressStructured.province,
+                shippingAddressStructured.zipcode
+            ].filter(Boolean);
             if (addressParts.length < 5) {
                 alert(t('กรุณากรอกข้อมูลจัดส่งให้ครบถ้วน', 'Please complete shipping information.'));
                 return;
             }
-            addressText = addressParts.join(', ');
+            addressText = formatShippingAddress(shippingAddressStructured);
+            syncCheckoutAddressToProfileCache(shippingAddressStructured, addressText);
         } else {
             addressText = t('รับที่ร้าน', 'Pickup at Store');
         }
@@ -445,6 +538,7 @@
 
     window.applyPromoCode = applyPromoCode;
     window.confirmOrder = confirmOrder;
+    window.addEventListener('eden:user-changed', prefillCheckoutAddressFromProfile);
 
     document.addEventListener('DOMContentLoaded', async () => {
         injectFulfillmentUI();

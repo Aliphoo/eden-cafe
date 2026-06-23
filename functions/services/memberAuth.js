@@ -173,24 +173,99 @@ function authMemberCode(uid) {
   return `ED-${source}`;
 }
 
+function normalizeDateString(value) {
+  const dateText = cleanString(value, 20);
+  if (!dateText) return '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText)) {
+    throw createPublicError('กรุณากรอกวันเกิดในรูปแบบ YYYY-MM-DD');
+  }
+  const date = new Date(`${dateText}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== dateText) {
+    throw createPublicError('กรุณากรอกวันเกิดให้ถูกต้อง');
+  }
+  return dateText;
+}
+
+function normalizeProfileNameFields(body = {}, existing = {}, options = {}) {
+  const fallbackName = cleanString(options.fallbackName || existing.display_name || existing.displayName || existing.name || 'สมาชิก Eden', 120);
+  const firstName = cleanString(body.firstName || body.first_name || existing.firstName || existing.first_name || '', 80);
+  const lastName = cleanString(body.lastName || body.last_name || existing.lastName || existing.last_name || '', 80);
+  const requestedDisplayName = cleanString(body.displayName || body.display_name || body.name || '', 120);
+  const displayName = cleanString(requestedDisplayName || [firstName, lastName].filter(Boolean).join(' ') || fallbackName, 120);
+
+  if (options.requireFullName && (!firstName || !lastName)) {
+    throw createPublicError('กรุณากรอกชื่อและนามสกุล');
+  }
+  if (options.requireDisplayName && !displayName) {
+    throw createPublicError('กรุณากรอกชื่อสมาชิก');
+  }
+
+  return { firstName, lastName, displayName };
+}
+
+function normalizeShippingAddressStructured(value = {}, fallbackText = '') {
+  const source = value && typeof value === 'object' ? value : {};
+  const normalized = {
+    addressLine: cleanString(source.addressLine || source.address_line || source.line1 || source.address || '', 250),
+    subdistrict: cleanString(source.subdistrict || source.subdistrictName || source.subdistrict_name || '', 80),
+    district: cleanString(source.district || source.districtName || source.district_name || '', 80),
+    province: cleanString(source.province || source.provinceName || source.province_name || '', 80),
+    zipcode: cleanString(source.zipcode || source.postalCode || source.postal_code || source.zip || '', 10),
+  };
+  if (!Object.values(normalized).some(Boolean) && fallbackText) {
+    normalized.addressLine = cleanString(fallbackText, 250);
+  }
+  return normalized;
+}
+
+function formatShippingAddress(address = {}) {
+  return [
+    address.addressLine,
+    address.subdistrict,
+    address.district,
+    address.province,
+    address.zipcode,
+  ].map(part => cleanString(part, 250)).filter(Boolean).join(', ');
+}
+
 function sanitizeProfile(uid, data = {}, credential = {}) {
   const phoneNumber = cleanString(data.phone_number || data.phoneE164 || data.phone || '', 40);
   const phoneDisplay = cleanString(data.phone_display || data.phone || displayThaiPhone(phoneNumber), 40);
   const displayName = cleanString(data.display_name || data.displayName || data.name || '', 120);
+  const firstName = cleanString(data.firstName || data.first_name || '', 80);
+  const lastName = cleanString(data.lastName || data.last_name || '', 80);
   const avatarUrl = cleanString(data.avatar_url || data.photoURL || '', 500);
   const memberLevel = cleanString(data.member_level || data.tier || 'Silver', 40) || 'Silver';
   const hasPasswordHash = !!cleanString(credential.password_hash || '', 2000);
   const emailVerifiedAt = data.emailVerifiedAt || data.email_verified_at || null;
+  const phoneVerifiedAt = data.phoneVerifiedAt || data.phone_verified_at || null;
+  const shippingAddressStructured = normalizeShippingAddressStructured(
+    data.shippingAddressStructured || data.shipping_address_structured || {},
+    data.shippingAddress || data.address || ''
+  );
+  const shippingAddress = cleanString(data.shippingAddress || data.address || formatShippingAddress(shippingAddressStructured), 500);
   return {
     id: cleanString(data.id || data.uid || uid, 160),
     uid: cleanString(data.uid || uid, 160),
     phone_number: phoneNumber,
     phone_display: phoneDisplay,
+    phoneVerified: data.phoneVerified === true || data.phone_verified === true || !!phoneVerifiedAt,
+    phoneVerifiedAt: timestampToIso(phoneVerifiedAt),
     email: cleanString(data.email || data.email_lower || '', 180) || null,
     emailVerified: data.emailVerified === true || data.email_verified === true,
     emailVerifiedAt: timestampToIso(emailVerifiedAt),
     display_name: displayName || null,
+    displayName: displayName || null,
+    firstName,
+    lastName,
     avatar_url: avatarUrl || null,
+    shippingAddress,
+    shippingAddressStructured,
+    shipping_address_structured: shippingAddressStructured,
+    birthDate: cleanString(data.birthDate || '', 20),
+    allergies: cleanString(data.allergies || '', 200),
+    healthNote: cleanString(data.healthNote || '', 500),
+    lineId: cleanString(data.lineId || '', 80),
     member_level: ['Silver', 'Gold', 'Platinum'].includes(memberLevel) ? memberLevel : 'Silver',
     points: Math.max(0, Math.floor(Number(data.points || 0))),
     password_login_enabled: hasPasswordHash || data.passwordLoginEnabled === true || data.password_login_enabled === true,
@@ -229,9 +304,12 @@ function createMemberAuthHandlers({
     }
 
     const sender = cleanString(config.sender || 'Eden Cafe', 80);
-    const message = purpose === 'password_reset'
+    let message = purpose === 'password_reset'
       ? `รหัส OTP สำหรับรีเซ็ตรหัสผ่านสมาชิก Eden Cafe คือ ${code} รหัสนี้หมดอายุใน 5 นาที`
       : `รหัส OTP สำหรับสมัครสมาชิก Eden Cafe คือ ${code} รหัสนี้หมดอายุใน 5 นาที`;
+    if (purpose === 'phone_change') {
+      message = `รหัส OTP สำหรับยืนยันเบอร์โทรศัพท์สมาชิก Eden Cafe คือ ${code} รหัสนี้หมดอายุใน 5 นาที`;
+    }
     const headers = { 'Content-Type': 'application/json' };
     const apiKey = cleanString(config.apiKey, 500);
     if (apiKey) {
@@ -398,11 +476,22 @@ function createMemberAuthHandlers({
     return snap.exists ? snap.data() || {} : {};
   }
 
-  async function loadMemberByUid(uid) {
+  async function loadMemberByUid(uid, depth = 0) {
     const safeUid = cleanString(uid, 160);
     if (!safeUid) return null;
     const snap = await db.collection('users').doc(safeUid).get();
-    return snap.exists ? { uid: snap.id, data: snap.data() || {} } : null;
+    if (snap.exists) {
+      const data = snap.data() || {};
+      const mergedInto = cleanString(data.mergedInto || data.primaryUid || '', 160);
+      if (mergedInto && mergedInto !== safeUid && depth < 3) return loadMemberByUid(mergedInto, depth + 1);
+      return { uid: snap.id, data };
+    }
+
+    const redirectSnap = await db.collection('member_merge_redirects').doc(safeUid).get();
+    const redirect = redirectSnap.exists ? redirectSnap.data() || {} : {};
+    const primaryUid = cleanString(redirect.primaryUid || redirect.mergedInto || '', 160);
+    if (primaryUid && primaryUid !== safeUid && depth < 3) return loadMemberByUid(primaryUid, depth + 1);
+    return null;
   }
 
   async function findCanonicalMemberForGoogle(decoded = {}) {
@@ -566,10 +655,10 @@ function createMemberAuthHandlers({
       const existing = userSnap.exists ? userSnap.data() || {} : {};
       const existingProviders = Array.isArray(existing.authProviderIds) ? existing.authProviderIds : [];
       const authProviderIds = Array.from(new Set([...existingProviders, 'phone', 'custom_password']));
-      const displayName = cleanString(
-        existing.display_name || existing.displayName || authUser?.displayName || 'สมาชิก Eden',
-        120
-      );
+      const names = normalizeProfileNameFields(req.body || {}, existing, {
+        fallbackName: authUser?.displayName || 'สมาชิก Eden',
+        requireFullName: true,
+      });
       const avatarUrl = cleanString(existing.avatar_url || existing.photoURL || authUser?.photoURL || '', 500);
       const email = normalizeEmail(existing.email || authUser?.email || '');
       const memberLevel = cleanString(existing.member_level || existing.tier || 'Silver', 40) || 'Silver';
@@ -591,8 +680,11 @@ function createMemberAuthHandlers({
         phoneE164: phoneNumber,
         email,
         email_lower: email,
-        display_name: displayName,
-        displayName,
+        firstName: names.firstName,
+        lastName: names.lastName,
+        display_name: names.displayName,
+        displayName: names.displayName,
+        name: names.displayName,
         avatar_url: avatarUrl,
         photoURL: avatarUrl,
         member_level: ['Silver', 'Gold', 'Platinum'].includes(memberLevel) ? memberLevel : 'Silver',
@@ -605,6 +697,10 @@ function createMemberAuthHandlers({
         profileCompleted: true,
         authProviderIds,
         registrationSource: cleanString(existing.registrationSource || 'firebase_phone_password', 80),
+        phoneVerified: true,
+        phoneVerifiedAt: existing.phoneVerifiedAt || now,
+        phone_verified: true,
+        phone_verified_at: existing.phone_verified_at || now,
         updated_at: now,
         updatedAt: now,
       };
@@ -675,10 +771,10 @@ function createMemberAuthHandlers({
       const credential = credentialSnap.exists ? credentialSnap.data() || {} : {};
       const existingProviders = Array.isArray(existing.authProviderIds) ? existing.authProviderIds : [];
       const authProviderIds = Array.from(new Set([...existingProviders, ...firebaseProviderIds(decoded), 'google.com', 'custom_password']));
-      const displayName = cleanString(
-        existing.display_name || existing.displayName || authUser?.displayName || decoded.name || email.split('@')[0] || 'สมาชิก Eden',
-        120
-      );
+      const names = normalizeProfileNameFields(req.body || {}, existing, {
+        fallbackName: authUser?.displayName || decoded.name || email.split('@')[0] || 'สมาชิก Eden',
+        requireFullName: true,
+      });
       const avatarUrl = cleanString(existing.avatar_url || existing.photoURL || authUser?.photoURL || decoded.picture || '', 500);
       const memberLevel = cleanString(existing.member_level || existing.tier || 'Silver', 40) || 'Silver';
       const points = Math.max(0, Math.floor(Number(existing.points || 0)));
@@ -695,8 +791,11 @@ function createMemberAuthHandlers({
         uid: memberUid,
         email,
         email_lower: email,
-        display_name: displayName,
-        displayName,
+        firstName: names.firstName,
+        lastName: names.lastName,
+        display_name: names.displayName,
+        displayName: names.displayName,
+        name: names.displayName,
         avatar_url: avatarUrl,
         photoURL: avatarUrl,
         member_level: ['Silver', 'Gold', 'Platinum'].includes(memberLevel) ? memberLevel : 'Silver',
@@ -1265,6 +1364,330 @@ function createMemberAuthHandlers({
     }
   }
 
+  async function updateMyProfile(req, res) {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'updateMyProfile', 40, 15 * 60 * 1000);
+      const decoded = await requireSignedInUser(req);
+      const member = await loadMemberByUid(decoded.uid);
+      if (!member?.uid) throw createPublicError('ไม่พบข้อมูลสมาชิก', 404);
+      checkRateLimitKey(`updateMyProfile:${member.uid}`, 30, 10 * 60 * 1000);
+
+      const existing = member.data || {};
+      const names = normalizeProfileNameFields(req.body || {}, existing, {
+        fallbackName: existing.display_name || existing.displayName || existing.name || 'สมาชิก Eden',
+        requireDisplayName: true,
+      });
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      const shippingAddressStructured = normalizeShippingAddressStructured(
+        req.body?.shippingAddressStructured || req.body?.shipping_address_structured || req.body || {},
+        req.body?.shippingAddress || req.body?.address || ''
+      );
+      const shippingAddress = cleanString(
+        req.body?.shippingAddress || req.body?.address || formatShippingAddress(shippingAddressStructured),
+        500
+      );
+      const payload = {
+        uid: member.uid,
+        firstName: names.firstName,
+        lastName: names.lastName,
+        displayName: names.displayName,
+        display_name: names.displayName,
+        name: names.displayName,
+        shippingAddress,
+        shippingAddressStructured,
+        shipping_address_structured: shippingAddressStructured,
+        birthDate: normalizeDateString(req.body?.birthDate || ''),
+        allergies: cleanString(req.body?.allergies || '', 200),
+        healthNote: cleanString(req.body?.healthNote || '', 500),
+        lineId: cleanString(req.body?.lineId || '', 80),
+        updated_at: now,
+        updatedAt: now,
+      };
+
+      await db.collection('users').doc(member.uid).set(payload, { merge: true });
+      await admin.auth().updateUser(member.uid, { displayName: names.displayName }).catch(error => {
+        if (error.code !== 'auth/user-not-found') {
+          logger.warn('Unable to update Auth displayName for member profile', {
+            uid: member.uid,
+            code: error.code || '',
+            message: error.message,
+          });
+        }
+      });
+
+      const [freshUserSnap, credential] = await Promise.all([
+        db.collection('users').doc(member.uid).get(),
+        getCredential(member.uid),
+      ]);
+      res.json({
+        ok: true,
+        profile: sanitizeProfile(member.uid, freshUserSnap.exists ? freshUserSnap.data() || {} : { ...existing, ...payload }, credential),
+      });
+    } catch (error) {
+      logger.warn('Member profile update failed', {
+        message: error.message,
+        status: error.statusCode || 500,
+      });
+      jsonError(res, error, 'ไม่สามารถบันทึกโปรไฟล์ได้ กรุณาลองใหม่อีกครั้ง');
+    }
+  }
+
+  async function requestPhoneChangeOtp(req, res) {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'requestPhoneChangeOtp', 10, 15 * 60 * 1000);
+      const decoded = await requireSignedInUser(req);
+      const member = await loadMemberByUid(decoded.uid);
+      if (!member?.uid) throw createPublicError('ไม่พบข้อมูลสมาชิก', 404);
+
+      const phoneNumber = normalizeThaiPhone(req.body?.phoneNumber || req.body?.phone);
+      let currentPhoneNumber = '';
+      try {
+        const credential = await getCredential(member.uid);
+        currentPhoneNumber = normalizeThaiPhone(credential.phone_number || member.data?.phone_number || member.data?.phoneE164 || member.data?.phone || '');
+      } catch (_) {
+        currentPhoneNumber = '';
+      }
+      if (currentPhoneNumber && currentPhoneNumber === phoneNumber) {
+        res.json({
+          ok: true,
+          alreadyVerified: true,
+          phoneNumber,
+          phoneDisplay: displayThaiPhone(phoneNumber),
+        });
+        return;
+      }
+
+      checkRateLimitKey(`requestPhoneChangeOtp:${member.uid}`, 3, 10 * 60 * 1000);
+      checkRateLimitKey(`requestPhoneChangeOtpPhone:${phoneIndexKey(phoneNumber)}`, 3, 10 * 60 * 1000);
+      await ensurePhoneIsAvailable(phoneNumber);
+
+      const code = randomOtpCode();
+      const now = admin.firestore.Timestamp.now();
+      const expiresAt = admin.firestore.Timestamp.fromDate(new Date(Date.now() + OTP_TTL_MS));
+      const verificationRef = db.collection(OTP_COLLECTION).doc();
+      await verificationRef.set({
+        uid: member.uid,
+        purpose: 'phone_change',
+        channel: 'phone',
+        identifier_key: phoneNumber,
+        identifier_display: displayThaiPhone(phoneNumber),
+        old_phone_number: currentPhoneNumber || null,
+        otp_hash: otpHash(`phone_change:${member.uid}:${phoneNumber}`, code, getOtpPepper()),
+        expires_at: expiresAt,
+        verified_at: null,
+        used_at: null,
+        attempt_count: 0,
+        max_attempts: OTP_MAX_ATTEMPTS,
+        created_at: now,
+      });
+
+      try {
+        await sendOtpSms(phoneNumber, code, 'phone_change');
+      } catch (error) {
+        await verificationRef.delete().catch(() => {});
+        throw error;
+      }
+
+      res.json({
+        ok: true,
+        verificationId: verificationRef.id,
+        phoneNumber,
+        phoneDisplay: displayThaiPhone(phoneNumber),
+        expiresInSeconds: Math.floor(OTP_TTL_MS / 1000),
+      });
+    } catch (error) {
+      logger.warn('Phone change OTP request failed', {
+        message: error.message,
+        status: error.statusCode || 500,
+      });
+      jsonError(res, error, 'ไม่สามารถส่ง OTP ยืนยันเบอร์โทรศัพท์ได้ กรุณาลองใหม่อีกครั้ง');
+    }
+  }
+
+  async function verifyPhoneChangeOtp(req, res) {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'verifyPhoneChangeOtp', 30, 10 * 60 * 1000);
+      const decoded = await requireSignedInUser(req);
+      const member = await loadMemberByUid(decoded.uid);
+      if (!member?.uid) throw createPublicError('ไม่พบข้อมูลสมาชิก', 404);
+
+      const verificationId = cleanString(req.body?.verificationId, 160);
+      if (!verificationId || verificationId.includes('/')) {
+        throw createPublicError('ไม่พบรายการ OTP กรุณาขอรหัสใหม่');
+      }
+      const phoneNumber = normalizeThaiPhone(req.body?.phoneNumber || req.body?.phone);
+      const code = cleanString(req.body?.otp || req.body?.code, 6);
+      if (!/^\d{6}$/.test(code)) throw createPublicError('กรุณากรอก OTP 6 หลัก');
+
+      checkRateLimitKey(`verifyPhoneChangeOtp:${member.uid}`, 12, 10 * 60 * 1000);
+      await ensurePhoneIsAvailableForUid(phoneNumber, member.uid);
+
+      const verificationRef = db.collection(OTP_COLLECTION).doc(verificationId);
+      const phoneIndexRef = db.collection(PHONE_INDEX_COLLECTION).doc(phoneIndexKey(phoneNumber));
+      const userRef = db.collection('users').doc(member.uid);
+      const credentialRef = db.collection(CREDENTIAL_COLLECTION).doc(member.uid);
+      let profileForResponse = null;
+      let credentialForResponse = null;
+      let publicFailure = null;
+
+      await db.runTransaction(async tx => {
+        const [verificationSnap, userSnap, credentialSnap, phoneIndexSnap] = await Promise.all([
+          tx.get(verificationRef),
+          tx.get(userRef),
+          tx.get(credentialRef),
+          tx.get(phoneIndexRef),
+        ]);
+        if (!verificationSnap.exists) {
+          publicFailure = createPublicError('ไม่พบรายการ OTP กรุณาขอรหัสใหม่');
+          return;
+        }
+
+        const record = verificationSnap.data() || {};
+        const expiresAt = record.expires_at?.toDate ? record.expires_at.toDate().getTime() : 0;
+        if (
+          record.purpose !== 'phone_change'
+          || record.channel !== 'phone'
+          || record.uid !== member.uid
+          || record.identifier_key !== phoneNumber
+          || record.used_at
+        ) {
+          publicFailure = createPublicError('ไม่พบรายการ OTP กรุณาขอรหัสใหม่');
+          return;
+        }
+        if (!expiresAt || expiresAt < Date.now()) {
+          publicFailure = createPublicError('OTP หมดอายุ กรุณาขอรหัสใหม่');
+          return;
+        }
+
+        const attempts = Math.max(0, Number(record.attempt_count || 0));
+        const maxAttempts = Math.max(1, Number(record.max_attempts || OTP_MAX_ATTEMPTS));
+        if (attempts >= maxAttempts) {
+          publicFailure = createPublicError('OTP ไม่ถูกต้อง กรุณาขอรหัสใหม่');
+          return;
+        }
+
+        const expected = otpHash(`phone_change:${member.uid}:${phoneNumber}`, code, getOtpPepper());
+        if (!constantTimeEqualHex(record.otp_hash, expected)) {
+          tx.update(verificationRef, {
+            attempt_count: admin.firestore.FieldValue.increment(1),
+            last_attempt_at: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          publicFailure = createPublicError('OTP ไม่ถูกต้อง กรุณาตรวจสอบแล้วลองอีกครั้ง');
+          return;
+        }
+
+        const phoneIndex = phoneIndexSnap.exists ? phoneIndexSnap.data() || {} : {};
+        if (phoneIndexSnap.exists && phoneIndex.uid && phoneIndex.uid !== member.uid) {
+          publicFailure = createPublicError('เบอร์นี้มีในระบบแล้ว กรุณาใช้เบอร์อื่น', 409);
+          return;
+        }
+
+        const existing = userSnap.exists ? userSnap.data() || {} : member.data || {};
+        const credential = credentialSnap.exists ? credentialSnap.data() || {} : {};
+        let oldPhoneNumber = '';
+        try {
+          oldPhoneNumber = normalizeThaiPhone(credential.phone_number || existing.phone_number || existing.phoneE164 || existing.phone || '');
+        } catch (_) {
+          oldPhoneNumber = '';
+        }
+        const oldPhoneIndexRef = oldPhoneNumber && oldPhoneNumber !== phoneNumber
+          ? db.collection(PHONE_INDEX_COLLECTION).doc(phoneIndexKey(oldPhoneNumber))
+          : null;
+        const oldPhoneIndexSnap = oldPhoneIndexRef ? await tx.get(oldPhoneIndexRef) : null;
+        const oldPhoneIndex = oldPhoneIndexSnap?.exists ? oldPhoneIndexSnap.data() || {} : {};
+
+        const now = admin.firestore.FieldValue.serverTimestamp();
+        const phoneDisplay = displayThaiPhone(phoneNumber);
+        const existingProviders = Array.isArray(existing.authProviderIds) ? existing.authProviderIds : [];
+        const authProviderIds = Array.from(new Set([...existingProviders, 'phone']));
+        const userPayload = {
+          uid: member.uid,
+          phone_number: phoneNumber,
+          phone_display: phoneDisplay,
+          phone: phoneDisplay,
+          phoneE164: phoneNumber,
+          loginUsername: phoneNumber,
+          phoneVerified: true,
+          phoneVerifiedAt: now,
+          phone_verified: true,
+          phone_verified_at: now,
+          authProviderIds,
+          updated_at: now,
+          updatedAt: now,
+        };
+        tx.set(userRef, userPayload, { merge: true });
+        tx.set(credentialRef, {
+          uid: member.uid,
+          phone_number: phoneNumber,
+          phone_index_key: phoneIndexKey(phoneNumber),
+          updated_at: now,
+        }, { merge: true });
+        tx.set(phoneIndexRef, {
+          uid: member.uid,
+          phone_number: phoneNumber,
+          updated_at: now,
+          created_at: phoneIndex.created_at || now,
+        }, { merge: true });
+        if (oldPhoneIndexRef && oldPhoneIndex.uid === member.uid) {
+          tx.delete(oldPhoneIndexRef);
+        }
+        tx.update(verificationRef, {
+          used_at: now,
+          verified_at: now,
+        });
+
+        profileForResponse = { ...existing, ...userPayload };
+        credentialForResponse = { ...credential, phone_number: phoneNumber, phone_index_key: phoneIndexKey(phoneNumber) };
+      });
+
+      if (publicFailure) throw publicFailure;
+
+      await admin.auth().updateUser(member.uid, { phoneNumber }).catch(error => {
+        if (error.code !== 'auth/user-not-found') {
+          logger.warn('Phone verified in Firestore but Auth phone was not updated', {
+            uid: member.uid,
+            code: error.code || '',
+            message: error.message,
+          });
+        }
+      });
+
+      res.json({
+        ok: true,
+        phoneNumber,
+        phoneDisplay: displayThaiPhone(phoneNumber),
+        profile: sanitizeProfile(member.uid, profileForResponse || {}, credentialForResponse || {}),
+      });
+    } catch (error) {
+      logger.warn('Phone change OTP verification failed', {
+        message: error.message,
+        status: error.statusCode || 500,
+      });
+      jsonError(res, error, 'ไม่สามารถยืนยันเบอร์โทรศัพท์ได้ กรุณาลองใหม่อีกครั้ง');
+    }
+  }
+
   async function completeRegister(req, res) {
     if (handleOptions(req, res)) return;
     setCors(req, res);
@@ -1312,6 +1735,10 @@ function createMemberAuthHandlers({
 
       const uid = `usr_${crypto.randomUUID().replace(/-/g, '').slice(0, 28)}`;
       const passwordHash = await hashPassword(password, getPasswordPepper());
+      const names = normalizeProfileNameFields(req.body || {}, {}, {
+        fallbackName: 'สมาชิก Eden',
+        requireFullName: true,
+      });
       const phoneDisplay = displayThaiPhone(phoneNumber);
       const phoneKey = phoneIndexKey(phoneNumber);
       const now = admin.firestore.FieldValue.serverTimestamp();
@@ -1344,8 +1771,11 @@ function createMemberAuthHandlers({
           phoneE164: phoneNumber,
           email: '',
           email_lower: '',
-          display_name: '',
-          displayName: 'สมาชิก Eden',
+          firstName: names.firstName,
+          lastName: names.lastName,
+          display_name: names.displayName,
+          displayName: names.displayName,
+          name: names.displayName,
           avatar_url: '',
           photoURL: '',
           member_level: 'Silver',
@@ -1358,6 +1788,10 @@ function createMemberAuthHandlers({
           profileCompleted: true,
           authProviderIds: ['custom_password'],
           registrationSource: 'phone_password_otp',
+          phoneVerified: true,
+          phoneVerifiedAt: now,
+          phone_verified: true,
+          phone_verified_at: now,
           created_at: now,
           createdAt: now,
           updated_at: now,
@@ -1536,6 +1970,9 @@ function createMemberAuthHandlers({
     completePasswordReset,
     loginMember,
     getMyProfile,
+    updateMyProfile,
+    requestPhoneChangeOtp,
+    verifyPhoneChangeOtp,
   };
 }
 

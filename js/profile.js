@@ -1,9 +1,14 @@
-// Profile dashboard asset deploy marker: profile-assets-20260621-1
 import { auth, db } from './firebase-config.js';
 import { onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { collection, doc, getDoc, getDocs, query, setDoc, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, doc, getDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getTierRules } from './membership.js';
-import { getMyProfile, profileToStoredUser } from './member-auth-service.js';
+import {
+    getMyProfile,
+    profileToStoredUser,
+    requestPhoneChangeOtp,
+    updateMyProfile,
+    verifyPhoneChangeOtp
+} from './member-auth-service.js';
 import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 (() => {
@@ -23,6 +28,17 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     let cloudProfileSaving = false;
     let cloudProfileError = '';
     let emailVerificationBusy = false;
+    let emailVerificationCooldownUntil = 0;
+    let emailVerificationState = {
+        email: ''
+    };
+    let phoneVerificationBusy = false;
+    let phoneVerificationCooldownUntil = 0;
+    let phoneVerificationState = {
+        verificationId: '',
+        phoneNumber: '',
+        phoneDisplay: ''
+    };
     let loyaltyConfig = null;
     let loyaltyLedger = [];
     let loyaltySummary = null;
@@ -79,6 +95,48 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
     function cleanString(value, maxLength = 300) {
         return String(value ?? '').trim().slice(0, maxLength);
+    }
+
+    function normalizeShippingAddressStructured(value = {}, fallbackText = '') {
+        const source = value && typeof value === 'object' ? value : {};
+        const normalized = {
+            addressLine: cleanString(source.addressLine || source.address_line || source.line1 || source.address || '', 250),
+            subdistrict: cleanString(source.subdistrict || source.subdistrictName || source.subdistrict_name || '', 80),
+            district: cleanString(source.district || source.districtName || source.district_name || '', 80),
+            province: cleanString(source.province || source.provinceName || source.province_name || '', 80),
+            zipcode: cleanString(source.zipcode || source.postalCode || source.postal_code || source.zip || '', 10)
+        };
+        if (!Object.values(normalized).some(Boolean) && fallbackText) {
+            normalized.addressLine = cleanString(fallbackText, 250);
+        }
+        return normalized;
+    }
+
+    function formatShippingAddress(address = {}) {
+        return [
+            address.addressLine,
+            address.subdistrict,
+            address.district,
+            address.province,
+            address.zipcode
+        ].map(part => cleanString(part, 250)).filter(Boolean).join(', ');
+    }
+
+    function profileShippingAddress(user = {}) {
+        const fallbackText = profileValue('shippingAddress', user.shippingAddress || user.address || '');
+        const structured = profileValue(
+            'shippingAddressStructured',
+            profileValue('shipping_address_structured', user.shippingAddressStructured || user.shipping_address_structured || user)
+        );
+        return normalizeShippingAddressStructured(structured, fallbackText);
+    }
+
+    function cooldownSeconds(until) {
+        return Math.max(0, Math.ceil((Number(until || 0) - Date.now()) / 1000));
+    }
+
+    function cooldownMinutes(until) {
+        return Math.max(1, Math.ceil(cooldownSeconds(until) / 60));
     }
 
     function isInternalPhoneEmail(email) {
@@ -198,6 +256,8 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             loyaltyRule: 'Earning & redemption rules',
             loyaltyHistory: 'Recent point history',
             loyaltyLoading: 'Loading loyalty information...',
+            refreshLoyalty: 'Refresh points',
+            refreshingLoyalty: 'Refreshing...',
             noLoyaltyHistory: 'No point movement yet.',
             pointsAsCash: '{points} points = THB {value} credit',
             earnRule: 'Earn 1 point for every THB {spend}. Gold x{gold}, Platinum x{platinum}.',
@@ -236,11 +296,14 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             googleInfo: 'Member Account',
             editableInfo: 'Additional customer information',
             name: 'Name',
+            firstName: 'First name',
+            lastName: 'Last name',
             email: 'Email',
             emailVerification: 'Email verification',
             emailVerified: 'Verified',
             emailUnverified: 'Not verified',
             emailOptional: 'We will send a 6-digit code to this email. After verification, you can use this email with your existing password.',
+            emailVerifiedLocked: 'Email verified. No extra action is needed.',
             emailCode: 'Verification code',
             emailCodePlaceholder: '123456',
             sendEmailCode: 'Send code',
@@ -251,6 +314,19 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             emailCodeVerified: 'Email verified successfully.',
             emailCodeFailed: 'Unable to verify email right now.',
             phone: 'Phone number',
+            phoneVerification: 'Phone verification',
+            phoneVerified: 'Phone verified',
+            phoneUnverified: 'Verify by OTP before changing this number.',
+            sendPhoneCode: 'Send OTP',
+            phoneCode: 'Phone OTP',
+            phoneCodePlaceholder: '123456',
+            verifyPhoneCode: 'Verify phone',
+            sendingPhoneCode: 'Sending OTP...',
+            verifyingPhoneCode: 'Verifying phone...',
+            phoneCodeSent: 'OTP sent. Please enter the 6-digit code.',
+            phoneCodeVerified: 'Phone number verified successfully.',
+            phoneCodeFailed: 'Unable to verify phone right now.',
+            verificationCooldown: 'Please wait 5 minutes before requesting another code.',
             shippingAddress: 'Shipping address',
             birthDate: 'Birthday',
             allergies: 'Food allergies',
@@ -432,14 +508,72 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         return Array.isArray(history) ? history.slice(0, 10) : [];
     }
 
+    function historyTimestampMillis(item = {}) {
+        const value = item.paidAt || item.closedAt || item.completedAt || item.timestamp || item.createdAt || item.updatedAt || item.date;
+        if (value?.toDate) return value.toDate().getTime();
+        const parsed = new Date(value || 0).getTime();
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function sortHistoryDesc(items) {
+        return items.sort((a, b) => historyTimestampMillis(b) - historyTimestampMillis(a));
+    }
+
+    function mapCloudOrder(docSnap) {
+        const data = docSnap.data() || {};
+        return {
+            firestoreId: docSnap.id,
+            id: data.id || data.receiptNo || data.orderNumber || docSnap.id,
+            ...data
+        };
+    }
+
+    async function fetchProfileOrdersFromCloud(uid) {
+        if (!db || !uid) return [];
+        const [customerSnap, legacySnap] = await Promise.all([
+            getDocs(query(collection(db, 'orders'), where('customerUid', '==', uid))).catch(() => ({ docs: [] })),
+            getDocs(query(collection(db, 'orders'), where('uid', '==', uid))).catch(() => ({ docs: [] }))
+        ]);
+        const ordersByDocId = new Map();
+        [...customerSnap.docs, ...legacySnap.docs].forEach(docSnap => {
+            const data = docSnap.data() || {};
+            const customerUid = String(data.customerUid || '').trim();
+            const orderUid = String(data.uid || '').trim();
+            const source = String(data.source || '').toLowerCase();
+            if (data.isTestOrder === true) return;
+            if (customerUid ? customerUid !== uid : (orderUid !== uid || source === 'pos')) return;
+            ordersByDocId.set(docSnap.id, mapCloudOrder(docSnap));
+        });
+        return sortHistoryDesc(Array.from(ordersByDocId.values())).slice(0, 20);
+    }
+
+    async function fetchProfileBookingsFromCloud(uid) {
+        if (!db || !uid) return [];
+        const [uidSnap, customerSnap, memberSnap] = await Promise.all([
+            getDocs(query(collection(db, 'bookings'), where('uid', '==', uid))).catch(() => ({ docs: [] })),
+            getDocs(query(collection(db, 'bookings'), where('customerUid', '==', uid))).catch(() => ({ docs: [] })),
+            getDocs(query(collection(db, 'bookings'), where('member_id', '==', uid))).catch(() => ({ docs: [] }))
+        ]);
+        const bookingsByDocId = new Map();
+        [...uidSnap.docs, ...customerSnap.docs, ...memberSnap.docs].forEach(docSnap => {
+            bookingsByDocId.set(docSnap.id, { id: docSnap.id, ...docSnap.data() });
+        });
+        return sortHistoryDesc(Array.from(bookingsByDocId.values())).slice(0, 20);
+    }
+
     async function refreshCloudHistory(user) {
         if (!user?.uid || cloudHistoryLoading || cloudHistoryUid === user.uid) return;
-        if (typeof window.fetchUserOrdersFromCloud !== 'function' || typeof window.fetchUserBookingsFromCloud !== 'function') return;
+        const fetchOrders = typeof window.fetchUserOrdersFromCloud === 'function'
+            ? window.fetchUserOrdersFromCloud
+            : fetchProfileOrdersFromCloud;
+        const fetchBookings = typeof window.fetchUserBookingsFromCloud === 'function'
+            ? window.fetchUserBookingsFromCloud
+            : fetchProfileBookingsFromCloud;
         cloudHistoryLoading = true;
         try {
             const [orders, bookings] = await Promise.all([
-                window.fetchUserOrdersFromCloud(user.uid),
-                window.fetchUserBookingsFromCloud(user.uid)
+                fetchOrders(user.uid),
+                fetchBookings(user.uid)
             ]);
             cloudOrders = Array.isArray(orders) ? orders : [];
             cloudBookings = Array.isArray(bookings) ? bookings : [];
@@ -471,10 +605,23 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             cloudProfileError = '';
             cloudProfile = {
                 ...profile,
-                displayName: profile.display_name || 'สมาชิก Eden',
-                photoURL: profile.avatar_url || 'Images/Logo.webp',
+                displayName: profile.display_name || profile.displayName || 'สมาชิก Eden',
+                firstName: profile.firstName || '',
+                lastName: profile.lastName || '',
+                photoURL: profile.avatar_url || '/Images/Logo.webp',
                 phone: profile.phone_display || '',
                 phoneE164: profile.phone_number || '',
+                phoneVerified: profile.phoneVerified === true || profile.phone_verified === true,
+                phoneVerifiedAt: profile.phoneVerifiedAt || profile.phone_verified_at || '',
+                shippingAddress: profile.shippingAddress || '',
+                shippingAddressStructured: normalizeShippingAddressStructured(
+                    profile.shippingAddressStructured || profile.shipping_address_structured || {},
+                    profile.shippingAddress || ''
+                ),
+                birthDate: profile.birthDate || '',
+                allergies: profile.allergies || '',
+                healthNote: profile.healthNote || '',
+                lineId: profile.lineId || '',
                 tier: profile.member_level || 'Silver',
                 member_level: profile.member_level || 'Silver',
                 points: Number(profile.points || 0),
@@ -498,9 +645,11 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         }
     }
 
-    async function refreshLoyaltyData(user) {
-        if (!db || !user?.uid || loyaltyLoading || loyaltyUid === user.uid) return;
+    async function refreshLoyaltyData(user, options = {}) {
+        const force = options.force === true;
+        if (!db || !user?.uid || loyaltyLoading || (!force && loyaltyUid === user.uid)) return;
         loyaltyLoading = true;
+        if (force) renderProfile();
         try {
             const [configSnap, summarySnap, ledgerSnap] = await Promise.all([
                 getDoc(doc(db, 'site_settings', 'loyalty')),
@@ -524,6 +673,13 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         } finally {
             loyaltyLoading = false;
         }
+    }
+
+    async function refreshProfileLoyalty() {
+        const user = readUser();
+        if (!user?.uid) return;
+        loyaltyUid = '';
+        await refreshLoyaltyData(user, { force: true });
     }
 
     function cartCount() {
@@ -553,11 +709,19 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         return {
             uid: user.uid || currentAuthUser?.uid || '',
             displayName,
+            firstName: user.firstName || '',
+            lastName: user.lastName || '',
             email: user.email || '',
             photoURL: user.avatar || user.photoURL || currentAuthUser?.photoURL || '/Images/Logo.webp',
             phone: user.phone || '',
             phoneE164: user.phoneNumber || '',
+            phoneVerified: user.phoneVerified === true,
+            phoneVerifiedAt: user.phoneVerifiedAt || '',
             shippingAddress: user.shippingAddress || user.address || '',
+            shippingAddressStructured: normalizeShippingAddressStructured(
+                user.shippingAddressStructured || user.shipping_address_structured || user,
+                user.shippingAddress || user.address || ''
+            ),
             birthDate: user.birthDate || '',
             allergies: user.allergies || '',
             healthNote: user.healthNote || '',
@@ -715,7 +879,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
         return `
             <div class="membership-panel" id="profile-loyalty-wallet">
-                <h2>${escapeHTML(labels.loyaltyWallet)}</h2>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                    <h2 style="margin:0;">${escapeHTML(labels.loyaltyWallet)}</h2>
+                    <button class="btn btn-outline" type="button" onclick="refreshProfileLoyalty()" ${loyaltyLoading ? 'disabled' : ''}>${escapeHTML(loyaltyLoading ? (labels.refreshingLoyalty || 'Refreshing...') : (labels.refreshLoyalty || 'Refresh points'))}</button>
+                </div>
                 <div class="stats-grid">
                     <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.points)}</div><div class="stat-label">${escapeHTML(labels.points)}</div></div>
                     <div class="stat-box"><div class="stat-value">฿${formatBaht(pointCashValue)}</div><div class="stat-label">${escapeHTML(labels.pointValue)}</div></div>
@@ -839,7 +1006,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     function renderSignedOut(container, labels) {
         container.innerHTML = `
             <div class="profile-container" style="text-align:center;">
-                <img src="Images/Logo.webp" alt="Eden Cafe" style="width:84px;height:84px;border-radius:50%;object-fit:cover;margin-bottom:18px;">
+                <img src="/Images/Logo.webp" alt="Eden Cafe" style="width:84px;height:84px;border-radius:50%;object-fit:cover;margin-bottom:18px;">
                 <h1 style="margin-bottom:10px;">${escapeHTML(labels.profile)}</h1>
                 <p style="color:#666;">${escapeHTML(labels.signInPrompt)}</p>
                 <a class="btn btn-outline" href="/login" style="margin-top:15px;">${escapeHTML(labels.signIn)}</a>
@@ -852,22 +1019,117 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         return orders.map(order => {
             const items = Array.isArray(order.items) ? order.items : [];
             const paymentStatus = String(order.paymentStatus || order.payment_status || '').toLowerCase();
-            const orderStatus = String(order.status || order.order_status || '').toLowerCase();
+            const orderStatus = String(order.billStatus || order.status || order.order_status || '').toLowerCase();
             const status = paymentStatus === 'paid' || paymentStatus === 'paid_online' || orderStatus === 'paid' || orderStatus === 'completed'
                 ? labels.paid
                 : labels.pending;
+            const displayId = order.receiptNo || order.orderNumber || order.id || order.firestoreId || '-';
+            const orderDate = order.paidAt || order.closedAt || order.completedAt || order.timestamp || order.createdAt || order.date || order.updatedAt;
+            const total = order.totalAmount ?? order.payableTotal ?? order.totalBeforeLoyalty ?? order.total ?? order.netTotal ?? 0;
             return `
                 <div class="order-card">
                     <div class="order-card-header">
-                        <strong>${escapeHTML(labels.orderId)} ${escapeHTML(order.id || '-')}</strong>
+                        <strong>${escapeHTML(labels.orderId)} ${escapeHTML(displayId)}</strong>
                         <span style="color:var(--primary-color);font-weight:600;">${escapeHTML(status)}</span>
                     </div>
-                    <p style="margin:0 0 8px;color:#666;">${formatDate(order.date || order.timestamp)}</p>
+                    <p style="margin:0 0 8px;color:#666;">${formatDate(orderDate)}</p>
                     <p style="margin:0 0 8px;">${escapeHTML(labels.items)}: ${items.map(item => escapeHTML(item.name || '')).join(', ') || '-'}</p>
-                    <strong>${escapeHTML(labels.total)}: ${money(order.totalAmount || order.total || 0)}</strong>
+                    <strong>${escapeHTML(labels.total)}: ${money(total)}</strong>
                 </div>
             `;
         }).join('');
+    }
+
+    function bookingServiceLabel(booking) {
+        const serviceType = String(booking.service_type || booking.serviceType || '').toUpperCase();
+        if (serviceType === 'ARCHERY') return 'Eden Archery';
+        const bookingType = String(booking.bookingType || '').toLowerCase();
+        if (bookingType === 'room') return isEnglishPage() ? 'Private room' : 'ห้องรับรอง';
+        if (bookingType === 'table') return isEnglishPage() ? 'Table booking' : 'จองโต๊ะ';
+        return isEnglishPage() ? 'Booking' : 'การจอง';
+    }
+
+    function bookingStatusLabel(booking) {
+        const serviceType = String(booking.service_type || booking.serviceType || '').toUpperCase();
+        if (serviceType === 'ARCHERY') {
+            const status = String(booking.booking_status || booking.status || '').toUpperCase();
+            const payment = String(booking.payment_status || booking.paymentStatus || '').toUpperCase();
+            if (payment === 'REFUNDED') return 'Refunded';
+            if (status === 'CONFIRMED') return 'Confirmed';
+            if (status === 'CHECKED_IN') return 'Checked-in';
+            if (status === 'COMPLETED') return 'Completed';
+            if (status === 'CANCELLED') return 'Cancelled';
+            if (status === 'NO_SHOW') return 'No Show';
+            if (payment === 'PAID_ONLINE') return 'Paid Online';
+            if (payment === 'PAID_COUNTER') return 'Paid Counter';
+            if (status === 'HELD') return 'Held';
+            return 'Pending';
+        }
+        return booking.status || 'confirmed';
+    }
+
+    function bookingDetailLine(booking) {
+        const serviceType = String(booking.service_type || booking.serviceType || '').toUpperCase();
+        if (serviceType === 'ARCHERY') {
+            const duration = booking.duration_minutes || booking.package_minutes || String(booking.package_code || '').replace(/\D/g, '');
+            return [
+                booking.booking_date || booking.date,
+                [booking.startTime || booking.start_time, booking.endTime || booking.end_time].filter(Boolean).join('-'),
+                duration ? duration + ' min' : '',
+                booking.paymentLabel || booking.payment_status || ''
+            ].filter(Boolean).join(' | ');
+        }
+        return [booking.date, booking.time || booking.arrivalTime || booking.startTime, booking.tableIds || booking.table || booking.zone || booking.tableZone].filter(Boolean).join(' | ');
+    }
+
+    function isArcheryBooking(booking) {
+        return String(booking.service_type || booking.serviceType || '').toUpperCase() === 'ARCHERY';
+    }
+
+    function archeryBookingMillis(booking) {
+        const date = booking.booking_date || booking.date || '';
+        const time = booking.start_time || booking.startTime || '00:00';
+        const parsed = new Date(`${date}T${time}:00+07:00`).getTime();
+        return Number.isFinite(parsed) ? parsed : itemTimestampMillis(booking);
+    }
+
+    function archeryBookingGroups(bookings) {
+        const archeryBookings = bookings.filter(isArcheryBooking);
+        const now = Date.now();
+        const closedStatuses = new Set(['COMPLETED', 'CANCELLED', 'NO_SHOW', 'EXPIRED']);
+        const upcoming = archeryBookings
+            .filter(booking => !closedStatuses.has(String(booking.booking_status || booking.status || '').toUpperCase()))
+            .filter(booking => archeryBookingMillis(booking) >= now)
+            .sort((a, b) => archeryBookingMillis(a) - archeryBookingMillis(b));
+        const history = archeryBookings
+            .filter(booking => !upcoming.some(item => item.id === booking.id))
+            .sort((a, b) => archeryBookingMillis(b) - archeryBookingMillis(a));
+        return { upcoming, history };
+    }
+
+    function renderArcheryBookingCard(booking) {
+        const detail = bookingDetailLine(booking);
+        return `
+            <div class="order-card">
+                <div class="order-card-header">
+                    <strong>Eden Archery #${escapeHTML(booking.id || booking.booking_id || '-')}</strong>
+                    <span style="color:var(--primary-color);font-weight:600;">${escapeHTML(bookingStatusLabel(booking))}</span>
+                </div>
+                <p style="margin:0;color:#666;">${escapeHTML(detail)}</p>
+            </div>
+        `;
+    }
+
+    function renderArcheryBookingSections(bookings) {
+        const { upcoming, history } = archeryBookingGroups(bookings);
+        return `
+            <div class="order-history" id="profile-archery-bookings">
+                <h2>Upcoming Archery Booking</h2>
+                ${upcoming.length ? upcoming.map(renderArcheryBookingCard).join('') : '<p style="color:#777;">ยังไม่มีรายการยิงธนูที่กำลังจะมาถึง</p>'}
+                <h2 style="margin-top:28px;">Archery Booking History</h2>
+                ${history.length ? history.map(renderArcheryBookingCard).join('') : '<p style="color:#777;">ยังไม่มีประวัติการจองยิงธนู</p>'}
+            </div>
+        `;
     }
 
     function renderBookingList(bookings, labels) {
@@ -875,10 +1137,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         return bookings.map(booking => `
             <div class="order-card">
                 <div class="order-card-header">
-                    <strong>${escapeHTML(booking.id || booking.date || '-')}</strong>
-                    <span style="color:var(--primary-color);font-weight:600;">${escapeHTML(booking.status || 'confirmed')}</span>
+                    <strong>${escapeHTML(bookingServiceLabel(booking))} #${escapeHTML(booking.id || booking.date || '-')}</strong>
+                    <span style="color:var(--primary-color);font-weight:600;">${escapeHTML(bookingStatusLabel(booking))}</span>
                 </div>
-                <p style="margin:0;color:#666;">${escapeHTML([booking.date, booking.time || booking.arrivalTime || booking.startTime, booking.tableIds || booking.table || booking.zone || booking.tableZone].filter(Boolean).join(' | '))}</p>
+                <p style="margin:0;color:#666;">${escapeHTML(bookingDetailLine(booking))}</p>
             </div>
         `).join('');
     }
@@ -1009,6 +1271,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                         <div>
                             <strong>${escapeHTML(displayName || labels.member)}</strong>
                             <span>${escapeHTML(membershipUser.memberCode || memberId(user))}</span>
+                            <span>UID: ${escapeHTML(user.uid || membershipUser.id || '-')}</span>
                         </div>
                         <span class="profile-mini-tier">${escapeHTML(tier)}</span>
                         <b>${formatNumber(membershipUser.points)} ${escapeHTML(labels.points)}</b>
@@ -1241,7 +1504,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const displayName = profileValue('displayName', profileValue('display_name', user.name || labels.member)) || labels.member;
         const phone = profileValue('phone', profileValue('phone_display', user.phone || user.phoneNumber || ''));
         const email = profileValue('email', user.email || '');
-        const avatar = profileValue('photoURL', profileValue('avatar_url', user.avatar || 'Images/Logo.webp')) || 'Images/Logo.webp';
+        const avatar = profileValue('photoURL', profileValue('avatar_url', user.avatar || '/Images/Logo.webp')) || '/Images/Logo.webp';
         const memberLevel = profileValue('member_level', profileValue('tier', 'Silver')) || 'Silver';
         const points = Number(profileValue('points', user.points || 0)) || 0;
         const createdAt = profileValue('created_at', profileValue('createdAt', ''));
@@ -1274,19 +1537,50 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     }
 
     function renderProfileForm(user, labels) {
-        const phone = profileValue('phone', user.phone || '');
-        const shippingAddress = profileValue('shippingAddress', user.shippingAddress || user.address || '');
+        const storedPhone = profileValue('phone', user.phone || '');
+        const phone = phoneVerificationState.phoneDisplay || storedPhone;
+        const firstName = profileValue('firstName', user.firstName || '');
+        const lastName = profileValue('lastName', user.lastName || '');
+        const shippingAddress = profileShippingAddress(user);
         const birthDate = profileValue('birthDate', '');
         const allergies = profileValue('allergies', '');
         const healthNote = profileValue('healthNote', '');
         const lineId = profileValue('lineId', '');
-        const displayName = profileValue('displayName', user.name || labels.member);
-        const email = profileValue('email', publicEmail(user.email || ''));
-        const avatar = profileValue('photoURL', user.avatar || user.photoURL || 'Images/Logo.webp');
+        const displayName = profileValue('displayName', [firstName, lastName].filter(Boolean).join(' ') || user.name || labels.member);
+        const storedEmail = profileValue('email', publicEmail(user.email || ''));
+        const email = emailVerificationState.email || storedEmail;
+        const avatar = profileValue('photoURL', user.avatar || user.photoURL || '/Images/Logo.webp');
         const loadingText = cloudProfileLoading ? `<p class="profile-save-message">${escapeHTML(labels.loadingProfile)}</p>` : '';
-        const emailVerified = !!email && cloudProfile?.emailVerified === true && cleanString(cloudProfile?.email, 180).toLowerCase() === cleanString(email, 180).toLowerCase();
+        const emailVerified = !emailVerificationState.email && !!email && cloudProfile?.emailVerified === true && cleanString(cloudProfile?.email, 180).toLowerCase() === cleanString(email, 180).toLowerCase();
         const emailStatusClass = emailVerified ? 'is-verified' : 'is-unverified';
         const emailStatusText = emailVerified ? labels.emailVerified : labels.emailUnverified;
+        const phoneVerified = !!storedPhone && !phoneVerificationState.verificationId && (cloudProfile?.phoneVerified === true || !!cloudProfile?.phoneVerifiedAt || !!cloudProfile?.phoneE164);
+        const phoneStatusClass = phoneVerified ? 'is-verified' : 'is-unverified';
+        const phoneStatusText = phoneVerified ? (labels.phoneVerified || 'ยืนยันเบอร์โทรแล้ว') : (labels.phoneUnverified || 'ต้องยืนยัน OTP ก่อนเปลี่ยนเบอร์');
+        const pendingPhoneChange = !!phoneVerificationState.verificationId;
+        const emailCooldown = cooldownSeconds(emailVerificationCooldownUntil);
+        const phoneCooldown = cooldownSeconds(phoneVerificationCooldownUntil);
+        const emailActionLabel = emailCooldown
+            ? `${labels.sendEmailCode || 'ส่งโค้ด'} (${cooldownMinutes(emailVerificationCooldownUntil)}m)`
+            : (emailVerificationBusy ? labels.sendingEmailCode : labels.sendEmailCode);
+        const phoneActionLabel = phoneCooldown
+            ? `${labels.sendPhoneCode || 'ส่ง OTP'} (${cooldownMinutes(phoneVerificationCooldownUntil)}m)`
+            : (phoneVerificationBusy ? (labels.sendingPhoneCode || 'กำลังส่ง OTP...') : (labels.sendPhoneCode || 'ส่ง OTP'));
+        const emailActions = emailVerified
+            ? `<p class="profile-privacy-note">${escapeHTML(labels.emailVerifiedLocked || 'ยืนยันอีเมลแล้ว ไม่ต้องกดยืนยันซ้ำ')}</p>`
+            : `<div class="profile-email-actions">
+                <button class="btn btn-outline" type="button" onclick="sendMemberEmailVerificationCode()" ${emailVerificationBusy || emailCooldown ? 'disabled' : ''}>${escapeHTML(emailActionLabel)}</button>
+                <input name="emailCode" type="text" inputmode="numeric" maxlength="6" placeholder="${escapeHTML(labels.emailCodePlaceholder)}" aria-label="${escapeHTML(labels.emailCode)}">
+                <button class="btn" type="button" onclick="verifyMemberEmailCode()" ${emailVerificationBusy ? 'disabled' : ''}>${escapeHTML(emailVerificationBusy ? labels.verifyingEmailCode : labels.verifyEmailCode)}</button>
+            </div>`;
+        const phoneActions = `
+            <div class="profile-email-actions">
+                <button class="btn btn-outline" id="phone-change-request" type="button" onclick="sendMemberPhoneVerificationCode()" ${phoneVerificationBusy || phoneCooldown ? 'disabled' : 'disabled'}>${escapeHTML(phoneActionLabel)}</button>
+                ${pendingPhoneChange ? `
+                    <input name="phoneCode" type="text" inputmode="numeric" maxlength="6" placeholder="${escapeHTML(labels.phoneCodePlaceholder || '123456')}" aria-label="${escapeHTML(labels.phoneCode || 'OTP เบอร์โทร')}">
+                    <button class="btn" type="button" onclick="verifyMemberPhoneCode()" ${phoneVerificationBusy ? 'disabled' : ''}>${escapeHTML(phoneVerificationBusy ? (labels.verifyingPhoneCode || 'กำลังยืนยันเบอร์...') : (labels.verifyPhoneCode || 'ยืนยันเบอร์'))}</button>
+                ` : ''}
+            </div>`;
 
         return `
             <div class="profile-account-card">
@@ -1302,6 +1596,14 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 <form class="profile-edit-form" id="member-profile-form" onsubmit="return saveMemberProfile(event)">
                     <div class="profile-form-grid">
                         <label>
+                            <span>${escapeHTML(labels.firstName || 'ชื่อ')}</span>
+                            <input name="firstName" type="text" autocomplete="given-name" maxlength="80" value="${escapeHTML(firstName)}" placeholder="${escapeHTML(labels.firstName || 'ชื่อ')}">
+                        </label>
+                        <label>
+                            <span>${escapeHTML(labels.lastName || 'นามสกุล')}</span>
+                            <input name="lastName" type="text" autocomplete="family-name" maxlength="80" value="${escapeHTML(lastName)}" placeholder="${escapeHTML(labels.lastName || 'นามสกุล')}">
+                        </label>
+                        <label>
                             <span>${escapeHTML(labels.email)}</span>
                             <input name="email" type="email" autocomplete="email" maxlength="180" value="${escapeHTML(email)}" placeholder="name@example.com">
                         </label>
@@ -1311,16 +1613,20 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                                 <span>${escapeHTML(emailStatusText)}</span>
                                 <small>${escapeHTML(labels.emailOptional)}</small>
                             </div>
-                            <div class="profile-email-actions">
-                                <button class="btn btn-outline" type="button" onclick="sendMemberEmailVerificationCode()" ${emailVerificationBusy ? 'disabled' : ''}>${escapeHTML(emailVerificationBusy ? labels.sendingEmailCode : labels.sendEmailCode)}</button>
-                                <input name="emailCode" type="text" inputmode="numeric" maxlength="6" placeholder="${escapeHTML(labels.emailCodePlaceholder)}" aria-label="${escapeHTML(labels.emailCode)}">
-                                <button class="btn" type="button" onclick="verifyMemberEmailCode()" ${emailVerificationBusy ? 'disabled' : ''}>${escapeHTML(emailVerificationBusy ? labels.verifyingEmailCode : labels.verifyEmailCode)}</button>
-                            </div>
+                            ${emailActions}
                         </div>
                         <label>
                             <span>${escapeHTML(labels.phone)}</span>
-                            <input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="40" value="${escapeHTML(phone)}" placeholder="${escapeHTML(labels.phonePlaceholder)}">
+                            <input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="40" value="${escapeHTML(phone)}" data-current-phone="${escapeHTML(storedPhone)}" oninput="syncPhoneVerificationAction()" placeholder="${escapeHTML(labels.phonePlaceholder)}">
                         </label>
+                        <div class="profile-email-verify profile-form-full ${phoneStatusClass}">
+                            <div>
+                                <strong>${escapeHTML(labels.phoneVerification || 'ยืนยันเบอร์โทร')}</strong>
+                                <span>${escapeHTML(phoneStatusText)}</span>
+                                <small>${escapeHTML(labels.phoneUnverified || 'หากเปลี่ยนเบอร์ ต้องยืนยัน OTP ก่อนบันทึกเบอร์ใหม่')}</small>
+                            </div>
+                            ${phoneActions}
+                        </div>
                         <label>
                             <span>${escapeHTML(labels.lineId)}</span>
                             <input name="lineId" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(lineId)}" placeholder="${escapeHTML(labels.linePlaceholder)}">
@@ -1334,8 +1640,24 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                             <input name="allergies" type="text" maxlength="200" value="${escapeHTML(allergies)}" placeholder="${escapeHTML(labels.allergiesPlaceholder)}">
                         </label>
                         <label class="profile-form-full">
-                            <span>${escapeHTML(labels.shippingAddress)}</span>
-                            <textarea name="shippingAddress" maxlength="500" rows="3" placeholder="${escapeHTML(labels.addressPlaceholder)}">${escapeHTML(shippingAddress)}</textarea>
+                            <span>${escapeHTML(labels.addressLine || labels.shippingAddress)}</span>
+                            <textarea id="profile-address-line" name="addressLine" autocomplete="street-address" maxlength="250" rows="2" placeholder="${escapeHTML(labels.addressPlaceholder)}">${escapeHTML(shippingAddress.addressLine)}</textarea>
+                        </label>
+                        <label>
+                            <span>${escapeHTML(labels.subdistrict || 'Subdistrict / ตำบล/แขวง')}</span>
+                            <input id="profile-subdistrict" name="subdistrict" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(shippingAddress.subdistrict)}">
+                        </label>
+                        <label>
+                            <span>${escapeHTML(labels.district || 'District / อำเภอ/เขต')}</span>
+                            <input id="profile-district" name="district" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(shippingAddress.district)}">
+                        </label>
+                        <label>
+                            <span>${escapeHTML(labels.province || 'Province / จังหวัด')}</span>
+                            <input id="profile-province" name="province" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(shippingAddress.province)}">
+                        </label>
+                        <label>
+                            <span>${escapeHTML(labels.zipcode || 'Zipcode / รหัสไปรษณีย์')}</span>
+                            <input id="profile-zipcode" name="zipcode" type="text" inputmode="numeric" autocomplete="postal-code" maxlength="10" value="${escapeHTML(shippingAddress.zipcode)}">
                         </label>
                         <label class="profile-form-full">
                             <span>${escapeHTML(labels.healthNote)}</span>
@@ -1353,9 +1675,21 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         `;
     }
 
+    function initProfileAddressAutocomplete() {
+        const initAddress = window.EdenAddressAutocomplete?.init || window.initAddressAutocomplete;
+        if (typeof initAddress !== 'function') return;
+        initAddress({
+            subdistrict: '#profile-subdistrict',
+            district: '#profile-district',
+            province: '#profile-province',
+            zipcode: '#profile-zipcode'
+        });
+    }
+
     function renderSignedIn(container, user, labels) {
         const orders = cloudOrders || readOrders();
         const bookings = cloudBookings || readBookings();
+        const nonArcheryBookings = bookings.filter(booking => !isArcheryBooking(booking));
         const membershipUser = buildMembershipUser(user, orders, bookings);
         const tier = getMemberTier(membershipUser);
         const avatar = profileValue('photoURL', user.avatar || user.photoURL || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user.name || labels.member) + '&background=4caf50&color=fff');
@@ -1377,6 +1711,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 </section>
             </div>
         `;
+        initProfileAddressAutocomplete();
         refreshLoyaltyData(user);
         refreshCloudProfile(user);
         refreshCloudHistory(user);
@@ -1432,16 +1767,55 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         return email;
     }
 
+    function getProfileFormPhone(requireChanged = false) {
+        const form = document.getElementById('member-profile-form');
+        const input = form?.querySelector('input[name="phone"]');
+        const phone = cleanString(input?.value, 40);
+        const currentPhone = cleanString(input?.dataset.currentPhone || cloudProfile?.phone || '', 40);
+        if (!phone) {
+            const error = new Error(isEnglishPage() ? 'Please enter a phone number first.' : 'กรุณากรอกเบอร์โทรศัพท์ก่อน');
+            error.userMessage = true;
+            throw error;
+        }
+        if (requireChanged && phone === currentPhone) {
+            const error = new Error(isEnglishPage() ? 'This phone number is already verified.' : 'เบอร์นี้ยืนยันแล้ว ไม่ต้องกดยืนยันซ้ำ');
+            error.userMessage = true;
+            throw error;
+        }
+        return phone;
+    }
+
+    function syncPhoneVerificationAction() {
+        const form = document.getElementById('member-profile-form');
+        const input = form?.querySelector('input[name="phone"]');
+        const button = document.getElementById('phone-change-request');
+        if (!input || !button) return;
+        const changed = cleanString(input.value, 40) !== cleanString(input.dataset.currentPhone || '', 40);
+        button.disabled = !changed || phoneVerificationBusy || cooldownSeconds(phoneVerificationCooldownUntil) > 0;
+    }
+
     async function sendMemberEmailVerificationCode() {
         const labels = getLabels();
         if (emailVerificationBusy) return false;
+        if (cooldownSeconds(emailVerificationCooldownUntil) > 0) {
+            showSaveMessage(labels.verificationCooldown || 'กรุณารอ 5 นาทีก่อนขอรหัสใหม่', true);
+            return false;
+        }
         emailVerificationBusy = true;
         showSaveMessage(labels.sendingEmailCode);
         let finalMessage = labels.emailCodeSent;
         let finalError = false;
         try {
             const email = getProfileFormEmail();
-            await profileApiRequest('/sendEmailVerificationCode', { email });
+            const result = await profileApiRequest('/sendEmailVerificationCode', { email });
+            if (result.alreadyVerified) {
+                emailVerificationState = { email: '' };
+                finalMessage = labels.emailVerifiedLocked || labels.emailCodeVerified;
+            } else {
+                emailVerificationState = { email };
+                emailVerificationCooldownUntil = Date.now() + (5 * 60 * 1000);
+                window.setTimeout(renderProfile, 5 * 60 * 1000);
+            }
         } catch (error) {
             logClientError('Email verification send failed:', error);
             finalMessage = error?.userMessage ? error.message : labels.emailCodeFailed;
@@ -1472,13 +1846,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             const email = getProfileFormEmail();
             const result = await profileApiRequest('/verifyEmailCode', { email, code });
             cloudProfile = { ...(cloudProfile || {}), email, emailVerified: true, emailVerifiedAt: result.emailVerifiedAt || new Date().toISOString() };
+            emailVerificationState = { email: '' };
+            emailVerificationCooldownUntil = 0;
             const user = readUser() || {};
-            localStorage.setItem(USER_KEY, JSON.stringify({
-                ...user,
-                email,
-                emailVerified: true,
-                emailVerifiedAt: result.emailVerifiedAt || new Date().toISOString()
-            }));
+            localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser({ ...cloudProfile, uid: user.uid || cloudProfile?.uid || '', email })));
         } catch (error) {
             logClientError('Email verification failed:', error);
             finalMessage = error?.userMessage ? error.message : labels.emailCodeFailed;
@@ -1491,60 +1862,168 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         return false;
     }
 
+    async function sendMemberPhoneVerificationCode() {
+        const labels = getLabels();
+        if (phoneVerificationBusy) return false;
+        if (cooldownSeconds(phoneVerificationCooldownUntil) > 0) {
+            showSaveMessage(labels.verificationCooldown || 'กรุณารอ 5 นาทีก่อนขอรหัสใหม่', true);
+            return false;
+        }
+        phoneVerificationBusy = true;
+        showSaveMessage(labels.sendingPhoneCode || 'กำลังส่ง OTP...');
+        let finalMessage = labels.phoneCodeSent || 'ส่ง OTP แล้ว กรุณากรอกรหัส 6 หลัก';
+        let finalError = false;
+        try {
+            const phone = getProfileFormPhone(true);
+            const result = await requestPhoneChangeOtp(phone);
+            if (result.alreadyVerified) {
+                phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
+                finalMessage = labels.phoneVerified || 'ยืนยันเบอร์โทรแล้ว';
+            } else {
+                phoneVerificationState = {
+                    verificationId: result.verificationId || '',
+                    phoneNumber: result.phoneNumber || phone,
+                    phoneDisplay: result.phoneDisplay || phone
+                };
+                phoneVerificationCooldownUntil = Date.now() + (5 * 60 * 1000);
+                window.setTimeout(renderProfile, 5 * 60 * 1000);
+            }
+        } catch (error) {
+            logClientError('Phone verification send failed:', error);
+            finalMessage = error?.userMessage ? error.message : (labels.phoneCodeFailed || labels.saveFailed);
+            finalError = true;
+        } finally {
+            phoneVerificationBusy = false;
+            renderProfile();
+            requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
+        }
+        return false;
+    }
+
+    async function verifyMemberPhoneCode() {
+        const labels = getLabels();
+        if (phoneVerificationBusy) return false;
+        const form = document.getElementById('member-profile-form');
+        const code = cleanString(form?.querySelector('input[name="phoneCode"]')?.value, 6);
+        if (!phoneVerificationState.verificationId) {
+            showSaveMessage(isEnglishPage() ? 'Please request a phone OTP first.' : 'กรุณาขอ OTP ก่อน', true);
+            return false;
+        }
+        if (!/^\d{6}$/.test(code)) {
+            showSaveMessage(isEnglishPage() ? 'Please enter the 6-digit code.' : 'กรุณากรอกรหัส 6 หลัก', true);
+            return false;
+        }
+
+        phoneVerificationBusy = true;
+        showSaveMessage(labels.verifyingPhoneCode || 'กำลังยืนยันเบอร์...');
+        let finalMessage = labels.phoneCodeVerified || 'ยืนยันเบอร์โทรเรียบร้อยแล้ว';
+        let finalError = false;
+        try {
+            const result = await verifyPhoneChangeOtp({
+                verificationId: phoneVerificationState.verificationId,
+                phoneNumber: phoneVerificationState.phoneNumber,
+                otp: code
+            });
+            const profile = result.profile || {};
+            cloudProfile = {
+                ...(cloudProfile || {}),
+                ...profile,
+                displayName: profile.display_name || profile.displayName || cloudProfile?.displayName || '',
+                phone: profile.phone_display || result.phoneDisplay || phoneVerificationState.phoneDisplay,
+                phoneE164: profile.phone_number || result.phoneNumber || phoneVerificationState.phoneNumber,
+                phoneVerified: true,
+                phoneVerifiedAt: profile.phoneVerifiedAt || new Date().toISOString()
+            };
+            localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(cloudProfile)));
+            phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
+            phoneVerificationCooldownUntil = 0;
+        } catch (error) {
+            logClientError('Phone verification failed:', error);
+            finalMessage = error?.userMessage ? error.message : (labels.phoneCodeFailed || labels.saveFailed);
+            finalError = true;
+        } finally {
+            phoneVerificationBusy = false;
+            renderProfile();
+            requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
+        }
+        return false;
+    }
+
     async function saveMemberProfile(event) {
         event.preventDefault();
         const labels = getLabels();
         const user = readUser();
         const form = event.currentTarget;
         if (cloudProfileSaving) return false;
-        if (!db || !user?.uid) {
+        if (!user?.uid) {
             showSaveMessage(labels.saveFailed, true);
             return false;
         }
         const formData = new FormData(form);
         const email = cleanString(formData.get('email'), 180).toLowerCase();
         const previousEmail = cleanString(cloudProfile?.email, 180).toLowerCase();
+        const requestedPhone = cleanString(formData.get('phone'), 40);
+        const currentPhone = cleanString(cloudProfile?.phone || user.phone || '', 40);
+        if (requestedPhone && currentPhone && requestedPhone !== currentPhone) {
+            showSaveMessage(labels.phoneUnverified || 'หากเปลี่ยนเบอร์ ต้องยืนยัน OTP ก่อนบันทึกเบอร์ใหม่', true);
+            return false;
+        }
+        const firstName = cleanString(formData.get('firstName'), 80);
+        const lastName = cleanString(formData.get('lastName'), 80);
+        if (!firstName || !lastName) {
+            showSaveMessage(isEnglishPage() ? 'Please enter first and last name.' : 'กรุณากรอกชื่อและนามสกุล', true);
+            return false;
+        }
+        const shippingAddressStructured = normalizeShippingAddressStructured({
+            addressLine: formData.get('addressLine'),
+            subdistrict: formData.get('subdistrict'),
+            district: formData.get('district'),
+            province: formData.get('province'),
+            zipcode: formData.get('zipcode')
+        });
         const payload = {
-            uid: user.uid,
-            displayName: cleanString(user.name || currentAuthUser?.displayName || labels.member, 120),
-            email,
-            email_lower: email,
-            photoURL: cleanString(user.avatar || currentAuthUser?.photoURL || '', 500),
-            phone: cleanString(formData.get('phone'), 40),
-            shippingAddress: cleanString(formData.get('shippingAddress'), 500),
+            firstName,
+            lastName,
+            displayName: [firstName, lastName].filter(Boolean).join(' '),
+            shippingAddress: cleanString(formatShippingAddress(shippingAddressStructured), 500),
+            shippingAddressStructured,
             birthDate: cleanString(formData.get('birthDate'), 20),
             allergies: cleanString(formData.get('allergies'), 200),
             healthNote: cleanString(formData.get('healthNote'), 500),
-            lineId: cleanString(formData.get('lineId'), 80),
-            updatedAt: serverTimestamp()
+            lineId: cleanString(formData.get('lineId'), 80)
         };
-        if (email !== previousEmail) {
-            payload.emailVerified = false;
-            payload.emailVerifiedAt = null;
-        }
+        const emailNeedsVerification = email && email !== previousEmail;
 
         cloudProfileSaving = true;
         setProfileSavingState(form, true, labels);
         showSaveMessage(labels.saving);
         try {
-            await setDoc(doc(db, 'users', user.uid), payload, { merge: true });
-            cloudProfile = { ...(cloudProfile || {}), ...payload };
-            cloudProfileUid = user.uid;
-            const mergedUser = {
-                ...user,
-                phone: payload.phone,
-                email: payload.email,
-                shippingAddress: payload.shippingAddress,
-                address: payload.shippingAddress,
-                lineId: payload.lineId
+            const result = await updateMyProfile(payload);
+            const profile = result.profile || {};
+            cloudProfile = {
+                ...(cloudProfile || {}),
+                ...profile,
+                displayName: profile.display_name || profile.displayName || payload.displayName,
+                firstName: profile.firstName || payload.firstName,
+                lastName: profile.lastName || payload.lastName,
+                phone: profile.phone_display || cloudProfile?.phone || user.phone || '',
+                phoneE164: profile.phone_number || cloudProfile?.phoneE164 || '',
+                shippingAddress: profile.shippingAddress || payload.shippingAddress,
+                shippingAddressStructured: normalizeShippingAddressStructured(
+                    profile.shippingAddressStructured || profile.shipping_address_structured || payload.shippingAddressStructured,
+                    profile.shippingAddress || payload.shippingAddress
+                )
             };
-            localStorage.setItem(USER_KEY, JSON.stringify(mergedUser));
-            showSaveMessage(labels.saved);
+            cloudProfileUid = user.uid;
+            cloudProfileError = '';
+            localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(cloudProfile)));
+            const savedMessage = emailNeedsVerification
+                ? `${labels.saved} ${labels.emailOptional || ''}`.trim()
+                : labels.saved;
+            showSaveMessage(savedMessage);
         } catch (error) {
             logClientError('Profile save failed:', error);
-            const message = error?.code === 'permission-denied'
-                ? (isEnglishPage() ? 'Unable to save profile because profile permissions are not ready. Please try again after refresh.' : 'บันทึกไม่สำเร็จ: สิทธิ์โปรไฟล์ยังไม่พร้อม กรุณารีเฟรชแล้วลองใหม่อีกครั้ง')
-                : labels.saveFailed;
+            const message = error?.userMessage ? error.message : labels.saveFailed;
             showSaveMessage(message, true);
         } finally {
             cloudProfileSaving = false;
@@ -1596,11 +2075,15 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     window.saveMemberProfile = saveMemberProfile;
     window.resetMemberProfileForm = resetMemberProfileForm;
     window.previewMemberTier = previewMemberTier;
+    window.refreshProfileLoyalty = refreshProfileLoyalty;
     window.setProfileTab = setProfileTab;
     window.setProfileHistoryFilter = setProfileHistoryFilter;
     window.toggleProfileHistoryExpanded = toggleProfileHistoryExpanded;
     window.sendMemberEmailVerificationCode = sendMemberEmailVerificationCode;
     window.verifyMemberEmailCode = verifyMemberEmailCode;
+    window.sendMemberPhoneVerificationCode = sendMemberPhoneVerificationCode;
+    window.verifyMemberPhoneCode = verifyMemberPhoneCode;
+    window.syncPhoneVerificationAction = syncPhoneVerificationAction;
 
     document.addEventListener('DOMContentLoaded', () => {
         renderProfile();
@@ -1619,6 +2102,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 cloudProfile = null;
                 cloudProfileUid = '';
                 cloudProfileError = '';
+                emailVerificationState = { email: '' };
+                emailVerificationCooldownUntil = 0;
+                phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
+                phoneVerificationCooldownUntil = 0;
                 loyaltyConfig = null;
                 loyaltyLedger = [];
                 loyaltySummary = null;
@@ -1636,6 +2123,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         cloudProfile = null;
         cloudProfileUid = '';
         cloudProfileError = '';
+        emailVerificationState = { email: '' };
+        emailVerificationCooldownUntil = 0;
+        phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
+        phoneVerificationCooldownUntil = 0;
         loyaltyConfig = null;
         loyaltyLedger = [];
         loyaltySummary = null;
