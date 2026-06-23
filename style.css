@@ -3983,6 +3983,18 @@ footer p {
     background: rgba(255, 255, 255, 0.9);
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
+.profile-edit-form.is-readonly input,
+.profile-edit-form.is-readonly textarea {
+    background: #f7fbf7;
+    color: #24362c;
+    cursor: default;
+}
+
+.profile-edit-form.is-readonly input:focus,
+.profile-edit-form.is-readonly textarea:focus {
+    border-color: #d9e4d6;
+    box-shadow: none;
+}
 
 .profile-edit-form input:focus,
 .profile-edit-form textarea:focus {
@@ -4043,9 +4055,18 @@ footer p {
     gap: 10px;
     align-items: center;
 }
+.profile-email-actions[hidden] {
+    display: none !important;
+}
 
 .profile-email-actions .btn {
     white-space: nowrap;
+}
+.profile-email-actions .btn:disabled,
+.profile-form-actions .btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.62;
+    transform: none;
 }
 
 .profile-privacy-note {

@@ -27,6 +27,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     let cloudProfileLoading = false;
     let cloudProfileSaving = false;
     let cloudProfileError = '';
+    let profileEditing = false;
     let emailVerificationBusy = false;
     let emailVerificationCooldownUntil = 0;
     let emailVerificationState = {
@@ -1551,6 +1552,11 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const email = emailVerificationState.email || storedEmail;
         const avatar = profileValue('photoURL', user.avatar || user.photoURL || '/Images/Logo.webp');
         const loadingText = cloudProfileLoading ? `<p class="profile-save-message">${escapeHTML(labels.loadingProfile)}</p>` : '';
+        const isEditing = profileEditing === true;
+        const formStateClass = isEditing ? 'is-editing' : 'is-readonly';
+        const readOnlyAttr = isEditing ? '' : 'readonly aria-readonly="true"';
+        const editProfileLabel = labels.editProfile || (isEnglishPage() ? 'Edit profile' : '\u0e41\u0e01\u0e49\u0e44\u0e02\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25');
+        const editToVerifyLabel = labels.editToVerify || (isEnglishPage() ? 'Edit profile to change or verify this information.' : '\u0e01\u0e14\u0e41\u0e01\u0e49\u0e44\u0e02\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e40\u0e1e\u0e37\u0e48\u0e2d\u0e40\u0e1b\u0e25\u0e35\u0e48\u0e22\u0e19\u0e2b\u0e23\u0e37\u0e2d\u0e22\u0e37\u0e19\u0e22\u0e31\u0e19');
         const emailVerified = !emailVerificationState.email && !!email && cloudProfile?.emailVerified === true && cleanString(cloudProfile?.email, 180).toLowerCase() === cleanString(email, 180).toLowerCase();
         const emailStatusClass = emailVerified ? 'is-verified' : 'is-unverified';
         const emailStatusText = emailVerified ? labels.emailVerified : labels.emailUnverified;
@@ -1558,6 +1564,9 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const phoneStatusClass = phoneVerified ? 'is-verified' : 'is-unverified';
         const phoneStatusText = phoneVerified ? (labels.phoneVerified || 'ยืนยันเบอร์โทรแล้ว') : (labels.phoneUnverified || 'ต้องยืนยัน OTP ก่อนเปลี่ยนเบอร์');
         const pendingPhoneChange = !!phoneVerificationState.verificationId;
+        const pendingEmailVerification = !!emailVerificationState.email;
+        const emailActionsHidden = !email || (emailVerified && !pendingEmailVerification);
+        const phoneActionsHidden = !phone || (phoneVerified && !pendingPhoneChange);
         const emailCooldown = cooldownSeconds(emailVerificationCooldownUntil);
         const phoneCooldown = cooldownSeconds(phoneVerificationCooldownUntil);
         const emailActionLabel = emailCooldown
@@ -1566,16 +1575,19 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const phoneActionLabel = phoneCooldown
             ? `${labels.sendPhoneCode || 'ส่ง OTP'} (${cooldownMinutes(phoneVerificationCooldownUntil)}m)`
             : (phoneVerificationBusy ? (labels.sendingPhoneCode || 'กำลังส่ง OTP...') : (labels.sendPhoneCode || 'ส่ง OTP'));
-        const emailActions = emailVerified
-            ? `<p class="profile-privacy-note">${escapeHTML(labels.emailVerifiedLocked || 'ยืนยันอีเมลแล้ว ไม่ต้องกดยืนยันซ้ำ')}</p>`
-            : `<div class="profile-email-actions">
-                <button class="btn btn-outline" type="button" onclick="sendMemberEmailVerificationCode()" ${emailVerificationBusy || emailCooldown ? 'disabled' : ''}>${escapeHTML(emailActionLabel)}</button>
-                <input name="emailCode" type="text" inputmode="numeric" maxlength="6" placeholder="${escapeHTML(labels.emailCodePlaceholder)}" aria-label="${escapeHTML(labels.emailCode)}">
-                <button class="btn" type="button" onclick="verifyMemberEmailCode()" ${emailVerificationBusy ? 'disabled' : ''}>${escapeHTML(emailVerificationBusy ? labels.verifyingEmailCode : labels.verifyEmailCode)}</button>
+        const emailActions = !isEditing
+            ? `<p class="profile-privacy-note">${escapeHTML(emailVerified ? (labels.emailVerifiedLocked || 'ยืนยันอีเมลแล้ว ไม่ต้องกดยืนยันซ้ำ') : editToVerifyLabel)}</p>`
+            : `<div class="profile-email-actions" id="email-verification-actions" ${emailActionsHidden ? 'hidden' : ''}>
+                <button class="btn btn-outline" id="email-verification-request" type="button" onclick="sendMemberEmailVerificationCode()" ${!email || emailVerificationBusy || emailCooldown || (emailVerified && !pendingEmailVerification) ? 'disabled' : ''}>${escapeHTML(emailActionLabel)}</button>
+                ${pendingEmailVerification ? `
+                    <input name="emailCode" type="text" inputmode="numeric" maxlength="6" placeholder="${escapeHTML(labels.emailCodePlaceholder)}" aria-label="${escapeHTML(labels.emailCode)}">
+                    <button class="btn" type="button" onclick="verifyMemberEmailCode()" ${emailVerificationBusy ? 'disabled' : ''}>${escapeHTML(emailVerificationBusy ? labels.verifyingEmailCode : labels.verifyEmailCode)}</button>
+                ` : ''}
             </div>`;
-        const phoneActions = `
-            <div class="profile-email-actions">
-                <button class="btn btn-outline" id="phone-change-request" type="button" onclick="sendMemberPhoneVerificationCode()" ${phoneVerificationBusy || phoneCooldown ? 'disabled' : 'disabled'}>${escapeHTML(phoneActionLabel)}</button>
+        const phoneActions = !isEditing
+            ? `<p class="profile-privacy-note">${escapeHTML(phoneVerified ? (labels.phoneVerifiedLocked || 'ยืนยันเบอร์โทรแล้ว ไม่ต้องกดยืนยันซ้ำ') : editToVerifyLabel)}</p>`
+            : `<div class="profile-email-actions" id="phone-verification-actions" ${phoneActionsHidden ? 'hidden' : ''}>
+                <button class="btn btn-outline" id="phone-change-request" type="button" onclick="sendMemberPhoneVerificationCode()" ${!phone || phoneVerificationBusy || phoneCooldown || (phoneVerified && !pendingPhoneChange) ? 'disabled' : ''}>${escapeHTML(phoneActionLabel)}</button>
                 ${pendingPhoneChange ? `
                     <input name="phoneCode" type="text" inputmode="numeric" maxlength="6" placeholder="${escapeHTML(labels.phoneCodePlaceholder || '123456')}" aria-label="${escapeHTML(labels.phoneCode || 'OTP เบอร์โทร')}">
                     <button class="btn" type="button" onclick="verifyMemberPhoneCode()" ${phoneVerificationBusy ? 'disabled' : ''}>${escapeHTML(phoneVerificationBusy ? (labels.verifyingPhoneCode || 'กำลังยืนยันเบอร์...') : (labels.verifyPhoneCode || 'ยืนยันเบอร์'))}</button>
@@ -1593,19 +1605,19 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                     </div>
                 </div>
                 ${loadingText}
-                <form class="profile-edit-form" id="member-profile-form" onsubmit="return saveMemberProfile(event)">
+                <form class="profile-edit-form ${formStateClass}" id="member-profile-form" onsubmit="return saveMemberProfile(event)">
                     <div class="profile-form-grid">
                         <label>
                             <span>${escapeHTML(labels.firstName || 'ชื่อ')}</span>
-                            <input name="firstName" type="text" autocomplete="given-name" maxlength="80" value="${escapeHTML(firstName)}" placeholder="${escapeHTML(labels.firstName || 'ชื่อ')}">
+                            <input name="firstName" type="text" autocomplete="given-name" maxlength="80" value="${escapeHTML(firstName)}" placeholder="${escapeHTML(labels.firstName || 'ชื่อ')}" ${readOnlyAttr}>
                         </label>
                         <label>
                             <span>${escapeHTML(labels.lastName || 'นามสกุล')}</span>
-                            <input name="lastName" type="text" autocomplete="family-name" maxlength="80" value="${escapeHTML(lastName)}" placeholder="${escapeHTML(labels.lastName || 'นามสกุล')}">
+                            <input name="lastName" type="text" autocomplete="family-name" maxlength="80" value="${escapeHTML(lastName)}" placeholder="${escapeHTML(labels.lastName || 'นามสกุล')}" ${readOnlyAttr}>
                         </label>
                         <label>
                             <span>${escapeHTML(labels.email)}</span>
-                            <input name="email" type="email" autocomplete="email" maxlength="180" value="${escapeHTML(email)}" placeholder="name@example.com">
+                            <input name="email" type="email" autocomplete="email" maxlength="180" value="${escapeHTML(email)}" placeholder="name@example.com" oninput="syncEmailVerificationAction()" ${readOnlyAttr}>
                         </label>
                         <div class="profile-email-verify profile-form-full ${emailStatusClass}">
                             <div>
@@ -1617,7 +1629,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                         </div>
                         <label>
                             <span>${escapeHTML(labels.phone)}</span>
-                            <input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="40" value="${escapeHTML(phone)}" data-current-phone="${escapeHTML(storedPhone)}" oninput="syncPhoneVerificationAction()" placeholder="${escapeHTML(labels.phonePlaceholder)}">
+                            <input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="40" value="${escapeHTML(phone)}" data-current-phone="${escapeHTML(storedPhone)}" oninput="syncPhoneVerificationAction()" placeholder="${escapeHTML(labels.phonePlaceholder)}" ${readOnlyAttr}>
                         </label>
                         <div class="profile-email-verify profile-form-full ${phoneStatusClass}">
                             <div>
@@ -1629,45 +1641,49 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                         </div>
                         <label>
                             <span>${escapeHTML(labels.lineId)}</span>
-                            <input name="lineId" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(lineId)}" placeholder="${escapeHTML(labels.linePlaceholder)}">
+                            <input name="lineId" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(lineId)}" placeholder="${escapeHTML(labels.linePlaceholder)}" ${readOnlyAttr}>
                         </label>
                         <label>
                             <span>${escapeHTML(labels.birthDate)}</span>
-                            <input name="birthDate" type="date" value="${escapeHTML(birthDate)}" aria-label="${escapeHTML(labels.birthPlaceholder)}">
+                            <input name="birthDate" type="date" value="${escapeHTML(birthDate)}" aria-label="${escapeHTML(labels.birthPlaceholder)}" ${readOnlyAttr}>
                         </label>
                         <label>
                             <span>${escapeHTML(labels.allergies)}</span>
-                            <input name="allergies" type="text" maxlength="200" value="${escapeHTML(allergies)}" placeholder="${escapeHTML(labels.allergiesPlaceholder)}">
+                            <input name="allergies" type="text" maxlength="200" value="${escapeHTML(allergies)}" placeholder="${escapeHTML(labels.allergiesPlaceholder)}" ${readOnlyAttr}>
                         </label>
                         <label class="profile-form-full">
                             <span>${escapeHTML(labels.addressLine || labels.shippingAddress)}</span>
-                            <textarea id="profile-address-line" name="addressLine" autocomplete="street-address" maxlength="250" rows="2" placeholder="${escapeHTML(labels.addressPlaceholder)}">${escapeHTML(shippingAddress.addressLine)}</textarea>
+                            <textarea id="profile-address-line" name="addressLine" autocomplete="street-address" maxlength="250" rows="2" placeholder="${escapeHTML(labels.addressPlaceholder)}" ${readOnlyAttr}>${escapeHTML(shippingAddress.addressLine)}</textarea>
                         </label>
                         <label>
                             <span>${escapeHTML(labels.subdistrict || 'Subdistrict / ตำบล/แขวง')}</span>
-                            <input id="profile-subdistrict" name="subdistrict" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(shippingAddress.subdistrict)}">
+                            <input id="profile-subdistrict" name="subdistrict" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(shippingAddress.subdistrict)}" ${readOnlyAttr}>
                         </label>
                         <label>
                             <span>${escapeHTML(labels.district || 'District / อำเภอ/เขต')}</span>
-                            <input id="profile-district" name="district" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(shippingAddress.district)}">
+                            <input id="profile-district" name="district" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(shippingAddress.district)}" ${readOnlyAttr}>
                         </label>
                         <label>
                             <span>${escapeHTML(labels.province || 'Province / จังหวัด')}</span>
-                            <input id="profile-province" name="province" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(shippingAddress.province)}">
+                            <input id="profile-province" name="province" type="text" autocomplete="off" maxlength="80" value="${escapeHTML(shippingAddress.province)}" ${readOnlyAttr}>
                         </label>
                         <label>
                             <span>${escapeHTML(labels.zipcode || 'Zipcode / รหัสไปรษณีย์')}</span>
-                            <input id="profile-zipcode" name="zipcode" type="text" inputmode="numeric" autocomplete="postal-code" maxlength="10" value="${escapeHTML(shippingAddress.zipcode)}">
+                            <input id="profile-zipcode" name="zipcode" type="text" inputmode="numeric" autocomplete="postal-code" maxlength="10" value="${escapeHTML(shippingAddress.zipcode)}" ${readOnlyAttr}>
                         </label>
                         <label class="profile-form-full">
                             <span>${escapeHTML(labels.healthNote)}</span>
-                            <textarea name="healthNote" maxlength="500" rows="3" placeholder="${escapeHTML(labels.healthPlaceholder)}">${escapeHTML(healthNote)}</textarea>
+                            <textarea name="healthNote" maxlength="500" rows="3" placeholder="${escapeHTML(labels.healthPlaceholder)}" ${readOnlyAttr}>${escapeHTML(healthNote)}</textarea>
                         </label>
                     </div>
                     <p class="profile-privacy-note">${escapeHTML(labels.privacyNote)}</p>
                     <div class="profile-form-actions">
-                        <button class="btn" type="submit" ${cloudProfileSaving ? 'disabled' : ''}>${escapeHTML(cloudProfileSaving ? labels.saving : labels.save)}</button>
-                        <button class="btn btn-outline" type="button" onclick="resetMemberProfileForm()">${escapeHTML(labels.reset)}</button>
+                        ${isEditing ? `
+                            <button class="btn" type="submit" ${cloudProfileSaving ? 'disabled' : ''}>${escapeHTML(cloudProfileSaving ? labels.saving : labels.save)}</button>
+                            <button class="btn btn-outline" type="button" onclick="resetMemberProfileForm()">${escapeHTML(labels.reset)}</button>
+                        ` : `
+                            <button class="btn" type="button" onclick="setProfileEditing(true)">${escapeHTML(editProfileLabel)}</button>
+                        `}
                     </div>
                     <p class="profile-save-message" id="profile-save-message" aria-live="polite"></p>
                 </form>
@@ -1711,7 +1727,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 </section>
             </div>
         `;
-        initProfileAddressAutocomplete();
+        if (profileEditing) initProfileAddressAutocomplete();
         refreshLoyaltyData(user);
         refreshCloudProfile(user);
         refreshCloudHistory(user);
@@ -1729,6 +1745,15 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         if (!submitBtn) return;
         submitBtn.disabled = isSaving;
         submitBtn.textContent = isSaving ? labels.saving : labels.save;
+    }
+
+    function setProfileEditing(isEditing) {
+        profileEditing = isEditing === true;
+        if (!profileEditing) {
+            emailVerificationState = { email: '' };
+            phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
+        }
+        renderProfile();
     }
 
     async function profileApiRequest(path, body) {
@@ -1785,17 +1810,40 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         return phone;
     }
 
+    function syncEmailVerificationAction() {
+        const form = document.getElementById('member-profile-form');
+        const input = form?.querySelector('input[name="email"]');
+        const actions = document.getElementById('email-verification-actions');
+        const button = document.getElementById('email-verification-request');
+        if (!input || !actions || !button) return;
+        const email = cleanString(input.value, 180).toLowerCase();
+        const currentEmail = cleanString(cloudProfile?.email || '', 180).toLowerCase();
+        const changed = email !== currentEmail;
+        const verified = !!email && !!currentEmail && email === currentEmail && cloudProfile?.emailVerified === true;
+        const pending = !!emailVerificationState.email;
+        const shouldShow = profileEditing && !!email && (!verified || changed || pending);
+        actions.hidden = !shouldShow;
+        button.disabled = !shouldShow || (!changed && verified && !pending) || emailVerificationBusy || cooldownSeconds(emailVerificationCooldownUntil) > 0;
+    }
+
     function syncPhoneVerificationAction() {
         const form = document.getElementById('member-profile-form');
         const input = form?.querySelector('input[name="phone"]');
+        const actions = document.getElementById('phone-verification-actions');
         const button = document.getElementById('phone-change-request');
-        if (!input || !button) return;
+        if (!input || !actions || !button) return;
         const changed = cleanString(input.value, 40) !== cleanString(input.dataset.currentPhone || '', 40);
-        button.disabled = !changed || phoneVerificationBusy || cooldownSeconds(phoneVerificationCooldownUntil) > 0;
+        const phone = cleanString(input.value, 40);
+        const verified = !!input.dataset.currentPhone && (cloudProfile?.phoneVerified === true || !!cloudProfile?.phoneVerifiedAt || !!cloudProfile?.phoneE164);
+        const pending = !!phoneVerificationState.verificationId;
+        const shouldShow = profileEditing && !!phone && (!verified || changed || pending);
+        actions.hidden = !shouldShow;
+        button.disabled = !shouldShow || (!changed && verified && !pending) || phoneVerificationBusy || cooldownSeconds(phoneVerificationCooldownUntil) > 0;
     }
 
     async function sendMemberEmailVerificationCode() {
         const labels = getLabels();
+        if (!profileEditing) return false;
         if (emailVerificationBusy) return false;
         if (cooldownSeconds(emailVerificationCooldownUntil) > 0) {
             showSaveMessage(labels.verificationCooldown || 'กรุณารอ 5 นาทีก่อนขอรหัสใหม่', true);
@@ -1864,6 +1912,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
     async function sendMemberPhoneVerificationCode() {
         const labels = getLabels();
+        if (!profileEditing) return false;
         if (phoneVerificationBusy) return false;
         if (cooldownSeconds(phoneVerificationCooldownUntil) > 0) {
             showSaveMessage(labels.verificationCooldown || 'กรุณารอ 5 นาทีก่อนขอรหัสใหม่', true);
@@ -1962,8 +2011,13 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const formData = new FormData(form);
         const email = cleanString(formData.get('email'), 180).toLowerCase();
         const previousEmail = cleanString(cloudProfile?.email, 180).toLowerCase();
+        const emailNeedsVerification = !!email && email !== previousEmail;
         const requestedPhone = cleanString(formData.get('phone'), 40);
         const currentPhone = cleanString(cloudProfile?.phone || user.phone || '', 40);
+        if (emailNeedsVerification) {
+            showSaveMessage(labels.emailOptional || (isEnglishPage() ? 'Please verify this email before saving.' : '\u0e01\u0e23\u0e38\u0e13\u0e32\u0e22\u0e37\u0e19\u0e22\u0e31\u0e19\u0e2d\u0e35\u0e40\u0e21\u0e25\u0e01\u0e48\u0e2d\u0e19\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01'), true);
+            return false;
+        }
         if (requestedPhone && currentPhone && requestedPhone !== currentPhone) {
             showSaveMessage(labels.phoneUnverified || 'หากเปลี่ยนเบอร์ ต้องยืนยัน OTP ก่อนบันทึกเบอร์ใหม่', true);
             return false;
@@ -1992,8 +2046,6 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             healthNote: cleanString(formData.get('healthNote'), 500),
             lineId: cleanString(formData.get('lineId'), 80)
         };
-        const emailNeedsVerification = email && email !== previousEmail;
-
         cloudProfileSaving = true;
         setProfileSavingState(form, true, labels);
         showSaveMessage(labels.saving);
@@ -2020,7 +2072,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             const savedMessage = emailNeedsVerification
                 ? `${labels.saved} ${labels.emailOptional || ''}`.trim()
                 : labels.saved;
-            showSaveMessage(savedMessage);
+            cloudProfileSaving = false;
+            profileEditing = false;
+            renderProfile();
+            requestAnimationFrame(() => showSaveMessage(savedMessage));
         } catch (error) {
             logClientError('Profile save failed:', error);
             const message = error?.userMessage ? error.message : labels.saveFailed;
@@ -2033,7 +2088,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     }
 
     function resetMemberProfileForm() {
-        renderProfile();
+        setProfileEditing(false);
     }
 
     function previewMemberTier(tier) {
@@ -2072,6 +2127,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     }
 
     window.renderProfile = renderProfile;
+    window.setProfileEditing = setProfileEditing;
     window.saveMemberProfile = saveMemberProfile;
     window.resetMemberProfileForm = resetMemberProfileForm;
     window.previewMemberTier = previewMemberTier;
@@ -2102,6 +2158,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 cloudProfile = null;
                 cloudProfileUid = '';
                 cloudProfileError = '';
+                profileEditing = false;
                 emailVerificationState = { email: '' };
                 emailVerificationCooldownUntil = 0;
                 phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
@@ -2123,6 +2180,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         cloudProfile = null;
         cloudProfileUid = '';
         cloudProfileError = '';
+        profileEditing = false;
         emailVerificationState = { email: '' };
         emailVerificationCooldownUntil = 0;
         phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
