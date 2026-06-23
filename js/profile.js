@@ -123,13 +123,146 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         ].map(part => cleanString(part, 250)).filter(Boolean).join(', ');
     }
 
-    function profileShippingAddress(user = {}) {
-        const fallbackText = profileValue('shippingAddress', user.shippingAddress || user.address || '');
-        const structured = profileValue(
-            'shippingAddressStructured',
-            profileValue('shipping_address_structured', user.shippingAddressStructured || user.shipping_address_structured || user)
+    function hasStructuredAddressValue(value = {}) {
+        return Object.values(normalizeShippingAddressStructured(value)).some(Boolean);
+    }
+
+    function firstNonEmpty(...values) {
+        for (const value of values) {
+            const text = cleanString(value);
+            if (text) return text;
+        }
+        return '';
+    }
+
+    function splitDisplayName(value = '') {
+        const parts = cleanString(value, 120).split(/\s+/).filter(Boolean);
+        return {
+            firstName: parts[0] || '',
+            lastName: parts.slice(1).join(' ')
+        };
+    }
+
+    function displayThaiPhone(phoneNumber = '') {
+        const phone = cleanString(phoneNumber, 40);
+        return phone.startsWith('+66') ? '0' + phone.slice(3) : phone;
+    }
+
+    function profileTextValue(key, fallback = '') {
+        const value = cloudProfile && cloudProfile[key] != null ? cloudProfile[key] : '';
+        return firstNonEmpty(value, fallback);
+    }
+
+    function buildProfileAddress(profile = {}, savedProfile = {}, user = {}) {
+        const fallbackText = firstNonEmpty(
+            profile.shippingAddress,
+            profile.address,
+            savedProfile.shippingAddress,
+            savedProfile.address,
+            cloudProfile?.shippingAddress,
+            user.shippingAddress,
+            user.address
         );
-        return normalizeShippingAddressStructured(structured, fallbackText);
+        const structuredSources = [
+            profile.shippingAddressStructured,
+            profile.shipping_address_structured,
+            savedProfile.shippingAddressStructured,
+            savedProfile.shipping_address_structured,
+            cloudProfile?.shippingAddressStructured,
+            cloudProfile?.shipping_address_structured,
+            user.shippingAddressStructured,
+            user.shipping_address_structured,
+            user
+        ];
+        const structuredSource = structuredSources.find(hasStructuredAddressValue) || {};
+        return normalizeShippingAddressStructured(structuredSource, fallbackText);
+    }
+
+    function buildCloudProfile(profile = {}, user = {}, savedProfile = {}) {
+        const previous = cloudProfile || {};
+        const displayName = firstNonEmpty(
+            profile.display_name,
+            profile.displayName,
+            profile.name,
+            savedProfile.display_name,
+            savedProfile.displayName,
+            savedProfile.name,
+            previous.displayName,
+            previous.display_name,
+            user.displayName,
+            user.name,
+            currentAuthUser?.displayName,
+            'สมาชิก Eden'
+        );
+        const nameParts = splitDisplayName(displayName);
+        const phoneE164 = firstNonEmpty(
+            profile.phone_number,
+            profile.phoneE164,
+            savedProfile.phone_number,
+            savedProfile.phoneE164,
+            previous.phoneE164,
+            previous.phone_number,
+            user.phoneNumber,
+            user.phoneE164
+        );
+        const phoneVerifiedAt = firstNonEmpty(
+            profile.phoneVerifiedAt,
+            profile.phone_verified_at,
+            savedProfile.phoneVerifiedAt,
+            savedProfile.phone_verified_at,
+            previous.phoneVerifiedAt,
+            previous.phone_verified_at,
+            user.phoneVerifiedAt,
+            user.phone_verified_at
+        );
+        const shippingAddressStructured = buildProfileAddress(profile, savedProfile, user);
+        const shippingAddress = firstNonEmpty(
+            profile.shippingAddress,
+            profile.address,
+            savedProfile.shippingAddress,
+            savedProfile.address,
+            previous.shippingAddress,
+            user.shippingAddress,
+            user.address,
+            formatShippingAddress(shippingAddressStructured)
+        );
+
+        return {
+            ...previous,
+            ...savedProfile,
+            ...profile,
+            displayName,
+            display_name: displayName,
+            firstName: firstNonEmpty(profile.firstName, profile.first_name, savedProfile.firstName, savedProfile.first_name, previous.firstName, user.firstName, nameParts.firstName),
+            lastName: firstNonEmpty(profile.lastName, profile.last_name, savedProfile.lastName, savedProfile.last_name, previous.lastName, user.lastName, nameParts.lastName),
+            email: firstNonEmpty(profile.email, profile.email_lower, savedProfile.email, savedProfile.email_lower, previous.email, user.email),
+            emailVerified: profile.emailVerified === true || profile.email_verified === true || savedProfile.emailVerified === true || savedProfile.email_verified === true || previous.emailVerified === true || user.emailVerified === true,
+            emailVerifiedAt: firstNonEmpty(profile.emailVerifiedAt, profile.email_verified_at, savedProfile.emailVerifiedAt, savedProfile.email_verified_at, previous.emailVerifiedAt, user.emailVerifiedAt),
+            photoURL: firstNonEmpty(profile.avatar_url, profile.photoURL, savedProfile.avatar_url, savedProfile.photoURL, previous.photoURL, user.avatar, user.photoURL, '/Images/Logo.webp'),
+            phone: firstNonEmpty(profile.phone_display, profile.phone, savedProfile.phone_display, savedProfile.phone, previous.phone, user.phone, displayThaiPhone(phoneE164)),
+            phoneE164,
+            phoneVerified: profile.phoneVerified === true || profile.phone_verified === true || savedProfile.phoneVerified === true || savedProfile.phone_verified === true || previous.phoneVerified === true || user.phoneVerified === true || !!phoneVerifiedAt || !!phoneE164,
+            phoneVerifiedAt,
+            shippingAddress,
+            shippingAddressStructured,
+            shipping_address_structured: shippingAddressStructured,
+            birthDate: firstNonEmpty(profile.birthDate, savedProfile.birthDate, previous.birthDate, user.birthDate),
+            allergies: firstNonEmpty(profile.allergies, savedProfile.allergies, previous.allergies, user.allergies),
+            healthNote: firstNonEmpty(profile.healthNote, savedProfile.healthNote, previous.healthNote, user.healthNote),
+            lineId: firstNonEmpty(profile.lineId, savedProfile.lineId, previous.lineId, user.lineId),
+            tier: firstNonEmpty(profile.member_level, profile.tier, savedProfile.member_level, savedProfile.tier, previous.member_level, previous.tier, user.memberLevel, user.member_level, 'Silver'),
+            member_level: firstNonEmpty(profile.member_level, profile.tier, savedProfile.member_level, savedProfile.tier, previous.member_level, previous.tier, user.memberLevel, user.member_level, 'Silver'),
+            points: Number(profile.points ?? savedProfile.points ?? previous.points ?? user.points ?? 0),
+            createdAt: firstNonEmpty(profile.created_at, profile.createdAt, savedProfile.created_at, savedProfile.createdAt, previous.createdAt),
+            updatedAt: firstNonEmpty(profile.updated_at, profile.updatedAt, savedProfile.updated_at, savedProfile.updatedAt, previous.updatedAt),
+            lastLoginAt: firstNonEmpty(profile.last_login_at, profile.lastLoginAt, savedProfile.last_login_at, savedProfile.lastLoginAt, previous.lastLoginAt),
+            password_login_enabled: profile.password_login_enabled === true || profile.passwordLoginEnabled === true || savedProfile.password_login_enabled === true || savedProfile.passwordLoginEnabled === true || previous.password_login_enabled === true || previous.passwordLoginEnabled === true || user.password_login_enabled === true || user.passwordLoginEnabled === true,
+            passwordLoginEnabled: profile.password_login_enabled === true || profile.passwordLoginEnabled === true || savedProfile.password_login_enabled === true || savedProfile.passwordLoginEnabled === true || previous.password_login_enabled === true || previous.passwordLoginEnabled === true || user.password_login_enabled === true || user.passwordLoginEnabled === true
+        };
+    }
+
+    function profileShippingAddress(user = {}) {
+        return buildProfileAddress(cloudProfile || {}, {}, user);
     }
 
     function cooldownSeconds(until) {
@@ -587,6 +720,33 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         }
     }
 
+    function profileHasSavedFields(profile = {}) {
+        return [
+            profile.firstName,
+            profile.first_name,
+            profile.lastName,
+            profile.last_name,
+            profile.shippingAddress,
+            profile.address,
+            profile.birthDate,
+            profile.allergies,
+            profile.healthNote,
+            profile.lineId
+        ].some(value => !!cleanString(value)) ||
+            hasStructuredAddressValue(profile.shippingAddressStructured || profile.shipping_address_structured || {});
+    }
+
+    async function fetchSavedUserProfile(user) {
+        if (!db || !user?.uid) return null;
+        try {
+            const snap = await getDoc(doc(db, 'users', user.uid));
+            return snap.exists() ? { uid: snap.id, ...(snap.data() || {}) } : null;
+        } catch (error) {
+            logClientError('Unable to load saved user profile document:', error);
+            return null;
+        }
+    }
+
     async function refreshCloudProfile(user) {
         if (!user?.uid || cloudProfileLoading || cloudProfileUid === user.uid) return;
         cloudProfileLoading = true;
@@ -604,33 +764,9 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 return;
             }
             cloudProfileError = '';
-            cloudProfile = {
-                ...profile,
-                displayName: profile.display_name || profile.displayName || 'สมาชิก Eden',
-                firstName: profile.firstName || '',
-                lastName: profile.lastName || '',
-                photoURL: profile.avatar_url || '/Images/Logo.webp',
-                phone: profile.phone_display || '',
-                phoneE164: profile.phone_number || '',
-                phoneVerified: profile.phoneVerified === true || profile.phone_verified === true,
-                phoneVerifiedAt: profile.phoneVerifiedAt || profile.phone_verified_at || '',
-                shippingAddress: profile.shippingAddress || '',
-                shippingAddressStructured: normalizeShippingAddressStructured(
-                    profile.shippingAddressStructured || profile.shipping_address_structured || {},
-                    profile.shippingAddress || ''
-                ),
-                birthDate: profile.birthDate || '',
-                allergies: profile.allergies || '',
-                healthNote: profile.healthNote || '',
-                lineId: profile.lineId || '',
-                tier: profile.member_level || 'Silver',
-                member_level: profile.member_level || 'Silver',
-                points: Number(profile.points || 0),
-                createdAt: profile.created_at || '',
-                updatedAt: profile.updated_at || '',
-                lastLoginAt: profile.last_login_at || ''
-            };
-            localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(profile)));
+            const savedProfile = profileHasSavedFields(profile) ? null : await fetchSavedUserProfile(user);
+            cloudProfile = buildCloudProfile(profile, user, savedProfile || {});
+            localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(cloudProfile)));
             cloudProfileUid = user.uid;
         } catch (error) {
             logClientError('Unable to load member profile:', error);
@@ -707,11 +843,12 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
     function buildProfileFallback(user = {}) {
         const displayName = user.name || currentAuthUser?.displayName || 'Eden Member';
+        const nameParts = splitDisplayName(displayName);
         return {
             uid: user.uid || currentAuthUser?.uid || '',
             displayName,
-            firstName: user.firstName || '',
-            lastName: user.lastName || '',
+            firstName: firstNonEmpty(user.firstName, nameParts.firstName),
+            lastName: firstNonEmpty(user.lastName, nameParts.lastName),
             email: user.email || '',
             photoURL: user.avatar || user.photoURL || currentAuthUser?.photoURL || '/Images/Logo.webp',
             phone: user.phone || '',
@@ -1540,14 +1677,15 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     function renderProfileForm(user, labels) {
         const storedPhone = profileValue('phone', user.phone || '');
         const phone = phoneVerificationState.phoneDisplay || storedPhone;
-        const firstName = profileValue('firstName', user.firstName || '');
-        const lastName = profileValue('lastName', user.lastName || '');
         const shippingAddress = profileShippingAddress(user);
-        const birthDate = profileValue('birthDate', '');
-        const allergies = profileValue('allergies', '');
-        const healthNote = profileValue('healthNote', '');
-        const lineId = profileValue('lineId', '');
-        const displayName = profileValue('displayName', [firstName, lastName].filter(Boolean).join(' ') || user.name || labels.member);
+        const displayName = profileTextValue('displayName', user.name || user.displayName || labels.member);
+        const nameParts = splitDisplayName(displayName);
+        const firstName = profileTextValue('firstName', user.firstName || nameParts.firstName);
+        const lastName = profileTextValue('lastName', user.lastName || nameParts.lastName);
+        const birthDate = profileTextValue('birthDate', user.birthDate || '');
+        const allergies = profileTextValue('allergies', user.allergies || '');
+        const healthNote = profileTextValue('healthNote', user.healthNote || '');
+        const lineId = profileTextValue('lineId', user.lineId || '');
         const storedEmail = profileValue('email', publicEmail(user.email || ''));
         const email = emailVerificationState.email || storedEmail;
         const avatar = profileValue('photoURL', user.avatar || user.photoURL || '/Images/Logo.webp');
@@ -2064,7 +2202,11 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 shippingAddressStructured: normalizeShippingAddressStructured(
                     profile.shippingAddressStructured || profile.shipping_address_structured || payload.shippingAddressStructured,
                     profile.shippingAddress || payload.shippingAddress
-                )
+                ),
+                birthDate: profile.birthDate != null ? cleanString(profile.birthDate, 20) : payload.birthDate,
+                allergies: profile.allergies != null ? cleanString(profile.allergies, 200) : payload.allergies,
+                healthNote: profile.healthNote != null ? cleanString(profile.healthNote, 500) : payload.healthNote,
+                lineId: profile.lineId != null ? cleanString(profile.lineId, 80) : payload.lineId
             };
             cloudProfileUid = user.uid;
             cloudProfileError = '';
