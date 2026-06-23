@@ -107,10 +107,14 @@ function renderPackages(settings = {}) {
     clearSkeleton(packageGrid);
 
     const isEnglish = String(document.documentElement.lang || '').toLowerCase().startsWith('en');
-    const sourcePackages = isEnglish && Array.isArray(settings.packagesEn)
+    const defaultPackages = Array.isArray(settings.packages) ? settings.packages : [];
+    const sourcePackages = isEnglish && Array.isArray(settings.packagesEn) && settings.packagesEn.length
         ? settings.packagesEn
-        : (!isEnglish && Array.isArray(settings.packages) ? settings.packages : []);
-    const lead = String(isEnglish ? (settings.packageLeadEn || '') : (settings.packageLead || settings.package_lead || '')).trim();
+        : defaultPackages;
+    const lead = String(isEnglish
+        ? (settings.packageLeadEn || settings.packageLead || settings.package_lead || '')
+        : (settings.packageLead || settings.package_lead || '')
+    ).trim();
     const leadEl = document.querySelector('.archery-band .archery-section-lead');
     if (lead && leadEl) leadEl.textContent = lead;
 
