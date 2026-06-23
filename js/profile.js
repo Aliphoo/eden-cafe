@@ -21,6 +21,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     let cloudProfileUid = '';
     let cloudProfileLoading = false;
     let cloudProfileSaving = false;
+    let cloudProfileError = '';
     let emailVerificationBusy = false;
     let loyaltyConfig = null;
     let loyaltyLedger = [];
@@ -467,6 +468,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 redirectToPasswordSetup();
                 return;
             }
+            cloudProfileError = '';
             cloudProfile = {
                 ...profile,
                 displayName: profile.display_name || 'สมาชิก Eden',
@@ -482,11 +484,17 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             };
             localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(profile)));
             cloudProfileUid = user.uid;
-            renderProfile();
         } catch (error) {
             logClientError('Unable to load member profile:', error);
+            cloudProfileError = profileLoadFailedMessage();
+            cloudProfile = {
+                ...(cloudProfile || {}),
+                ...buildProfileFallback(user)
+            };
+            cloudProfileUid = user.uid;
         } finally {
             cloudProfileLoading = false;
+            if (cloudProfileUid === user.uid) renderProfile();
         }
     }
 
@@ -532,6 +540,34 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
     function profileValue(key, fallback = '') {
         return cloudProfile && cloudProfile[key] != null ? cloudProfile[key] : fallback;
+    }
+
+    function profileLoadFailedMessage() {
+        return isEnglishPage()
+            ? 'Unable to load saved profile. Showing your current session details.'
+            : 'โหลดข้อมูลโปรไฟล์ไม่สำเร็จ กำลังแสดงข้อมูลจากเซสชันปัจจุบัน';
+    }
+
+    function buildProfileFallback(user = {}) {
+        const displayName = user.name || currentAuthUser?.displayName || 'Eden Member';
+        return {
+            uid: user.uid || currentAuthUser?.uid || '',
+            displayName,
+            email: user.email || '',
+            photoURL: user.avatar || user.photoURL || currentAuthUser?.photoURL || '/Images/Logo.webp',
+            phone: user.phone || '',
+            phoneE164: user.phoneNumber || '',
+            shippingAddress: user.shippingAddress || user.address || '',
+            birthDate: user.birthDate || '',
+            allergies: user.allergies || '',
+            healthNote: user.healthNote || '',
+            lineId: user.lineId || '',
+            tier: user.memberLevel || user.member_level || 'Silver',
+            member_level: user.memberLevel || user.member_level || 'Silver',
+            points: Number(user.points || 0),
+            password_login_enabled: true,
+            passwordLoginEnabled: true
+        };
     }
 
     function formatNumber(value) {
@@ -1326,6 +1362,9 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const displayName = profileValue('displayName', user.name || labels.member);
         const email = profileValue('email', user.email || '');
         const historyItems = buildHistoryItems(orders, bookings, labels);
+        const profileLoadNotice = cloudProfileError
+            ? `<p class="profile-save-message" role="status">${escapeHTML(cloudProfileError)}</p>`
+            : '';
         if (!PROFILE_TABS.includes(activeProfileTab)) activeProfileTab = 'points';
         if (!HISTORY_FILTERS.includes(activeHistoryFilter)) activeHistoryFilter = 'all';
 
@@ -1333,6 +1372,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             <div class="profile-layout profile-dashboard">
                 ${renderProfileSummary(user, labels, membershipUser, tier, avatar, displayName, email)}
                 <section class="profile-main profile-dashboard-main">
+                    ${profileLoadNotice}
                     ${renderActiveProfilePanel(user, labels, membershipUser, tier, historyItems)}
                 </section>
             </div>
@@ -1578,6 +1618,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 cloudHistoryUid = '';
                 cloudProfile = null;
                 cloudProfileUid = '';
+                cloudProfileError = '';
                 loyaltyConfig = null;
                 loyaltyLedger = [];
                 loyaltySummary = null;
@@ -1594,6 +1635,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         cloudHistoryUid = '';
         cloudProfile = null;
         cloudProfileUid = '';
+        cloudProfileError = '';
         loyaltyConfig = null;
         loyaltyLedger = [];
         loyaltySummary = null;

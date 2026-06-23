@@ -7,6 +7,28 @@ function cleanString(value, maxLength = 300) {
     return String(value ?? '').trim().slice(0, maxLength);
 }
 
+function wait(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function createAuthRequiredError() {
+    const error = new Error('กรุณาเข้าสู่ระบบอีกครั้งเพื่อดำเนินการต่อ');
+    error.status = 401;
+    error.code = 'auth-required';
+    error.userMessage = true;
+    return error;
+}
+
+async function waitForCurrentUser(timeoutMs = 6000) {
+    const startedAt = Date.now();
+    let user = auth?.currentUser || null;
+    while (!user && Date.now() - startedAt < timeoutMs) {
+        await wait(100);
+        user = auth?.currentUser || null;
+    }
+    return user;
+}
+
 export function normalizeThaiPhone(value) {
     const raw = cleanString(value, 40);
     const compact = raw.replace(/[^\d+]/g, '');
@@ -53,17 +75,19 @@ export function storeProfile(profile) {
     return storedUser;
 }
 
-async function authHeaders() {
+async function authHeaders({ requireAuth = false } = {}) {
     const headers = { 'Content-Type': 'application/json' };
-    const user = auth?.currentUser;
+    const user = requireAuth ? await waitForCurrentUser() : auth?.currentUser;
     if (user && typeof user.getIdToken === 'function') {
         headers.Authorization = 'Bearer ' + await user.getIdToken();
+    } else if (requireAuth) {
+        throw createAuthRequiredError();
     }
     return headers;
 }
 
 async function edenAuthRequest(path, { method = 'POST', body = null, authenticated = false } = {}) {
-    const headers = authenticated ? await authHeaders() : { 'Content-Type': 'application/json' };
+    const headers = authenticated ? await authHeaders({ requireAuth: true }) : { 'Content-Type': 'application/json' };
     const response = await fetch(FUNCTIONS_BASE_URL + path, {
         method,
         headers,
