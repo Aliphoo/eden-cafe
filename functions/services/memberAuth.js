@@ -229,8 +229,8 @@ function formatShippingAddress(address = {}) {
 }
 
 function sanitizeProfile(uid, data = {}, credential = {}) {
-  const phoneNumber = cleanString(data.phone_number || data.phoneE164 || data.phone || '', 40);
-  const phoneDisplay = cleanString(data.phone_display || data.phone || displayThaiPhone(phoneNumber), 40);
+  const credentialPhoneNumber = cleanString(credential.phone_number || '', 40);
+  const phoneNumber = cleanString(data.phone_number || data.phoneE164 || credentialPhoneNumber || data.phone || '', 40);
   const displayName = cleanString(data.display_name || data.displayName || data.name || '', 120);
   const firstName = cleanString(data.firstName || data.first_name || '', 80);
   const lastName = cleanString(data.lastName || data.last_name || '', 80);
@@ -239,6 +239,9 @@ function sanitizeProfile(uid, data = {}, credential = {}) {
   const hasPasswordHash = !!cleanString(credential.password_hash || '', 2000);
   const emailVerifiedAt = data.emailVerifiedAt || data.email_verified_at || null;
   const phoneVerifiedAt = data.phoneVerifiedAt || data.phone_verified_at || null;
+  const credentialMatchesPhone = !!credentialPhoneNumber && !!phoneNumber && credentialPhoneNumber === phoneNumber;
+  const phoneVerified = data.phoneVerified === true || data.phone_verified === true || !!phoneVerifiedAt || credentialMatchesPhone;
+  const phoneDisplay = cleanString(data.phone_display || (phoneVerified ? data.phone : '') || displayThaiPhone(phoneNumber), 40);
   const shippingAddressStructured = normalizeShippingAddressStructured(
     data.shippingAddressStructured || data.shipping_address_structured || {},
     data.shippingAddress || data.address || ''
@@ -249,7 +252,7 @@ function sanitizeProfile(uid, data = {}, credential = {}) {
     uid: cleanString(data.uid || uid, 160),
     phone_number: phoneNumber,
     phone_display: phoneDisplay,
-    phoneVerified: data.phoneVerified === true || data.phone_verified === true || !!phoneVerifiedAt,
+    phoneVerified,
     phoneVerifiedAt: timestampToIso(phoneVerifiedAt),
     email: cleanString(data.email || data.email_lower || '', 180) || null,
     emailVerified: data.emailVerified === true || data.email_verified === true,
@@ -1443,6 +1446,60 @@ function createMemberAuthHandlers({
     }
   }
 
+  async function checkPhoneChange(req, res) {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'checkPhoneChange', 30, 15 * 60 * 1000);
+      const decoded = await requireSignedInUser(req);
+      const member = await loadMemberByUid(decoded.uid);
+      if (!member?.uid) throw createPublicError('ไม่พบข้อมูลสมาชิก', 404);
+
+      const phoneNumber = normalizeThaiPhone(req.body?.phoneNumber || req.body?.phone);
+      let currentPhoneNumber = '';
+      try {
+        const credential = await getCredential(member.uid);
+        currentPhoneNumber = normalizeThaiPhone(credential.phone_number || member.data?.phone_number || member.data?.phoneE164 || '');
+      } catch (_) {
+        currentPhoneNumber = '';
+      }
+
+      if (currentPhoneNumber && currentPhoneNumber === phoneNumber) {
+        res.json({
+          ok: true,
+          alreadyVerified: true,
+          needsOtp: false,
+          phoneNumber,
+          phoneDisplay: displayThaiPhone(phoneNumber),
+        });
+        return;
+      }
+
+      checkRateLimitKey(`checkPhoneChange:${member.uid}`, 30, 15 * 60 * 1000);
+      checkRateLimitKey(`checkPhoneChangePhone:${phoneIndexKey(phoneNumber)}`, 30, 15 * 60 * 1000);
+      await ensurePhoneIsAvailableForUid(phoneNumber, member.uid);
+
+      res.json({
+        ok: true,
+        available: true,
+        needsOtp: true,
+        phoneNumber,
+        phoneDisplay: displayThaiPhone(phoneNumber),
+      });
+    } catch (error) {
+      logger.warn('Phone change precheck failed', {
+        message: error.message,
+        status: error.statusCode || 500,
+      });
+      jsonError(res, error, 'ไม่สามารถตรวจสอบเบอร์โทรศัพท์ได้ กรุณาลองใหม่อีกครั้ง');
+    }
+  }
+
   async function requestPhoneChangeOtp(req, res) {
     if (handleOptions(req, res)) return;
     setCors(req, res);
@@ -1975,6 +2032,7 @@ function createMemberAuthHandlers({
     loginMember,
     getMyProfile,
     updateMyProfile,
+    checkPhoneChange,
     requestPhoneChangeOtp,
     verifyPhoneChangeOtp,
   };

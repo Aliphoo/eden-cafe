@@ -3,12 +3,13 @@ import { onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.c
 import { collection, doc, getDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getTierRules } from './membership.js';
 import {
+    checkPhoneChange,
     getMyProfile,
     profileToStoredUser,
     requestPhoneChangeOtp,
     updateMyProfile,
     verifyPhoneChangeOtp
-} from './member-auth-service.js?v=profile-otp-fix-20260623-1';
+} from './member-auth-service.js?v=profile-otp-precheck-20260623-1';
 import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 (() => {
@@ -32,14 +33,17 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     let emailVerificationBusy = false;
     let emailVerificationCooldownUntil = 0;
     let emailVerificationState = {
-        email: ''
+        email: '',
+        checkedEmail: ''
     };
     let phoneVerificationBusy = false;
     let phoneVerificationCooldownUntil = 0;
     let phoneVerificationState = {
         verificationId: '',
         phoneNumber: '',
-        phoneDisplay: ''
+        phoneDisplay: '',
+        checkedPhoneInput: '',
+        checkedPhoneNumber: ''
     };
     let loyaltyConfig = null;
     let loyaltyLedger = [];
@@ -475,6 +479,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             emailUnverified: 'Not verified',
             emailOptional: 'We will send a 6-digit code to this email. After verification, you can use this email with your existing password.',
             emailVerifiedLocked: 'Email verified. No extra action is needed.',
+            checkEmail: 'Check email',
+            checkingEmail: 'Checking email...',
+            emailReadyToSend: 'Email checked. You can send a verification code now.',
+            checkEmailFirst: 'Please check this email before sending a code.',
             emailCode: 'Verification code',
             emailCodePlaceholder: '123456',
             sendEmailCode: 'Send code',
@@ -489,6 +497,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             phoneVerified: 'Phone verified',
             phoneUnverified: 'Verify by OTP before changing this number.',
             phoneVerifiedLocked: 'Phone verified. No extra action is needed.',
+            checkPhone: 'Check phone',
+            checkingPhone: 'Checking phone...',
+            phoneReadyToSend: 'Phone number checked. You can send an OTP now.',
+            checkPhoneFirst: 'Please check this phone number before sending an OTP.',
             sendPhoneCode: 'Send OTP',
             phoneCode: 'Phone OTP',
             phoneCodePlaceholder: '123456',
@@ -618,6 +630,11 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             emailVerified: 'ยืนยันแล้ว',
             emailUnverified: 'ยังไม่ยืนยัน',
             emailOptional: 'ระบบจะส่งรหัส 6 หลักไปที่อีเมลนี้ หลังยืนยันแล้ว คุณสามารถเข้าสู่ระบบด้วยอีเมลและรหัสผ่านเดิมได้',
+            emailVerifiedLocked: 'ยืนยันอีเมลแล้ว ไม่ต้องกดยืนยันซ้ำ',
+            checkEmail: 'ตรวจสอบอีเมล',
+            checkingEmail: 'กำลังตรวจสอบอีเมล...',
+            emailReadyToSend: 'ตรวจสอบอีเมลแล้ว สามารถส่งโค้ดยืนยันได้',
+            checkEmailFirst: 'กรุณาตรวจสอบอีเมลก่อนส่งโค้ด',
             emailCode: 'รหัสยืนยันอีเมล',
             emailCodePlaceholder: '123456',
             sendEmailCode: 'ส่งโค้ด',
@@ -632,6 +649,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             phoneVerified: 'ยืนยันเบอร์โทรแล้ว',
             phoneUnverified: 'ต้องยืนยัน OTP ก่อนเปลี่ยนเบอร์',
             phoneVerifiedLocked: 'ยืนยันเบอร์โทรแล้ว ไม่ต้องกดยืนยันซ้ำ',
+            checkPhone: 'ตรวจสอบเบอร์',
+            checkingPhone: 'กำลังตรวจสอบเบอร์...',
+            phoneReadyToSend: 'ตรวจสอบเบอร์แล้ว สามารถส่ง OTP ได้',
+            checkPhoneFirst: 'กรุณาตรวจสอบเบอร์ก่อนส่ง OTP',
             sendPhoneCode: 'ส่ง OTP',
             phoneCode: 'OTP เบอร์โทร',
             phoneCodePlaceholder: '123456',
@@ -1813,13 +1834,22 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const emailVerified = !emailVerificationState.email && !!email && cloudProfile?.emailVerified === true && cleanString(cloudProfile?.email, 180).toLowerCase() === cleanString(email, 180).toLowerCase();
         const emailStatusClass = emailVerified ? 'is-verified' : 'is-unverified';
         const emailStatusText = emailVerified ? labels.emailVerified : labels.emailUnverified;
-        const phoneVerified = !!storedPhone && !phoneVerificationState.verificationId && (cloudProfile?.phoneVerified === true || !!cloudProfile?.phoneVerifiedAt);
+        const phoneVerified = !!storedPhone
+            && cleanString(phone, 40) === cleanString(storedPhone, 40)
+            && !phoneVerificationState.verificationId
+            && (cloudProfile?.phoneVerified === true || !!cloudProfile?.phoneVerifiedAt);
         const phoneStatusClass = phoneVerified ? 'is-verified' : 'is-unverified';
         const phoneStatusText = phoneVerified ? (labels.phoneVerified || 'ยืนยันเบอร์โทรแล้ว') : (labels.phoneUnverified || 'ต้องยืนยัน OTP ก่อนเปลี่ยนเบอร์');
-        const pendingPhoneChange = !!phoneVerificationState.verificationId;
-        const pendingEmailVerification = !!emailVerificationState.email;
-        const emailActionsHidden = !email || (emailVerified && !pendingEmailVerification);
-        const phoneActionsHidden = !phone || (phoneVerified && !pendingPhoneChange);
+        const normalizedEmail = cleanString(email, 180).toLowerCase();
+        const normalizedCheckedEmail = cleanString(emailVerificationState.checkedEmail, 180).toLowerCase();
+        const pendingEmailVerification = !!emailVerificationState.email && cleanString(emailVerificationState.email, 180).toLowerCase() === normalizedEmail;
+        const emailChecked = !!normalizedCheckedEmail && normalizedCheckedEmail === normalizedEmail && !pendingEmailVerification;
+        const normalizedPhone = cleanString(phone, 40);
+        const normalizedCheckedPhone = cleanString(phoneVerificationState.checkedPhoneInput || phoneVerificationState.phoneDisplay, 40);
+        const pendingPhoneChange = !!phoneVerificationState.verificationId && cleanString(phoneVerificationState.phoneDisplay || phoneVerificationState.checkedPhoneInput, 40) === normalizedPhone;
+        const phoneChecked = !!normalizedCheckedPhone && normalizedCheckedPhone === normalizedPhone && !pendingPhoneChange;
+        const emailActionsHidden = !email || (emailVerified && !pendingEmailVerification && !emailChecked);
+        const phoneActionsHidden = !phone || (phoneVerified && !pendingPhoneChange && !phoneChecked);
         const emailCooldown = cooldownSeconds(emailVerificationCooldownUntil);
         const phoneCooldown = cooldownSeconds(phoneVerificationCooldownUntil);
         const emailActionLabel = emailCooldown
@@ -1831,7 +1861,12 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const emailActions = !isEditing
             ? `<p class="profile-privacy-note">${escapeHTML(emailVerified ? (labels.emailVerifiedLocked || 'ยืนยันอีเมลแล้ว ไม่ต้องกดยืนยันซ้ำ') : editToVerifyLabel)}</p>`
             : `<div class="profile-email-actions" id="email-verification-actions" ${emailActionsHidden ? 'hidden' : ''}>
-                <button class="btn btn-outline" id="email-verification-request" type="button" onclick="sendMemberEmailVerificationCode()" ${!email || emailVerificationBusy || emailCooldown || (emailVerified && !pendingEmailVerification) ? 'disabled' : ''}>${escapeHTML(emailActionLabel)}</button>
+                ${!emailChecked && !pendingEmailVerification ? `
+                    <button class="btn btn-outline" id="email-verification-check" type="button" onclick="checkMemberEmailVerification()" ${!email || emailVerificationBusy || (emailVerified && !pendingEmailVerification) ? 'disabled' : ''}>${escapeHTML(emailVerificationBusy ? (labels.checkingEmail || labels.sendingEmailCode) : (labels.checkEmail || 'ตรวจสอบอีเมล'))}</button>
+                ` : ''}
+                ${emailChecked && !pendingEmailVerification ? `
+                    <button class="btn btn-outline" id="email-verification-request" type="button" onclick="sendMemberEmailVerificationCode()" ${!email || emailVerificationBusy || emailCooldown ? 'disabled' : ''}>${escapeHTML(emailActionLabel)}</button>
+                ` : ''}
                 ${pendingEmailVerification ? `
                     <input name="emailCode" type="text" inputmode="numeric" maxlength="6" value="${escapeHTML(profileDraftValue('emailCode', ''))}" placeholder="${escapeHTML(labels.emailCodePlaceholder)}" aria-label="${escapeHTML(labels.emailCode)}">
                     <button class="btn" type="button" onclick="verifyMemberEmailCode()" ${emailVerificationBusy ? 'disabled' : ''}>${escapeHTML(emailVerificationBusy ? labels.verifyingEmailCode : labels.verifyEmailCode)}</button>
@@ -1840,7 +1875,12 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const phoneActions = !isEditing
             ? `<p class="profile-privacy-note">${escapeHTML(phoneVerified ? (labels.phoneVerifiedLocked || 'ยืนยันเบอร์โทรแล้ว ไม่ต้องกดยืนยันซ้ำ') : editToVerifyLabel)}</p>`
             : `<div class="profile-email-actions" id="phone-verification-actions" ${phoneActionsHidden ? 'hidden' : ''}>
-                <button class="btn btn-outline" id="phone-change-request" type="button" onclick="sendMemberPhoneVerificationCode()" ${!phone || phoneVerificationBusy || phoneCooldown || (phoneVerified && !pendingPhoneChange) ? 'disabled' : ''}>${escapeHTML(phoneActionLabel)}</button>
+                ${!phoneChecked && !pendingPhoneChange ? `
+                    <button class="btn btn-outline" id="phone-change-check" type="button" onclick="checkMemberPhoneVerification()" ${!phone || phoneVerificationBusy || (phoneVerified && !pendingPhoneChange) ? 'disabled' : ''}>${escapeHTML(phoneVerificationBusy ? (labels.checkingPhone || labels.sendingPhoneCode) : (labels.checkPhone || 'ตรวจสอบเบอร์'))}</button>
+                ` : ''}
+                ${phoneChecked && !pendingPhoneChange ? `
+                    <button class="btn btn-outline" id="phone-change-request" type="button" onclick="sendMemberPhoneVerificationCode()" ${!phone || phoneVerificationBusy || phoneCooldown ? 'disabled' : ''}>${escapeHTML(phoneActionLabel)}</button>
+                ` : ''}
                 ${pendingPhoneChange ? `
                     <input name="phoneCode" type="text" inputmode="numeric" maxlength="6" value="${escapeHTML(profileDraftValue('phoneCode', ''))}" placeholder="${escapeHTML(labels.phoneCodePlaceholder || '123456')}" aria-label="${escapeHTML(labels.phoneCode || 'OTP เบอร์โทร')}">
                     <button class="btn" type="button" onclick="verifyMemberPhoneCode()" ${phoneVerificationBusy ? 'disabled' : ''}>${escapeHTML(phoneVerificationBusy ? (labels.verifyingPhoneCode || 'กำลังยืนยันเบอร์...') : (labels.verifyPhoneCode || 'ยืนยันเบอร์'))}</button>
@@ -2006,8 +2046,8 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             clearProfileFormDraft();
         } else {
             clearProfileFormDraft();
-            emailVerificationState = { email: '' };
-            phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
+            emailVerificationState = { email: '', checkedEmail: '' };
+            phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '', checkedPhoneInput: '', checkedPhoneNumber: '' };
         }
         renderProfile();
     }
@@ -2078,31 +2118,94 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const form = document.getElementById('member-profile-form');
         const input = form?.querySelector('input[name="email"]');
         const actions = document.getElementById('email-verification-actions');
-        const button = document.getElementById('email-verification-request');
-        if (!input || !actions || !button) return;
+        const checkButton = document.getElementById('email-verification-check');
+        const requestButton = document.getElementById('email-verification-request');
+        if (!input || !actions) return;
         const email = cleanString(input.value, 180).toLowerCase();
         const currentEmail = cleanString(cloudProfile?.email || '', 180).toLowerCase();
+        const pendingEmail = cleanString(emailVerificationState.email, 180).toLowerCase();
+        const checkedEmail = cleanString(emailVerificationState.checkedEmail, 180).toLowerCase();
+        if ((pendingEmail && pendingEmail !== email) || (checkedEmail && checkedEmail !== email)) {
+            emailVerificationState = { email: '', checkedEmail: '' };
+            emailVerificationCooldownUntil = 0;
+            updateProfileFormDraft({ email, emailCode: '' });
+            renderProfile();
+            return;
+        }
         const changed = email !== currentEmail;
         const verified = !!email && !!currentEmail && email === currentEmail && cloudProfile?.emailVerified === true;
-        const pending = !!emailVerificationState.email;
-        const shouldShow = profileEditing && !!email && (!verified || changed || pending);
+        const pending = !!pendingEmail && pendingEmail === email;
+        const checked = !!checkedEmail && checkedEmail === email && !pending;
+        const shouldShow = profileEditing && !!email && (!verified || changed || pending || checked);
         actions.hidden = !shouldShow;
-        button.disabled = !shouldShow || (!changed && verified && !pending) || emailVerificationBusy || cooldownSeconds(emailVerificationCooldownUntil) > 0;
+        if (checkButton) {
+            checkButton.disabled = !shouldShow || pending || checked || (!changed && verified) || emailVerificationBusy;
+        }
+        if (requestButton) {
+            requestButton.disabled = !shouldShow || !checked || emailVerificationBusy || cooldownSeconds(emailVerificationCooldownUntil) > 0;
+        }
     }
 
     function syncPhoneVerificationAction() {
         const form = document.getElementById('member-profile-form');
         const input = form?.querySelector('input[name="phone"]');
         const actions = document.getElementById('phone-verification-actions');
-        const button = document.getElementById('phone-change-request');
-        if (!input || !actions || !button) return;
-        const changed = cleanString(input.value, 40) !== cleanString(input.dataset.currentPhone || '', 40);
+        const checkButton = document.getElementById('phone-change-check');
+        const requestButton = document.getElementById('phone-change-request');
+        if (!input || !actions) return;
         const phone = cleanString(input.value, 40);
+        const checkedPhone = cleanString(phoneVerificationState.checkedPhoneInput || phoneVerificationState.phoneDisplay, 40);
+        const pendingPhone = cleanString(phoneVerificationState.phoneDisplay || phoneVerificationState.checkedPhoneInput, 40);
+        if ((phoneVerificationState.verificationId && pendingPhone && pendingPhone !== phone) || (checkedPhone && checkedPhone !== phone)) {
+            phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '', checkedPhoneInput: '', checkedPhoneNumber: '' };
+            phoneVerificationCooldownUntil = 0;
+            updateProfileFormDraft({ phone, phoneCode: '' });
+            renderProfile();
+            return;
+        }
+        const changed = phone !== cleanString(input.dataset.currentPhone || '', 40);
         const verified = !!input.dataset.currentPhone && (cloudProfile?.phoneVerified === true || !!cloudProfile?.phoneVerifiedAt);
-        const pending = !!phoneVerificationState.verificationId;
-        const shouldShow = profileEditing && !!phone && (!verified || changed || pending);
+        const pending = !!phoneVerificationState.verificationId && pendingPhone === phone;
+        const checked = !!checkedPhone && checkedPhone === phone && !pending;
+        const shouldShow = profileEditing && !!phone && (!verified || changed || pending || checked);
         actions.hidden = !shouldShow;
-        button.disabled = !shouldShow || (!changed && verified && !pending) || phoneVerificationBusy || cooldownSeconds(phoneVerificationCooldownUntil) > 0;
+        if (checkButton) {
+            checkButton.disabled = !shouldShow || pending || checked || (!changed && verified) || phoneVerificationBusy;
+        }
+        if (requestButton) {
+            requestButton.disabled = !shouldShow || !checked || phoneVerificationBusy || cooldownSeconds(phoneVerificationCooldownUntil) > 0;
+        }
+    }
+
+    async function checkMemberEmailVerification() {
+        const labels = getLabels();
+        if (!profileEditing) return false;
+        if (emailVerificationBusy) return false;
+        emailVerificationBusy = true;
+        showSaveMessage(labels.checkingEmail || 'กำลังตรวจสอบอีเมล...');
+        let finalMessage = labels.emailReadyToSend || 'ตรวจสอบอีเมลแล้ว สามารถส่งโค้ดยืนยันได้';
+        let finalError = false;
+        try {
+            const email = getProfileFormEmail();
+            const result = await profileApiRequest('/checkEmailVerification', { email });
+            if (result.alreadyVerified) {
+                emailVerificationState = { email: '', checkedEmail: '' };
+                finalMessage = labels.emailVerifiedLocked || labels.emailCodeVerified;
+            } else {
+                emailVerificationState = { email: '', checkedEmail: result.email || email };
+                updateProfileFormDraft({ email: result.email || email, emailCode: '' });
+            }
+        } catch (error) {
+            logClientError('Email verification precheck failed:', error);
+            emailVerificationState = { email: '', checkedEmail: '' };
+            finalMessage = error?.userMessage ? error.message : (labels.emailCodeFailed || labels.saveFailed);
+            finalError = true;
+        } finally {
+            emailVerificationBusy = false;
+            renderProfile();
+            requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
+        }
+        return false;
     }
 
     async function sendMemberEmailVerificationCode() {
@@ -2119,12 +2222,18 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         let finalError = false;
         try {
             const email = getProfileFormEmail();
+            if (cleanString(emailVerificationState.checkedEmail, 180).toLowerCase() !== email) {
+                finalMessage = labels.checkEmailFirst || 'กรุณาตรวจสอบอีเมลก่อนส่งโค้ด';
+                finalError = true;
+                emailVerificationBusy = false;
+                return false;
+            }
             const result = await profileApiRequest('/sendEmailVerificationCode', { email });
             if (result.alreadyVerified) {
-                emailVerificationState = { email: '' };
+                emailVerificationState = { email: '', checkedEmail: '' };
                 finalMessage = labels.emailVerifiedLocked || labels.emailCodeVerified;
             } else {
-                emailVerificationState = { email };
+                emailVerificationState = { email, checkedEmail: email };
                 updateProfileFormDraft({ email, emailCode: '' });
                 emailVerificationCooldownUntil = Date.now() + (5 * 60 * 1000);
                 window.setTimeout(renderProfile, 5 * 60 * 1000);
@@ -2135,6 +2244,44 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             finalError = true;
         } finally {
             emailVerificationBusy = false;
+            renderProfile();
+            requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
+        }
+        return false;
+    }
+
+    async function checkMemberPhoneVerification() {
+        const labels = getLabels();
+        if (!profileEditing) return false;
+        if (phoneVerificationBusy) return false;
+        phoneVerificationBusy = true;
+        showSaveMessage(labels.checkingPhone || 'กำลังตรวจสอบเบอร์...');
+        let finalMessage = labels.phoneReadyToSend || 'ตรวจสอบเบอร์แล้ว สามารถส่ง OTP ได้';
+        let finalError = false;
+        try {
+            const phone = getProfileFormPhone(false);
+            const result = await checkPhoneChange(phone);
+            if (result.alreadyVerified) {
+                phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '', checkedPhoneInput: '', checkedPhoneNumber: '' };
+                finalMessage = labels.phoneVerifiedLocked || labels.phoneVerified;
+            } else {
+                const phoneDisplay = result.phoneDisplay || phone;
+                phoneVerificationState = {
+                    verificationId: '',
+                    phoneNumber: result.phoneNumber || '',
+                    phoneDisplay,
+                    checkedPhoneInput: phoneDisplay,
+                    checkedPhoneNumber: result.phoneNumber || ''
+                };
+                updateProfileFormDraft({ phone: phoneDisplay, phoneCode: '' });
+            }
+        } catch (error) {
+            logClientError('Phone verification precheck failed:', error);
+            phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '', checkedPhoneInput: '', checkedPhoneNumber: '' };
+            finalMessage = phoneOtpErrorMessage(error, labels, labels.phoneCodeFailed || labels.saveFailed);
+            finalError = true;
+        } finally {
+            phoneVerificationBusy = false;
             renderProfile();
             requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
         }
@@ -2159,7 +2306,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             const email = getProfileFormEmail();
             const result = await profileApiRequest('/verifyEmailCode', { email, code });
             cloudProfile = { ...(cloudProfile || {}), email, emailVerified: true, emailVerifiedAt: result.emailVerifiedAt || new Date().toISOString() };
-            emailVerificationState = { email: '' };
+            emailVerificationState = { email: '', checkedEmail: '' };
             emailVerificationCooldownUntil = 0;
             const user = readUser() || {};
             localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser({ ...cloudProfile, uid: user.uid || cloudProfile?.uid || '', email })));
@@ -2188,16 +2335,25 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         let finalMessage = labels.phoneCodeSent || 'ส่ง OTP แล้ว กรุณากรอกรหัส 6 หลัก';
         let finalError = false;
         try {
-            const phone = getProfileFormPhone(true);
+            const phone = getProfileFormPhone(false);
+            const checkedPhone = cleanString(phoneVerificationState.checkedPhoneInput || phoneVerificationState.phoneDisplay, 40);
+            if (checkedPhone !== cleanString(phone, 40)) {
+                finalMessage = labels.checkPhoneFirst || 'กรุณาตรวจสอบเบอร์ก่อนส่ง OTP';
+                finalError = true;
+                phoneVerificationBusy = false;
+                return false;
+            }
             const result = await requestPhoneChangeOtp(phone);
             if (result.alreadyVerified) {
-                phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
+                phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '', checkedPhoneInput: '', checkedPhoneNumber: '' };
                 finalMessage = labels.phoneVerified || 'ยืนยันเบอร์โทรแล้ว';
             } else {
                 phoneVerificationState = {
                     verificationId: result.verificationId || '',
                     phoneNumber: result.phoneNumber || phone,
-                    phoneDisplay: result.phoneDisplay || phone
+                    phoneDisplay: result.phoneDisplay || phone,
+                    checkedPhoneInput: result.phoneDisplay || phone,
+                    checkedPhoneNumber: result.phoneNumber || ''
                 };
                 updateProfileFormDraft({ phone: result.phoneDisplay || phone, phoneCode: '' });
                 phoneVerificationCooldownUntil = Date.now() + (5 * 60 * 1000);
@@ -2254,7 +2410,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 phoneVerifiedAt: profile.phoneVerifiedAt || new Date().toISOString()
             };
             localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(cloudProfile)));
-            phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
+            phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '', checkedPhoneInput: '', checkedPhoneNumber: '' };
             phoneVerificationCooldownUntil = 0;
         } catch (error) {
             logClientError('Phone verification failed:', error);
@@ -2419,8 +2575,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     window.setProfileTab = setProfileTab;
     window.setProfileHistoryFilter = setProfileHistoryFilter;
     window.toggleProfileHistoryExpanded = toggleProfileHistoryExpanded;
+    window.checkMemberEmailVerification = checkMemberEmailVerification;
     window.sendMemberEmailVerificationCode = sendMemberEmailVerificationCode;
     window.verifyMemberEmailCode = verifyMemberEmailCode;
+    window.checkMemberPhoneVerification = checkMemberPhoneVerification;
     window.sendMemberPhoneVerificationCode = sendMemberPhoneVerificationCode;
     window.verifyMemberPhoneCode = verifyMemberPhoneCode;
     window.syncEmailVerificationAction = syncEmailVerificationAction;
@@ -2445,9 +2603,9 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 cloudProfileError = '';
                 profileEditing = false;
                 clearProfileFormDraft();
-                emailVerificationState = { email: '' };
+                emailVerificationState = { email: '', checkedEmail: '' };
                 emailVerificationCooldownUntil = 0;
-                phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
+                phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '', checkedPhoneInput: '', checkedPhoneNumber: '' };
                 phoneVerificationCooldownUntil = 0;
                 loyaltyConfig = null;
                 loyaltyLedger = [];
@@ -2468,9 +2626,9 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         cloudProfileError = '';
         profileEditing = false;
         clearProfileFormDraft();
-        emailVerificationState = { email: '' };
+        emailVerificationState = { email: '', checkedEmail: '' };
         emailVerificationCooldownUntil = 0;
-        phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '' };
+        phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '', checkedPhoneInput: '', checkedPhoneNumber: '' };
         phoneVerificationCooldownUntil = 0;
         loyaltyConfig = null;
         loyaltyLedger = [];
