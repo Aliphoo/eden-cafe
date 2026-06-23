@@ -159,6 +159,10 @@
 
     function profilePhoneForCheckout(user = getUser()) {
         if (!user) return '';
+        if (user.phoneRemovedAt || user.phone_removed_at) {
+            const checkoutPhone = firstNonEmpty(user.checkoutPhone, user.checkout_phone, user.contactPhone, user.contact_phone);
+            return checkoutPhone || '';
+        }
         const verifiedPhone = user.phoneVerified === true || !!user.phoneVerifiedAt || !!user.phone_number;
         const phoneNumberDisplay = displayThaiPhone(user.phoneNumber || user.phone_number || user.phoneE164 || '');
         return firstNonEmpty(
@@ -193,6 +197,10 @@
         const phoneVerified = profile.phoneVerified === true
             || profile.phone_verified === true
             || !!(profile.phoneVerifiedAt || profile.phone_verified_at);
+        const phoneRemoved = !!(profile.phoneRemovedAt || profile.phone_removed_at)
+            && !verifiedPhoneNumber
+            && !checkoutPhone
+            && profile.phoneVerified === false;
         const nextUser = {
             ...user,
             name: firstNonEmpty(profile.display_name, profile.displayName, user.name),
@@ -200,14 +208,16 @@
             firstName: firstNonEmpty(profile.firstName, profile.first_name, user.firstName),
             lastName: firstNonEmpty(profile.lastName, profile.last_name, user.lastName),
             email: firstNonEmpty(profile.email, user.email),
-            phone: phoneDisplay || checkoutPhone || user.phone || '',
-            phoneNumber: verifiedPhoneNumber || user.phoneNumber || '',
-            checkoutPhone: checkoutPhone || user.checkoutPhone || '',
-            checkout_phone: checkoutPhone || user.checkout_phone || '',
-            contactPhone: checkoutPhone || user.contactPhone || '',
-            contact_phone: checkoutPhone || user.contact_phone || '',
+            phone: phoneRemoved ? '' : (phoneDisplay || checkoutPhone || user.phone || ''),
+            phoneNumber: phoneRemoved ? '' : (verifiedPhoneNumber || user.phoneNumber || ''),
+            checkoutPhone: phoneRemoved ? '' : (checkoutPhone || user.checkoutPhone || ''),
+            checkout_phone: phoneRemoved ? '' : (checkoutPhone || user.checkout_phone || ''),
+            contactPhone: phoneRemoved ? '' : (checkoutPhone || user.contactPhone || ''),
+            contact_phone: phoneRemoved ? '' : (checkoutPhone || user.contact_phone || ''),
             phoneVerified,
-            phoneVerifiedAt: profile.phoneVerifiedAt || profile.phone_verified_at || user.phoneVerifiedAt || '',
+            phoneVerifiedAt: phoneRemoved ? '' : (profile.phoneVerifiedAt || profile.phone_verified_at || user.phoneVerifiedAt || ''),
+            phoneRemovedAt: profile.phoneRemovedAt || profile.phone_removed_at || user.phoneRemovedAt || '',
+            phone_removed_at: profile.phoneRemovedAt || profile.phone_removed_at || user.phone_removed_at || '',
             shippingAddress: profile.shippingAddress || user.shippingAddress || '',
             address: profile.shippingAddress || profile.address || user.address || '',
             shippingAddressStructured: Object.values(address).some(Boolean) ? address : user.shippingAddressStructured,

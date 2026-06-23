@@ -7,9 +7,11 @@ import {
     getMyProfile,
     profileToStoredUser,
     requestPhoneChangeOtp,
+    requestPhoneRemovalOtp,
     updateMyProfile,
-    verifyPhoneChangeOtp
-} from './member-auth-service.js?v=profile-otp-precheck-20260623-1';
+    verifyPhoneChangeOtp,
+    verifyPhoneRemovalOtp
+} from './member-auth-service.js?v=phone-removal-20260623-1';
 import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 (() => {
@@ -44,6 +46,15 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         phoneDisplay: '',
         checkedPhoneInput: '',
         checkedPhoneNumber: ''
+    };
+    let phoneRemovalBusy = false;
+    let phoneRemovalCooldownUntil = 0;
+    let phoneRemovalState = {
+        open: false,
+        channel: 'phone',
+        verificationId: '',
+        identifierDisplay: '',
+        phoneDisplay: ''
     };
     let loyaltyConfig = null;
     let loyaltyLedger = [];
@@ -200,25 +211,38 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             'สมาชิก Eden'
         );
         const nameParts = splitDisplayName(displayName);
+        const phoneRemovedAt = firstNonEmpty(
+            profile.phoneRemovedAt,
+            profile.phone_removed_at,
+            savedProfile.phoneRemovedAt,
+            savedProfile.phone_removed_at,
+            user.phoneRemovedAt,
+            user.phone_removed_at
+        );
+        const phoneRemovalExplicit = !!phoneRemovedAt
+            && (profile.phoneVerified === false
+                || profile.phone_verified === false
+                || savedProfile.phoneVerified === false
+                || savedProfile.phone_verified === false);
         const verifiedPhoneE164 = firstNonEmpty(
             profile.phone_number,
             profile.phoneE164,
             savedProfile.phone_number,
             savedProfile.phoneE164,
-            previous.phoneE164,
-            previous.phone_number,
-            user.phoneNumber,
-            user.phoneE164
+            phoneRemovalExplicit ? '' : previous.phoneE164,
+            phoneRemovalExplicit ? '' : previous.phone_number,
+            phoneRemovalExplicit ? '' : user.phoneNumber,
+            phoneRemovalExplicit ? '' : user.phoneE164
         );
         const phoneVerifiedAt = firstNonEmpty(
             profile.phoneVerifiedAt,
             profile.phone_verified_at,
             savedProfile.phoneVerifiedAt,
             savedProfile.phone_verified_at,
-            previous.phoneVerifiedAt,
-            previous.phone_verified_at,
-            user.phoneVerifiedAt,
-            user.phone_verified_at
+            phoneRemovalExplicit ? '' : previous.phoneVerifiedAt,
+            phoneRemovalExplicit ? '' : previous.phone_verified_at,
+            phoneRemovalExplicit ? '' : user.phoneVerifiedAt,
+            phoneRemovalExplicit ? '' : user.phone_verified_at
         );
         const phoneVerifiedExplicitFalse = profile.phoneVerified === false
             || profile.phone_verified === false
@@ -236,21 +260,21 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             profile.checkout_phone,
             profile.contactPhone,
             profile.contact_phone,
-            savedProfile.checkoutPhone,
-            savedProfile.checkout_phone,
-            savedProfile.contactPhone,
-            savedProfile.contact_phone,
-            previous.checkoutPhone,
-            previous.checkout_phone,
-            previous.contactPhone,
-            previous.contact_phone,
-            user.checkoutPhone,
-            user.checkout_phone,
-            user.contactPhone,
-            user.contact_phone,
+            phoneRemovalExplicit ? '' : savedProfile.checkoutPhone,
+            phoneRemovalExplicit ? '' : savedProfile.checkout_phone,
+            phoneRemovalExplicit ? '' : savedProfile.contactPhone,
+            phoneRemovalExplicit ? '' : savedProfile.contact_phone,
+            phoneRemovalExplicit ? '' : previous.checkoutPhone,
+            phoneRemovalExplicit ? '' : previous.checkout_phone,
+            phoneRemovalExplicit ? '' : previous.contactPhone,
+            phoneRemovalExplicit ? '' : previous.contact_phone,
+            phoneRemovalExplicit ? '' : user.checkoutPhone,
+            phoneRemovalExplicit ? '' : user.checkout_phone,
+            phoneRemovalExplicit ? '' : user.contactPhone,
+            phoneRemovalExplicit ? '' : user.contact_phone,
             !verifiedPhoneE164 ? profile.phone : '',
-            !verifiedPhoneE164 ? savedProfile.phone : '',
-            !verifiedPhoneE164 ? user.phone : ''
+            !phoneRemovalExplicit && !verifiedPhoneE164 ? savedProfile.phone : '',
+            !phoneRemovalExplicit && !verifiedPhoneE164 ? user.phone : ''
         );
         const shippingAddressStructured = buildProfileAddress(profile, savedProfile, user);
         const shippingAddress = firstNonEmpty(
@@ -276,7 +300,9 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             emailVerified: profile.emailVerified === true || profile.email_verified === true || savedProfile.emailVerified === true || savedProfile.email_verified === true || previous.emailVerified === true || user.emailVerified === true,
             emailVerifiedAt: firstNonEmpty(profile.emailVerifiedAt, profile.email_verified_at, savedProfile.emailVerifiedAt, savedProfile.email_verified_at, previous.emailVerifiedAt, user.emailVerifiedAt),
             photoURL: firstNonEmpty(profile.avatar_url, profile.photoURL, savedProfile.avatar_url, savedProfile.photoURL, previous.photoURL, user.avatar, user.photoURL, '/Images/Logo.webp'),
-            phone: firstNonEmpty(profile.phone_display, profile.phone, savedProfile.phone_display, savedProfile.phone, previous.phone, user.phone, displayThaiPhone(verifiedPhoneE164), checkoutPhone),
+            phone: phoneRemovalExplicit
+                ? firstNonEmpty(profile.phone_display, profile.phone, checkoutPhone)
+                : firstNonEmpty(profile.phone_display, profile.phone, savedProfile.phone_display, savedProfile.phone, previous.phone, user.phone, displayThaiPhone(verifiedPhoneE164), checkoutPhone),
             phoneE164,
             checkoutPhone,
             checkout_phone: checkoutPhone,
@@ -284,6 +310,8 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             contact_phone: checkoutPhone,
             phoneVerified,
             phoneVerifiedAt,
+            phoneRemovedAt,
+            phone_removed_at: phoneRemovedAt,
             shippingAddress,
             shippingAddressStructured,
             shipping_address_structured: shippingAddressStructured,
@@ -513,6 +541,22 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             phoneCodeConflict: 'This phone number is linked to another Eden member account. Please sign in with that account or contact staff to merge accounts.',
             phoneCodeRateLimited: 'Too many OTP requests. Please wait a few minutes before trying again.',
             phoneCodeProviderFailed: 'The SMS provider could not send the OTP right now. Please try again later.',
+            removePhone: 'Remove phone',
+            removePhoneTitle: 'Remove phone number',
+            removePhoneLead: 'After removing this phone number, you cannot sign in or reset your password with it until you verify a new phone.',
+            removePhoneChannel: 'Receive OTP by',
+            removePhoneByPhone: 'Current phone',
+            removePhoneByEmail: 'Verified email',
+            removePhoneEmailUnavailable: 'Verify your email first to use email OTP.',
+            sendRemovePhoneCode: 'Send removal OTP',
+            sendingRemovePhoneCode: 'Sending OTP...',
+            removePhoneCode: 'Removal OTP',
+            verifyRemovePhoneCode: 'Confirm removal',
+            verifyingRemovePhoneCode: 'Removing phone...',
+            removePhoneCodeSent: 'OTP sent. Please enter the 6-digit code to remove your phone number.',
+            removePhoneSuccess: 'Phone number removed successfully.',
+            removePhoneFailed: 'Unable to remove phone number right now.',
+            cancelRemovePhone: 'Cancel',
             verificationCooldown: 'Please wait 5 minutes before requesting another code.',
             shippingAddress: 'Shipping address',
             birthDate: 'Birthday',
@@ -665,6 +709,22 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             phoneCodeConflict: 'เบอร์นี้ผูกกับบัญชีสมาชิก Eden อื่นแล้ว กรุณาเข้าสู่ระบบด้วยบัญชีนั้น หรือให้แอดมินรวมบัญชีก่อน',
             phoneCodeRateLimited: 'ขอ OTP หลายครั้งเกินไป กรุณารอสักครู่ก่อนลองใหม่',
             phoneCodeProviderFailed: 'ผู้ให้บริการ SMS ยังส่ง OTP ไม่สำเร็จ กรุณาลองใหม่ภายหลัง',
+            removePhone: 'ลบเบอร์โทร',
+            removePhoneTitle: 'ลบเบอร์โทรออกจากบัญชี',
+            removePhoneLead: 'หลังลบเบอร์นี้ คุณจะไม่สามารถเข้าสู่ระบบหรือรีเซ็ตรหัสผ่านด้วยเบอร์นี้ได้ จนกว่าจะยืนยันเบอร์ใหม่อีกครั้ง',
+            removePhoneChannel: 'รับ OTP ผ่าน',
+            removePhoneByPhone: 'เบอร์โทรปัจจุบัน',
+            removePhoneByEmail: 'อีเมลที่ยืนยันแล้ว',
+            removePhoneEmailUnavailable: 'กรุณายืนยันอีเมลก่อนใช้ OTP ทางอีเมล',
+            sendRemovePhoneCode: 'ส่ง OTP เพื่อลบเบอร์',
+            sendingRemovePhoneCode: 'กำลังส่ง OTP...',
+            removePhoneCode: 'OTP ลบเบอร์โทร',
+            verifyRemovePhoneCode: 'ยืนยันลบเบอร์',
+            verifyingRemovePhoneCode: 'กำลังลบเบอร์...',
+            removePhoneCodeSent: 'ส่ง OTP แล้ว กรุณากรอกรหัส 6 หลักเพื่อลบเบอร์โทร',
+            removePhoneSuccess: 'ลบเบอร์โทรเรียบร้อยแล้ว',
+            removePhoneFailed: 'ยังไม่สามารถลบเบอร์โทรได้ในขณะนี้',
+            cancelRemovePhone: 'ยกเลิก',
             verificationCooldown: 'กรุณารอ 5 นาทีก่อนขอรหัสใหม่',
             shippingAddress: 'ที่อยู่จัดส่ง',
             birthDate: 'วันเกิด',
@@ -746,6 +806,18 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
     function clearProfileFormDraft() {
         profileFormDraft = null;
+    }
+
+    function resetPhoneRemovalState() {
+        phoneRemovalBusy = false;
+        phoneRemovalCooldownUntil = 0;
+        phoneRemovalState = {
+            open: false,
+            channel: 'phone',
+            verificationId: '',
+            identifierDisplay: '',
+            phoneDisplay: ''
+        };
     }
 
     function profileDraftValue(name, fallback = '') {
@@ -1803,6 +1875,55 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         `;
     }
 
+    function renderPhoneRemovalModal(labels, context = {}) {
+        if (!phoneRemovalState.open) return '';
+        const channel = phoneRemovalState.channel === 'email' ? 'email' : 'phone';
+        const emailVerified = context.emailVerified === true;
+        const pending = !!phoneRemovalState.verificationId;
+        const cooldown = cooldownSeconds(phoneRemovalCooldownUntil);
+        const sendLabel = cooldown
+            ? `${labels.sendRemovePhoneCode || 'ส่ง OTP'} (${cooldownMinutes(phoneRemovalCooldownUntil)}m)`
+            : (phoneRemovalBusy ? (labels.sendingRemovePhoneCode || labels.sendingPhoneCode) : (labels.sendRemovePhoneCode || 'ส่ง OTP'));
+        const verifyLabel = phoneRemovalBusy
+            ? (labels.verifyingRemovePhoneCode || labels.verifyingPhoneCode)
+            : (labels.verifyRemovePhoneCode || 'ยืนยันลบเบอร์');
+        const identifierDisplay = phoneRemovalState.identifierDisplay || (channel === 'email' ? context.email : context.phone);
+        return `
+            <div class="modal-overlay show profile-phone-removal-modal" role="dialog" aria-modal="true" aria-labelledby="phone-removal-title">
+                <div class="modal-content profile-phone-removal-content">
+                    <button class="profile-modal-close" type="button" onclick="closePhoneRemovalModal()" aria-label="${escapeHTML(labels.cancelRemovePhone || 'Cancel')}">&times;</button>
+                    <h3 id="phone-removal-title">${escapeHTML(labels.removePhoneTitle || 'ลบเบอร์โทร')}</h3>
+                    <p>${escapeHTML(labels.removePhoneLead || '')}</p>
+                    <div class="profile-phone-removal-target">
+                        <strong>${escapeHTML(context.phone || '-')}</strong>
+                    </div>
+                    <fieldset class="profile-phone-removal-options" ${pending || phoneRemovalBusy ? 'disabled' : ''}>
+                        <legend>${escapeHTML(labels.removePhoneChannel || 'รับ OTP ผ่าน')}</legend>
+                        <label>
+                            <input type="radio" name="phoneRemovalChannel" value="phone" ${channel === 'phone' ? 'checked' : ''} onchange="setPhoneRemovalChannel('phone')">
+                            <span>${escapeHTML(labels.removePhoneByPhone || 'เบอร์โทรปัจจุบัน')}</span>
+                        </label>
+                        <label class="${emailVerified ? '' : 'is-disabled'}">
+                            <input type="radio" name="phoneRemovalChannel" value="email" ${channel === 'email' ? 'checked' : ''} ${emailVerified ? '' : 'disabled'} onchange="setPhoneRemovalChannel('email')">
+                            <span>${escapeHTML(labels.removePhoneByEmail || 'อีเมลที่ยืนยันแล้ว')}${context.email ? ` (${escapeHTML(context.email)})` : ''}</span>
+                            ${emailVerified ? '' : `<small>${escapeHTML(labels.removePhoneEmailUnavailable || '')}</small>`}
+                        </label>
+                    </fieldset>
+                    ${pending ? `
+                        <p class="profile-privacy-note">${escapeHTML((labels.removePhoneCodeSent || '') + (identifierDisplay ? ` ${identifierDisplay}` : ''))}</p>
+                        <div class="profile-phone-removal-code">
+                            <input name="phoneRemovalCode" type="text" inputmode="numeric" maxlength="6" value="${escapeHTML(profileDraftValue('phoneRemovalCode', ''))}" placeholder="${escapeHTML(labels.phoneCodePlaceholder || '123456')}" aria-label="${escapeHTML(labels.removePhoneCode || 'OTP')}">
+                            <button class="btn" type="button" onclick="verifyMemberPhoneRemovalCode()" ${phoneRemovalBusy ? 'disabled' : ''}>${escapeHTML(verifyLabel)}</button>
+                        </div>
+                    ` : `
+                        <button class="btn" type="button" onclick="sendMemberPhoneRemovalCode()" ${phoneRemovalBusy || cooldown ? 'disabled' : ''}>${escapeHTML(sendLabel)}</button>
+                    `}
+                    <button class="btn btn-outline" type="button" onclick="closePhoneRemovalModal()" ${phoneRemovalBusy ? 'disabled' : ''}>${escapeHTML(labels.cancelRemovePhone || 'ยกเลิก')}</button>
+                </div>
+            </div>
+        `;
+    }
+
     function renderProfileForm(user, labels) {
         const storedPhone = profileValue('phone', user.phone || '');
         const phone = profileDraftValue('phone', phoneVerificationState.phoneDisplay || storedPhone);
@@ -1858,6 +1979,16 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const phoneActionLabel = phoneCooldown
             ? `${labels.sendPhoneCode || 'ส่ง OTP'} (${cooldownMinutes(phoneVerificationCooldownUntil)}m)`
             : (phoneVerificationBusy ? (labels.sendingPhoneCode || 'กำลังส่ง OTP...') : (labels.sendPhoneCode || 'ส่ง OTP'));
+        const phoneRemovalButton = phoneVerified
+            ? `<button class="btn btn-outline profile-phone-remove-button" type="button" onclick="openPhoneRemovalModal()" ${phoneRemovalBusy ? 'disabled' : ''}>${escapeHTML(labels.removePhone || 'ลบเบอร์โทร')}</button>`
+            : '';
+        const phoneRemovalModal = phoneVerified
+            ? renderPhoneRemovalModal(labels, {
+                phone: storedPhone,
+                email,
+                emailVerified
+            })
+            : '';
         const emailActions = !isEditing
             ? `<p class="profile-privacy-note">${escapeHTML(emailVerified ? (labels.emailVerifiedLocked || 'ยืนยันอีเมลแล้ว ไม่ต้องกดยืนยันซ้ำ') : editToVerifyLabel)}</p>`
             : `<div class="profile-email-actions" id="email-verification-actions" ${emailActionsHidden ? 'hidden' : ''}>
@@ -1931,6 +2062,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                                 <small>${escapeHTML(labels.phoneUnverified || 'หากเปลี่ยนเบอร์ ต้องยืนยัน OTP ก่อนบันทึกเบอร์ใหม่')}</small>
                             </div>
                             ${phoneActions}
+                            ${phoneRemovalButton}
                         </div>
                         <label>
                             <span>${escapeHTML(labels.lineId)}</span>
@@ -1980,6 +2112,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                     </div>
                     <p class="profile-save-message" id="profile-save-message" aria-live="polite"></p>
                 </form>
+                ${phoneRemovalModal}
             </div>
         `;
     }
@@ -2112,6 +2245,154 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         if (error?.status === 429) return labels.phoneCodeRateLimited || labels.verificationCooldown || error.message || fallback;
         if (error?.status === 502 || error?.status === 503) return labels.phoneCodeProviderFailed || error.message || fallback;
         return error?.userMessage ? error.message : fallback;
+    }
+
+    function phoneRemovalErrorMessage(error, labels) {
+        if (error?.status === 429) return labels.verificationCooldown || labels.removePhoneFailed;
+        if (error?.status === 502 || error?.status === 503) return labels.phoneCodeProviderFailed || labels.removePhoneFailed;
+        return error?.userMessage ? error.message : (labels.removePhoneFailed || labels.saveFailed);
+    }
+
+    function openPhoneRemovalModal() {
+        const labels = getLabels();
+        const user = readUser() || {};
+        const phoneVerified = !!(cloudProfile?.phoneVerified || cloudProfile?.phoneVerifiedAt || user.phoneVerified || user.phoneVerifiedAt);
+        const phone = cleanString(cloudProfile?.phone_display || user.phone || '', 40);
+        if (!phoneVerified || !phone) {
+            showSaveMessage(labels.phoneUnverified || labels.removePhoneFailed || labels.saveFailed, true);
+            return false;
+        }
+        phoneRemovalState = {
+            open: true,
+            channel: 'phone',
+            verificationId: '',
+            identifierDisplay: '',
+            phoneDisplay: phone
+        };
+        updateProfileFormDraft({ phoneRemovalCode: '' });
+        renderProfile();
+        return false;
+    }
+
+    function closePhoneRemovalModal() {
+        resetPhoneRemovalState();
+        updateProfileFormDraft({ phoneRemovalCode: '' });
+        renderProfile();
+        return false;
+    }
+
+    function setPhoneRemovalChannel(channel) {
+        const labels = getLabels();
+        if (phoneRemovalBusy || phoneRemovalState.verificationId) return false;
+        const nextChannel = channel === 'email' ? 'email' : 'phone';
+        const email = cleanString(cloudProfile?.email || '', 180).toLowerCase();
+        const emailVerified = !!email && cloudProfile?.emailVerified === true;
+        if (nextChannel === 'email' && !emailVerified) {
+            showSaveMessage(labels.removePhoneEmailUnavailable || labels.emailUnverified || labels.removePhoneFailed, true);
+            return false;
+        }
+        phoneRemovalState = {
+            ...phoneRemovalState,
+            open: true,
+            channel: nextChannel,
+            verificationId: '',
+            identifierDisplay: ''
+        };
+        updateProfileFormDraft({ phoneRemovalCode: '' });
+        renderProfile();
+        return false;
+    }
+
+    async function sendMemberPhoneRemovalCode() {
+        const labels = getLabels();
+        if (phoneRemovalBusy) return false;
+        if (cooldownSeconds(phoneRemovalCooldownUntil) > 0) {
+            showSaveMessage(labels.verificationCooldown || labels.removePhoneFailed, true);
+            return false;
+        }
+        phoneRemovalBusy = true;
+        showSaveMessage(labels.sendingRemovePhoneCode || labels.sendingPhoneCode);
+        let finalMessage = labels.removePhoneCodeSent || labels.phoneCodeSent;
+        let finalError = false;
+        try {
+            const result = await requestPhoneRemovalOtp(phoneRemovalState.channel || 'phone');
+            phoneRemovalState = {
+                open: true,
+                channel: result.channel || phoneRemovalState.channel || 'phone',
+                verificationId: result.verificationId || '',
+                identifierDisplay: result.identifierDisplay || '',
+                phoneDisplay: result.phoneDisplay || phoneRemovalState.phoneDisplay || ''
+            };
+            updateProfileFormDraft({ phoneRemovalCode: '' });
+            phoneRemovalCooldownUntil = Date.now() + (5 * 60 * 1000);
+            window.setTimeout(renderProfile, 5 * 60 * 1000);
+        } catch (error) {
+            logClientError('Phone removal OTP send failed:', error);
+            finalMessage = phoneRemovalErrorMessage(error, labels);
+            finalError = true;
+        } finally {
+            phoneRemovalBusy = false;
+            renderProfile();
+            requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
+        }
+        return false;
+    }
+
+    async function verifyMemberPhoneRemovalCode() {
+        const labels = getLabels();
+        if (phoneRemovalBusy) return false;
+        const code = cleanString(document.querySelector('input[name="phoneRemovalCode"]')?.value, 6);
+        if (!phoneRemovalState.verificationId) {
+            showSaveMessage(labels.removePhoneCodeSent || labels.phoneCodeFailed, true);
+            return false;
+        }
+        if (!/^\d{6}$/.test(code)) {
+            showSaveMessage(isEnglishPage() ? 'Please enter the 6-digit code.' : 'กรุณากรอกรหัส 6 หลัก', true);
+            return false;
+        }
+
+        phoneRemovalBusy = true;
+        showSaveMessage(labels.verifyingRemovePhoneCode || labels.verifyingPhoneCode);
+        let finalMessage = labels.removePhoneSuccess || labels.saved;
+        let finalError = false;
+        try {
+            const result = await verifyPhoneRemovalOtp({
+                verificationId: phoneRemovalState.verificationId,
+                otp: code
+            });
+            const profile = result.profile || {};
+            cloudProfile = {
+                ...(cloudProfile || {}),
+                ...profile,
+                phone: '',
+                phoneE164: '',
+                phone_number: '',
+                phone_display: '',
+                phoneVerified: false,
+                phoneVerifiedAt: '',
+                phoneRemovedAt: profile.phoneRemovedAt || profile.phone_removed_at || new Date().toISOString(),
+                checkoutPhone: profile.checkoutPhone || profile.checkout_phone || '',
+                checkout_phone: profile.checkout_phone || profile.checkoutPhone || '',
+                contactPhone: profile.contactPhone || profile.contact_phone || '',
+                contact_phone: profile.contact_phone || profile.contactPhone || ''
+            };
+            localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(cloudProfile)));
+            phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '', checkedPhoneInput: '', checkedPhoneNumber: '' };
+            phoneVerificationCooldownUntil = 0;
+            resetPhoneRemovalState();
+            clearProfileFormDraft();
+            profileEditing = false;
+        } catch (error) {
+            logClientError('Phone removal verification failed:', error);
+            updateProfileFormDraft({ phoneRemovalCode: code });
+            finalMessage = phoneRemovalErrorMessage(error, labels);
+            finalError = true;
+        } finally {
+            phoneRemovalBusy = false;
+            renderProfile();
+            requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
+        }
+        return false;
     }
 
     function syncEmailVerificationAction() {
@@ -2581,6 +2862,11 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     window.checkMemberPhoneVerification = checkMemberPhoneVerification;
     window.sendMemberPhoneVerificationCode = sendMemberPhoneVerificationCode;
     window.verifyMemberPhoneCode = verifyMemberPhoneCode;
+    window.openPhoneRemovalModal = openPhoneRemovalModal;
+    window.closePhoneRemovalModal = closePhoneRemovalModal;
+    window.setPhoneRemovalChannel = setPhoneRemovalChannel;
+    window.sendMemberPhoneRemovalCode = sendMemberPhoneRemovalCode;
+    window.verifyMemberPhoneRemovalCode = verifyMemberPhoneRemovalCode;
     window.syncEmailVerificationAction = syncEmailVerificationAction;
     window.syncPhoneVerificationAction = syncPhoneVerificationAction;
 
@@ -2607,6 +2893,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 emailVerificationCooldownUntil = 0;
                 phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '', checkedPhoneInput: '', checkedPhoneNumber: '' };
                 phoneVerificationCooldownUntil = 0;
+                resetPhoneRemovalState();
                 loyaltyConfig = null;
                 loyaltyLedger = [];
                 loyaltySummary = null;
@@ -2630,6 +2917,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         emailVerificationCooldownUntil = 0;
         phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '', checkedPhoneInput: '', checkedPhoneNumber: '' };
         phoneVerificationCooldownUntil = 0;
+        resetPhoneRemovalState();
         loyaltyConfig = null;
         loyaltyLedger = [];
         loyaltySummary = null;

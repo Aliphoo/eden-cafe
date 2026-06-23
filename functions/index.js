@@ -990,8 +990,21 @@ const memberAuthHandlers = createMemberAuthHandlers({
     apiKey: OTP_SMS_API_KEY.value() || process.env.OTP_SMS_API_KEY || '',
     sender: OTP_SMS_SENDER.value() || process.env.OTP_SMS_SENDER || 'Eden Cafe',
   }),
-  sendOtpEmail: async (email, code) => {
+  sendOtpEmail: async (email, code, options = {}) => {
     const from = safeSecretValue(SMTP_FROM, 180) || safeSecretValue(SMTP_USER, 180);
+    const isPhoneRemoval = String(options?.purpose || '') === 'phone_removal';
+    const phoneRemovalMail = isPhoneRemoval ? {
+      subject: 'Eden Cafe phone removal OTP',
+      text: `Your Eden Cafe OTP for removing your account phone number is ${code}. This code expires in 5 minutes.`,
+      html: [
+        '<div style="font-family:Arial,sans-serif;line-height:1.6;color:#123526;">',
+        '<h2 style="margin:0 0 12px;">Eden Cafe phone removal</h2>',
+        '<p>Use this OTP to remove the phone number from your Eden Cafe member account.</p>',
+        `<div style="font-size:32px;font-weight:700;letter-spacing:0.18em;background:#f2fbf3;border-radius:14px;padding:18px 22px;display:inline-block;">${code}</div>`,
+        '<p>This code expires in 5 minutes. If you did not request this, please ignore this email and keep your account password secure.</p>',
+        '</div>',
+      ].join(''),
+    } : null;
     await createMailTransporter().sendMail({
       from,
       to: email,
@@ -1005,6 +1018,7 @@ const memberAuthHandlers = createMemberAuthHandlers({
         '<p>รหัสนี้หมดอายุใน 5 นาที หากคุณไม่ได้ขอรีเซ็ตรหัสผ่าน สามารถละเว้นอีเมลนี้ได้</p>',
         '</div>',
       ].join(''),
+      ...(phoneRemovalMail || {}),
     });
   },
 });
@@ -1101,6 +1115,32 @@ exports.verifyPhoneChangeOtp = onRequest(
     secrets: [AUTH_OTP_PEPPER],
   },
   memberAuthHandlers.verifyPhoneChangeOtp
+);
+
+exports.requestPhoneRemovalOtp = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [
+      AUTH_OTP_PEPPER,
+      OTP_SMS_API_URL,
+      OTP_SMS_API_KEY,
+      OTP_SMS_SENDER,
+      SMTP_HOST,
+      SMTP_PORT,
+      SMTP_USER,
+      SMTP_PASS,
+      SMTP_FROM,
+    ],
+  },
+  memberAuthHandlers.requestPhoneRemovalOtp
+);
+
+exports.verifyPhoneRemovalOtp = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [AUTH_OTP_PEPPER],
+  },
+  memberAuthHandlers.verifyPhoneRemovalOtp
 );
 
 function normalizeAdminRole(role) {

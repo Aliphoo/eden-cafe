@@ -267,6 +267,8 @@ function sanitizeProfile(uid, data = {}, credential = {}) {
     contact_phone: checkoutPhone,
     phoneVerified,
     phoneVerifiedAt: timestampToIso(phoneVerifiedAt),
+    phoneRemovedAt: timestampToIso(data.phoneRemovedAt || data.phone_removed_at),
+    phone_removed_at: timestampToIso(data.phoneRemovedAt || data.phone_removed_at),
     email: cleanString(data.email || data.email_lower || '', 180) || null,
     emailVerified: data.emailVerified === true || data.email_verified === true,
     emailVerifiedAt: timestampToIso(emailVerifiedAt),
@@ -325,6 +327,9 @@ function createMemberAuthHandlers({
       : `รหัส OTP สำหรับสมัครสมาชิก Eden Cafe คือ ${code} รหัสนี้หมดอายุใน 5 นาที`;
     if (purpose === 'phone_change') {
       message = `รหัส OTP สำหรับยืนยันเบอร์โทรศัพท์สมาชิก Eden Cafe คือ ${code} รหัสนี้หมดอายุใน 5 นาที`;
+    }
+    if (purpose === 'phone_removal') {
+      message = `Eden Cafe OTP for removing your account phone number is ${code}. This code expires in 5 minutes.`;
     }
     const headers = { 'Content-Type': 'application/json' };
     const apiKey = cleanString(config.apiKey, 500);
@@ -1153,6 +1158,53 @@ function createMemberAuthHandlers({
     await sendOtpEmail(identifierKey, code, { purpose: 'password_reset' });
   }
 
+  function memberCurrentPhoneNumber(data = {}, credential = {}) {
+    const candidates = [
+      credential.phone_number,
+      data.phone_number,
+      data.phoneE164,
+      data.phoneVerified === true || data.phone_verified === true || data.phoneVerifiedAt || data.phone_verified_at
+        ? data.phone
+        : '',
+    ];
+    for (const value of candidates) {
+      if (!value) continue;
+      try {
+        return normalizeThaiPhone(value);
+      } catch (_) {
+        // Keep checking other profile mirrors.
+      }
+    }
+    return '';
+  }
+
+  function samePhoneValue(value, phoneNumber) {
+    if (!value || !phoneNumber) return false;
+    try {
+      return normalizeThaiPhone(value) === phoneNumber;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function verifiedProfileEmail(data = {}) {
+    if (!(data.emailVerified === true || data.email_verified === true || data.emailVerifiedAt || data.email_verified_at)) {
+      return '';
+    }
+    return normalizeEmail(data.email || data.email_lower || '');
+  }
+
+  async function sendPhoneRemovalOtp({ channel, identifierKey, code }) {
+    if (channel === 'phone') {
+      await sendOtpSms(identifierKey, code, 'phone_removal');
+      return;
+    }
+    if (typeof sendOtpEmail !== 'function') {
+      throw createPublicError('Email OTP sender is not configured.', 503);
+    }
+    await sendOtpEmail(identifierKey, code, { purpose: 'phone_removal' });
+  }
+
   async function requestPasswordResetOtp(req, res) {
     if (handleOptions(req, res)) return;
     setCors(req, res);
@@ -1766,6 +1818,311 @@ function createMemberAuthHandlers({
     }
   }
 
+  async function requestPhoneRemovalOtp(req, res) {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'requestPhoneRemovalOtp', 10, 15 * 60 * 1000);
+      const decoded = await requireSignedInUser(req);
+      const member = await loadMemberByUid(decoded.uid);
+      if (!member?.uid) throw createPublicError('Member profile was not found.', 404);
+      checkRateLimitKey(`requestPhoneRemovalOtp:${member.uid}`, 3, 10 * 60 * 1000);
+
+      const credential = await getCredential(member.uid);
+      const phoneNumber = memberCurrentPhoneNumber(member.data || {}, credential);
+      if (!phoneNumber) throw createPublicError('There is no verified phone number to remove.', 400);
+
+      const channel = cleanString(req.body?.channel || 'phone', 20).toLowerCase();
+      if (!['phone', 'email'].includes(channel)) {
+        throw createPublicError('Please choose phone or email OTP.', 400);
+      }
+
+      const email = verifiedProfileEmail(member.data || {});
+      const identifierKey = channel === 'email' ? email : phoneNumber;
+      if (channel === 'email' && !email) {
+        throw createPublicError('Please verify your email before using email OTP to remove your phone number.', 400);
+      }
+      checkRateLimitKey(`requestPhoneRemovalOtp:${channel}:${sha256(identifierKey).slice(0, 48)}`, 3, 10 * 60 * 1000);
+
+      const code = randomOtpCode();
+      const now = admin.firestore.Timestamp.now();
+      const expiresAt = admin.firestore.Timestamp.fromDate(new Date(Date.now() + OTP_TTL_MS));
+      const resendAfter = admin.firestore.Timestamp.fromDate(new Date(Date.now() + OTP_TTL_MS));
+      const verificationRef = db.collection(OTP_COLLECTION).doc();
+      await verificationRef.set({
+        uid: member.uid,
+        purpose: 'phone_removal',
+        channel,
+        identifier_key: identifierKey,
+        identifier_display: channel === 'phone' ? displayThaiPhone(phoneNumber) : identifierKey,
+        target_phone_number: phoneNumber,
+        target_phone_display: displayThaiPhone(phoneNumber),
+        target_email: email || null,
+        target_snapshot: {
+          phone_number: phoneNumber,
+          phone_index_key: phoneIndexKey(phoneNumber),
+          email: email || null,
+        },
+        otp_hash: otpHash(`phone_removal:${member.uid}:${channel}:${identifierKey}:${phoneNumber}`, code, getOtpPepper()),
+        expires_at: expiresAt,
+        resend_after: resendAfter,
+        verified_at: null,
+        used_at: null,
+        attempt_count: 0,
+        max_attempts: OTP_MAX_ATTEMPTS,
+        created_at: now,
+      });
+
+      try {
+        await sendPhoneRemovalOtp({ channel, identifierKey, code });
+      } catch (error) {
+        await verificationRef.delete().catch(() => {});
+        throw error;
+      }
+
+      res.json({
+        ok: true,
+        verificationId: verificationRef.id,
+        channel,
+        identifierDisplay: channel === 'phone' ? displayThaiPhone(phoneNumber) : identifierKey,
+        phoneDisplay: displayThaiPhone(phoneNumber),
+        expiresInSeconds: Math.floor(OTP_TTL_MS / 1000),
+        resendAfterSeconds: Math.floor(OTP_TTL_MS / 1000),
+      });
+    } catch (error) {
+      logger.warn('Phone removal OTP request failed', {
+        message: error.message,
+        status: error.statusCode || 500,
+      });
+      jsonError(res, error, 'Unable to send phone removal OTP. Please try again.');
+    }
+  }
+
+  async function verifyPhoneRemovalOtp(req, res) {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'verifyPhoneRemovalOtp', 30, 10 * 60 * 1000);
+      const decoded = await requireSignedInUser(req);
+      const member = await loadMemberByUid(decoded.uid);
+      if (!member?.uid) throw createPublicError('Member profile was not found.', 404);
+
+      const verificationId = cleanString(req.body?.verificationId, 160);
+      if (!verificationId || verificationId.includes('/')) {
+        throw createPublicError('Phone removal OTP was not found. Please request a new code.', 400);
+      }
+      const code = cleanString(req.body?.otp || req.body?.code, 6);
+      if (!/^\d{6}$/.test(code)) throw createPublicError('Please enter the 6-digit OTP.', 400);
+      checkRateLimitKey(`verifyPhoneRemovalOtp:${member.uid}`, 12, 10 * 60 * 1000);
+
+      const FieldValue = admin.firestore.FieldValue;
+      const verificationRef = db.collection(OTP_COLLECTION).doc(verificationId);
+      const userRef = db.collection('users').doc(member.uid);
+      const credentialRef = db.collection(CREDENTIAL_COLLECTION).doc(member.uid);
+      const summaryRef = db.collection('member_summaries').doc(member.uid);
+      const auditRef = db.collection('member_security_events').doc();
+      let profileForResponse = null;
+      let credentialForResponse = null;
+      let removedPhoneNumber = '';
+      let publicFailure = null;
+
+      await db.runTransaction(async tx => {
+        const [verificationSnap, userSnap, credentialSnap, summarySnap] = await Promise.all([
+          tx.get(verificationRef),
+          tx.get(userRef),
+          tx.get(credentialRef),
+          tx.get(summaryRef),
+        ]);
+        if (!verificationSnap.exists) {
+          publicFailure = createPublicError('Phone removal OTP was not found. Please request a new code.', 400);
+          return;
+        }
+
+        const record = verificationSnap.data() || {};
+        const channel = cleanString(record.channel, 20).toLowerCase();
+        const identifierKey = cleanString(record.identifier_key, 180);
+        const targetPhoneNumber = cleanString(record.target_phone_number, 40);
+        const expiresAt = record.expires_at?.toDate ? record.expires_at.toDate().getTime() : 0;
+        if (
+          record.purpose !== 'phone_removal'
+          || record.uid !== member.uid
+          || !['phone', 'email'].includes(channel)
+          || !identifierKey
+          || !targetPhoneNumber
+          || record.used_at
+        ) {
+          publicFailure = createPublicError('Phone removal OTP was not found. Please request a new code.', 400);
+          return;
+        }
+        if (!expiresAt || expiresAt < Date.now()) {
+          publicFailure = createPublicError('OTP expired. Please request a new code.', 400);
+          return;
+        }
+
+        const attempts = Math.max(0, Number(record.attempt_count || 0));
+        const maxAttempts = Math.max(1, Number(record.max_attempts || OTP_MAX_ATTEMPTS));
+        if (attempts >= maxAttempts) {
+          publicFailure = createPublicError('Too many incorrect OTP attempts. Please request a new code.', 400);
+          return;
+        }
+
+        const expected = otpHash(`phone_removal:${member.uid}:${channel}:${identifierKey}:${targetPhoneNumber}`, code, getOtpPepper());
+        if (!constantTimeEqualHex(record.otp_hash, expected)) {
+          tx.update(verificationRef, {
+            attempt_count: FieldValue.increment(1),
+            last_attempt_at: FieldValue.serverTimestamp(),
+          });
+          publicFailure = createPublicError('OTP is incorrect. Please check and try again.', 400);
+          return;
+        }
+
+        const existing = userSnap.exists ? userSnap.data() || {} : member.data || {};
+        const credential = credentialSnap.exists ? credentialSnap.data() || {} : {};
+        const currentPhoneNumber = memberCurrentPhoneNumber(existing, credential);
+        if (!currentPhoneNumber || currentPhoneNumber !== targetPhoneNumber) {
+          publicFailure = createPublicError('Phone number changed before verification. Please request a new OTP.', 409);
+          return;
+        }
+
+        if (channel === 'email') {
+          const currentEmail = verifiedProfileEmail(existing);
+          if (!currentEmail || currentEmail !== identifierKey) {
+            publicFailure = createPublicError('Verified email changed before verification. Please request a new OTP.', 409);
+            return;
+          }
+        }
+
+        const phoneIndexRef = db.collection(PHONE_INDEX_COLLECTION).doc(phoneIndexKey(targetPhoneNumber));
+        const phoneIndexSnap = await tx.get(phoneIndexRef);
+        const phoneIndex = phoneIndexSnap.exists ? phoneIndexSnap.data() || {} : {};
+        const now = FieldValue.serverTimestamp();
+        const authProviderIds = (Array.isArray(existing.authProviderIds) ? existing.authProviderIds : [])
+          .filter(providerId => providerId !== 'phone');
+        const userPayload = {
+          phone_number: FieldValue.delete(),
+          phone_display: FieldValue.delete(),
+          phone: '',
+          phoneE164: FieldValue.delete(),
+          phoneVerified: false,
+          phoneVerifiedAt: FieldValue.delete(),
+          phone_verified: false,
+          phone_verified_at: FieldValue.delete(),
+          phoneRemovedAt: now,
+          phone_removed_at: now,
+          authProviderIds,
+          updated_at: now,
+          updatedAt: now,
+        };
+        if (samePhoneValue(existing.loginUsername, targetPhoneNumber)) {
+          userPayload.loginUsername = FieldValue.delete();
+        }
+        ['checkoutPhone', 'checkout_phone', 'contactPhone', 'contact_phone'].forEach(field => {
+          if (samePhoneValue(existing[field], targetPhoneNumber)) {
+            userPayload[field] = '';
+          }
+        });
+
+        tx.set(userRef, userPayload, { merge: true });
+        tx.set(credentialRef, {
+          phone_number: FieldValue.delete(),
+          phone_index_key: FieldValue.delete(),
+          phone_removed_at: now,
+          updated_at: now,
+        }, { merge: true });
+        if (summarySnap.exists) {
+          tx.set(summaryRef, {
+            phone: '',
+            phoneE164: FieldValue.delete(),
+            phone_number: FieldValue.delete(),
+            phone_display: FieldValue.delete(),
+            phoneVerified: false,
+            phoneVerifiedAt: FieldValue.delete(),
+            phone_removed_at: now,
+            updatedAt: now,
+            updated_at: now,
+          }, { merge: true });
+        }
+        if (phoneIndexSnap.exists && phoneIndex.uid === member.uid) {
+          tx.delete(phoneIndexRef);
+        }
+        tx.update(verificationRef, {
+          used_at: now,
+          verified_at: now,
+        });
+        tx.set(auditRef, {
+          uid: member.uid,
+          event: 'phone_removed',
+          channel,
+          phone_hash: sha256(targetPhoneNumber).slice(0, 48),
+          email_hash: channel === 'email' ? sha256(identifierKey).slice(0, 48) : null,
+          verification_id: verificationId,
+          created_at: now,
+        });
+
+        removedPhoneNumber = targetPhoneNumber;
+        const clearedProfile = {
+          ...existing,
+          phone_number: '',
+          phone_display: '',
+          phone: '',
+          phoneE164: '',
+          phoneVerified: false,
+          phoneVerifiedAt: null,
+          phone_verified: false,
+          phone_verified_at: null,
+          phoneRemovedAt: new Date().toISOString(),
+          phone_removed_at: new Date().toISOString(),
+          authProviderIds,
+        };
+        ['checkoutPhone', 'checkout_phone', 'contactPhone', 'contact_phone'].forEach(field => {
+          if (samePhoneValue(existing[field], targetPhoneNumber)) {
+            clearedProfile[field] = '';
+          }
+        });
+        if (samePhoneValue(existing.loginUsername, targetPhoneNumber)) {
+          clearedProfile.loginUsername = '';
+        }
+        profileForResponse = clearedProfile;
+        credentialForResponse = { ...credential, phone_number: '', phone_index_key: '' };
+      });
+
+      if (publicFailure) throw publicFailure;
+
+      await admin.auth().updateUser(member.uid, { phoneNumber: null }).catch(error => {
+        if (error.code !== 'auth/user-not-found') {
+          logger.warn('Phone removed in Firestore but Auth phone was not cleared', {
+            uid: member.uid,
+            code: error.code || '',
+            message: error.message,
+          });
+        }
+      });
+
+      res.json({
+        ok: true,
+        phoneRemoved: true,
+        removedPhoneDisplay: displayThaiPhone(removedPhoneNumber),
+        profile: sanitizeProfile(member.uid, profileForResponse || {}, credentialForResponse || {}),
+      });
+    } catch (error) {
+      logger.warn('Phone removal OTP verification failed', {
+        message: error.message,
+        status: error.statusCode || 500,
+      });
+      jsonError(res, error, 'Unable to remove phone number. Please try again.');
+    }
+  }
+
   async function completeRegister(req, res) {
     if (handleOptions(req, res)) return;
     setCors(req, res);
@@ -2052,6 +2409,8 @@ function createMemberAuthHandlers({
     checkPhoneChange,
     requestPhoneChangeOtp,
     verifyPhoneChangeOtp,
+    requestPhoneRemovalOtp,
+    verifyPhoneRemovalOtp,
   };
 }
 
