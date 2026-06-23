@@ -22,8 +22,12 @@ const {
   timestampToDate,
 } = require('../shared/time');
 const {
-  updateLocksForBooking,
+  queryLocksForBooking,
 } = require('../shared/locks');
+const {
+  readArcheryLoyaltyState,
+  writeArcheryLoyaltyState,
+} = require('../archery/loyalty');
 
 const BEAM_API_KEY_SANDBOX = defineSecret('BEAM_API_KEY_SANDBOX');
 const BEAM_WEBHOOK_SECRET_SANDBOX = defineSecret('BEAM_WEBHOOK_SECRET_SANDBOX');
@@ -265,7 +269,7 @@ function sanitizePaymentForClient(payment = {}) {
   };
 }
 
-async function readBookingForMember(transaction, db, branchId, bookingId, actor) {
+async function readBookingForMember(transaction, db, branchId, bookingId, actor, staffSessionId = '') {
   const bookingRef = db.collection('bookings').doc(bookingId);
   const bookingSnap = await transaction.get(bookingRef);
   if (!bookingSnap.exists) throw apiError('BOOKING_NOT_FOUND', 404, 'Booking was not found');
@@ -274,7 +278,12 @@ async function readBookingForMember(transaction, db, branchId, bookingId, actor)
     throw apiError('BOOKING_NOT_FOUND', 404, 'Archery booking was not found');
   }
   const memberId = cleanString(booking.member_id || booking.uid || booking.customerUid, 160);
-  requireMember(actor, memberId);
+  const sessionId = cleanString(staffSessionId, 180);
+  if (sessionId) {
+    await requireStaffSession(transaction, db, actor, branchId, sessionId);
+  } else {
+    requireMember(actor, memberId);
+  }
   return { bookingRef, booking };
 }
 
@@ -388,12 +397,13 @@ const createBeamArcheryPayment = httpFunction(async ({ db, data, actor, requestI
   const config = beamConfig();
   const branchId = normalizeBranchId(data.branch_id);
   const bookingId = cleanString(data.booking_id || data.bookingId, 180);
+  const staffSessionId = cleanString(data.staff_session_id || data.staffSessionId, 180);
   const idempotencyKey = cleanString(data.idempotency_key || data.idempotencyKey, 180);
   if (!bookingId) throw apiError('BOOKING_REQUIRED', 400, 'booking_id is required');
   if (!idempotencyKey) throw apiError('IDEMPOTENCY_KEY_REQUIRED', 400, 'idempotency_key is required');
 
   const bookingSnapshot = await db.runTransaction(async transaction => {
-    const { booking } = await readBookingForMember(transaction, db, branchId, bookingId, actor);
+    const { booking } = await readBookingForMember(transaction, db, branchId, bookingId, actor, staffSessionId);
     const status = publicBookingStatus(booking);
     if (status !== 'HELD') throw apiError('BOOKING_STATE_DOES_NOT_ALLOW_ACTION', 409, 'Only HELD bookings can be paid online');
     const expiresAt = timestampToDate(booking.expires_at || booking.hold_expires_at || booking.holdExpiresAt);
@@ -406,6 +416,15 @@ const createBeamArcheryPayment = httpFunction(async ({ db, data, actor, requestI
   });
 
   if (bookingSnapshot.existing) {
+    logger.info('Beam archery payment link reused', {
+      branch_id: branchId,
+      booking_id: bookingId,
+      payment_id: bookingSnapshot.existing.payment_id || '',
+      provider_ref: bookingSnapshot.existing.provider_ref || '',
+      payment_status: bookingSnapshot.existing.payment_status || bookingSnapshot.existing.status || '',
+      payment_environment: config.environment,
+      request_id: requestId || '',
+    });
     return {
       replayed: true,
       ...sanitizePaymentForClient(bookingSnapshot.existing),
@@ -427,7 +446,7 @@ const createBeamArcheryPayment = httpFunction(async ({ db, data, actor, requestI
       beam_payment_link_id: beam.paymentLinkId,
     },
   }, async transaction => {
-    const { bookingRef, booking } = await readBookingForMember(transaction, db, branchId, bookingId, actor);
+    const { bookingRef, booking } = await readBookingForMember(transaction, db, branchId, bookingId, actor, staffSessionId);
     const status = publicBookingStatus(booking);
     if (status !== 'HELD') throw apiError('BOOKING_STATE_DOES_NOT_ALLOW_ACTION', 409, 'Only HELD bookings can be paid online');
     const expiresAt = timestampToDate(booking.expires_at || booking.hold_expires_at || booking.holdExpiresAt);
@@ -464,6 +483,10 @@ const createBeamArcheryPayment = httpFunction(async ({ db, data, actor, requestI
       payment_id: paymentId,
       payment_status: 'PENDING',
       payment_provider: 'BEAM',
+      payment_method: 'QR_PAYMENT',
+      payment_link_url: beam.paymentLinkUrl,
+      provider_ref: beam.paymentLinkId,
+      beam_payment_link_id: beam.paymentLinkId,
       updated_at: now,
     });
     writeAuditLog(transaction, db, {
@@ -480,6 +503,19 @@ const createBeamArcheryPayment = httpFunction(async ({ db, data, actor, requestI
     return sanitizePaymentForClient(paymentPayload);
   });
 
+  logger.info('Beam archery payment link created', {
+    branch_id: branchId,
+    booking_id: bookingId,
+    payment_id: result.response?.payment_id || '',
+    provider_ref: result.response?.provider_ref || beam.paymentLinkId || '',
+    beam_payment_link_id: result.response?.beam_payment_link_id || beam.paymentLinkId || '',
+    amount,
+    amount_minor: beam.amountMinor,
+    payment_environment: config.environment,
+    replayed: result.replayed === true,
+    request_id: requestId || '',
+  });
+
   return {
     replayed: result.replayed,
     ...result.response,
@@ -493,10 +529,11 @@ const createBeamArcheryPayment = httpFunction(async ({ db, data, actor, requestI
 const getArcheryPaymentStatus = httpFunction(async ({ db, data, actor }) => {
   const branchId = normalizeBranchId(data.branch_id);
   const bookingId = cleanString(data.booking_id || data.bookingId, 180);
+  const staffSessionId = cleanString(data.staff_session_id || data.staffSessionId, 180);
   if (!bookingId) throw apiError('BOOKING_REQUIRED', 400, 'booking_id is required');
 
   const result = await db.runTransaction(async transaction => {
-    const { booking } = await readBookingForMember(transaction, db, branchId, bookingId, actor);
+    const { booking } = await readBookingForMember(transaction, db, branchId, bookingId, actor, staffSessionId);
     const payment = await findBookingPayment(transaction, db, branchId, bookingId);
     return {
       booking_id: bookingId,
@@ -662,11 +699,33 @@ async function processSuccessfulWebhook(transaction, db, context) {
     return { status: 'RECONCILIATION_REQUIRED', reconciliation_id: queueRef.id };
   }
 
-  await updateLocksForBooking(transaction, db, branchId, bookingId, {
-    lock_status: 'CONFIRMED',
-    status: 'CONFIRMED',
-    expires_at: null,
-    hold_expires_at: null,
+  const locksSnap = await queryLocksForBooking(transaction, db, branchId, bookingId);
+  const loyaltyState = await readArcheryLoyaltyState(transaction, db, {
+    bookingId,
+    booking: {
+      ...booking,
+      booking_id: bookingId,
+      payment_id: paymentRef.id,
+      payment_status: 'PAID_ONLINE',
+      booking_status: 'CONFIRMED',
+      status: 'CONFIRMED',
+    },
+  });
+  const loyaltyResult = writeArcheryLoyaltyState(transaction, loyaltyState, {
+    paymentId: paymentRef.id,
+    paymentStatus: 'PAID_ONLINE',
+    bookingStatus: 'CONFIRMED',
+    actorId: 'BEAM_WEBHOOK',
+  });
+
+  locksSnap.forEach(docSnap => {
+    transaction.set(docSnap.ref, {
+      lock_status: 'CONFIRMED',
+      status: 'CONFIRMED',
+      expires_at: null,
+      hold_expires_at: null,
+      updated_at: FieldValue.serverTimestamp(),
+    }, { merge: true });
   });
   await markPaymentTerminal(transaction, db, {
     paymentRef,
@@ -710,7 +769,12 @@ async function processSuccessfulWebhook(transaction, db, context) {
     status: 'PROCESSED',
     updated_at: FieldValue.serverTimestamp(),
   }, { merge: true });
-  return { status: 'PROCESSED', booking_id: bookingId, payment_id: paymentRef.id };
+  return {
+    status: 'PROCESSED',
+    booking_id: bookingId,
+    payment_id: paymentRef.id,
+    loyalty: loyaltyResult,
+  };
 }
 
 const beamArcheryPaymentWebhook = onRequest({
@@ -744,6 +808,16 @@ const beamArcheryPaymentWebhook = onRequest({
     const eventId = paymentDocId('beam_webhook', `${eventType}:${webhookIdentity(eventType, payload)}:${sha256(rawRequestBody(req))}`);
     const amountMinor = webhookAmount(payload);
     const paymentLinkId = cleanString(payload.paymentLinkId || payload.sourceId, 180);
+
+    logger.info('Beam archery webhook received', {
+      event_type: eventType,
+      booking_id: bookingId,
+      provider_ref: providerRef,
+      payment_link_id: paymentLinkId,
+      amount_minor: amountMinor,
+      payment_environment: config.environment,
+      webhook_event_id: eventId,
+    });
 
     const result = await db.runTransaction(async transaction => {
       const webhookEventRef = db.collection('payment_webhook_events').doc(eventId);
@@ -846,6 +920,18 @@ const beamArcheryPaymentWebhook = onRequest({
       return { status: failedStatus, booking_id: bookingId, payment_id: paymentRef.id };
     });
 
+    logger.info('Beam archery webhook processed', {
+      event_type: eventType,
+      booking_id: bookingId,
+      provider_ref: providerRef,
+      payment_link_id: paymentLinkId,
+      amount_minor: amountMinor,
+      payment_environment: config.environment,
+      result_status: result.status || '',
+      payment_id: result.payment_id || '',
+      reconciliation_id: result.reconciliation_id || '',
+      duplicate: result.duplicate === true,
+    });
     res.status(200).json({ ok: true, ...result });
   } catch (error) {
     logger.warn('Beam archery webhook failed', {
@@ -853,6 +939,8 @@ const beamArcheryPaymentWebhook = onRequest({
       status: error.statusCode || 500,
       error_message: error.message,
       event: beamEvent(req),
+      reference_id: webhookReferenceId(req.body || ''),
+      provider_ref: webhookProviderRef(req.body || {}),
     });
     sendError(res, error);
   }

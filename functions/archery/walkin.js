@@ -18,8 +18,12 @@ const {
   calculateArcheryPricing,
   normalizePartySize,
 } = require('./pricing');
+const {
+  readArcheryLoyaltyState,
+  writeArcheryLoyaltyState,
+} = require('./loyalty');
 
-const WALKIN_PAYMENT_STATUSES = new Set(['PAID_COUNTER', 'UNPAID']);
+const WALKIN_PAYMENT_METHODS = new Set(['QR_PAYMENT', 'CASH']);
 
 const createWalkInArcheryBooking = httpFunction(async ({ db, data, actor, requestId }) => {
   assertNoClientLane(data);
@@ -31,10 +35,17 @@ const createWalkInArcheryBooking = httpFunction(async ({ db, data, actor, reques
   if (!memberId) throw apiError('MEMBER_NOT_FOUND', 404, 'member_id is required');
   const timing = normalizeTiming(data);
   const idempotencyKey = cleanString(data.idempotency_key || data.idempotencyKey, 180);
-  const paymentStatus = cleanString(data.payment_status || data.paymentStatus || 'UNPAID', 40).toUpperCase();
-  if (!WALKIN_PAYMENT_STATUSES.has(paymentStatus)) {
-    throw apiError('INVALID_PAYMENT_STATUS', 400, 'Walk-in payment_status must be PAID_COUNTER or UNPAID');
+  const legacyPaymentStatus = cleanString(data.payment_status || data.paymentStatus || '', 40).toUpperCase();
+  const requestedPaymentMethod = cleanString(data.payment_method || data.paymentMethod || '', 40).toUpperCase();
+  const paymentMethod = requestedPaymentMethod
+    || (legacyPaymentStatus === 'PAID_COUNTER' ? 'CASH' : 'QR_PAYMENT');
+  if (!WALKIN_PAYMENT_METHODS.has(paymentMethod)) {
+    throw apiError('INVALID_PAYMENT_METHOD', 400, 'Walk-in payment_method must be QR_PAYMENT or CASH');
   }
+  const isCash = paymentMethod === 'CASH';
+  const bookingStatus = isCash ? 'CONFIRMED' : 'HELD';
+  const paymentStatus = isCash ? 'PAID_COUNTER' : 'UNPAID';
+  const lockStatus = isCash ? 'CONFIRMED' : 'HELD';
   const pricingConfig = await loadArcheryPricingConfig(null, db);
   const pricingPreview = calculateArcheryPricing(pricingConfig, timing, data);
   const partySize = normalizePartySize(pricingPreview);
@@ -53,20 +64,52 @@ const createWalkInArcheryBooking = httpFunction(async ({ db, data, actor, reques
       party_size: partySize,
       ability_option_id: pricingPreview.ability_option_id,
       equipment_option_id: pricingPreview.equipment_option_id,
+      payment_method: paymentMethod,
       payment_status: paymentStatus,
     },
   }, async transaction => {
     await requireStaffSession(transaction, db, actor, branchId, staffSessionId);
+    const bookingRef = db.collection('bookings').doc();
+    const paymentRef = paymentStatus === 'PAID_COUNTER'
+      ? db.collection('payments').doc()
+      : null;
+    let loyaltyState = null;
+    if (paymentRef) {
+      loyaltyState = await readArcheryLoyaltyState(transaction, db, {
+        bookingId: bookingRef.id,
+        booking: {
+          booking_id: bookingRef.id,
+          branch_id: branchId,
+          service_type: SERVICE_TYPE,
+          member_id: memberId,
+          uid: memberId,
+          customerUid: memberId,
+          source: 'WALK_IN',
+          booking_status: bookingStatus,
+          status: bookingStatus,
+          payment_method: paymentMethod,
+          payment_status: paymentStatus,
+          payment_id: paymentRef.id,
+          amount_total: pricingPreview.amount_total,
+          booking_date: timing.booking_date,
+          date: timing.booking_date,
+          customer_name: data.customer_name || data.customerName,
+          name: data.customer_name || data.customerName,
+        },
+      });
+    }
     const created = await createArcheryBookingInTransaction(transaction, db, {
+      bookingRef,
       branchId,
       memberId,
       source: 'WALK_IN',
       timing,
       pricingConfig,
       pricingSelection: data,
-      bookingStatus: 'CONFIRMED',
+      bookingStatus,
+      paymentMethod,
       paymentStatus,
-      lockStatus: 'CONFIRMED',
+      lockStatus,
       idempotencyKey,
       actorId: actor.uid,
       customerName: data.customer_name || data.customerName,
@@ -76,8 +119,8 @@ const createWalkInArcheryBooking = httpFunction(async ({ db, data, actor, reques
     });
 
     let paymentId = '';
-    if (paymentStatus === 'PAID_COUNTER') {
-      const paymentRef = db.collection('payments').doc();
+    let loyaltyResult = null;
+    if (paymentRef) {
       paymentId = paymentRef.id;
       transaction.set(paymentRef, {
         payment_id: paymentRef.id,
@@ -97,6 +140,18 @@ const createWalkInArcheryBooking = httpFunction(async ({ db, data, actor, reques
         updated_at: FieldValue.serverTimestamp(),
       });
       transaction.update(created.bookingRef, { payment_id: paymentRef.id });
+      loyaltyState.booking = {
+        ...created.booking,
+        payment_id: paymentRef.id,
+        payment_status: paymentStatus,
+      };
+      loyaltyResult = writeArcheryLoyaltyState(transaction, loyaltyState, {
+        paymentId: paymentRef.id,
+        paymentStatus,
+        bookingStatus,
+        actorId: actor.uid,
+        actorEmail: actor.email || '',
+      });
     }
 
     writeAuditLog(transaction, db, {
@@ -108,7 +163,8 @@ const createWalkInArcheryBooking = httpFunction(async ({ db, data, actor, reques
       targetId: created.booking_id,
       after: {
         booking_id: created.booking_id,
-        booking_status: 'CONFIRMED',
+        booking_status: bookingStatus,
+        payment_method: paymentMethod,
         payment_status: paymentStatus,
         assigned_resource_id: created.assigned_resource_id,
         assigned_resource_ids: created.assigned_resource_ids,
@@ -126,7 +182,8 @@ const createWalkInArcheryBooking = httpFunction(async ({ db, data, actor, reques
       booking_id: created.booking_id,
       branch_id: branchId,
       service_type: SERVICE_TYPE,
-      booking_status: 'CONFIRMED',
+      booking_status: bookingStatus,
+      payment_method: paymentMethod,
       payment_status: paymentStatus,
       payment_id: paymentId,
       assigned_resource_id: created.assigned_resource_id,
@@ -148,6 +205,9 @@ const createWalkInArcheryBooking = httpFunction(async ({ db, data, actor, reques
       amount_breakdown: created.booking.amount_breakdown,
       pricing_version: created.booking.pricing_version,
       pricing_updated_at: created.booking.pricing_updated_at,
+      expires_at: created.expires_at ? created.expires_at.toDate().toISOString() : null,
+      payment_required: paymentMethod === 'QR_PAYMENT',
+      loyalty: loyaltyResult,
     };
   });
 

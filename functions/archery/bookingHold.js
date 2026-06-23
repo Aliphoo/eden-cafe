@@ -121,6 +121,7 @@ function buildBookingPayload(options = {}) {
     resource_type_id: RESOURCE_TYPE_ID,
     booking_status: options.bookingStatus,
     status: options.bookingStatus,
+    payment_method: cleanString(options.paymentMethod, 40),
     payment_status: options.paymentStatus,
     amount_total: amount,
     package_amount: Number(pricing.package_amount || amount) || 0,
@@ -196,7 +197,7 @@ async function createArcheryBookingInTransaction(transaction, db, options = {}) 
   if (!primaryLane) throw apiError('NO_LANE_AVAILABLE', 409, 'No lane is available for the requested time');
   const assignedResourceIds = selectedLanes.map(lane => lane.resource_id);
   const assignedLaneNumbers = selectedLanes.map(laneNumberFromLane).filter(Boolean);
-  const bookingRef = db.collection('bookings').doc();
+  const bookingRef = options.bookingRef || db.collection('bookings').doc();
   const expiresAt = options.bookingStatus === 'HELD'
     ? Timestamp.fromMillis(Date.now() + (HOLD_MINUTES * 60 * 1000))
     : null;

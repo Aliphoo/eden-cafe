@@ -6,16 +6,58 @@ service firebase.storage {
     }
     function isAdmin() {
       return isSignedIn()
-        && request.auth.token.email is string
-        && request.auth.token.email.matches('(?i)^(admin@edencafe\\.com|phoo1236@gmail\\.com|sonsawan\\.1231@gmail\\.com)$');
+        && (
+          (
+            request.auth.token.email is string
+            && request.auth.token.email.matches('(?i)^(admin@edencafe\\.com|phoo1236@gmail\\.com|sonsawan\\.1231@gmail\\.com)$')
+          )
+          || (
+            firestore.exists(/databases/(default)/documents/admin_users/$(request.auth.uid))
+            && firestore.get(/databases/(default)/documents/admin_users/$(request.auth.uid)).data.status == 'active'
+            && firestore.get(/databases/(default)/documents/admin_users/$(request.auth.uid)).data.role in ['owner', 'head_manager', 'manager']
+          )
+        );
     }
 
-    match /{folder}/{fileName} {
+    function hasAdminPermission(permission) {
+      return isSignedIn()
+        && (
+          (
+            request.auth.token.email is string
+            && request.auth.token.email.matches('(?i)^(admin@edencafe\\.com|phoo1236@gmail\\.com|sonsawan\\.1231@gmail\\.com)$')
+          )
+          || (
+            firestore.exists(/databases/(default)/documents/admin_users/$(request.auth.uid))
+            && firestore.get(/databases/(default)/documents/admin_users/$(request.auth.uid)).data.status == 'active'
+            && (
+              firestore.get(/databases/(default)/documents/admin_users/$(request.auth.uid)).data.role in ['owner', 'head_manager']
+              || (
+                firestore.get(/databases/(default)/documents/admin_users/$(request.auth.uid)).data.role == 'manager'
+                && firestore.get(/databases/(default)/documents/admin_users/$(request.auth.uid)).data.permissions[permission] == true
+              )
+            )
+          )
+        );
+    }
+
+    function hasBlogRole(roles) {
+      return isSignedIn()
+        && firestore.exists(/databases/(default)/documents/blog_users/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/blog_users/$(request.auth.uid)).data.role in roles;
+    }
+
+    function canWriteFolder(folder) {
+      return (folder in ['products', 'shop_products'] && hasAdminPermission('products'))
+        || (folder == 'rooms' && hasAdminPermission('rooms'))
+        || (folder == 'blogs' && (hasAdminPermission('blogs') || hasBlogRole(['admin', 'editor', 'writer'])));
+    }
+
+    match /{folder}/{fileName=**} {
       allow read: if folder in ['products', 'shop_products', 'rooms', 'blogs'];
-      allow write: if isAdmin()
-        && folder in ['products', 'shop_products', 'rooms', 'blogs']
+      allow create, update: if canWriteFolder(folder)
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
+      allow delete: if canWriteFolder(folder);
     }
 
     match /{allPaths=**} {

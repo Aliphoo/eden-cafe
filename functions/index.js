@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { Readable } = require('stream');
 const { createMemberAuthHandlers } = require('./services/memberAuth');
+const loyaltyFormula = require('./loyaltyFormula');
 
 admin.initializeApp();
 
@@ -38,6 +39,9 @@ const ADMIN_EMAILS = new Set([
   'phoo1236@gmail.com',
   'sonsawan.1231@gmail.com',
 ]);
+const ADMIN_PERMISSION_FALLBACKS = {
+  archery: ['bookings'],
+};
 const POS_APK_FILE_NAME = 'eden-pos-1.24-v25-release.apk';
 const POS_APK_VERSION_NAME = '1.24';
 const POS_APK_VERSION_CODE = '25';
@@ -115,7 +119,7 @@ function setCors(req, res) {
     res.set('Vary', 'Origin');
   }
   res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  res.set('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Request-Id,X-Eden-System-Key');
   res.set('Access-Control-Expose-Headers', 'Content-Disposition,Content-Length,X-Eden-Release-Id,X-Eden-Apk-Version-Name,X-Eden-Apk-Version-Code,X-Eden-Apk-Sha256,X-Eden-Apk-Origin');
   res.set('Access-Control-Max-Age', '3600');
 }
@@ -931,11 +935,18 @@ async function requireAdminAccess(req, permission = '') {
     throw error;
   }
   if (access.role === 'owner' || access.role === 'head_manager') return decoded;
-  if (permission && access.permissions && access.permissions[permission] === true) return decoded;
+  if (hasAdminAccessPermission(access, permission)) return decoded;
 
   const error = new Error('Admin permission required');
   error.statusCode = 403;
   throw error;
+}
+
+function hasAdminAccessPermission(access = {}, permission = '') {
+  if (!permission) return true;
+  if (access.permissions && access.permissions[permission] === true) return true;
+  if (Object.prototype.hasOwnProperty.call(access.permissions || {}, permission)) return false;
+  return (ADMIN_PERMISSION_FALLBACKS[permission] || []).some(fallback => access.permissions?.[fallback] === true);
 }
 
 async function requireOwnerAccess(req) {
@@ -1083,10 +1094,10 @@ function normalizeAdminPermissions(role, raw = {}) {
     'loyalty',
     'orders',
     'bookings',
+    'archery',
     'tables',
     'rooms',
     'products',
-    'shop',
     'blogs',
     'faqs',
     'promptpay',
@@ -1763,10 +1774,10 @@ function latestTimestamp(values = []) {
 
 function permissionFromImageFolder(folder) {
   const value = cleanString(folder, 40).toLowerCase();
-  if (value === 'shop_products') return 'shop';
+  if (value === 'shop_products') return 'products';
   if (value === 'blogs') return 'blogs';
   if (value === 'rooms') return 'rooms';
-  if (value === 'archery') return 'bookings';
+  if (value === 'archery') return 'archery';
   return 'products';
 }
 
@@ -2844,7 +2855,7 @@ exports.createWalkInBooking = onRequest(
     }
 
     try {
-      const decoded = await requireAdminAccess(req, 'bookings');
+      const decoded = await requireAdminAccess(req, 'archery');
       const raw = req.body || {};
       const timing = normalizeArcheryTimePayload(raw);
       const memberUid = cleanString(raw.member_id || raw.memberUid || raw.customerUid || raw.uid, 160);
@@ -2937,7 +2948,7 @@ exports.adminCheckInBooking = onRequest(
       return;
     }
     try {
-      const decoded = await requireAdminAccess(req, 'bookings');
+      const decoded = await requireAdminAccess(req, 'archery');
       const bookingId = cleanString(req.body?.booking_id || req.body?.bookingId || req.body?.id, 80);
       await db.runTransaction(async transaction => {
         const { bookingRef, booking } = await readArcheryBookingForAdmin(transaction, bookingId);
@@ -2989,7 +3000,7 @@ exports.adminExtendBooking = onRequest(
       return;
     }
     try {
-      const decoded = await requireAdminAccess(req, 'bookings');
+      const decoded = await requireAdminAccess(req, 'archery');
       const raw = req.body || {};
       const bookingId = cleanString(raw.booking_id || raw.bookingId || raw.id, 80);
       const requestedEnd = cleanString(raw.new_end_time || raw.newEndTime || '', 10);
@@ -3070,7 +3081,7 @@ exports.adminMoveBookingLane = onRequest(
       return;
     }
     try {
-      const decoded = await requireAdminAccess(req, 'bookings');
+      const decoded = await requireAdminAccess(req, 'archery');
       const raw = req.body || {};
       const bookingId = cleanString(raw.booking_id || raw.bookingId || raw.id, 80);
       const newLaneId = normalizeArcheryLaneId(raw.new_lane_id || raw.newLaneId || raw.lane_id || raw.laneId);
@@ -3146,7 +3157,7 @@ exports.adminCancelBooking = onRequest(
       return;
     }
     try {
-      const decoded = await requireAdminAccess(req, 'bookings');
+      const decoded = await requireAdminAccess(req, 'archery');
       const bookingId = cleanString(req.body?.booking_id || req.body?.bookingId || req.body?.id, 80);
       const reason = cleanString(req.body?.reason || '', 300);
       await db.runTransaction(async transaction => {
@@ -3191,7 +3202,7 @@ exports.adminCompleteBooking = onRequest(
       return;
     }
     try {
-      const decoded = await requireAdminAccess(req, 'bookings');
+      const decoded = await requireAdminAccess(req, 'archery');
       const bookingId = cleanString(req.body?.booking_id || req.body?.bookingId || req.body?.id, 80);
       await db.runTransaction(async transaction => {
         const { bookingRef, booking } = await readArcheryBookingForAdmin(transaction, bookingId);
@@ -3235,7 +3246,7 @@ exports.adminMarkNoShow = onRequest(
       return;
     }
     try {
-      const decoded = await requireAdminAccess(req, 'bookings');
+      const decoded = await requireAdminAccess(req, 'archery');
       const bookingId = cleanString(req.body?.booking_id || req.body?.bookingId || req.body?.id, 80);
       await db.runTransaction(async transaction => {
         const { bookingRef, booking } = await readArcheryBookingForAdmin(transaction, bookingId);
@@ -3278,7 +3289,7 @@ exports.recordCounterPayment = onRequest(
       return;
     }
     try {
-      const decoded = await requireAdminAccess(req, 'bookings');
+      const decoded = await requireAdminAccess(req, 'archery');
       const raw = req.body || {};
       const bookingId = cleanString(raw.booking_id || raw.bookingId || raw.id, 80);
       const idempotencyKey = cleanString(raw.idempotency_key || raw.idempotencyKey || `${bookingId}_counter`, 160);
@@ -4354,29 +4365,11 @@ function safeLedgerKey(value) {
 }
 
 function normalizePosSaleItems(items) {
-  return Array.isArray(items)
-    ? items.map(item => ({
-      productId: cleanString(item.productId || item.id || item.menuItemId || '', 120),
-      variantId: cleanString(item.variantId || item.variant || item.optionId || item.variantName || 'base', 80),
-      sku: cleanString(item.sku || item.variantSku || '', 80),
-      name: cleanString(item.name || item.productName || 'POS item', 180),
-      variantName: cleanString(item.variantName || item.optionName || item.variant || '', 120),
-      category: cleanString(item.category || item.categoryName || item.categoryId || '', 160),
-      quantity: Math.max(0, Number(item.quantity ?? item.qty ?? 0)),
-      unitPrice: Math.max(0, Number(item.unitPrice ?? item.price ?? item.basePrice ?? 0)),
-      lineDiscount: Math.max(0, Number(item.lineDiscount ?? item.discount ?? 0)),
-      taxEnabled: item.taxEnabled !== false,
-    })).filter(item => item.quantity > 0)
-    : [];
+  return loyaltyFormula.normalizePosSaleItems(items);
 }
 
 function eligibleSubtotalForPosSale(items, excludedCategories) {
-  const excluded = new Set(excludedCategories);
-  return items.reduce((sum, item) => {
-    const category = cleanString(item.category, 160).toLowerCase();
-    if (category && excluded.has(category)) return sum;
-    return sum + Math.max(0, item.unitPrice * item.quantity - item.lineDiscount);
-  }, 0);
+  return loyaltyFormula.eligibleSubtotalForPosSale(items, excludedCategories);
 }
 
 function expiryTimestamp(months) {
@@ -4443,6 +4436,55 @@ async function markPosLoyaltyFailed(orderRef, error, idempotencyKey) {
   }
 }
 
+const POS_LOYALTY_SKIP_REASONS = new Set([
+  'no-customer',
+  'unsynced-customer',
+  'test-order',
+  'soft-launch',
+]);
+
+function normalizePosLoyaltySkipReason(value) {
+  const reason = cleanString(value || '', 80).toLowerCase().replace(/_/g, '-');
+  return POS_LOYALTY_SKIP_REASONS.has(reason) ? reason : '';
+}
+
+function posLoyaltySkipReasonFor({ customerProfileSynced, customerUid, isTestOrder, softLaunch } = {}) {
+  if (isTestOrder === true) return 'test-order';
+  if (softLaunch === true) return 'soft-launch';
+  if (!cleanString(customerUid || '', 180)) return 'no-customer';
+  if (customerProfileSynced === false) return 'unsynced-customer';
+  return '';
+}
+
+function posLoyaltySkippedPayload({ customerUid = '', idempotencyKey = '', reason = '' } = {}) {
+  const skipReason = normalizePosLoyaltySkipReason(reason) || 'no-customer';
+  return {
+    customerUid: cleanString(customerUid || '', 180),
+    earnedPoints: 0,
+    redeemedPoints: 0,
+    loyaltyDiscount: 0,
+    idempotencyKey,
+    skipped: true,
+    reason: skipReason,
+    syncedAt: new Date().toISOString(),
+  };
+}
+
+function posLoyaltySkippedOrderPatch(payload, idempotencyKey) {
+  return {
+    loyalty: payload,
+    earnedPoints: 0,
+    redeemedPoints: 0,
+    loyaltyDiscount: 0,
+    loyaltySyncStatus: 'skipped',
+    loyaltyError: payload.reason,
+    loyaltySkipReason: payload.reason,
+    loyaltyIdempotencyKey: idempotencyKey || payload.idempotencyKey || '',
+    loyaltySkippedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+}
+
 function firstFiniteNumber(values, fallback = 0) {
   for (const value of values) {
     const number = Number(value);
@@ -4452,10 +4494,26 @@ function firstFiniteNumber(values, fallback = 0) {
 }
 
 function sumPosItemsSubtotal(items) {
-  return normalizePosSaleItems(items).reduce(
-    (sum, item) => sum + Math.max(0, item.unitPrice * item.quantity),
-    0
-  );
+  return loyaltyFormula.sumPosItemsSubtotal(items);
+}
+
+function sumPosItemsLineDiscount(items) {
+  return loyaltyFormula.sumPosItemsLineDiscount(items);
+}
+
+function finiteNumberOrNull(value) {
+  return loyaltyFormula.finiteNumberOrNull(value);
+}
+
+function resolvePosOrderDiscount({ orderDiscount, normalDiscount, discount, subtotal, netAmount, items }) {
+  return loyaltyFormula.resolvePosOrderDiscount({
+    orderDiscount,
+    normalDiscount,
+    discount,
+    subtotal,
+    netAmount,
+    items,
+  });
 }
 
 function buildTrustedPosLoyaltyPayload(orderRef, order = {}) {
@@ -4469,20 +4527,29 @@ function buildTrustedPosLoyaltyPayload(orderRef, order = {}) {
     order.totalBeforeDiscount,
     itemSubtotal,
   ], itemSubtotal));
-  const normalDiscount = Math.max(0, firstFiniteNumber([
-    order.normalDiscount,
-    order.discountAmount,
-    order.discount,
-    order.manualDiscount,
-  ], 0));
+  const preliminaryOrderDiscount = resolvePosOrderDiscount({
+    orderDiscount: order.orderDiscount,
+    normalDiscount: order.normalDiscount,
+    discount: firstFiniteNumber([order.discountAmount, order.discount, order.manualDiscount], null),
+    subtotal,
+    items,
+  });
   const netAmount = Math.max(0, firstFiniteNumber([
     order.totalBeforeLoyalty,
     order.netAmount,
     order.netTotal,
     order.totalAmount,
     order.total,
-    Math.max(0, subtotal - normalDiscount),
+    Math.max(0, subtotal - sumPosItemsLineDiscount(items) - preliminaryOrderDiscount),
   ], 0));
+  const orderDiscount = resolvePosOrderDiscount({
+    orderDiscount: order.orderDiscount,
+    normalDiscount: order.normalDiscount,
+    discount: firstFiniteNumber([order.discountAmount, order.discount, order.manualDiscount], null),
+    subtotal,
+    netAmount,
+    items,
+  });
   const redeemedPoints = Math.max(0, Math.trunc(firstFiniteNumber([
     order.redeemedPoints,
     order.loyaltyRedeemedPoints,
@@ -4502,15 +4569,383 @@ function buildTrustedPosLoyaltyPayload(orderRef, order = {}) {
     customerUid: cleanString(order.customerUid || '', 180),
     customerEmail: cleanString(order.customerEmail || '', 180),
     customerMemberCode: cleanString(order.customerMemberCode || '', 80),
+    customerProfileSynced: order.customerProfileSynced === true,
+    loyaltySkipReason: normalizePosLoyaltySkipReason(order.loyaltySkipReason || order.loyalty?.reason || ''),
     netAmount,
     subtotal,
-    normalDiscount,
+    normalDiscount: orderDiscount,
+    orderDiscount,
     loyaltyDiscount: Math.max(0, Number(order.loyaltyDiscount || 0)),
     redeemedPoints,
+    isTestOrder: order.isTestOrder === true,
+    softLaunch: order.softLaunch === true,
     items,
     idempotencyKey,
   };
 }
+
+function normalizePosMemberPhone(value) {
+  const raw = cleanString(value || '', 40);
+  const digits = raw.replace(/\D/g, '');
+  let local = digits;
+  if (local.startsWith('66') && local.length >= 11) local = '0' + local.slice(2);
+  if (!local && raw.startsWith('+66')) local = '0' + raw.replace(/\D/g, '').slice(2);
+  const e164 = normalizeThaiPhoneForMemberIndex(raw || local);
+  return {
+    raw,
+    local,
+    e164,
+    display: local || raw || (e164 ? displayThaiPhone(e164) : ''),
+  };
+}
+
+function posMemberPayloadFromBody(body = {}, existing = {}, decoded = {}, uid = '') {
+  const phone = normalizePosMemberPhone(body.phone || existing.phone || existing.phone_display || existing.phone_number || '');
+  const displayName = firstCleanString([
+    body.displayName,
+    body.name,
+    existing.displayName,
+    existing.name,
+    phone.display ? `ลูกค้า ${phone.display}` : '',
+  ], 120);
+  const email = normalizePublicEmail(body.email || existing.email || '');
+  const memberCode = firstCleanString([
+    existing.memberCode,
+    authMemberCode(uid),
+  ], 40);
+  const now = admin.firestore.FieldValue.serverTimestamp();
+
+  const payload = {
+    displayName,
+    name: displayName,
+    display_name: displayName,
+    email,
+    email_lower: email,
+    phone: phone.display,
+    phoneNormalized: phone.local,
+    phone_display: phone.display,
+    lineId: cleanString(body.lineId || existing.lineId || '', 80),
+    updatedAt: now,
+    updated_at: now,
+    updatedBy: decoded.uid || '',
+    updatedByEmail: cleanString(decoded.email || '', 180),
+    source: cleanString(existing.source || body.source || 'pos', 40),
+    registrationSource: cleanString(existing.registrationSource || 'pos', 40),
+  };
+
+  if (phone.e164) {
+    payload.phoneE164 = phone.e164;
+    payload.phone_number = phone.e164;
+    payload.loginUsername = phone.e164;
+  }
+  if (memberCode) payload.memberCode = memberCode;
+  if (!existing.tier) payload.tier = 'Silver';
+  if (!existing.status) payload.status = 'active';
+  if (existing.points === undefined) payload.points = 0;
+  if (existing.totalSpent === undefined) payload.totalSpent = 0;
+  if (existing.visitCount === undefined) payload.visitCount = 0;
+
+  return payload;
+}
+
+function publicPosMemberProfile(uid, data = {}) {
+  const phone = normalizePosMemberPhone(data.phone || data.phone_display || data.phone_number || data.phoneE164 || '');
+  return {
+    uid,
+    displayName: cleanString(data.displayName || data.name || data.display_name || data.email || 'Eden Member', 120),
+    email: cleanString(data.email || '', 180),
+    phone: phone.display,
+    phoneNormalized: phone.local,
+    lineId: cleanString(data.lineId || '', 80),
+    tier: cleanString(data.tier || 'Silver', 30),
+    memberCode: cleanString(data.memberCode || uid.slice(0, 12), 40),
+    points: Number(data.points || 0),
+    totalSpent: Number(data.totalSpent || 0),
+    visitCount: Number(data.visitCount || 0),
+    profileSynced: true,
+    source: 'eden',
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function publicPosMemberSummary(uid, userData = {}, summaryData = {}) {
+  const profile = publicPosMemberProfile(uid, userData);
+  const points = summaryData.pointsBalance !== undefined
+    ? Number(summaryData.pointsBalance || 0)
+    : profile.points;
+  return {
+    ...profile,
+    points,
+    totalSpent: Number(summaryData.totalSpent ?? profile.totalSpent ?? 0),
+    visitCount: Number(summaryData.visitCount ?? profile.visitCount ?? 0),
+    tier: cleanString(summaryData.tier || profile.tier || 'Silver', 30),
+  };
+}
+
+async function enrichPosMemberProfiles(memberDocs = []) {
+  const summarySnaps = await Promise.all(
+    memberDocs.map(memberDoc =>
+      db.collection('member_summaries').doc(memberDoc.id).get().catch(() => null)
+    )
+  );
+
+  return memberDocs.map((memberDoc, index) => {
+    const userData = memberDoc.data() || {};
+    const summarySnap = summarySnaps[index];
+    const summaryData = summarySnap && summarySnap.exists ? summarySnap.data() || {} : {};
+    return publicPosMemberSummary(memberDoc.id, userData, summaryData);
+  });
+}
+
+function posMemberSearchScore(member = {}, query = '', digits = '') {
+  if (!query && !digits) return 1;
+  const haystack = [
+    member.uid,
+    member.displayName,
+    member.email,
+    member.phone,
+    member.phoneNormalized,
+    member.lineId,
+    member.memberCode,
+    member.tier,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  let score = haystack.includes(query) ? 80 : 0;
+  if (digits && String(member.phoneNormalized || '').includes(digits)) score += 140;
+  if (digits && String(member.phone || '').replace(/\D/g, '').includes(digits)) score += 120;
+  if (query && String(member.memberCode || '').toLowerCase() === query) score += 180;
+  if (query && String(member.email || '').toLowerCase() === query) score += 160;
+  if (query && String(member.displayName || '').toLowerCase().includes(query)) score += 100;
+  if ((member.points || 0) > 0) score += 12;
+  if ((member.totalSpent || 0) > 0) score += 8;
+  return score;
+}
+
+exports.searchPosMembers = onRequest(
+  { region: 'asia-southeast1', timeoutSeconds: 60, memory: '256MiB' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const decoded = await requireAdminAccess(req, 'pos');
+      const body = req.body || {};
+      const search = cleanString(body.search || body.query || '', 160).toLowerCase();
+      const phone = normalizePosMemberPhone(body.phone || search);
+      const digits = phone.local || String(search || '').replace(/\D/g, '');
+      const limitCount = Math.min(Math.max(Number(body.limitCount || 250), 1), 500);
+      checkRateLimitKey(`search-pos-members:${decoded.uid || clientIp(req)}`, 240, 60 * 60 * 1000);
+
+      const queryPromises = [];
+      const addQuery = (field, value, size = limitCount) => {
+        const cleanValue = cleanString(value || '', 180);
+        if (!cleanValue) return;
+        queryPromises.push(db.collection('users').where(field, '==', cleanValue).limit(Math.min(size, limitCount)).get());
+      };
+
+      if (digits) {
+        addQuery('phoneNormalized', digits);
+        addQuery('phone', phone.display || digits);
+      }
+      if (phone.e164) {
+        addQuery('phone_number', phone.e164);
+        addQuery('phoneE164', phone.e164);
+        addQuery('loginUsername', phone.e164);
+      }
+      if (search && search.includes('@')) {
+        addQuery('email_lower', normalizePublicEmail(search));
+        addQuery('email', normalizePublicEmail(search));
+      }
+      if (/^ed-/i.test(search)) {
+        addQuery('memberCode', search.toUpperCase());
+      }
+
+      queryPromises.push(db.collection('users').limit(limitCount).get());
+
+      const querySnaps = await Promise.all(queryPromises.map(promise => promise.catch(() => null)));
+      const byId = new Map();
+      querySnaps.forEach(snap => {
+        if (!snap) return;
+        snap.docs.forEach(memberDoc => {
+          const data = memberDoc.data() || {};
+          const status = String(data.status || 'active').toLowerCase();
+          if (['deleted', 'disabled', 'blocked'].includes(status)) return;
+          byId.set(memberDoc.id, memberDoc);
+        });
+      });
+
+      const members = await enrichPosMemberProfiles(Array.from(byId.values()));
+      const filtered = members
+        .map(member => ({
+          member,
+          score: posMemberSearchScore(member, search, digits),
+        }))
+        .filter(row => !search && !digits ? true : row.score > 0)
+        .sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          const codeA = a.member.memberCode || '';
+          const codeB = b.member.memberCode || '';
+          return codeA && codeB && codeA !== codeB
+            ? codeA.localeCompare(codeB, 'th')
+            : String(a.member.displayName || '').localeCompare(String(b.member.displayName || ''), 'th');
+        })
+        .slice(0, limitCount)
+        .map(row => row.member);
+
+      res.status(200).json({ ok: true, members: filtered });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('POS member search failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to search POS members');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+exports.getPosMemberLoyaltySummary = onRequest(
+  { region: 'asia-southeast1', timeoutSeconds: 30, memory: '256MiB' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const decoded = await requireAdminAccess(req, 'pos');
+      const uid = cleanString((req.body || {}).uid || (req.body || {}).customerUid || '', 180);
+      if (!uid) {
+        const error = new Error('Member UID is required');
+        error.statusCode = 400;
+        throw error;
+      }
+      checkRateLimitKey(`get-pos-member-summary:${decoded.uid || clientIp(req)}`, 240, 60 * 60 * 1000);
+
+      const [memberSnap, summarySnap] = await Promise.all([
+        db.collection('users').doc(uid).get(),
+        db.collection('member_summaries').doc(uid).get(),
+      ]);
+      const member = memberSnap.exists ? memberSnap.data() || {} : {};
+      const summary = summarySnap.exists ? summarySnap.data() || {} : {};
+      const publicMember = publicPosMemberSummary(uid, member, summary);
+
+      res.status(200).json({
+        ok: true,
+        summary: {
+          customerUid: uid,
+          pointsBalance: publicMember.points,
+          tier: publicMember.tier,
+          totalSpent: publicMember.totalSpent,
+          visitCount: publicMember.visitCount,
+        },
+      });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('POS member loyalty summary failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to load POS member loyalty summary');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+async function resolvePosMemberUid(body = {}) {
+  const requestedUid = cleanString(body.uid || '', 180);
+  if (requestedUid) return requestedUid;
+
+  const phone = normalizePosMemberPhone(body.phone || '');
+  const email = normalizePublicEmail(body.email || '');
+  const candidates = [];
+
+  if (phone.local) {
+    candidates.push(db.collection('users').where('phoneNormalized', '==', phone.local).limit(1).get());
+    candidates.push(db.collection('users').where('phone', '==', phone.display).limit(1).get());
+  }
+  if (phone.e164) {
+    candidates.push(db.collection('users').where('phone_number', '==', phone.e164).limit(1).get());
+    candidates.push(db.collection('users').where('phoneE164', '==', phone.e164).limit(1).get());
+  }
+  if (email) {
+    candidates.push(db.collection('users').where('email_lower', '==', email).limit(1).get());
+  }
+
+  const results = await Promise.all(candidates.map(queryPromise => queryPromise.catch(() => null)));
+  for (const snap of results) {
+    if (snap && !snap.empty) return snap.docs[0].id;
+  }
+
+  if (phone.local) return `pos-phone-${phone.local}`;
+  if (email) return `pos-email-${sha256(email).slice(0, 16)}`;
+  return `pos-member-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+}
+
+exports.upsertPosMemberProfile = onRequest(
+  { region: 'asia-southeast1', timeoutSeconds: 60, memory: '256MiB' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const decoded = await requireAdminAccess(req, 'pos');
+      const body = req.body || {};
+      const uid = await resolvePosMemberUid(body);
+      const phone = normalizePosMemberPhone(body.phone || '');
+      const displayName = firstCleanString([body.displayName, body.name], 120);
+
+      if (!uid) {
+        const error = new Error('Member UID is required');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (!displayName && !phone.local && !normalizePublicEmail(body.email || '')) {
+        const error = new Error('Member name, phone, or email is required');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      checkRateLimitKey(`upsert-pos-member:${decoded.uid || clientIp(req)}`, 120, 60 * 60 * 1000);
+
+      const memberRef = db.collection('users').doc(uid);
+      const memberSnap = await memberRef.get();
+      const existing = memberSnap.exists ? memberSnap.data() || {} : {};
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      const payload = posMemberPayloadFromBody(body, existing, decoded, uid);
+
+      await memberRef.set({
+        uid,
+        ...payload,
+        ...(memberSnap.exists ? {} : {
+          createdAt: now,
+          created_at: now,
+          createdBy: decoded.uid || '',
+          createdByEmail: cleanString(decoded.email || '', 180),
+        }),
+      }, { merge: true });
+
+      const savedSnap = await memberRef.get();
+      res.status(200).json({
+        ok: true,
+        member: publicPosMemberProfile(uid, savedSnap.data() || {}),
+      });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('POS member profile upsert failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to save POS member profile');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
 
 function cloudFunctionUrl(functionName) {
   const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || 'edencafe-d9095';
@@ -4543,10 +4978,25 @@ exports.applyPosLoyaltySale = onRequest(
       const customerUid = cleanString(body.customerUid || '', 180);
       idempotencyKey = safeLedgerKey(body.idempotencyKey || receiptNo || orderId);
       const netAmount = Math.max(0, Number(body.netAmount || 0));
-      const normalDiscount = Math.max(0, Number(body.normalDiscount || 0));
       const subtotal = Math.max(0, Number(body.subtotal || 0));
       const requestedRedeemedPoints = Math.max(0, Math.trunc(Number(body.redeemedPoints || 0)));
       const items = normalizePosSaleItems(body.items || []);
+      const orderDiscount = resolvePosOrderDiscount({
+        orderDiscount: body.orderDiscount,
+        normalDiscount: body.normalDiscount,
+        discount: body.discount,
+        subtotal,
+        netAmount,
+        items,
+      });
+      const requestSkipReason =
+        normalizePosLoyaltySkipReason(body.loyaltySkipReason) ||
+        posLoyaltySkipReasonFor({
+          customerUid,
+          customerProfileSynced: body.customerProfileSynced,
+          isTestOrder: body.isTestOrder,
+          softLaunch: body.softLaunch,
+        });
       const orderLookup = await resolvePosOrderRef(requestedOrderId || orderId, firestoreId, receiptNo);
       orderRef = orderLookup.ref;
 
@@ -4570,22 +5020,39 @@ exports.applyPosLoyaltySale = onRequest(
         error.statusCode = 400;
         throw error;
       }
-      if (!customerUid) {
-        const error = new Error('Customer UID is required');
-        error.statusCode = 400;
-        throw error;
-      }
-      if (netAmount <= 0) {
-        const error = new Error('Net amount must be greater than zero');
-        error.statusCode = 400;
-        throw error;
-      }
       if (!orderRef) {
         const error = new Error('Synced order was not found');
         error.statusCode = 404;
         throw error;
       }
       orderId = orderRef.id;
+
+      if (requestSkipReason) {
+        const resultPayload = posLoyaltySkippedPayload({
+          customerUid,
+          idempotencyKey,
+          reason: requestSkipReason,
+        });
+        await orderRef.set(posLoyaltySkippedOrderPatch(resultPayload, idempotencyKey), { merge: true });
+        logger.info('POS loyalty sale skipped before ledger apply', {
+          orderId,
+          receiptNo,
+          customerUid,
+          idempotencyKey,
+          reason: requestSkipReason,
+        });
+        res.status(200).json({
+          ok: true,
+          status: 'skipped',
+          loyalty: resultPayload,
+        });
+        return;
+      }
+      if (netAmount <= 0) {
+        const error = new Error('Net amount must be greater than zero');
+        error.statusCode = 400;
+        throw error;
+      }
 
       const userRef = db.collection('users').doc(customerUid);
       const summaryRef = db.collection('member_summaries').doc(customerUid);
@@ -4617,53 +5084,39 @@ exports.applyPosLoyaltySale = onRequest(
           error.statusCode = 404;
           throw error;
         }
-        if (!userSnap.exists) {
-          const error = new Error('Member profile was not found');
-          error.statusCode = 404;
-          throw error;
-        }
-
         const order = orderSnap.data() || {};
         if (cleanString(order.customerUid || '', 180) && cleanString(order.customerUid || '', 180) !== customerUid) {
           const error = new Error('Customer UID does not match synced order');
           error.statusCode = 400;
           throw error;
         }
-        if (
-          order.isTestOrder === true ||
-          order.softLaunch === true ||
-          body.isTestOrder === true ||
-          body.softLaunch === true
-        ) {
-          resultPayload = {
+        const orderSkipReason = posLoyaltySkipReasonFor({
+          customerUid,
+          customerProfileSynced: order.customerProfileSynced,
+          isTestOrder: order.isTestOrder === true || body.isTestOrder === true,
+          softLaunch: order.softLaunch === true || body.softLaunch === true,
+        });
+        if (orderSkipReason) {
+          resultPayload = posLoyaltySkippedPayload({
             customerUid,
-            earnedPoints: 0,
-            redeemedPoints: 0,
-            loyaltyDiscount: 0,
             idempotencyKey,
-            skipped: true,
-            reason: 'test_order',
-            syncedAt: new Date().toISOString(),
-          };
+            reason: orderSkipReason,
+          });
           resultStatus = 'skipped';
-          transaction.set(orderRef, {
-            loyalty: resultPayload,
-            earnedPoints: 0,
-            redeemedPoints: 0,
-            loyaltyDiscount: 0,
-            loyaltySyncStatus: 'skipped',
-            loyaltyError: '',
-            loyaltyIdempotencyKey: idempotencyKey,
-            loyaltySkippedAt: admin.firestore.FieldValue.serverTimestamp(),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          }, { merge: true });
-          logger.info('POS loyalty sale skipped for test order', {
+          transaction.set(orderRef, posLoyaltySkippedOrderPatch(resultPayload, idempotencyKey), { merge: true });
+          logger.info('POS loyalty sale skipped', {
             orderId,
             receiptNo,
             customerUid,
             idempotencyKey,
+            reason: orderSkipReason,
           });
           return;
+        }
+        if (!userSnap.exists) {
+          const error = new Error('Member profile was not found');
+          error.statusCode = 404;
+          throw error;
         }
         if (
           order.loyaltySyncStatus === 'synced' &&
@@ -4724,72 +5177,33 @@ exports.applyPosLoyaltySale = onRequest(
 
         const member = userSnap.data() || {};
         const summary = summarySnap.exists ? summarySnap.data() || {} : {};
-        const memberTotalSpent = Math.max(0, Number(member.totalSpent || 0));
-        const memberVisitCount = Math.max(0, Math.floor(Number(member.visitCount || 0)));
-        const summaryTotalSpent = Math.max(0, Number(summary.totalSpent ?? memberTotalSpent));
-        const summaryVisitCount = Math.max(0, Math.floor(Number(summary.visitCount ?? memberVisitCount)));
-        const summaryLifetimePoints = Math.max(0, Number(summary.lifetimePoints || 0));
-        const summaryTotalRedeemed = Math.max(0, Number(summary.totalRedeemed || 0));
-        const memberPoints = Math.max(0, Math.floor(Number(member.points || 0)));
-        const estimatedLegacyPoints = config.spendPerPoint > 0
-          ? Math.floor(memberTotalSpent / config.spendPerPoint)
-          : 0;
-        const pointsBefore = summarySnap.exists && summary.pointsBalance !== undefined
-          ? Math.max(0, Math.floor(Number(summary.pointsBalance || 0)))
-          : Math.max(memberPoints, estimatedLegacyPoints);
-        const summaryLifetimeBase = Math.max(summaryLifetimePoints, pointsBefore);
-
-        if (requestedRedeemedPoints > pointsBefore) {
-          const error = new Error('Redeemed points exceed member balance');
-          error.statusCode = 400;
-          throw error;
-        }
-        if (
-          requestedRedeemedPoints > 0 &&
-          config.minRedeemPoints > 0 &&
-          requestedRedeemedPoints < config.minRedeemPoints
-        ) {
-          const error = new Error(`Minimum redeem points is ${config.minRedeemPoints}`);
-          error.statusCode = 400;
-          throw error;
-        }
-
-        const requestedDiscount = requestedRedeemedPoints * config.pointValue;
-        const maxRedeemDiscount = (netAmount * config.maxRedeemPercent) / 100;
-        if (requestedDiscount > maxRedeemDiscount + 0.0001) {
-          const error = new Error('Redeemed points exceed max redeem percent');
-          error.statusCode = 400;
-          throw error;
-        }
-        if (requestedDiscount > netAmount + 0.0001) {
-          const error = new Error('Redeemed points exceed sale amount');
-          error.statusCode = 400;
-          throw error;
-        }
-
-        const loyaltyDiscount = Math.min(netAmount, requestedDiscount);
-        const payableAmount = Math.max(0, netAmount - loyaltyDiscount);
-        const eligibleSubtotal = eligibleSubtotalForPosSale(items, config.excludedCategories);
-        const subtotalBase = subtotal > 0
-          ? subtotal
-          : items.reduce((sum, item) => sum + Math.max(0, item.unitPrice * item.quantity), 0);
-        const eligibleRatio = subtotalBase > 0 ? Math.min(1, eligibleSubtotal / subtotalBase) : 0;
-        const normalDiscountShare = config.earnAfterDiscount
-          ? normalDiscount * eligibleRatio
-          : 0;
-        const redeemedDiscountShare = config.earnOnRedeemedAmount
-          ? 0
-          : loyaltyDiscount * eligibleRatio;
-        const earnBase = Math.max(0, eligibleSubtotal - normalDiscountShare - redeemedDiscountShare);
-        const currentTier = cleanString(member.tier || summary.tier || 'Silver', 40);
-        const multiplier = Number(config.tierMultipliers[currentTier] || 1);
-        const earnedPoints = config.spendPerPoint > 0
-          ? Math.floor((earnBase / config.spendPerPoint) * multiplier)
-          : 0;
-        const pointsAfter = Math.max(0, pointsBefore - requestedRedeemedPoints + earnedPoints);
-        const totalSpentAfter = memberTotalSpent + payableAmount;
-        const visitCountAfter = memberVisitCount + 1;
-        const tier = memberTierFromMetrics(pointsAfter, totalSpentAfter, visitCountAfter);
+        const saleCalc = loyaltyFormula.calculatePosLoyaltySale({
+          config,
+          member,
+          summary: summarySnap.exists ? summary : {},
+          items,
+          subtotal,
+          netAmount,
+          orderDiscount,
+          requestedRedeemedPoints,
+        });
+        const {
+          earnedPoints,
+          redeemedPoints,
+          loyaltyDiscount,
+          payableAmount,
+          pointsBefore,
+          pointsAfter,
+          tier,
+          eligibleAmount: eligibleSubtotal,
+          earnBase,
+          totalSpentAfter,
+          visitCountAfter,
+          summaryTotalSpent,
+          summaryVisitCount,
+          summaryLifetimeBase,
+          summaryTotalRedeemed,
+        } = saleCalc;
         const now = admin.firestore.FieldValue.serverTimestamp();
         const syncedAt = new Date().toISOString();
         const memberCode = cleanString(member.memberCode || '', 80);
@@ -4799,7 +5213,7 @@ exports.applyPosLoyaltySale = onRequest(
         resultPayload = {
           customerUid,
           earnedPoints,
-          redeemedPoints: requestedRedeemedPoints,
+          redeemedPoints,
           loyaltyDiscount,
           pointsBefore,
           pointsAfter,
@@ -4809,21 +5223,21 @@ exports.applyPosLoyaltySale = onRequest(
           idempotencyKey,
           ledgerIds: {
             earn: earnedPoints > 0 ? earnLedgerRef.id : '',
-            redeem: requestedRedeemedPoints > 0 ? redeemLedgerRef.id : '',
+            redeem: redeemedPoints > 0 ? redeemLedgerRef.id : '',
           },
           syncedAt,
         };
 
-        if (requestedRedeemedPoints > 0) {
+        if (redeemedPoints > 0) {
           transaction.set(redeemLedgerRef, {
             userId: customerUid,
             memberCode,
             memberName,
             memberEmail,
             type: 'pos_redeem',
-            pointsDelta: -requestedRedeemedPoints,
+            pointsDelta: -redeemedPoints,
             pointsBefore,
-            pointsAfter: pointsBefore - requestedRedeemedPoints,
+            pointsAfter: pointsBefore - redeemedPoints,
             amount: loyaltyDiscount,
             receiptNo,
             orderId,
@@ -4842,7 +5256,7 @@ exports.applyPosLoyaltySale = onRequest(
             memberEmail,
             type: 'pos_earn',
             pointsDelta: earnedPoints,
-            pointsBefore: pointsBefore - requestedRedeemedPoints,
+            pointsBefore: pointsBefore - redeemedPoints,
             pointsAfter,
             amount: earnBase,
             receiptNo,
@@ -4875,13 +5289,13 @@ exports.applyPosLoyaltySale = onRequest(
           pointsBalance: pointsAfter,
           tier,
           lifetimePoints: summaryLifetimeBase + earnedPoints,
-          totalRedeemed: summaryTotalRedeemed + requestedRedeemedPoints,
+          totalRedeemed: summaryTotalRedeemed + redeemedPoints,
           totalSpent: summaryTotalSpent + payableAmount,
           visitCount: summaryVisitCount + 1,
           lastLedgerId:
             earnedPoints > 0
               ? earnLedgerRef.id
-              : requestedRedeemedPoints > 0
+              : redeemedPoints > 0
                 ? redeemLedgerRef.id
                 : cleanString(summary.lastLedgerId || '', 180),
           updatedAt: now,
@@ -4890,8 +5304,9 @@ exports.applyPosLoyaltySale = onRequest(
         transaction.set(orderRef, {
           loyalty: resultPayload,
           earnedPoints,
-          redeemedPoints: requestedRedeemedPoints,
+          redeemedPoints,
           loyaltyDiscount,
+          normalDiscount: orderDiscount,
           totalBeforeLoyalty: netAmount,
           totalAmount: payableAmount,
           total: payableAmount,
@@ -4996,33 +5411,36 @@ exports.adminRetryPosLoyaltySale = onRequest(
         throw error;
       }
 
-      if (order.isTestOrder === true || order.softLaunch === true) {
-        await orderRef.set({
-          loyalty: {
-            customerUid: cleanString(order.customerUid || '', 180),
-            earnedPoints: 0,
-            redeemedPoints: 0,
-            loyaltyDiscount: 0,
-            idempotencyKey,
-            skipped: true,
-            reason: 'test_order',
-            syncedAt: new Date().toISOString(),
-          },
-          earnedPoints: 0,
-          redeemedPoints: 0,
-          loyaltyDiscount: 0,
-          loyaltySyncStatus: 'skipped',
-          loyaltyError: '',
-          loyaltyIdempotencyKey: idempotencyKey,
-          loyaltySkippedAt: admin.firestore.FieldValue.serverTimestamp(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        }, { merge: true });
-        logger.info('Admin POS loyalty retry skipped test order', {
+      const retrySkipReason =
+        normalizePosLoyaltySkipReason(order.loyaltySkipReason || order.loyalty?.reason || order.loyaltyError) ||
+        posLoyaltySkipReasonFor({
+          customerUid: order.customerUid,
+          customerProfileSynced: order.customerProfileSynced,
+          isTestOrder: order.isTestOrder === true,
+          softLaunch: order.softLaunch === true,
+        });
+
+      if (retrySkipReason) {
+        const resultPayload = posLoyaltySkippedPayload({
+          customerUid: order.customerUid,
+          idempotencyKey,
+          reason: retrySkipReason,
+        });
+        await orderRef.set(posLoyaltySkippedOrderPatch(resultPayload, idempotencyKey), { merge: true });
+        logger.info('Admin POS loyalty retry skipped non-retryable order', {
           orderId: orderRef.id,
           receiptNo,
           idempotencyKey,
+          reason: retrySkipReason,
         });
-        res.status(200).json({ ok: true, status: 'skipped', orderId: orderRef.id, receiptNo, idempotencyKey });
+        res.status(200).json({
+          ok: true,
+          status: 'skipped',
+          orderId: orderRef.id,
+          receiptNo,
+          idempotencyKey,
+          loyalty: resultPayload,
+        });
         return;
       }
 
@@ -5093,6 +5511,7 @@ const archeryConfirmV1 = require('./archery/confirmBooking');
 const archeryWalkinV1 = require('./archery/walkin');
 const archeryCancelV1 = require('./archery/cancel');
 const archeryAdminActionsV1 = require('./archery/adminActions');
+const archeryStaffSessionV1 = require('./archery/staffSession');
 const archeryPaymentsV1 = require('./payments');
 const archeryScheduledV1 = require('./scheduled');
 
@@ -5100,6 +5519,7 @@ exports.getArcheryAvailability = archeryAvailabilityV1.getArcheryAvailability;
 exports.createArcheryHold = archeryBookingHoldV1.createArcheryHold;
 exports.createBookingHold = archeryBookingHoldV1.createArcheryHold;
 exports.confirmArcheryBooking = archeryConfirmV1.confirmArcheryBooking;
+exports.startArcheryStaffSession = archeryStaffSessionV1.startArcheryStaffSession;
 exports.createWalkInArcheryBooking = archeryWalkinV1.createWalkInArcheryBooking;
 exports.createWalkInBooking = archeryWalkinV1.createWalkInArcheryBooking;
 exports.requestCancelBooking = archeryCancelV1.requestCancelBooking;

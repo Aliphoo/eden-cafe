@@ -5,19 +5,30 @@ const { apiError, cleanString, timestampToDate } = require('../shared/time');
 
 const REGION = 'asia-southeast1';
 const VALID_ROLES = new Set(['OWNER', 'MANAGER', 'ARCHERY_STAFF', 'CASHIER', 'CUSTOMER']);
+const ADMIN_PERMISSION_FALLBACKS = {
+  archery: ['bookings'],
+};
 const ALLOWED_ORIGINS = new Set([
   'https://edencafe.co',
   'https://www.edencafe.co',
   'https://edencafe-d9095.web.app',
   'https://edencafe-d9095.firebaseapp.com',
+  'capacitor://localhost',
+  'https://localhost',
+  'http://localhost',
   'http://localhost:3000',
+  'http://localhost:5174',
   'http://localhost:5000',
+  'http://127.0.0.1:5174',
   'http://127.0.0.1:5000',
 ]);
 
 function setCors(req, res) {
   const origin = req.get('origin') || '';
-  if (ALLOWED_ORIGINS.has(origin)) {
+  if (
+    ALLOWED_ORIGINS.has(origin)
+    || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+  ) {
     res.set('Access-Control-Allow-Origin', origin);
     res.set('Vary', 'Origin');
   }
@@ -74,9 +85,26 @@ function resolveRole(decoded = {}, user = {}, adminUser = {}) {
   if (VALID_ROLES.has(userRole)) return userRole;
   const legacyRole = cleanString(adminUser.role, 40).toLowerCase();
   if (legacyRole === 'owner') return 'OWNER';
-  if (['head_manager', 'manager'].includes(legacyRole)) return 'MANAGER';
+  if (legacyRole === 'head_manager') return 'MANAGER';
+  if (legacyRole === 'manager') {
+    if (!adminUserHasPermission(adminUser, 'archery')) return 'CUSTOMER';
+    const archeryRole = cleanString(adminUser.archery_role || adminUser.archeryRole, 40).toUpperCase();
+    if (VALID_ROLES.has(archeryRole) && archeryRole !== 'CUSTOMER') return archeryRole;
+    return 'MANAGER';
+  }
   if (legacyRole === 'staff') return 'ARCHERY_STAFF';
   return 'CUSTOMER';
+}
+
+function adminUserHasPermission(adminUser = {}, permission = '') {
+  if (!permission) return true;
+  if (adminUser.status !== 'active') return false;
+  const role = cleanString(adminUser.role, 40).toLowerCase();
+  if (role === 'owner' || role === 'head_manager') return true;
+  if (role !== 'manager') return false;
+  if (adminUser.permissions && adminUser.permissions[permission] === true) return true;
+  if (Object.prototype.hasOwnProperty.call(adminUser.permissions || {}, permission)) return false;
+  return (ADMIN_PERMISSION_FALLBACKS[permission] || []).some(fallback => adminUser.permissions?.[fallback] === true);
 }
 
 function resolveBranchIds(decoded = {}, user = {}, adminUser = {}) {

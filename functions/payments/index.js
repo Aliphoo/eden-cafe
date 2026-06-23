@@ -10,6 +10,10 @@ const {
 } = require('../shared/time');
 const beamArcheryPayments = require('./beamArchery');
 const webPaymentCore = require('./webPaymentCore');
+const {
+  readArcheryLoyaltyState,
+  writeArcheryLoyaltyState,
+} = require('../archery/loyalty');
 
 function paymentId(prefix, value) {
   return `${prefix}_${sha256(value).slice(0, 40)}`;
@@ -60,6 +64,15 @@ const recordCounterPayment = httpFunction(async ({ db, data, actor, requestId })
         throw apiError('PAYMENT_ALREADY_RECORDED', 409, 'idempotency_key has already recorded another payment');
       }
     }
+    const loyaltyState = await readArcheryLoyaltyState(transaction, db, {
+      bookingId,
+      booking: {
+        ...booking,
+        booking_id: bookingId,
+        payment_id: paymentRef.id,
+        payment_status: 'PAID_COUNTER',
+      },
+    });
     const now = FieldValue.serverTimestamp();
     transaction.set(paymentRef, {
       payment_id: paymentRef.id,
@@ -85,6 +98,13 @@ const recordCounterPayment = httpFunction(async ({ db, data, actor, requestId })
       paid_by: actor.uid,
       updated_at: now,
     });
+    const loyaltyResult = writeArcheryLoyaltyState(transaction, loyaltyState, {
+      paymentId: paymentRef.id,
+      paymentStatus: 'PAID_COUNTER',
+      bookingStatus: booking.booking_status || booking.status || '',
+      actorId: actor.uid,
+      actorEmail: actor.email || '',
+    });
     writeAuditLog(transaction, db, {
       branchId,
       actor,
@@ -100,6 +120,7 @@ const recordCounterPayment = httpFunction(async ({ db, data, actor, requestId })
       booking_id: bookingId,
       payment_id: paymentRef.id,
       payment_status: 'PAID_COUNTER',
+      loyalty: loyaltyResult,
     };
   });
 
