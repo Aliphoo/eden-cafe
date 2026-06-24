@@ -1,5 +1,5 @@
 /* style.css */
-/* Profile dashboard asset deploy marker: profile-layout-20260624-1 */
+/* Profile dashboard asset deploy marker: profile-layout-20260624-2 */
 :root {
     --primary-color: #1A9345; /* New Eden Fresh Green */
     --accent-color: #137234; /* Darker Green for contrast/buttons */
@@ -4604,6 +4604,13 @@ footer p {
     display: grid;
     gap: 18px;
     min-width: 0;
+    padding: 0;
+    outline: none;
+}
+
+.profile-tab-panel:focus,
+.profile-tab-panel:focus-visible {
+    outline: none;
 }
 
 .profile-dashboard-head,
