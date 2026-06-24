@@ -649,6 +649,14 @@ function activityAmount(data = {}) {
   ) || 0;
 }
 
+function firstNumber(...values) {
+  for (const value of values) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
 function activityStatus(data = {}) {
   return cleanString(
     data.paymentLabel ||
@@ -662,6 +670,345 @@ function activityStatus(data = {}) {
     '',
     80
   );
+}
+
+function receiptSourceTypeCollection(sourceType = '') {
+  const normalized = normalizeReceiptStatus(sourceType);
+  if (['pos_order', 'web_order', 'order', 'orders', 'shop_order'].includes(normalized)) return 'orders';
+  if (['booking', 'bookings', 'archery', 'archery_booking'].includes(normalized)) return 'bookings';
+  return '';
+}
+
+function receiptOwnerMatches(data = {}, uid = '', collectionName = '') {
+  const expectedUid = cleanString(uid, 180);
+  if (!expectedUid) return false;
+  if (collectionName === 'orders') {
+    const customerUid = cleanString(data.customerUid || '', 180);
+    if (customerUid) return customerUid === expectedUid;
+    if (activityOrderSource(data) === 'pos') return false;
+    return [
+      data.uid,
+      data.userId,
+      data.memberUid,
+      data.member_id,
+      data.memberId,
+    ].some(value => cleanString(value || '', 180) === expectedUid);
+  }
+  if (collectionName === 'bookings') {
+    return [
+      data.uid,
+      data.customerUid,
+      data.member_id,
+      data.memberId,
+      data.memberUid,
+      data.userId,
+    ].some(value => cleanString(value || '', 180) === expectedUid);
+  }
+  return false;
+}
+
+function parseReceiptRequest(rawOptions = {}) {
+  const actionId = cleanString(rawOptions.actionId || rawOptions.receiptActionId || '', 260);
+  let sourceType = cleanString(rawOptions.sourceType || rawOptions.type || '', 80);
+  let sourceId = cleanString(rawOptions.sourceId || rawOptions.id || rawOptions.firestoreId || '', 180);
+  if ((!sourceType || !sourceId) && actionId.includes(':')) {
+    const [parsedType, ...rest] = actionId.split(':');
+    sourceType = sourceType || cleanString(parsedType || '', 80);
+    sourceId = sourceId || cleanString(rest.join(':') || '', 180);
+  }
+  return {
+    actionId,
+    sourceType,
+    sourceId,
+    receiptNo: cleanString(rawOptions.receiptNo || '', 120),
+    receiptId: cleanString(rawOptions.receiptId || '', 180),
+  };
+}
+
+async function getOwnedReceiptSource(uid, rawOptions = {}) {
+  const request = parseReceiptRequest(rawOptions);
+  const collectionName = receiptSourceTypeCollection(request.sourceType);
+  if (!collectionName || !request.sourceId) {
+    const error = new Error('Missing receipt source');
+    error.statusCode = 400;
+    throw error;
+  }
+  const collectionRef = db.collection(collectionName);
+  const candidateIds = Array.from(new Set([request.sourceId, request.receiptId].filter(Boolean)));
+  for (const id of candidateIds) {
+    try {
+      const snap = await collectionRef.doc(id).get();
+      if (snap.exists) {
+        const data = { firestoreId: snap.id, ...serializeActivityValue(snap.data() || {}) };
+        if (receiptOwnerMatches(data, uid, collectionName)) return { data, collectionName, request };
+      }
+    } catch (error) {
+      logger.warn('Receipt direct lookup failed', {
+        collectionName,
+        code: error.code || '',
+        message: error.message,
+      });
+    }
+  }
+
+  const lookupValue = request.sourceId || request.receiptNo || request.receiptId;
+  const fields = collectionName === 'orders'
+    ? ['receiptNo', 'orderNumber', 'id', 'payment_id', 'paymentId', 'source_id']
+    : ['booking_id', 'bookingId', 'id', 'payment_id', 'paymentId', 'source_id'];
+  for (const field of fields) {
+    try {
+      const snap = await collectionRef.where(field, '==', lookupValue).limit(5).get();
+      for (const docSnap of snap.docs) {
+        const data = { firestoreId: docSnap.id, ...serializeActivityValue(docSnap.data() || {}) };
+        if (receiptOwnerMatches(data, uid, collectionName)) return { data, collectionName, request };
+      }
+    } catch (error) {
+      logger.warn('Receipt field lookup failed', {
+        collectionName,
+        field,
+        code: error.code || '',
+        message: error.message,
+      });
+    }
+  }
+
+  const error = new Error('Receipt not found');
+  error.statusCode = 404;
+  throw error;
+}
+
+function receiptItemName(item = {}) {
+  return cleanString(
+    item.name ||
+    item.productName ||
+    item.title ||
+    item.label ||
+    item.menuName ||
+    'Eden Cafe item',
+    160
+  );
+}
+
+function sanitizeReceiptItems(data = {}, fallbackName = 'Eden Cafe order') {
+  const rawItems = Array.isArray(data.items) ? data.items : [];
+  const items = rawItems.slice(0, 80).map(item => {
+    const quantity = Math.max(0, firstNumber(item.quantity, item.qty, item.count, 1) || 1);
+    const unitPrice = firstNumber(item.unitPrice, item.price, item.amount, item.total, 0);
+    const lineTotal = firstNumber(item.lineTotal, item.total, item.subtotal, item.amountTotal, unitPrice * quantity);
+    return {
+      name: receiptItemName(item),
+      variantName: cleanString(item.variantName || item.variant || item.optionName || '', 120),
+      quantity,
+      unitPrice,
+      lineTotal,
+    };
+  }).filter(item => item.name);
+  if (items.length) return items;
+  return [{
+    name: cleanString(fallbackName || 'Eden Cafe order', 160),
+    variantName: '',
+    quantity: 1,
+    unitPrice: activityAmount(data),
+    lineTotal: activityAmount(data),
+  }];
+}
+
+function receiptFallbackItemName(data = {}, collectionName = '') {
+  if (collectionName === 'bookings') {
+    if (isActivityArcheryBooking(data)) return 'Eden Archery booking';
+    return 'Eden Cafe booking';
+  }
+  return activityItemsText(data.items) || 'Eden Cafe order';
+}
+
+function buildCustomerReceiptPayload(uid, sourceData = {}, collectionName = '', request = {}) {
+  const source = collectionName === 'orders'
+    ? activityOrderSource(sourceData)
+    : (isActivityArcheryBooking(sourceData) ? 'archery' : 'booking');
+  const sourceType = collectionName === 'orders'
+    ? (source === 'pos' ? 'pos_order' : 'web_order')
+    : (source === 'archery' ? 'archery_booking' : 'booking');
+  const displayId = cleanString(
+    sourceData.receiptNo ||
+    sourceData.receipt_no ||
+    sourceData.orderNumber ||
+    sourceData.booking_id ||
+    sourceData.bookingId ||
+    sourceData.id ||
+    sourceData.firestoreId ||
+    request.sourceId ||
+    '-',
+    120
+  );
+  const eligibility = activityReceiptMetadata(sourceData, {
+    category: collectionName === 'orders' ? (source === 'pos' ? 'pos' : 'orders') : (source === 'archery' ? 'archery' : 'bookings'),
+    type: sourceType,
+    source,
+    sourceType,
+    sourceId: sourceData.firestoreId || sourceData.id || displayId,
+    displayId,
+  });
+  if (!eligibility.available) {
+    const error = new Error('Receipt is not available for this activity');
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const items = sanitizeReceiptItems(sourceData, receiptFallbackItemName(sourceData, collectionName));
+  const itemsTotal = items.reduce((sum, item) => sum + (Number(item.lineTotal) || 0), 0);
+  const subtotal = firstNumber(sourceData.subtotal, sourceData.subTotal, sourceData.itemsSubtotal, sourceData.grossTotal, itemsTotal);
+  const discount = firstNumber(sourceData.discount, sourceData.discountAmount, sourceData.totalDiscount, 0);
+  const taxIncluded = firstNumber(sourceData.taxIncluded, sourceData.vatIncluded, sourceData.taxAmount, sourceData.vatAmount, 0);
+  const totalAmount = activityAmount(sourceData) || Math.max(0, subtotal - discount);
+  const paidAmount = firstNumber(sourceData.paidAmount, sourceData.amountPaid, sourceData.receivedAmount, totalAmount);
+  const changeAmount = firstNumber(sourceData.changeAmount, sourceData.change, 0);
+  const issuedAt = activityIso(
+    sourceData.paidAt ||
+    sourceData.closedAt ||
+    sourceData.completedAt ||
+    sourceData.timestamp ||
+    sourceData.createdAt ||
+    sourceData.created_at ||
+    sourceData.date
+  );
+  const receiptNo = cleanString(
+    eligibility.receipt?.receiptNo ||
+    sourceData.receiptNo ||
+    sourceData.receipt_no ||
+    sourceData.orderNumber ||
+    sourceData.booking_id ||
+    displayId,
+    120
+  );
+
+  return {
+    ok: true,
+    uid,
+    receipt: {
+      receiptNo,
+      receiptId: cleanString(eligibility.receipt?.receiptId || sourceData.receiptId || sourceData.receipt_id || '', 180),
+      source,
+      sourceType,
+      sourceId: cleanString(sourceData.firestoreId || sourceData.id || request.sourceId || '', 180),
+      status: activityStatus(sourceData),
+      issuedAt,
+      customerName: cleanString(sourceData.customerName || sourceData.name || sourceData.displayName || '', 160),
+      cashierName: cleanString(sourceData.cashierName || sourceData.staffName || '', 120),
+      paymentMethod: cleanString(sourceData.paymentMethod || sourceData.payment_method || '', 80),
+      paymentLabel: cleanString(sourceData.paymentLabel || sourceData.payment_method_label || sourceData.paymentMethodLabel || '', 120),
+      currency: cleanString(sourceData.currency || 'THB', 12) || 'THB',
+      subtotal,
+      discount,
+      taxIncluded,
+      totalAmount,
+      paidAmount,
+      changeAmount,
+      items,
+    },
+  };
+}
+
+const RECEIPT_PAID_STATUSES = new Set([
+  'paid',
+  'paid_online',
+  'paid_counter',
+  'completed',
+  'complete',
+  'success',
+  'succeeded',
+  'settled',
+  'captured',
+  'ชำระเงินแล้ว',
+  'จ่ายแล้ว',
+]);
+
+const RECEIPT_BLOCKED_STATUSES = new Set([
+  'pending',
+  'unpaid',
+  'pending_payment',
+  'paid_pending_review',
+  'review_required',
+  'cancelled',
+  'canceled',
+  'failed',
+  'payment_failed',
+  'expired',
+  'void',
+  'voided',
+  'refunded',
+  'รอชำระเงิน',
+  'ยังไม่ชำระเงิน',
+  'ยกเลิก',
+  'ยกเลิกแล้ว',
+  'ล้มเหลว',
+  'ชำระไม่สำเร็จ',
+]);
+
+function normalizeReceiptStatus(value) {
+  return cleanString(value || '', 80).toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function activityPaymentStatusCandidates(data = {}) {
+  return [
+    data.payment_status,
+    data.paymentStatus,
+    data.billStatus,
+    data.paymentLabel,
+  ].map(normalizeReceiptStatus).filter(Boolean);
+}
+
+function activityGeneralStatusCandidates(data = {}) {
+  return [
+    data.status,
+    data.order_status,
+    data.booking_status,
+    data.bookingStatus,
+  ].map(normalizeReceiptStatus).filter(Boolean);
+}
+
+function activityReceiptMetadata(data = {}, options = {}) {
+  const paymentStatuses = activityPaymentStatusCandidates(data);
+  const generalStatuses = activityGeneralStatusCandidates(data);
+  const statuses = [...paymentStatuses, ...generalStatuses];
+  const hasBlockedStatus = statuses.some(status => RECEIPT_BLOCKED_STATUSES.has(status));
+  const hasPaidStatus = paymentStatuses.some(status => RECEIPT_PAID_STATUSES.has(status))
+    || ((options.category === 'orders' || options.source === 'pos') && generalStatuses.some(status => RECEIPT_PAID_STATUSES.has(status)));
+  const receiptNo = cleanString(data.receiptNo || data.posReceiptNo || data.receipt_no || '', 120);
+  const receiptId = cleanString(data.receiptId || data.receipt_id || '', 180);
+  const available = !hasBlockedStatus && (hasPaidStatus || !!receiptId || (!!receiptNo && options.source === 'pos'));
+  if (!available) {
+    return { available: false, receipt: null, actions: [] };
+  }
+  const sourceType = cleanString(options.sourceType || options.type || options.category || '', 80);
+  const sourceId = cleanString(options.sourceId || data.firestoreId || data.id || options.displayId || '', 180);
+  const actionId = cleanString(`${sourceType || 'activity'}:${sourceId || receiptId || receiptNo}`, 260);
+  const receipt = {
+    available: true,
+    source: cleanString(options.source || data.source || '', 40),
+    sourceType,
+    sourceId,
+    receiptNo,
+    receiptId,
+    orderId: cleanString(data.orderNumber || data.orderId || data.id || options.displayId || '', 180),
+    bookingId: cleanString(data.booking_id || data.bookingId || data.id || options.displayId || '', 180),
+    status: activityStatus(data),
+    amount: activityAmount(data),
+    actionId,
+  };
+  return {
+    available: true,
+    receipt,
+    actions: [{
+      type: 'download_receipt',
+      enabled: true,
+      actionId,
+      source: receipt.source,
+      sourceType: receipt.sourceType,
+      sourceId: receipt.sourceId,
+      receiptNo: receipt.receiptNo,
+      receiptId: receipt.receiptId,
+    }],
+  };
 }
 
 function isActivityArcheryBooking(data = {}) {
@@ -795,10 +1142,20 @@ function orderActivity(order = {}, uid = '') {
   const displayId = cleanString(order.receiptNo || order.orderNumber || order.id || order.firestoreId || '-', 120);
   const amount = activityAmount(order);
   const occurredMs = activityTimestampMillis(order);
+  const category = source === 'pos' ? 'pos' : 'orders';
+  const type = source === 'pos' ? 'pos_order' : 'web_order';
+  const receipt = activityReceiptMetadata(order, {
+    category,
+    type,
+    source,
+    sourceType: type,
+    sourceId: order.firestoreId || order.id || displayId,
+    displayId,
+  });
   return {
     id: `order:${order.firestoreId || displayId}`,
-    category: source === 'pos' ? 'pos' : 'orders',
-    type: source === 'pos' ? 'pos_order' : 'web_order',
+    category,
+    type,
     source,
     title: source === 'pos' ? `POS receipt #${displayId}` : `Order #${displayId}`,
     status: activityStatus(order) || 'pending',
@@ -811,6 +1168,9 @@ function orderActivity(order = {}, uid = '') {
       firestoreId: cleanString(order.firestoreId || '', 180),
       receiptNo: cleanString(order.receiptNo || '', 120),
     },
+    receiptAvailable: receipt.available,
+    receipt: receipt.receipt,
+    actions: receipt.actions,
   };
 }
 
@@ -818,11 +1178,22 @@ function bookingActivity(booking = {}) {
   const archery = isActivityArcheryBooking(booking);
   const displayId = cleanString(booking.booking_id || booking.id || booking.firestoreId || '-', 120);
   const occurredMs = activityTimestampMillis(booking);
+  const category = archery ? 'archery' : 'bookings';
+  const type = archery ? 'archery_booking' : 'booking';
+  const source = archery ? 'archery' : 'booking';
+  const receipt = activityReceiptMetadata(booking, {
+    category,
+    type,
+    source,
+    sourceType: type,
+    sourceId: booking.firestoreId || booking.id || booking.booking_id || displayId,
+    displayId,
+  });
   return {
     id: `booking:${booking.firestoreId || displayId}`,
-    category: archery ? 'archery' : 'bookings',
-    type: archery ? 'archery_booking' : 'booking',
-    source: archery ? 'archery' : 'booking',
+    category,
+    type,
+    source,
     title: archery ? `Eden Archery #${displayId}` : `Booking #${displayId}`,
     status: activityStatus(booking) || 'confirmed',
     detail: activityBookingDetail(booking) || '-',
@@ -833,6 +1204,9 @@ function bookingActivity(booking = {}) {
       bookingId: displayId,
       firestoreId: cleanString(booking.firestoreId || '', 180),
     },
+    receiptAvailable: receipt.available,
+    receipt: receipt.receipt,
+    actions: receipt.actions,
   };
 }
 
@@ -870,14 +1244,28 @@ function ledgerActivity(ledger = {}) {
 function activityOrderSummary(order = {}) {
   const amount = activityAmount(order);
   const occurredMs = activityTimestampMillis(order);
+  const source = activityOrderSource(order);
+  const displayId = cleanString(order.receiptNo || order.orderNumber || order.id || order.firestoreId || '-', 120);
+  const type = source === 'pos' ? 'pos_order' : 'web_order';
+  const receipt = activityReceiptMetadata(order, {
+    category: source === 'pos' ? 'pos' : 'orders',
+    type,
+    source,
+    sourceType: type,
+    sourceId: order.firestoreId || order.id || displayId,
+    displayId,
+  });
   return {
     firestoreId: cleanString(order.firestoreId || '', 180),
-    id: cleanString(order.receiptNo || order.orderNumber || order.id || order.firestoreId || '-', 120),
+    id: displayId,
     receiptNo: cleanString(order.receiptNo || '', 120),
     orderNumber: cleanString(order.orderNumber || '', 120),
-    source: activityOrderSource(order),
+    source,
     status: cleanString(order.status || order.order_status || order.billStatus || '', 80),
     paymentStatus: cleanString(order.paymentStatus || order.payment_status || '', 80),
+    receiptAvailable: receipt.available,
+    receipt: receipt.receipt,
+    actions: receipt.actions,
     totalAmount: amount,
     total: amount,
     date: occurredMs ? new Date(occurredMs).toISOString() : '',
@@ -894,13 +1282,28 @@ function activityOrderSummary(order = {}) {
 
 function activityBookingSummary(booking = {}) {
   const occurredMs = activityTimestampMillis(booking);
+  const archery = isActivityArcheryBooking(booking);
+  const type = archery ? 'archery_booking' : 'booking';
+  const source = archery ? 'archery' : 'booking';
+  const displayId = cleanString(booking.booking_id || booking.id || booking.firestoreId || '-', 120);
+  const receipt = activityReceiptMetadata(booking, {
+    category: archery ? 'archery' : 'bookings',
+    type,
+    source,
+    sourceType: type,
+    sourceId: booking.firestoreId || booking.id || booking.booking_id || displayId,
+    displayId,
+  });
   return {
     firestoreId: cleanString(booking.firestoreId || '', 180),
-    id: cleanString(booking.booking_id || booking.id || booking.firestoreId || '-', 120),
+    id: displayId,
     service_type: cleanString(booking.service_type || booking.serviceType || '', 40),
     bookingType: cleanString(booking.bookingType || booking.booking_type || '', 40),
     status: cleanString(booking.status || booking.booking_status || '', 80),
     paymentStatus: cleanString(booking.paymentStatus || booking.payment_status || '', 80),
+    receiptAvailable: receipt.available,
+    receipt: receipt.receipt,
+    actions: receipt.actions,
     booking_date: cleanString(booking.booking_date || booking.bookingDate || booking.date || '', 20),
     start_time: cleanString(booking.start_time || booking.startTime || '', 10),
     end_time: cleanString(booking.end_time || booking.endTime || '', 10),
@@ -1033,6 +1436,44 @@ exports.getMyActivity = onRequest(
         message: error.message,
       });
       const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to load member activity right now.');
+      res.status(status).json({ ok: false, error: publicError.message });
+    }
+  }
+);
+
+exports.getMyReceipt = onRequest(
+  { region: 'asia-southeast1', timeoutSeconds: 30, memory: '256MiB' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    res.set('Cache-Control', 'no-store, max-age=0');
+    res.set('X-Content-Type-Options', 'nosniff');
+
+    if (!['GET', 'POST'].includes(req.method)) {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const decoded = await requireSignedInUser(req);
+      try {
+        checkRateLimitKey(`get-my-receipt:${decoded.uid}`, 120, 15 * 60 * 1000);
+      } catch (rateLimitError) {
+        rateLimitError.publicMessage = 'Too many receipt requests. Please wait a moment and try again.';
+        throw rateLimitError;
+      }
+      const rawOptions = req.method === 'GET' ? (req.query || {}) : (req.body || {});
+      const { data, collectionName, request } = await getOwnedReceiptSource(decoded.uid, rawOptions);
+      const payload = buildCustomerReceiptPayload(decoded.uid, data, collectionName, request);
+      res.status(200).json(payload);
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('Member receipt fetch failed', {
+        status,
+        code: error.code || '',
+        message: error.message,
+      });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to load receipt right now.');
       res.status(status).json({ ok: false, error: publicError.message });
     }
   }

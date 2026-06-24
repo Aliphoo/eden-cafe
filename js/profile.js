@@ -28,6 +28,8 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     let cloudHistoryUid = '';
     let cloudHistoryRangeKey = '';
     let cloudHistoryLoading = false;
+    let historyReceiptNotice = '';
+    let historyReceiptBusyActionId = '';
     let cloudProfile = null;
     let cloudProfileUid = '';
     let cloudProfileLoading = false;
@@ -74,8 +76,9 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     let activeProfileTab = 'points';
     let activeHistoryFilter = 'all';
     let historyExpanded = false;
-    let historyDateFrom = '';
-    let historyDateTo = '';
+    const DEFAULT_HISTORY_DATE_RANGE = getCurrentMonthDateRange();
+    let historyDateFrom = DEFAULT_HISTORY_DATE_RANGE.from;
+    let historyDateTo = DEFAULT_HISTORY_DATE_RANGE.to;
     const PROFILE_TABS = ['points', 'history', 'account'];
     const HISTORY_FILTERS = ['all', 'orders', 'pos', 'bookings', 'archery', 'points'];
     const CAN_LOG_CLIENT_ERRORS = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
@@ -477,6 +480,24 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         });
     }
 
+    function formatDateInputValue(date) {
+        if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    function getCurrentMonthDateRange(now = new Date()) {
+        if (!(now instanceof Date) || Number.isNaN(now.getTime())) return { from: '', to: '' };
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        return {
+            from: formatDateInputValue(firstDay),
+            to: formatDateInputValue(lastDay)
+        };
+    }
+
     function getLabels() {
         const en = isEnglishPage();
         return en ? {
@@ -506,7 +527,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             bookArchery: 'Book Archery',
             historyAll: 'All',
             historyOrders: 'Orders',
-            historyPos: 'POS',
+            historyPos: 'In-store',
             historyBookings: 'Table / Room',
             historyArchery: 'Archery',
             historyPoints: 'Points',
@@ -514,6 +535,11 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             historyFrom: 'From',
             historyTo: 'To',
             historyClearDates: 'Clear dates',
+            downloadReceipt: 'Download receipt',
+            preparingReceipt: 'Preparing receipt...',
+            receiptDownloadPreparing: 'Receipt download is being prepared for this paid activity.',
+            receiptDownloadReady: 'Receipt downloaded.',
+            receiptDownloadFailed: 'Unable to download receipt right now.',
             loadMoreHistory: 'Load more',
             loadingHistory: 'Loading activity...',
             recentActivity: 'Recent activity',
@@ -688,8 +714,14 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             bookArchery: 'จองยิงธนู',
             historyAll: 'ทั้งหมด',
             historyOrders: 'คำสั่งซื้อ',
+            historyPos: 'หน้าร้าน',
             historyBookings: 'โต๊ะ / ห้อง',
             historyArchery: 'ยิงธนู',
+            downloadReceipt: 'ดาวน์โหลดใบเสร็จ',
+            preparingReceipt: 'กำลังเตรียมใบเสร็จ...',
+            receiptDownloadPreparing: 'ระบบกำลังเตรียมใบเสร็จสำหรับรายการที่ชำระเงินแล้ว',
+            receiptDownloadReady: 'ดาวน์โหลดใบเสร็จแล้ว',
+            receiptDownloadFailed: 'ไม่สามารถดาวน์โหลดใบเสร็จได้ในขณะนี้',
             recentActivity: 'กิจกรรมล่าสุด',
             noHistory: 'ยังไม่มีประวัติการใช้งาน',
             showAll: 'ดูทั้งหมด',
@@ -1728,6 +1760,144 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         return false;
     }
 
+    function receiptMoney(value, currency = 'THB') {
+        const amount = (Number(value) || 0).toLocaleString('th-TH', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+        return `${currency === 'THB' ? '฿' : escapeHTML(currency)}${amount}`;
+    }
+
+    function receiptDateTime(value) {
+        if (!value) return '-';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '-';
+        return date.toLocaleString(isEnglishPage() ? 'en-US' : 'th-TH', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    }
+
+    function receiptFilenamePart(value) {
+        return cleanString(value || 'receipt', 80).replace(/[^a-z0-9ก-๙_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'receipt';
+    }
+
+    function receiptPaymentLabel(receipt = {}) {
+        return cleanString(receipt.paymentLabel || receipt.paymentMethod || '', 120) || (isEnglishPage() ? 'Paid' : 'ชำระเงินแล้ว');
+    }
+
+    function buildCustomerReceiptHTML(receipt = {}) {
+        const labels = getLabels();
+        const en = isEnglishPage();
+        const items = Array.isArray(receipt.items) ? receipt.items : [];
+        const currency = cleanString(receipt.currency || 'THB', 12) || 'THB';
+        const row = (label, value) => value ? `
+            <div class="receipt-row">
+                <span>${escapeHTML(label)}</span>
+                <strong>${escapeHTML(value)}</strong>
+            </div>
+        ` : '';
+        const receiptBody = `
+            <div class="receipt-card">
+                <div class="receipt-brand">Eden Cafe</div>
+                <div class="receipt-title">${escapeHTML(en ? 'Receipt' : 'ใบเสร็จรับเงิน')}</div>
+                <div class="receipt-rule"></div>
+                ${row(en ? 'Receipt no.' : 'เลขที่', receipt.receiptNo || '-')}
+                ${row(en ? 'Date' : 'เวลา', receiptDateTime(receipt.issuedAt))}
+                ${receipt.cashierName ? row(en ? 'Cashier' : 'แคชเชียร์', receipt.cashierName) : ''}
+                ${receipt.customerName ? row(en ? 'Customer' : 'ลูกค้า', receipt.customerName) : ''}
+                <div class="receipt-rule"></div>
+                ${items.map(item => `
+                    <div class="receipt-item">
+                        <span>${escapeHTML(item.name || 'Eden Cafe item')}${item.variantName ? ` / ${escapeHTML(item.variantName)}` : ''} x${Number(item.quantity || 1).toLocaleString('th-TH')}</span>
+                        <strong>${receiptMoney(item.lineTotal, currency)}</strong>
+                    </div>
+                `).join('')}
+                <div class="receipt-rule"></div>
+                ${row('Subtotal', receiptMoney(receipt.subtotal, currency))}
+                ${Number(receipt.discount || 0) ? row('Discount', '-' + receiptMoney(receipt.discount, currency)) : ''}
+                ${Number(receipt.taxIncluded || 0) ? row('VAT included', receiptMoney(receipt.taxIncluded, currency)) : ''}
+                ${row('Total', receiptMoney(receipt.totalAmount, currency))}
+                ${row('Payment', receiptPaymentLabel(receipt))}
+                ${Number(receipt.paidAmount || 0) ? row('Paid', receiptMoney(receipt.paidAmount, currency)) : ''}
+                ${Number(receipt.changeAmount || 0) ? row('Change', receiptMoney(receipt.changeAmount, currency)) : ''}
+                <div class="receipt-rule"></div>
+                <div class="receipt-footer">${escapeHTML(en ? 'Thank you for supporting Eden Cafe' : 'ขอบคุณที่อุดหนุน Eden Cafe')}</div>
+            </div>
+        `;
+        return `<!doctype html>
+<html lang="${en ? 'en' : 'th'}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${escapeHTML(receipt.receiptNo || 'Eden Cafe Receipt')}</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; padding: 24px; background: #f4f8f1; color: #172f24; font-family: Arial, "Noto Sans Thai", sans-serif; }
+        .receipt-card { width: min(380px, 100%); margin: 0 auto; padding: 22px; border: 1px solid #dce8dc; border-radius: 12px; background: #fff; box-shadow: 0 14px 32px rgba(15, 62, 46, 0.12); }
+        .receipt-brand { text-align: center; color: #159947; font-size: 1.2rem; font-weight: 900; }
+        .receipt-title, .receipt-footer { text-align: center; color: #365847; }
+        .receipt-title { margin-top: 4px; font-weight: 800; }
+        .receipt-rule { border-top: 1px dashed #9aa; margin: 12px 0; }
+        .receipt-row, .receipt-item { display: flex; justify-content: space-between; gap: 12px; margin: 6px 0; line-height: 1.45; }
+        .receipt-row span, .receipt-item span { min-width: 0; overflow-wrap: anywhere; }
+        .receipt-row strong, .receipt-item strong { flex: 0 0 auto; text-align: right; }
+        .receipt-row:nth-last-of-type(3) { font-size: 1.05rem; }
+        @media print { body { padding: 0; background: #fff; } .receipt-card { width: 100%; border: 0; box-shadow: none; } }
+    </style>
+</head>
+<body>${receiptBody}</body>
+</html>`;
+    }
+
+    function downloadCustomerReceipt(receipt = {}) {
+        const html = buildCustomerReceiptHTML(receipt);
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `EdenCafe-Receipt-${receiptFilenamePart(receipt.receiptNo || receipt.sourceId)}.html`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    async function requestProfileReceiptDownload(target) {
+        const dataset = target?.dataset || target || {};
+        const payload = {
+            actionId: cleanString(dataset.receiptAction || dataset.actionId || '', 260),
+            sourceType: cleanString(dataset.receiptSourceType || dataset.sourceType || '', 80),
+            sourceId: cleanString(dataset.receiptSourceId || dataset.sourceId || '', 180),
+            receiptNo: cleanString(dataset.receiptNo || '', 120),
+            receiptId: cleanString(dataset.receiptId || '', 180)
+        };
+        if (!payload.actionId || !payload.sourceType || !payload.sourceId) return false;
+        const labels = getLabels();
+        historyReceiptBusyActionId = payload.actionId;
+        historyReceiptNotice = labels.preparingReceipt || (isEnglishPage() ? 'Preparing receipt...' : 'กำลังเตรียมใบเสร็จ...');
+        activeProfileTab = 'history';
+        renderProfile();
+        try {
+            const result = await profileApiRequest('/getMyReceipt', payload);
+            if (!result?.receipt) throw new Error(labels.receiptDownloadFailed || 'Unable to download receipt right now.');
+            downloadCustomerReceipt(result.receipt);
+            historyReceiptNotice = labels.receiptDownloadReady || (isEnglishPage() ? 'Receipt downloaded.' : 'ดาวน์โหลดใบเสร็จแล้ว');
+        } catch (error) {
+            logClientError('Receipt download failed:', error);
+            historyReceiptNotice = error.message || labels.receiptDownloadFailed || (isEnglishPage()
+                ? 'Unable to download receipt right now.'
+                : 'ไม่สามารถดาวน์โหลดใบเสร็จได้ในขณะนี้');
+        } finally {
+            historyReceiptBusyActionId = '';
+            renderProfile();
+        }
+        return false;
+    }
+
     function tierPointTarget(tier) {
         const rules = getTierRules();
         return Number(rules[tier.toUpperCase()]?.minPoints || 0) || 0;
@@ -1926,7 +2096,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     }
 
     function historyTypeLabel(category, labels, source = '') {
-        if (category === 'pos' || source === 'pos') return labels.historyPos || 'POS';
+        if (category === 'pos' || source === 'pos') return labels.historyPos || (isEnglishPage() ? 'In-store' : 'หน้าร้าน');
         if (category === 'points') return labels.historyPoints || labels.points || 'Points';
         if (category === 'archery') return labels.historyArchery;
         if (category === 'bookings') return labels.historyBookings;
@@ -1939,6 +2109,55 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         if (['paid', 'paid_online', 'paid_counter', 'completed', 'synced'].includes(normalized)) return labels.paid;
         if (['pending', 'unpaid', 'pending_payment', 'paid_pending_review', 'review_required'].includes(normalized)) return labels.pending;
         return value || '-';
+    }
+
+    function normalizeHistoryStatus(value) {
+        return cleanString(value || '', 80).toLowerCase().replace(/[\s-]+/g, '_');
+    }
+
+    function isReceiptBlockedStatus(value) {
+        return [
+            'pending',
+            'unpaid',
+            'pending_payment',
+            'paid_pending_review',
+            'review_required',
+            'cancelled',
+            'canceled',
+            'failed',
+            'payment_failed',
+            'expired',
+            'void',
+            'voided',
+            'refunded',
+            'รอชำระเงิน',
+            'ยังไม่ชำระเงิน',
+            'ยกเลิก',
+            'ยกเลิกแล้ว',
+            'ล้มเหลว',
+            'ชำระไม่สำเร็จ'
+        ].includes(normalizeHistoryStatus(value));
+    }
+
+    function normalizeActivityReceiptAction(item = {}) {
+        const actions = Array.isArray(item.actions) ? item.actions : [];
+        const receipt = item.receipt && typeof item.receipt === 'object' ? item.receipt : {};
+        const action = actions.find(entry => normalizeHistoryStatus(entry?.type) === 'download_receipt' && entry?.enabled !== false) || null;
+        const available = item.receiptAvailable === true || receipt.available === true || !!action;
+        if (!available || isReceiptBlockedStatus(item.status || receipt.status)) return null;
+        const sourceType = cleanString(action?.sourceType || receipt.sourceType || item.type || '', 80);
+        const sourceId = cleanString(action?.sourceId || receipt.sourceId || item.refs?.firestoreId || item.id || '', 180);
+        const actionId = cleanString(action?.actionId || receipt.actionId || `${sourceType}:${sourceId}`, 260);
+        if (!actionId || !sourceType || !sourceId) return null;
+        return {
+            available: true,
+            actionId,
+            source: cleanString(action?.source || receipt.source || item.source || '', 40),
+            sourceType,
+            sourceId,
+            receiptNo: cleanString(action?.receiptNo || receipt.receiptNo || item.refs?.receiptNo || '', 120),
+            receiptId: cleanString(action?.receiptId || receipt.receiptId || '', 180)
+        };
     }
 
     function normalizeBackendActivity(item = {}, labels) {
@@ -1954,6 +2173,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             : (amount ? money(amount) : '');
         const occurredAt = item.occurredAt || item.timestamp || item.createdAt || item.date;
         return {
+            id: cleanString(item.id || '', 260),
             category,
             source,
             type: cleanString(item.type || '', 80),
@@ -1964,7 +2184,8 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             detail: cleanString(item.detail || '-', 240),
             amount: amountText,
             timestamp: timestampMillis(occurredAt),
-            pointsDelta
+            pointsDelta,
+            receipt: normalizeActivityReceiptAction(item)
         };
     }
 
@@ -1991,7 +2212,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const filterLabels = {
             all: labels.historyAll,
             orders: labels.historyOrders,
-            pos: labels.historyPos || 'POS',
+            pos: labels.historyPos || (isEnglishPage() ? 'In-store' : 'หน้าร้าน'),
             bookings: labels.historyBookings,
             archery: labels.historyArchery,
             points: labels.historyPoints || labels.points || 'Points'
@@ -2038,6 +2259,27 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         `;
     }
 
+    function renderHistoryReceiptAction(item, labels) {
+        if (!item?.receipt?.available) return '';
+        const isBusy = historyReceiptBusyActionId === item.receipt.actionId;
+        return `
+            <button
+                class="profile-timeline-receipt"
+                type="button"
+                data-receipt-action="${escapeHTML(item.receipt.actionId)}"
+                data-receipt-source-type="${escapeHTML(item.receipt.sourceType)}"
+                data-receipt-source-id="${escapeHTML(item.receipt.sourceId)}"
+                data-receipt-no="${escapeHTML(item.receipt.receiptNo)}"
+                data-receipt-id="${escapeHTML(item.receipt.receiptId)}"
+                onclick="return requestProfileReceiptDownload(this)"
+                ${isBusy ? 'disabled' : ''}>
+                ${escapeHTML(isBusy
+                    ? (labels.preparingReceipt || (isEnglishPage() ? 'Preparing receipt...' : 'กำลังเตรียมใบเสร็จ...'))
+                    : (labels.downloadReceipt || (isEnglishPage() ? 'Download receipt' : 'ดาวน์โหลดใบเสร็จ')))}
+            </button>
+        `;
+    }
+
     function renderHistoryTimeline(items, labels) {
         if (!items.length) {
             return `<div class="profile-empty-state">${escapeHTML(labels.noHistory)}</div>`;
@@ -2056,6 +2298,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                             <p>${escapeHTML(item.meta)}</p>
                             <small>${escapeHTML(item.detail)}</small>
                             ${item.amount ? `<b>${escapeHTML(item.amount)}</b>` : ''}
+                            ${renderHistoryReceiptAction(item, labels)}
                         </div>
                     </article>
                 `).join('')}
@@ -2087,6 +2330,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                 </div>
                 ${renderHistoryDateControls(labels)}
                 ${renderHistoryFilters(labels)}
+                ${historyReceiptNotice ? `<p class="profile-history-status" role="status" aria-live="polite">${escapeHTML(historyReceiptNotice)}</p>` : ''}
                 ${cloudHistoryLoading ? `<p class="profile-history-status" role="status">${escapeHTML(loadingLabel)}</p>` : ''}
                 ${renderHistoryTimeline(limitedItems, labels)}
                 <div class="profile-history-actions">
@@ -3312,6 +3556,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     window.clearProfileHistoryDates = clearProfileHistoryDates;
     window.toggleProfileHistoryExpanded = toggleProfileHistoryExpanded;
     window.loadMoreProfileHistory = loadMoreProfileHistory;
+    window.requestProfileReceiptDownload = requestProfileReceiptDownload;
     window.checkMemberEmailVerification = checkMemberEmailVerification;
     window.sendMemberEmailVerificationCode = sendMemberEmailVerificationCode;
     window.verifyMemberEmailCode = verifyMemberEmailCode;
