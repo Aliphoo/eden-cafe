@@ -1,9 +1,13 @@
 import { db } from './firebase-config.js';
-import { collection, getDocs, orderBy, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
+import { cachedPublicJSON, clearPublicCache, snapshotRows } from './public-data-cache.js';
+import { collection, getDocs, limit, orderBy, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const PAGE_LIMIT = 3;
 const HUB_PREVIEW_LIMIT = 12;
+const FAQ_PAGE_QUERY_LIMIT = 80;
+const FAQ_HUB_QUERY_LIMIT = 80;
+const PUBLIC_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const PAGE_LABELS = {
     home: 'หน้าแรก',
@@ -140,7 +144,7 @@ const FALLBACK_FAQS = [
     }
 ];
 
-let faqCache = null;
+const faqCache = new Map();
 
 function escapeHTML(value) {
     return String(value ?? '')
@@ -180,23 +184,72 @@ function normalizeFaq(raw = {}, id = '') {
     };
 }
 
-async function fetchFaqs() {
-    if (faqCache) return faqCache;
+function normalizeFaqRows(rows = []) {
+    return rows
+        .map(row => normalizeFaq(row, row.id))
+        .filter(faq => faq.status === 'published' && faq.question && faq.answer);
+}
+
+async function fetchFaqRows(cacheKey, buildQuery) {
+    return cachedPublicJSON(cacheKey, async () => {
+        const snap = await getDocs(buildQuery());
+        return snapshotRows(snap);
+    }, { ttlMs: PUBLIC_CACHE_TTL_MS });
+}
+
+function mergeRows(rowsList) {
+    const byId = new Map();
+    rowsList.flat().forEach(row => {
+        if (row?.id) byId.set(row.id, row);
+    });
+    return [...byId.values()];
+}
+
+async function fetchFaqs(pageKey = 'faq', options = {}) {
+    const normalizedPage = PAGE_LABELS[pageKey] ? pageKey : 'faq';
+    const cacheKey = `${normalizedPage}:${options.hub ? 'hub' : 'page'}:v2`;
+    if (faqCache.has(cacheKey)) return faqCache.get(cacheKey);
     if (!db) {
-        faqCache = fallbackFaqs();
-        return faqCache;
+        const fallback = fallbackFaqs();
+        faqCache.set(cacheKey, fallback);
+        return fallback;
     }
 
     try {
-        const snap = await getDocs(query(collection(db, 'faqs'), orderBy('order', 'asc')));
-        faqCache = snap.docs
-            .map(docSnap => normalizeFaq(docSnap.data(), docSnap.id))
-            .filter(faq => faq.status === 'published' && faq.question && faq.answer);
-        if (!faqCache.length) faqCache = fallbackFaqs();
+        const rows = options.hub
+            ? mergeRows([
+                await fetchFaqRows(`faqs:target:faq:${FAQ_HUB_QUERY_LIMIT}:v2`, () => query(
+                    collection(db, 'faqs'),
+                    where('targetPages', 'array-contains', 'faq'),
+                    limit(FAQ_HUB_QUERY_LIMIT)
+                )),
+                await fetchFaqRows(`faqs:popular:${FAQ_HUB_QUERY_LIMIT}:v2`, () => query(
+                    collection(db, 'faqs'),
+                    where('isPopular', '==', true),
+                    limit(FAQ_HUB_QUERY_LIMIT)
+                ))
+            ])
+            : await fetchFaqRows(`faqs:target:${normalizedPage}:${FAQ_PAGE_QUERY_LIMIT}:v2`, () => query(
+                collection(db, 'faqs'),
+                where('targetPages', 'array-contains', normalizedPage),
+                limit(normalizedPage === 'faq' ? FAQ_HUB_QUERY_LIMIT : FAQ_PAGE_QUERY_LIMIT)
+            ));
+
+        let faqs = normalizeFaqRows(rows);
+        if (!faqs.length) {
+            const fallbackRows = await fetchFaqRows(`faqs:fallback:${FAQ_HUB_QUERY_LIMIT}:v1`, () => query(
+                collection(db, 'faqs'),
+                orderBy('order', 'asc'),
+                limit(FAQ_HUB_QUERY_LIMIT)
+            ));
+            faqs = normalizeFaqRows(fallbackRows);
+        }
+        if (!faqs.length) faqs = fallbackFaqs();
+        faqCache.set(cacheKey, faqs);
     } catch (_) {
-        faqCache = fallbackFaqs();
+        faqCache.set(cacheKey, fallbackFaqs());
     }
-    return faqCache;
+    return faqCache.get(cacheKey);
 }
 
 function fallbackFaqs() {
@@ -268,16 +321,10 @@ function renderPageSchema(pageKey, faqs) {
 async function renderPageFaqs(container) {
     const pageKey = container.dataset.faqPage || 'home';
     container.dataset.faqManaged = 'true';
-    if (!container.children.length) {
-        container.innerHTML = '<p class="faq-loading">กำลังโหลดคำถามที่พบบ่อย...</p>';
-    }
-
-    if (container.querySelector('.faq-loading')) {
-        renderSkeleton(container, 'faq-grid', { count: pageKey === 'faq' ? 6 : 3 });
-    }
+    renderSkeleton(container, 'faq-grid', { count: pageKey === 'faq' ? 6 : 3 });
 
     try {
-        const faqs = getPageFaqs(await fetchFaqs(), pageKey);
+        const faqs = getPageFaqs(await fetchFaqs(pageKey), pageKey);
         clearSkeleton(container);
         if (!faqs.length) {
             container.innerHTML = `<p class="faq-empty">ยังไม่มีคำถามสำหรับ${escapeHTML(PAGE_LABELS[pageKey] || 'หน้านี้')}</p>`;
@@ -287,8 +334,8 @@ async function renderPageFaqs(container) {
         addMoreLink(container, pageKey);
         renderPageSchema(pageKey, faqs);
     } catch (_) {
-        clearSkeleton(container);
         const faqs = getPageFaqs(fallbackFaqs(), pageKey);
+        clearSkeleton(container);
         if (faqs.length) {
             container.innerHTML = faqs.map((faq, index) => renderFaqCard(faq, { open: index === 0 })).join('');
             addMoreLink(container, pageKey);
@@ -325,16 +372,10 @@ function renderHubList(container, faqs, expanded = false, searchTerm = '') {
 
 async function renderFaqHub(container) {
     container.dataset.faqManaged = 'true';
-    if (!container.children.length) {
-        container.innerHTML = '<p class="faq-loading">กำลังโหลดศูนย์รวมคำถาม...</p>';
-    }
-
-    if (container.querySelector('.faq-loading')) {
-        renderSkeleton(container, 'faq-grid', { count: 6 });
-    }
+    renderSkeleton(container, 'faq-grid', { count: 6 });
 
     try {
-        const faqs = (await fetchFaqs())
+        const faqs = (await fetchFaqs('faq', { hub: true }))
             .filter(faq => faq.targetPages.includes('faq') || faq.isPopular)
             .sort((a, b) => safeNumber(a.popularOrder, a.order) - safeNumber(b.popularOrder, b.order));
         clearSkeleton(container);
@@ -360,10 +401,10 @@ async function renderFaqHub(container) {
         });
         refresh();
     } catch (_) {
-        clearSkeleton(container);
         const faqs = fallbackFaqs()
             .filter(faq => faq.targetPages.includes('faq') || faq.isPopular)
             .sort((a, b) => safeNumber(a.popularOrder, a.order) - safeNumber(b.popularOrder, b.order));
+        clearSkeleton(container);
         container.innerHTML = '<div data-faq-hub-results></div>';
         renderHubList(container, faqs, false, '');
     }
@@ -380,7 +421,8 @@ async function initFaq() {
 
 window.EdenFAQ = {
     refresh: () => {
-        faqCache = null;
+        faqCache.clear();
+        clearPublicCache('faqs:');
         return initFaq();
     }
 };

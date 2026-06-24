@@ -1,6 +1,11 @@
 import { db } from './firebase-config.js';
-import { collection, getDocs, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
+import { cachedPublicJSON, snapshotRows } from './public-data-cache.js';
+import { collection, getDocs, limit, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const PUBLIC_CACHE_TTL_MS = 5 * 60 * 1000;
+const SHOP_CATEGORY_LIMIT = 160;
+const SHOP_PRODUCT_LIMIT = 180;
 
 const FALLBACK_PRODUCTS = [
     { id: 'p1_light', category: 'coffee', categoryNameTh: 'เมล็ดกาแฟ', categoryNameEn: 'Coffee Beans', nameTh: 'Light Roast Beans', nameEn: 'Light Roast Beans', descriptionTh: 'โทนผลไม้สดชื่น เหมาะกับดริปและอเมริกาโน่', descriptionEn: 'Bright fruity notes for pour-over and americano.', price: 450, imageUrl: 'https://images.unsplash.com/photo-1559525839-b184a4d698c7?auto=format&fit=crop&w=600&q=80', stock: 12 },
@@ -56,9 +61,6 @@ function normalizeProduct(product, categoryMap = {}) {
     const en = isEnglishPage();
     const variants = Array.isArray(product.variants) ? product.variants : [];
     const activeVariant = variants.find(variant => parseShopBoolean(variant.availableForSale, true)) || variants[0] || null;
-    const basePrice = Number(product.price) || 0;
-    const variantPrice = Number(activeVariant?.price);
-    const displayPrice = Number.isFinite(variantPrice) && variantPrice > 0 ? variantPrice : basePrice;
     const trackStock = parseShopBoolean(product.trackStock, source === 'shop');
     const stock = Number(product.stock);
     return {
@@ -68,7 +70,7 @@ function normalizeProduct(product, categoryMap = {}) {
         categoryName: getShopCategoryName(product, category, categoryId),
         name: product.name || (en ? product.nameEn : product.nameTh) || 'Eden Product',
         description: product.description || (en ? product.descriptionEn : product.descriptionTh) || '',
-        price: displayPrice,
+        price: Number(activeVariant?.price ?? product.price) || 0,
         imageUrl: product.imageUrl || product.image || 'Images/Logo.webp',
         stock: trackStock ? (Number.isFinite(stock) ? stock : 0) : (Number.isFinite(stock) && stock > 0 ? stock : 99),
         availableForSale: parseShopBoolean(product.availableForSale, true),
@@ -88,9 +90,9 @@ function fallbackProducts() {
 }
 
 function renderProducts(container, products, note = '') {
-    clearSkeleton(container);
     const en = isEnglishPage();
     const fallbackMode = Boolean(note);
+    clearSkeleton(container);
     const grouped = products.reduce((acc, product) => {
         if (!acc[product.category]) acc[product.category] = { title: product.categoryName, items: [] };
         acc[product.category].items.push(product);
@@ -164,40 +166,26 @@ function setupTabs() {
 async function fetchProductsFromCloud() {
     if (!db) return [];
 
-    const [menuCatSnap, menuProdSnap] = await Promise.all([
-        getDocs(query(collection(db, 'categories'))),
-        getDocs(query(collection(db, 'products')))
+    const [categoryRows, productRows] = await Promise.all([
+        cachedPublicJSON('shop-categories:v1', async () => {
+            const snapshot = await getDocs(query(collection(db, 'categories'), limit(SHOP_CATEGORY_LIMIT)));
+            return snapshotRows(snapshot);
+        }, { ttlMs: PUBLIC_CACHE_TTL_MS }),
+        cachedPublicJSON('shop-products:visible:v2', async () => {
+            const snapshot = await getDocs(query(
+                collection(db, 'products'),
+                where('showInShop', '==', true),
+                limit(SHOP_PRODUCT_LIMIT)
+            ));
+            return snapshotRows(snapshot);
+        }, { ttlMs: PUBLIC_CACHE_TTL_MS })
     ]);
     const menuCategoryMap = {};
-    menuCatSnap.forEach(docSnap => { menuCategoryMap[docSnap.id] = docSnap.data(); });
+    categoryRows.forEach(row => { menuCategoryMap[row.id] = row; });
 
-    return menuProdSnap.docs
-        .map(docSnap => normalizeProduct({ id: docSnap.id, source: 'menu', ...docSnap.data() }, menuCategoryMap))
+    return productRows
+        .map(row => normalizeProduct({ ...row, source: 'menu' }, menuCategoryMap))
         .filter(product => product.availableForSale !== false && product.showInShop);
-}
-
-function normalizeShopSnapshot(menuCatSnap, menuProdSnap) {
-    const menuCategoryMap = {};
-    menuCatSnap.forEach(docSnap => { menuCategoryMap[docSnap.id] = docSnap.data(); });
-
-    return menuProdSnap.docs
-        .map(docSnap => normalizeProduct({ id: docSnap.id, source: 'menu', ...docSnap.data() }, menuCategoryMap))
-        .filter(product => product.availableForSale !== false && product.showInShop);
-}
-
-function subscribeProductsFromCloud(onResult, onError) {
-    if (!db) return () => {};
-    let latestMenuCat = null;
-    let latestMenuProd = null;
-    const emit = () => {
-        if (!latestMenuCat || !latestMenuProd) return;
-        onResult(normalizeShopSnapshot(latestMenuCat, latestMenuProd));
-    };
-    const stops = [
-        onSnapshot(query(collection(db, 'categories')), snap => { latestMenuCat = snap; emit(); }, onError),
-        onSnapshot(query(collection(db, 'products')), snap => { latestMenuProd = snap; emit(); }, onError)
-    ];
-    return () => stops.forEach(stop => stop());
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -210,16 +198,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderSkeleton(onlineShopContainer, 'product-grid', { count: 8 });
 
     try {
-        subscribeProductsFromCloud((products) => {
-            if (products.length) {
-                renderProducts(onlineShopContainer, products);
-            } else {
-                renderProducts(onlineShopContainer, fallbackProducts(), en ? 'Showing sample products while the online catalog is empty.' : 'แสดงสินค้าตัวอย่างระหว่างรอข้อมูลจากหลังบ้าน');
-            }
-        }, (error) => {
-            console.error('Error listening to shop products:', error);
-            renderProducts(onlineShopContainer, fallbackProducts(), en ? 'Could not load live catalog. Showing fallback products.' : 'ไม่สามารถโหลดสินค้าจากหลังบ้านได้ จึงแสดงสินค้าสำรองไว้ก่อน');
-        });
+        const products = await fetchProductsFromCloud();
+        if (products.length) {
+            renderProducts(onlineShopContainer, products);
+        } else {
+            renderProducts(onlineShopContainer, fallbackProducts(), en ? 'Showing sample products while the online catalog is empty.' : 'แสดงสินค้าตัวอย่างระหว่างรอข้อมูลจากหลังบ้าน');
+        }
     } catch (error) {
         console.error('Error loading shop products:', error);
         renderProducts(onlineShopContainer, fallbackProducts(), en ? 'Could not load live catalog. Showing fallback products.' : 'ไม่สามารถโหลดสินค้าจากหลังบ้านได้ จึงแสดงสินค้าสำรองไว้ก่อน');

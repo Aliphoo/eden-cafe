@@ -1,13 +1,16 @@
+import './page-telemetry.js';
 import { auth, provider, db } from './firebase-config.js';
 import { getMemberTier, getTierBenefits } from './membership.js';
 import { BLOG_POSTS, SITE, getBlogUrl } from './blog-data.mjs';
 import { renderSkeleton } from './ui-skeleton.js';
 import { enhanceAdminFileInputs, runAdminFileOperationFlow, runAdminImageUploadFlow } from './admin-upload-modal.js?v=admin-file-picker-1';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp, writeBatch, runTransaction, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp, writeBatch, runTransaction, limit, startAfter } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const ADMIN_IMAGE_MAX_FILE_SIZE = 8 * 1024 * 1024;
 const ADMIN_IMAGE_MAX_EDGE = 1800;
+const ADMIN_LAZY_MODULE_VERSION = 'phase5-1';
+let blogCmsAdminModulePromise = null;
 
 function escapeHTML(value) {
     return String(value ?? '')
@@ -519,13 +522,23 @@ let memberOrdersMetricsUnsubscribe = null;
 let memberBookingsMetricsUnsubscribe = null;
 let ordersUnsubscribe = null;
 let ordersData = [];
+let ordersLoadTimer = null;
+let ordersPageCursors = [];
 let ordersFiltersBound = false;
 let ordersStyleMounted = false;
 const ORDERS_PRO_VIEW_VERSION = 'orders-pro-view-4';
+const ORDERS_LOAD_TIMEOUT_MS = 15000;
+const ORDERS_PAGE_SIZE_OPTIONS = [25, 50, 100];
 const ordersFilterState = {
     datePreset: 'today',
     startKey: adminTodayISO(),
     endKey: adminTodayISO(),
+    pageIndex: 0,
+    pageSize: 50,
+    hasNext: false,
+    loadedCount: 0,
+    loadStatus: 'idle',
+    lastError: '',
     source: 'all',
     status: 'all',
     payment: 'all',
@@ -1302,6 +1315,41 @@ function installAdminRefreshButtons() {
     });
 }
 
+async function loadBlogCmsAdminModule(options = {}) {
+    const root = document.getElementById('blog-cms-admin-root');
+    if (root && !root.querySelector('.blog-cms-topbar')) {
+        root.innerHTML = '<div class="blog-cms-admin-loading">Loading Blog CMS module...</div>';
+    }
+    if (!blogCmsAdminModulePromise) {
+        blogCmsAdminModulePromise = import(`./blog-cms-admin.js?v=${ADMIN_LAZY_MODULE_VERSION}`)
+            .then(module => {
+                window.EdenTelemetry?.report?.('admin_lazy_module_loaded', { label: 'blog-cms-admin' });
+                return module;
+            })
+            .catch(error => {
+                blogCmsAdminModulePromise = null;
+                window.EdenTelemetry?.report?.('admin_lazy_module_error', {
+                    label: 'blog-cms-admin',
+                    message: error?.message || String(error)
+                });
+                throw error;
+            });
+    }
+    const module = await blogCmsAdminModulePromise;
+    if (typeof module.initBlogCmsAdmin === 'function') {
+        await module.initBlogCmsAdmin(options);
+    } else if (typeof window.fetchBlogsFromCloud === 'function') {
+        await window.fetchBlogsFromCloud();
+    }
+    return module;
+}
+
+window.addEventListener('eden-admin-tab-activated', event => {
+    if (event.detail?.tabId === 'blogs') {
+        loadBlogCmsAdminModule().catch(error => console.error('Unable to load Blog CMS admin module:', error));
+    }
+});
+
 window.refreshAdminSection = async (tabId, button = null) => {
     if (!tabId) return;
     const label = button?.textContent || '';
@@ -1360,7 +1408,7 @@ window.refreshAdminSection = async (tabId, button = null) => {
                 await refreshCategoriesOnce();
                 break;
             case 'blogs':
-                if (typeof window.fetchBlogsFromCloud === 'function') window.fetchBlogsFromCloud();
+                await loadBlogCmsAdminModule({ forceRefresh: true });
                 break;
             case 'faqs':
                 if (typeof window.fetchFaqsFromCloud === 'function') window.fetchFaqsFromCloud();
@@ -4127,7 +4175,8 @@ function ordersDateRangeForPreset(preset) {
 function setOrdersDatePreset(preset) {
     ordersFilterState.datePreset = preset;
     Object.assign(ordersFilterState, ordersDateRangeForPreset(preset));
-    renderOrdersProView();
+    ordersResetPagination();
+    setupRealtimeOrders();
 }
 
 function setOrdersViewMode(mode) {
@@ -4144,9 +4193,92 @@ function resetOrdersFilters() {
         payment: 'all',
         category: 'all',
         search: '',
-        view: 'orders'
+        view: 'orders',
+        pageIndex: 0,
+        hasNext: false,
+        loadedCount: 0,
+        lastError: ''
     });
-    renderOrdersProView();
+    ordersResetPagination();
+    setupRealtimeOrders();
+}
+
+function ordersResetPagination() {
+    ordersFilterState.pageIndex = 0;
+    ordersFilterState.hasNext = false;
+    ordersFilterState.loadedCount = 0;
+    ordersPageCursors = [];
+}
+
+function clearOrdersLoadTimer() {
+    if (ordersLoadTimer) {
+        window.clearTimeout(ordersLoadTimer);
+        ordersLoadTimer = null;
+    }
+}
+
+function setOrdersLoadState(state = 'idle', message = '') {
+    ordersFilterState.loadStatus = state;
+    const statusEl = document.getElementById('orders-load-status');
+    if (statusEl) {
+        statusEl.className = `orders-load-status ${state}`;
+        statusEl.textContent = message || (state === 'loading'
+            ? 'Loading orders...'
+            : state === 'error'
+                ? 'Orders failed to load'
+                : state === 'empty'
+                    ? 'No orders in this range'
+                    : `Loaded ${ordersFilterState.loadedCount.toLocaleString('th-TH')} orders`);
+    }
+    updateOrdersControls();
+}
+
+function startOrdersLoadTimer() {
+    clearOrdersLoadTimer();
+    ordersLoadTimer = window.setTimeout(() => {
+        ordersFilterState.lastError = `Orders load exceeded ${Math.round(ORDERS_LOAD_TIMEOUT_MS / 1000)} seconds`;
+        setOrdersLoadState('error', `${ordersFilterState.lastError}. Please retry.`);
+        const tbody = document.getElementById('orders-table-body');
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#b42318;">Orders are taking too long to load. <button class="btn-action" type="button" onclick="retryOrdersLoad()">Reload</button></td></tr>`;
+        }
+    }, ORDERS_LOAD_TIMEOUT_MS);
+}
+
+function ordersStartDate() {
+    return ordersFilterState.startKey ? parseLocalDateKey(ordersFilterState.startKey) : null;
+}
+
+function ordersEndExclusiveDate() {
+    const end = ordersFilterState.endKey ? parseLocalDateKey(ordersFilterState.endKey) : null;
+    return end ? addLocalDays(end, 1) : null;
+}
+
+function buildOrdersQuery() {
+    const constraints = [];
+    const startDate = ordersStartDate();
+    const endDate = ordersEndExclusiveDate();
+    if (startDate && endDate) {
+        constraints.push(where('timestamp', '>=', startDate));
+        constraints.push(where('timestamp', '<', endDate));
+    }
+    constraints.push(orderBy('timestamp', 'desc'));
+    if (ordersFilterState.pageIndex > 0) {
+        const cursor = ordersPageCursors[ordersFilterState.pageIndex - 1];
+        if (cursor) constraints.push(startAfter(cursor));
+        else ordersFilterState.pageIndex = 0;
+    }
+    constraints.push(limit(Math.max(1, safeNumber(ordersFilterState.pageSize, 50)) + 1));
+    return query(collection(db, 'orders'), ...constraints);
+}
+
+function ordersSnapshotPage(snapshot) {
+    const pageSize = Math.max(1, safeNumber(ordersFilterState.pageSize, 50));
+    const docs = snapshot.docs || [];
+    ordersFilterState.hasNext = docs.length > pageSize;
+    const pageDocs = docs.slice(0, pageSize);
+    if (pageDocs.length) ordersPageCursors[ordersFilterState.pageIndex] = pageDocs[pageDocs.length - 1];
+    return pageDocs.map(docSnap => ({ ...docSnap.data(), firestoreId: docSnap.id }));
 }
 
 function mountOrdersStyles() {
@@ -4167,6 +4299,13 @@ function mountOrdersStyles() {
         .orders-segments button.active{background:#0f7d3d;color:#fff;border-color:#0f7d3d}
         .orders-actions-row{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap}
         .orders-result-label{color:#60706a;font-weight:700}
+        .orders-load-status{color:#60706a;font-weight:800}
+        .orders-load-status.loading{color:#8a5a00}
+        .orders-load-status.ready{color:#1f7a3a}
+        .orders-load-status.error{color:#b42318}
+        .orders-page-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+        .orders-page-controls button,.orders-page-controls select{border:1px solid #cfe0d0;background:#fff;color:#157a3b;border-radius:999px;padding:8px 12px;font-weight:700;cursor:pointer}
+        .orders-page-controls button:disabled{cursor:not-allowed;opacity:.48}
         .orders-table-wrap{overflow-x:auto;border:1px solid #edf1ea;border-radius:8px}
         .orders-table-wrap table{min-width:1080px}
         .orders-table-wrap th{white-space:nowrap}
@@ -4280,6 +4419,16 @@ function mountOrdersProScaffold() {
                     <button type="button" data-orders-view="date">ตามวันที่</button>
                 </div>
                 <span id="orders-result-label" class="orders-result-label">กำลังโหลดข้อมูล...</span>
+                <span id="orders-load-status" class="orders-load-status">Ready</span>
+                <div class="orders-page-controls" aria-label="Orders pages">
+                    <select id="orders-page-size" aria-label="Orders per page">
+                        ${ORDERS_PAGE_SIZE_OPTIONS.map(size => `<option value="${size}">${size}</option>`).join('')}
+                    </select>
+                    <button id="orders-prev-page" type="button">Prev</button>
+                    <span id="orders-page-label">Page 1</span>
+                    <button id="orders-next-page" type="button">Next</button>
+                    <button id="orders-retry-load" type="button">Reload</button>
+                </div>
                 <button type="button" class="orders-reset-btn" id="orders-reset-filters">ล้างตัวกรอง</button>
             </div>
         </div>
@@ -4299,17 +4448,25 @@ function bindOrdersControls() {
         if (event.target?.id === 'orders-start-date') {
             ordersFilterState.datePreset = 'custom';
             ordersFilterState.startKey = event.target.value || '';
-            renderOrdersProView();
+            ordersResetPagination();
+            setupRealtimeOrders();
         }
         if (event.target?.id === 'orders-end-date') {
             ordersFilterState.datePreset = 'custom';
             ordersFilterState.endKey = event.target.value || '';
-            renderOrdersProView();
+            ordersResetPagination();
+            setupRealtimeOrders();
         }
     });
     document.addEventListener('change', event => {
         const target = event.target;
         if (!target?.id) return;
+        if (target.id === 'orders-page-size') {
+            ordersFilterState.pageSize = Math.max(1, safeNumber(target.value, 50));
+            ordersResetPagination();
+            setupRealtimeOrders();
+            return;
+        }
         if (target.id === 'orders-source-filter') ordersFilterState.source = target.value;
         if (target.id === 'orders-status-filter') ordersFilterState.status = target.value;
         if (target.id === 'orders-payment-filter') ordersFilterState.payment = target.value;
@@ -4322,6 +4479,15 @@ function bindOrdersControls() {
         const view = event.target?.closest?.('[data-orders-view]')?.dataset.ordersView;
         if (view) setOrdersViewMode(view);
         if (event.target?.id === 'orders-reset-filters') resetOrdersFilters();
+        if (event.target?.id === 'orders-retry-load') setupRealtimeOrders();
+        if (event.target?.id === 'orders-prev-page' && ordersFilterState.pageIndex > 0) {
+            ordersFilterState.pageIndex -= 1;
+            setupRealtimeOrders();
+        }
+        if (event.target?.id === 'orders-next-page' && ordersFilterState.hasNext) {
+            ordersFilterState.pageIndex += 1;
+            setupRealtimeOrders();
+        }
     });
 }
 
@@ -4339,6 +4505,15 @@ function updateOrdersControls() {
     });
     const searchInput = document.getElementById('orders-search');
     if (searchInput && searchInput.value !== ordersFilterState.search) searchInput.value = ordersFilterState.search || '';
+    const pageSize = document.getElementById('orders-page-size');
+    if (pageSize && pageSize.value !== String(ordersFilterState.pageSize)) pageSize.value = String(ordersFilterState.pageSize);
+    const loading = ordersFilterState.loadStatus === 'loading';
+    const prev = document.getElementById('orders-prev-page');
+    const next = document.getElementById('orders-next-page');
+    const pageLabel = document.getElementById('orders-page-label');
+    if (prev) prev.disabled = loading || ordersFilterState.pageIndex <= 0;
+    if (next) next.disabled = loading || !ordersFilterState.hasNext;
+    if (pageLabel) pageLabel.textContent = `Page ${ordersFilterState.pageIndex + 1}`;
     document.querySelectorAll('[data-orders-date-preset]').forEach(button => {
         button.classList.toggle('active', button.dataset.ordersDatePreset === ordersFilterState.datePreset);
     });
@@ -4486,42 +4661,34 @@ function setupRealtimeOrders() {
     }
     dashboardOrdersLoaded = false;
     mountOrdersProScaffold();
-    const q = query(collection(db, "orders"), orderBy("timestamp", "desc"));
+    const tbody = document.getElementById('orders-table-body');
+    if (tbody) renderSkeleton(tbody, 'table', { cols: 8, rows: 6 });
+    setOrdersLoadState('loading');
+    startOrdersLoadTimer();
+    const q = buildOrdersQuery();
     ordersUnsubscribe = onSnapshot(q, (snapshot) => {
-        let todayOrders = 0;
-        let todayRevenue = 0;
-        const reportOrders = [];
-        const todayKey = localDateKey(new Date());
-
-        snapshot.forEach((docSnap) => {
-            const order = { ...docSnap.data(), firestoreId: docSnap.id };
-            reportOrders.push(order);
-            const status = orderStatusValue(order);
-            const paymentStatus = orderPaymentStatusValue(order);
-            const isRevenueOrder = paymentStatus === 'paid' || status === 'completed';
-            if (!order.isTestOrder && isRevenueOrder && status !== 'cancelled' && orderDateKey(order) === todayKey) {
-                todayOrders++;
-                todayRevenue += orderReportTotal(order);
-            }
-        });
-
+        clearOrdersLoadTimer();
+        const reportOrders = ordersSnapshotPage(snapshot);
         ordersData = reportOrders;
         dashboardOrdersData = reportOrders;
         dashboardOrdersLoaded = true;
+        ordersFilterState.loadedCount = reportOrders.length;
+        ordersFilterState.lastError = '';
+        setOrdersLoadState(reportOrders.length ? 'ready' : 'empty');
         renderDashboardSalesReport();
-        const statOrders = document.getElementById('stat-orders');
-        const statRevenue = document.getElementById('stat-revenue');
-        if (statOrders) statOrders.innerText = todayOrders;
-        if (statRevenue) statRevenue.innerText = '฿' + todayRevenue.toLocaleString('th-TH');
         renderOrdersProView();
     }, (error) => {
+        clearOrdersLoadTimer();
         console.error("Error listening to orders:", error);
         dashboardOrdersLoaded = false;
-        const tbody = document.getElementById('orders-table-body');
-        if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:red;">ไม่มีสิทธิ์เข้าถึงข้อมูล หรือเกิดข้อผิดพลาด</td></tr>';
+        ordersFilterState.lastError = error.message || 'Unable to load Orders';
+        setOrdersLoadState('error', ordersFilterState.lastError);
+        const body = document.getElementById('orders-table-body');
+        if (body) body.innerHTML = '<tr><td colspan="8" style="text-align:center; color:red;">Orders failed to load: ' + escapeHTML(ordersFilterState.lastError) + ' <button class="btn-action" type="button" onclick="retryOrdersLoad()">Reload</button></td></tr>';
     });
 }
 
+window.retryOrdersLoad = () => setupRealtimeOrders();
 window.setOrdersDatePreset = setOrdersDatePreset;
 window.setOrdersViewMode = setOrdersViewMode;
 window.resetOrdersFilters = resetOrdersFilters;

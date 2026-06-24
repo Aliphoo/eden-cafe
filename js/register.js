@@ -1,3 +1,4 @@
+import './page-telemetry.js';
 import { auth } from './firebase-config.js';
 import {
     GoogleAuthProvider,

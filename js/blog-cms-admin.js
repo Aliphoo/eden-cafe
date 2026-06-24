@@ -2029,7 +2029,7 @@ window.addEventListener('eden:admin-access-change', async (event) => {
     render();
 });
 
-document.addEventListener('DOMContentLoaded', async () => {
+export async function initBlogCmsAdmin(options = {}) {
     const el = root();
     if (!el) return;
     installStyles();
@@ -2043,5 +2043,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (error) {
         el.innerHTML = `<div class="blog-cms-alert">โหลด Blog CMS ไม่สำเร็จ: ${escapeHTML(error.message || error)}</div>`;
         console.error('Blog CMS admin failed:', error);
+    }
+}
+
+function isBlogCmsTabActive() {
+    const el = root();
+    const section = el?.closest?.('.content-section');
+    return !!section?.classList?.contains('active');
+}
+
+window.addEventListener('eden-admin-tab-activated', event => {
+    if (event.detail?.tabId === 'blogs') {
+        initBlogCmsAdmin().catch(error => console.error('Blog CMS admin failed:', error));
+    }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    const el = root();
+    if (!el) return;
+    installStyles();
+    if (isBlogCmsTabActive()) {
+        initBlogCmsAdmin().catch(error => console.error('Blog CMS admin failed:', error));
+        return;
+    }
+    if (!el.innerHTML.trim()) {
+        el.innerHTML = '<div class="blog-cms-admin-loading">Blog CMS ready to load when Blogs tab opens</div>';
     }
 });

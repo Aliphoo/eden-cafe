@@ -1,7 +1,11 @@
 import { db } from './firebase-config.js';
-import { collection, getDocs, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { cachedPublicJSON, snapshotRows } from './public-data-cache.js';
+import { collection, getDocs, limit, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const FEATURED_LIMIT = 8;
+const FEATURED_QUERY_LIMIT = 32;
+const FEATURED_CATEGORY_LIMIT = 160;
+const PUBLIC_CACHE_TTL_MS = 5 * 60 * 1000;
 const CATEGORY_FALLBACK = {
     coffee: { th: 'กาแฟ', en: 'Coffee' },
     tea: { th: 'ชา', en: 'Tea' },
@@ -62,9 +66,10 @@ function hasSellableStock(product = {}) {
 }
 
 function shouldShowFeatured(product = {}) {
+    const featured = parseBool(product.showOnIndex, false) || parseBool(product.isFeatured, false);
     return parseBool(product.availableForSale, true)
         && (parseBool(product.showOnWebsite, true) || parseBool(product.showInShop, false))
-        && parseBool(product.showOnIndex ?? product.isFeatured, false)
+        && featured
         && hasSellableStock(product);
 }
 
@@ -145,15 +150,41 @@ function renderFeaturedEmpty(grid, error = false) {
 async function fetchCategoryMap() {
     if (!db) return {};
     try {
-        const snapshot = await getDocs(query(collection(db, 'categories')));
-        return snapshot.docs.reduce((acc, docSnap) => {
-            acc[docSnap.id] = { id: docSnap.id, ...docSnap.data() };
+        const rows = await cachedPublicJSON('featured-categories:v1', async () => {
+            const snapshot = await getDocs(query(collection(db, 'categories'), limit(FEATURED_CATEGORY_LIMIT)));
+            return snapshotRows(snapshot);
+        }, { ttlMs: PUBLIC_CACHE_TTL_MS });
+        return rows.reduce((acc, row) => {
+            acc[row.id] = row;
             return acc;
         }, {});
     } catch (error) {
         console.warn('Unable to load featured product categories:', error);
         return {};
     }
+}
+
+async function fetchFeaturedRowsForFlag(fieldName) {
+    return cachedPublicJSON(`featured-products:${fieldName}:v2`, async () => {
+        const snapshot = await getDocs(query(
+            collection(db, 'products'),
+            where(fieldName, '==', true),
+            limit(FEATURED_QUERY_LIMIT)
+        ));
+        return snapshotRows(snapshot);
+    }, { ttlMs: PUBLIC_CACHE_TTL_MS });
+}
+
+async function fetchFeaturedProductRows() {
+    const [showOnIndexRows, legacyFeaturedRows] = await Promise.all([
+        fetchFeaturedRowsForFlag('showOnIndex'),
+        fetchFeaturedRowsForFlag('isFeatured')
+    ]);
+    const byId = new Map();
+    [...showOnIndexRows, ...legacyFeaturedRows].forEach(row => {
+        if (row?.id) byId.set(row.id, row);
+    });
+    return [...byId.values()];
 }
 
 async function loadFeaturedProducts() {
@@ -167,10 +198,9 @@ async function loadFeaturedProducts() {
     try {
         const [categoryMap, productSnapshot] = await Promise.all([
             fetchCategoryMap(),
-            getDocs(query(collection(db, 'products')))
+            fetchFeaturedProductRows()
         ]);
-        const products = productSnapshot.docs
-            .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
+        const products = productSnapshot
             .filter(shouldShowFeatured)
             .sort((a, b) => {
                 const featuredOrder = safeNumber(a.featuredOrder ?? a.indexOrder ?? a.order, 999999) - safeNumber(b.featuredOrder ?? b.indexOrder ?? b.order, 999999);

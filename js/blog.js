@@ -1,8 +1,12 @@
 import { BLOG_POSTS, BLOG_POST_BY_SLUG, SITE, getBlogUrl } from './blog-data.mjs';
+import { cachedPublicJSON, snapshotRows } from './public-data-cache.js';
 
 const BLOG_COLLECTION = 'blogs';
 const FIRESTORE_MODULE_URL = 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+const CMS_LIST_LIMIT = 24;
+const PUBLIC_CACHE_TTL_MS = 5 * 60 * 1000;
 let cmsPostsPromise = null;
+const cmsPostBySlugPromises = new Map();
 
 function normalizeSlug(value) {
     return String(value || '')
@@ -180,6 +184,17 @@ function getStaticPosts() {
     return BLOG_POSTS.map(normalizeStaticPost).filter(Boolean);
 }
 
+function normalizeCmsRows(rows = []) {
+    return rows
+        .map(row => {
+            const { id, ...data } = row || {};
+            return { raw: data, post: normalizeCmsPost(id, data) };
+        })
+        .filter(({ raw, post }) => String(raw.status || 'draft') === 'published' && post.slug && post.title)
+        .map(({ post }) => post)
+        .sort((a, b) => postSortTime(b) - postSortTime(a));
+}
+
 async function fetchPublishedCmsPosts() {
     if (!cmsPostsPromise) {
         cmsPostsPromise = (async () => {
@@ -187,18 +202,55 @@ async function fetchPublishedCmsPosts() {
                 import('./firebase-config.js'),
                 import(FIRESTORE_MODULE_URL)
             ]);
-            const q = firestore.query(
-                firestore.collection(db, BLOG_COLLECTION),
-                firestore.where('status', '==', 'published')
-            );
-            const snapshot = await firestore.getDocs(q);
-            return snapshot.docs
-                .map(item => normalizeCmsPost(item.id, item.data()))
-                .filter(post => post.slug && post.title)
-                .sort((a, b) => postSortTime(b) - postSortTime(a));
+            const rows = await cachedPublicJSON(`blog:published-list:${CMS_LIST_LIMIT}:v3`, async () => {
+                let snapshot;
+                try {
+                    const q = firestore.query(
+                        firestore.collection(db, BLOG_COLLECTION),
+                        firestore.where('status', '==', 'published'),
+                        firestore.orderBy('published_at', 'desc'),
+                        firestore.limit(CMS_LIST_LIMIT)
+                    );
+                    snapshot = await firestore.getDocs(q);
+                } catch (error) {
+                    console.warn('Published blog ordered query failed, using limited fallback:', error);
+                    const fallbackQuery = firestore.query(
+                        firestore.collection(db, BLOG_COLLECTION),
+                        firestore.where('status', '==', 'published'),
+                        firestore.limit(CMS_LIST_LIMIT)
+                    );
+                    snapshot = await firestore.getDocs(fallbackQuery);
+                }
+                return snapshotRows(snapshot);
+            }, { ttlMs: PUBLIC_CACHE_TTL_MS });
+            return normalizeCmsRows(rows);
         })();
     }
     return cmsPostsPromise;
+}
+
+async function fetchPublishedCmsPostBySlug(slug) {
+    const normalizedSlug = normalizeSlug(slug);
+    if (!normalizedSlug) return null;
+    if (!cmsPostBySlugPromises.has(normalizedSlug)) {
+        cmsPostBySlugPromises.set(normalizedSlug, (async () => {
+            const [{ db }, firestore] = await Promise.all([
+                import('./firebase-config.js'),
+                import(FIRESTORE_MODULE_URL)
+            ]);
+            const rows = await cachedPublicJSON(`blog:detail:${normalizedSlug}:v2`, async () => {
+                const q = firestore.query(
+                    firestore.collection(db, BLOG_COLLECTION),
+                    firestore.where('slug', '==', normalizedSlug),
+                    firestore.limit(1)
+                );
+                const snapshot = await firestore.getDocs(q);
+                return snapshotRows(snapshot);
+            }, { ttlMs: PUBLIC_CACHE_TTL_MS });
+            return normalizeCmsRows(rows)[0] || null;
+        })());
+    }
+    return cmsPostBySlugPromises.get(normalizedSlug);
 }
 
 function setupTocHighlight() {
@@ -620,9 +672,13 @@ async function hydrateCmsDetail() {
     if (!slug) return;
 
     const staticPost = normalizeStaticPost(BLOG_POST_BY_SLUG[slug]);
-    let cmsPosts = [];
+    let cmsPost = null;
+    let relatedPool = [];
     try {
-        cmsPosts = await fetchPublishedCmsPosts();
+        [cmsPost, relatedPool] = await Promise.all([
+            fetchPublishedCmsPostBySlug(slug),
+            fetchPublishedCmsPosts().catch(() => [])
+        ]);
     } catch (error) {
         if (staticPost) {
             renderCmsDetail(staticPost, getStaticPosts());
@@ -632,8 +688,8 @@ async function hydrateCmsDetail() {
         return;
     }
 
-    const cmsPost = cmsPosts.find(post => post.slug === slug);
     if (cmsPost) {
+        const cmsPosts = [cmsPost, ...relatedPool.filter(post => post.slug !== cmsPost.slug)];
         renderCmsDetail(cmsPost, cmsPosts);
         exposeBlogDataForDebugging(cmsPosts, 'firestore');
         return;

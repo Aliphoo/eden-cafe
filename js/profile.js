@@ -1,6 +1,7 @@
+import './page-telemetry.js';
 import { auth, db } from './firebase-config.js';
 import { onAuthStateChanged, PhoneAuthProvider, RecaptchaVerifier, reauthenticateWithCredential, signInWithCustomToken, updatePhoneNumber } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { collection, doc, getDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, doc, getDoc, getDocs, limit, orderBy, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getTierRules } from './membership.js';
 import {
     checkPhoneChange,
@@ -24,6 +25,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     let cloudOrders = null;
     let cloudBookings = null;
     let cloudHistoryUid = '';
+    let profileActivityUid = '';
     let cloudHistoryLoading = false;
     let cloudProfile = null;
     let cloudProfileUid = '';
@@ -962,29 +964,94 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         return sortHistoryDesc(Array.from(bookingsByDocId.values())).slice(0, 20);
     }
 
-    async function refreshCloudHistory(user) {
-        if (!user?.uid || cloudHistoryLoading || cloudHistoryUid === user.uid) return;
-        const fetchOrders = typeof window.fetchUserOrdersFromCloud === 'function'
-            ? window.fetchUserOrdersFromCloud
-            : fetchProfileOrdersFromCloud;
-        const fetchBookings = typeof window.fetchUserBookingsFromCloud === 'function'
-            ? window.fetchUserBookingsFromCloud
-            : fetchProfileBookingsFromCloud;
+    async function fetchMyActivityFromBackend({ limitCount = 20, cursor = '', ledgerLimit = 8 } = {}) {
+        return profileApiRequest('/getMyActivity', {
+            limit: limitCount,
+            cursor,
+            ledgerLimit
+        });
+    }
+
+    async function fetchLoyaltyDataFromCloud(uid) {
+        if (!db || !uid) return { config: null, summary: null, ledger: [] };
+        const ledgerQuery = query(
+            collection(db, 'point_ledger'),
+            where('userId', '==', uid),
+            orderBy('createdAt', 'desc'),
+            limit(8)
+        );
+        const [configSnap, summarySnap, ledgerSnap] = await Promise.all([
+            getDoc(doc(db, 'site_settings', 'loyalty')),
+            getDoc(doc(db, 'member_summaries', uid)),
+            getDocs(ledgerQuery).catch(async error => {
+                logClientError('Unable to load ordered point ledger; falling back to equality query:', error);
+                return getDocs(query(collection(db, 'point_ledger'), where('userId', '==', uid))).catch(() => ({ docs: [] }));
+            })
+        ]);
+        const ledger = ledgerSnap.docs
+            .map(item => ({ id: item.id, ...item.data() }))
+            .sort((a, b) => {
+                const left = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
+                const right = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
+                return right - left;
+            })
+            .slice(0, 8);
+        return {
+            config: configSnap.exists() ? normalizeLoyaltyConfig(configSnap.data()) : normalizeLoyaltyConfig(),
+            summary: summarySnap.exists() ? summarySnap.data() : null,
+            ledger
+        };
+    }
+
+    function applyActivityPayload(user, payload = {}) {
+        cloudOrders = Array.isArray(payload.orders) ? payload.orders : [];
+        cloudBookings = Array.isArray(payload.bookings) ? payload.bookings : [];
+        loyaltyConfig = payload.loyaltyConfig ? normalizeLoyaltyConfig(payload.loyaltyConfig) : normalizeLoyaltyConfig();
+        loyaltySummary = payload.loyaltySummary || null;
+        loyaltyLedger = Array.isArray(payload.loyaltyLedger) ? payload.loyaltyLedger.slice(0, 8) : [];
+        cloudHistoryUid = user.uid;
+        loyaltyUid = user.uid;
+        profileActivityUid = user.uid;
+    }
+
+    async function refreshProfileActivity(user, options = {}) {
+        const force = options.force === true;
+        if (!user?.uid || cloudHistoryLoading || (!force && profileActivityUid === user.uid)) return;
         cloudHistoryLoading = true;
+        loyaltyLoading = true;
+        if (force) renderProfile();
         try {
-            const [orders, bookings] = await Promise.all([
-                fetchOrders(user.uid),
-                fetchBookings(user.uid)
-            ]);
-            cloudOrders = Array.isArray(orders) ? orders : [];
-            cloudBookings = Array.isArray(bookings) ? bookings : [];
-            cloudHistoryUid = user.uid;
+            const payload = await fetchMyActivityFromBackend({ limitCount: 20, ledgerLimit: 8 });
+            applyActivityPayload(user, payload);
             renderProfile();
         } catch (error) {
-            logClientError('Unable to load profile history from cloud:', error);
+            logClientError('Unable to load profile activity endpoint; using Firestore fallback:', error);
+            try {
+                const [orders, bookings, loyalty] = await Promise.all([
+                    fetchProfileOrdersFromCloud(user.uid),
+                    fetchProfileBookingsFromCloud(user.uid),
+                    fetchLoyaltyDataFromCloud(user.uid)
+                ]);
+                applyActivityPayload(user, {
+                    orders,
+                    bookings,
+                    loyaltyConfig: loyalty.config,
+                    loyaltySummary: loyalty.summary,
+                    loyaltyLedger: loyalty.ledger
+                });
+                renderProfile();
+            } catch (fallbackError) {
+                logClientError('Unable to load profile activity fallback:', fallbackError);
+            }
         } finally {
             cloudHistoryLoading = false;
+            loyaltyLoading = false;
+            if (profileActivityUid === user.uid) renderProfile();
         }
+    }
+
+    async function refreshCloudHistory(user) {
+        return refreshProfileActivity(user);
     }
 
     function profileHasSavedFields(profile = {}) {
@@ -1050,40 +1117,16 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     }
 
     async function refreshLoyaltyData(user, options = {}) {
-        const force = options.force === true;
-        if (!db || !user?.uid || loyaltyLoading || (!force && loyaltyUid === user.uid)) return;
-        loyaltyLoading = true;
-        if (force) renderProfile();
-        try {
-            const [configSnap, summarySnap, ledgerSnap] = await Promise.all([
-                getDoc(doc(db, 'site_settings', 'loyalty')),
-                getDoc(doc(db, 'member_summaries', user.uid)),
-                getDocs(query(collection(db, 'point_ledger'), where('userId', '==', user.uid)))
-            ]);
-            loyaltyConfig = configSnap.exists() ? normalizeLoyaltyConfig(configSnap.data()) : normalizeLoyaltyConfig();
-            loyaltySummary = summarySnap.exists() ? summarySnap.data() : null;
-            loyaltyLedger = ledgerSnap.docs
-                .map(item => ({ id: item.id, ...item.data() }))
-                .sort((a, b) => {
-                    const left = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
-                    const right = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
-                    return right - left;
-                })
-                .slice(0, 8);
-            loyaltyUid = user.uid;
-            renderProfile();
-        } catch (error) {
-            logClientError('Unable to load loyalty information:', error);
-        } finally {
-            loyaltyLoading = false;
-        }
+        return refreshProfileActivity(user, options);
     }
 
     async function refreshProfileLoyalty() {
         const user = readUser();
         if (!user?.uid) return;
         loyaltyUid = '';
-        await refreshLoyaltyData(user, { force: true });
+        profileActivityUid = '';
+        cloudHistoryUid = '';
+        await refreshProfileActivity(user, { force: true });
     }
 
     function cartCount() {

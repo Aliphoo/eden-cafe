@@ -1,3 +1,4 @@
+import './page-telemetry.js';
 import { auth, provider, db } from './firebase-config.js';
 import qrcodeFactory from './qrcode-generator.esm.js';
 import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';

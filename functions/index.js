@@ -143,6 +143,14 @@ const VISITOR_COUNTER_SESSION_COLLECTION = 'visitor_counter_sessions';
 const VISITOR_COUNTER_IP_BUCKET_COLLECTION = 'visitor_counter_ip_buckets';
 const VISITOR_COUNTER_IP_DAILY_LIMIT = 80;
 const VISITOR_COUNTER_LOADING_MESSAGE = '\u0e01\u0e33\u0e25\u0e31\u0e07\u0e2d\u0e31\u0e1b\u0e40\u0e14\u0e15\u0e2a\u0e16\u0e34\u0e15\u0e34';
+const PAGE_PERFORMANCE_EVENTS_COLLECTION = 'page_performance_events';
+const PAGE_TELEMETRY_TYPES = new Set([
+  'page_watchdog_15s',
+  'slow_ready',
+  'js_error',
+  'unhandled_rejection',
+  'custom',
+]);
 
 function bangkokDateKey(date = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {
@@ -265,6 +273,110 @@ exports.trackVisitorCounter = onRequest(
       logger.warn('Visitor counter failed', { message: error.message, status });
       const publicError = publicApiError({ ...error, statusCode: status }, VISITOR_COUNTER_LOADING_MESSAGE);
       res.status(status).json({ error: publicError.message, fallbackText: VISITOR_COUNTER_LOADING_MESSAGE });
+    }
+  }
+);
+
+function telemetryBody(req) {
+  if (req.body && typeof req.body === 'object') return req.body;
+  if (typeof req.body === 'string') {
+    try {
+      return JSON.parse(req.body);
+    } catch (_) {
+      return {};
+    }
+  }
+  return {};
+}
+
+function safeTelemetryType(value) {
+  const type = cleanString(value || '', 80);
+  return PAGE_TELEMETRY_TYPES.has(type) ? type : 'custom';
+}
+
+function safeTelemetryPath(value) {
+  const raw = cleanString(value || '/', 240);
+  const pathOnly = raw.split('?')[0].split('#')[0] || '/';
+  return pathOnly.startsWith('/') ? pathOnly : '/' + pathOnly;
+}
+
+function safeTelemetrySignals(value = {}) {
+  const signals = value && typeof value === 'object' ? value : {};
+  const busyTargets = Array.isArray(signals.busyTargets)
+    ? signals.busyTargets.map(item => cleanString(item, 160)).filter(Boolean).slice(0, 8)
+    : [];
+  const htmlClasses = Array.isArray(signals.htmlClasses)
+    ? signals.htmlClasses.map(item => cleanString(item, 80)).filter(Boolean).slice(0, 8)
+    : [];
+  return {
+    busyCount: Math.max(0, Math.min(200, Number(signals.busyCount) || 0)),
+    busyTargets,
+    htmlClasses,
+    adminTab: cleanString(signals.adminTab || '', 80),
+  };
+}
+
+function normalizeTelemetryPayload(body = {}, req) {
+  const viewport = body.viewport && typeof body.viewport === 'object' ? body.viewport : {};
+  const details = body.details && typeof body.details === 'object' ? body.details : {};
+  return {
+    type: safeTelemetryType(body.type),
+    path: safeTelemetryPath(body.path),
+    title: cleanString(body.title || '', 160),
+    durationMs: Math.max(0, Math.min(10 * 60 * 1000, Number(body.durationMs) || 0)),
+    readyState: cleanString(body.readyState || '', 40),
+    visibilityState: cleanString(body.visibilityState || '', 40),
+    viewport: {
+      width: Math.max(0, Math.min(10000, Number(viewport.width) || 0)),
+      height: Math.max(0, Math.min(10000, Number(viewport.height) || 0)),
+    },
+    signals: safeTelemetrySignals(body.signals),
+    details: {
+      label: cleanString(details.label || '', 120),
+      message: cleanString(details.message || '', 220),
+      source: cleanString(details.source || '', 180),
+      line: Math.max(0, Math.min(1000000, Number(details.line) || 0)),
+      column: Math.max(0, Math.min(1000000, Number(details.column) || 0)),
+      watchdogMs: Math.max(0, Math.min(120000, Number(details.watchdogMs) || 0)),
+    },
+    origin: cleanString(req.get('origin') || '', 160),
+    userAgentHash: sha256(req.get('user-agent') || '').slice(0, 32),
+    ipHash: sha256(clientIp(req)).slice(0, 32),
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    date: bangkokDateKey(),
+  };
+}
+
+exports.reportPageTelemetry = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    res.set('Cache-Control', 'no-store, max-age=0');
+    res.set('X-Content-Type-Options', 'nosniff');
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'page-telemetry', 240, 15 * 60 * 1000);
+      const payload = normalizeTelemetryPayload(telemetryBody(req), req);
+      await db.collection(PAGE_PERFORMANCE_EVENTS_COLLECTION).add(payload);
+      if (payload.type === 'page_watchdog_15s') {
+        logger.warn('Page watchdog telemetry received', {
+          path: payload.path,
+          durationMs: payload.durationMs,
+          busyCount: payload.signals.busyCount,
+          adminTab: payload.signals.adminTab,
+        });
+      }
+      res.status(204).send('');
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('Page telemetry report failed', { message: error.message, status });
+      res.status(status).json({ error: 'Unable to record telemetry' });
     }
   }
 );
@@ -536,6 +648,207 @@ exports.getMyProfile = onRequest(
 exports.updateMyProfile = onRequest(
   { region: 'asia-southeast1' },
   memberAuthHandlers.updateMyProfile
+);
+
+function normalizeMyActivityLimit(value, fallback = 20, max = 50) {
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.max(1, Math.min(max, parsed));
+}
+
+function encodeMyActivityCursor(timestampMs = 0) {
+  const timestamp = Math.max(0, Math.floor(Number(timestampMs) || 0));
+  if (!timestamp) return '';
+  return Buffer.from(JSON.stringify({ before: timestamp })).toString('base64url');
+}
+
+function decodeMyActivityCursor(value = '') {
+  const text = cleanString(value || '', 300);
+  if (!text) return 0;
+  try {
+    const payload = JSON.parse(Buffer.from(text, 'base64url').toString('utf8'));
+    return Math.max(0, Math.floor(Number(payload.before || payload.timestamp || 0) || 0));
+  } catch (_) {
+    return 0;
+  }
+}
+
+function myActivityMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  if (value instanceof Date) return value.getTime();
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function serializeMyActivityValue(value) {
+  if (!value) return value;
+  if (typeof value.toDate === 'function') return value.toDate().toISOString();
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map(serializeMyActivityValue);
+  if (typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, serializeMyActivityValue(item)])
+    );
+  }
+  return value;
+}
+
+function serializeMyActivityDoc(docSnap) {
+  const data = serializeMyActivityValue(docSnap.data() || {});
+  return {
+    id: data.id || docSnap.id,
+    firestoreId: docSnap.id,
+    ...data,
+  };
+}
+
+function myActivityTimestamp(record = {}) {
+  return myActivityMillis(
+    record.paidAt
+    || record.closedAt
+    || record.completedAt
+    || record.timestamp
+    || record.createdAt
+    || record.updatedAt
+    || record.booking_date
+    || record.date
+  );
+}
+
+async function queryMemberActivityCollection({ collectionName, uid, fields, orderField, beforeMs, limitCount }) {
+  const querySize = Math.min(Math.max(limitCount * 2, limitCount + 3), 80);
+  const seen = new Map();
+
+  await Promise.all(fields.map(async fieldName => {
+    let queryRef = db.collection(collectionName).where(fieldName, '==', uid);
+    if (orderField && beforeMs > 0) {
+      queryRef = queryRef.where(orderField, '<', admin.firestore.Timestamp.fromMillis(beforeMs));
+    }
+    if (orderField) queryRef = queryRef.orderBy(orderField, 'desc');
+    queryRef = queryRef.limit(querySize);
+
+    let snap = null;
+    try {
+      snap = await queryRef.get();
+    } catch (error) {
+      logger.warn('Member activity ordered query failed; falling back to limited equality query', {
+        collectionName,
+        fieldName,
+        orderField,
+        message: error.message,
+      });
+      snap = await db.collection(collectionName)
+        .where(fieldName, '==', uid)
+        .limit(querySize)
+        .get();
+    }
+
+    snap.docs.forEach(docSnap => {
+      if (!seen.has(docSnap.id)) seen.set(docSnap.id, serializeMyActivityDoc(docSnap));
+    });
+  }));
+
+  return Array.from(seen.values())
+    .filter(record => !beforeMs || myActivityTimestamp(record) < beforeMs)
+    .sort((a, b) => myActivityTimestamp(b) - myActivityTimestamp(a));
+}
+
+async function getMyActivityPayload(uid, options = {}) {
+  const limitCount = normalizeMyActivityLimit(options.limit, 20, 50);
+  const ledgerLimit = normalizeMyActivityLimit(options.ledgerLimit, 8, 20);
+  const beforeMs = decodeMyActivityCursor(options.cursor || '');
+
+  const [orders, bookings, configSnap, summarySnap, ledgerRows] = await Promise.all([
+    queryMemberActivityCollection({
+      collectionName: 'orders',
+      uid,
+      fields: ['customerUid', 'uid'],
+      orderField: 'timestamp',
+      beforeMs,
+      limitCount,
+    }),
+    queryMemberActivityCollection({
+      collectionName: 'bookings',
+      uid,
+      fields: ['uid', 'customerUid', 'member_id'],
+      orderField: 'timestamp',
+      beforeMs,
+      limitCount,
+    }),
+    db.collection('site_settings').doc('loyalty').get().catch(() => null),
+    db.collection('member_summaries').doc(uid).get().catch(() => null),
+    queryMemberActivityCollection({
+      collectionName: 'point_ledger',
+      uid,
+      fields: ['userId'],
+      orderField: 'createdAt',
+      beforeMs: 0,
+      limitCount: ledgerLimit,
+    }),
+  ]);
+
+  const filteredOrders = orders
+    .filter(order => {
+      if (order.isTestOrder === true) return false;
+      const customerUid = cleanString(order.customerUid || '', 160);
+      const orderUid = cleanString(order.uid || '', 160);
+      const source = cleanString(order.source || '', 30).toLowerCase();
+      return customerUid ? customerUid === uid : (orderUid === uid && source !== 'pos');
+    })
+    .slice(0, limitCount);
+  const filteredBookings = bookings.slice(0, limitCount);
+  const activity = [
+    ...filteredOrders.map(item => ({ kind: 'order', timestamp: myActivityTimestamp(item), item })),
+    ...filteredBookings.map(item => ({ kind: 'booking', timestamp: myActivityTimestamp(item), item })),
+  ].sort((a, b) => b.timestamp - a.timestamp);
+  const pageItems = activity.slice(0, limitCount);
+  const lastTimestamp = pageItems.length ? pageItems[pageItems.length - 1].timestamp : 0;
+
+  return {
+    ok: true,
+    uid,
+    limit: limitCount,
+    cursor: cleanString(options.cursor || '', 300),
+    nextCursor: activity.length > limitCount ? encodeMyActivityCursor(lastTimestamp) : '',
+    orders: filteredOrders,
+    bookings: filteredBookings,
+    activity: pageItems.map(row => ({
+      kind: row.kind,
+      timestamp: row.timestamp,
+      item: row.item,
+    })),
+    loyaltyConfig: configSnap?.exists ? serializeMyActivityValue(configSnap.data() || {}) : null,
+    loyaltySummary: summarySnap?.exists ? serializeMyActivityValue(summarySnap.data() || {}) : null,
+    loyaltyLedger: ledgerRows.slice(0, ledgerLimit),
+  };
+}
+
+exports.getMyActivity = onRequest(
+  { region: 'asia-southeast1', timeoutSeconds: 30, memory: '256MiB' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'GET' && req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const decoded = await requireSignedInUser(req);
+      checkRateLimitKey(`get-my-activity:${decoded.uid}`, 180, 60 * 60 * 1000);
+      const input = req.method === 'GET' ? (req.query || {}) : (req.body || {});
+      const payload = await getMyActivityPayload(decoded.uid, input);
+      res.status(200).json(payload);
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('Member activity fetch failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to load member activity');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
 );
 
 exports.checkPhoneChange = onRequest(

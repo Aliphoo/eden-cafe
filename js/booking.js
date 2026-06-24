@@ -1,3 +1,4 @@
+import './page-telemetry.js';
 import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
