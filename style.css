@@ -7400,6 +7400,213 @@ body[data-blog-page] h3 {
     }
 }
 
+body.eden-promo-popup-open {
+    overflow: hidden;
+}
+
+.eden-promo-popup {
+    position: fixed;
+    inset: 0;
+    z-index: 10050;
+    display: grid;
+    place-items: center;
+    padding: clamp(12px, 3vw, 32px);
+}
+
+.eden-promo-popup__scrim {
+    position: absolute;
+    inset: 0;
+    background: rgba(18, 24, 20, 0.68);
+    backdrop-filter: blur(5px);
+}
+
+.eden-promo-popup__dialog {
+    position: relative;
+    width: min(960px, 100%);
+    max-height: calc(100vh - 32px);
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto auto;
+    overflow: hidden;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.68);
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 24px 72px rgba(0, 0, 0, 0.34);
+}
+
+.eden-promo-popup__stage {
+    position: relative;
+    min-height: 0;
+    display: grid;
+    place-items: center;
+    background: #f4f7f4;
+}
+
+.eden-promo-popup__media {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    max-height: min(72vh, 720px);
+    display: grid;
+    place-items: center;
+    background: #ffffff;
+}
+
+.eden-promo-popup__media img,
+.eden-promo-popup__link {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.eden-promo-popup__media img {
+    object-fit: contain;
+}
+
+.eden-promo-popup__link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.eden-promo-popup__nav,
+.eden-promo-popup__close {
+    display: inline-grid;
+    place-items: center;
+    border: 1px solid rgba(27, 47, 35, 0.14);
+    border-radius: 8px;
+    color: #203629;
+    background: rgba(255, 255, 255, 0.9);
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.eden-promo-popup__nav:hover,
+.eden-promo-popup__close:hover {
+    background: #f0f7f2;
+}
+
+.eden-promo-popup__nav {
+    position: absolute;
+    top: 50%;
+    width: 46px;
+    height: 58px;
+    transform: translateY(-50%);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+}
+
+.eden-promo-popup__nav--prev {
+    left: 12px;
+}
+
+.eden-promo-popup__nav--next {
+    right: 12px;
+}
+
+.eden-promo-popup__nav svg,
+.eden-promo-popup__close svg {
+    width: 24px;
+    height: 24px;
+}
+
+.eden-promo-popup.is-single-slide .eden-promo-popup__nav {
+    display: none;
+}
+
+.eden-promo-popup__dots {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 11px 16px 8px;
+    background: #ffffff;
+}
+
+.eden-promo-popup__dots button {
+    width: 10px;
+    height: 10px;
+    border: 0;
+    border-radius: 999px;
+    background: #c7d2ca;
+    cursor: pointer;
+    padding: 0;
+}
+
+.eden-promo-popup__dots button.is-active {
+    width: 26px;
+    background: var(--accent-color);
+}
+
+.eden-promo-popup__footer {
+    min-height: 66px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 16px;
+    border-top: 1px solid #edf2ee;
+    background: #ffffff;
+}
+
+.eden-promo-popup__check {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: #49564e;
+    font-size: 0.94rem;
+    line-height: 1.35;
+}
+
+.eden-promo-popup__check input {
+    width: 20px;
+    height: 20px;
+    accent-color: var(--accent-color);
+    flex: 0 0 auto;
+}
+
+.eden-promo-popup__close {
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
+}
+
+@media (max-width: 640px) {
+    .eden-promo-popup {
+        padding: 10px;
+    }
+
+    .eden-promo-popup__dialog {
+        max-height: calc(100vh - 20px);
+    }
+
+    .eden-promo-popup__media {
+        aspect-ratio: 4 / 5;
+        max-height: 68vh;
+    }
+
+    .eden-promo-popup__nav {
+        width: 40px;
+        height: 52px;
+    }
+
+    .eden-promo-popup__nav--prev {
+        left: 8px;
+    }
+
+    .eden-promo-popup__nav--next {
+        right: 8px;
+    }
+
+    .eden-promo-popup__footer {
+        align-items: flex-start;
+        min-height: 62px;
+        padding: 10px 12px;
+    }
+
+    .eden-promo-popup__check {
+        font-size: 0.88rem;
+    }
+}
+
 /* Shared Skeleton Loading */
 .eden-skeleton-grid,
 .eden-skeleton-list,

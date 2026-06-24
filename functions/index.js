@@ -1247,7 +1247,8 @@ function cleanString(value, maxLength) {
 }
 
 function permissionFromImageFolder(folder) {
-  const value = cleanString(folder, 40).toLowerCase();
+  const value = cleanString(folder, 40).toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  if (value === 'index' || value === 'index_popup') return 'index';
   if (value === 'shop_products') return 'products';
   if (value === 'blogs') return 'blogs';
   if (value === 'rooms') return 'rooms';

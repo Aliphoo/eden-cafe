@@ -28,6 +28,14 @@ function safeImageURL(value, fallback = 'Images/Logo.webp') {
     return fallback;
 }
 
+function safeOptionalLinkURL(value) {
+    const url = String(value ?? '').trim();
+    if (!url) return '';
+    if (/^(https?:|mailto:|tel:)/i.test(url)) return url.slice(0, 500);
+    if (/^\/(?!\/)/.test(url) || /^#/.test(url)) return url.slice(0, 500);
+    return '';
+}
+
 function safeNumber(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
@@ -11943,10 +11951,55 @@ const DEFAULT_INDEX_SETTINGS = {
     aboutTitleTh: 'เรื่องราวของเรา: จากยอดดอยสู่แก้วกาแฟของคุณ',
     aboutBodyTh: 'Eden Cafe เกิดขึ้นจากความหลงใหลในศิลปะการชงกาแฟและการสนับสนุนเกษตรกรไทย เราคัดสรรเมล็ดกาแฟจากแหล่งปลูกที่ดีที่สุดบนยอดดอยในประเทศไทย คั่วด้วยเทคนิคพิเศษเพื่อให้ได้รสชาติที่เป็นเอกลักษณ์ ไม่เหมือนใคร บรรยากาศร้านของเราออกแบบสไตล์มินิมอล อิงธรรมชาติ เพื่อให้คุณได้พักผ่อนอย่างแท้จริง',
     aboutTitleEn: 'Our Story: From Thai Mountains to Your Cup',
-    aboutBodyEn: 'Eden Cafe was born out of a passion for the art of coffee brewing and supporting Thai farmers. We carefully select coffee beans from the best high-altitude farms in Thailand, roasted with special techniques to achieve a unique flavor. Our minimalist, nature-inspired design offers a true sanctuary for relaxation.'
+    aboutBodyEn: 'Eden Cafe was born out of a passion for the art of coffee brewing and supporting Thai farmers. We carefully select coffee beans from the best high-altitude farms in Thailand, roasted with special techniques to achieve a unique flavor. Our minimalist, nature-inspired design offers a true sanctuary for relaxation.',
+    promoPopup: {
+        enabled: false,
+        title: 'Eden Cafe promotions',
+        slides: []
+    }
 };
 
 const indexSettingsForm = document.getElementById('indexSettingsForm');
+const INDEX_PROMO_MAX_SLIDES = 8;
+let indexPromoSlides = [];
+
+function cleanIndexText(value, fallback = '', maxLength = 500) {
+    const text = String(value ?? '').trim();
+    return (text || fallback).slice(0, maxLength);
+}
+
+function createBlankPromoSlide() {
+    return {
+        id: 'promo-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7),
+        imageUrl: '',
+        linkUrl: '',
+        altText: '',
+        active: true
+    };
+}
+
+function normalizePromoPopupSlide(slide = {}, index = 0) {
+    const imageUrl = safeImageURL(slide.imageUrl || slide.image_url || '', '');
+    return {
+        id: cleanIndexText(slide.id, 'promo-' + (index + 1), 80),
+        imageUrl,
+        linkUrl: safeOptionalLinkURL(slide.linkUrl || slide.link_url || ''),
+        altText: cleanIndexText(slide.altText || slide.alt || '', '', 180),
+        active: slide.active !== false,
+        order: index + 1
+    };
+}
+
+function normalizePromoPopupSettings(raw = {}) {
+    const slides = Array.isArray(raw.slides)
+        ? raw.slides.map((slide, index) => normalizePromoPopupSlide(slide, index)).filter(slide => slide.imageUrl).slice(0, INDEX_PROMO_MAX_SLIDES)
+        : [];
+    return {
+        enabled: raw.enabled === true,
+        title: cleanIndexText(raw.title || raw.titleTh || raw.titleEn, DEFAULT_INDEX_SETTINGS.promoPopup.title, 90),
+        slides
+    };
+}
 
 function normalizeIndexSettings(data = {}) {
     const pick = (key, max) => String(data[key] || DEFAULT_INDEX_SETTINGS[key] || '').trim().slice(0, max);
@@ -11959,7 +12012,8 @@ function normalizeIndexSettings(data = {}) {
         aboutTitleTh: pick('aboutTitleTh', 140),
         aboutBodyTh: pick('aboutBodyTh', 900),
         aboutTitleEn: pick('aboutTitleEn', 140),
-        aboutBodyEn: pick('aboutBodyEn', 900)
+        aboutBodyEn: pick('aboutBodyEn', 900),
+        promoPopup: normalizePromoPopupSettings(data.promoPopup || data.promo_popup || {})
     };
 }
 
@@ -11979,6 +12033,148 @@ function setIndexField(id, value) {
     if (field) field.value = value || '';
 }
 
+function readIndexPromoSlidesFromRows(options = {}) {
+    const list = document.getElementById('index-promo-slide-list');
+    const rows = Array.from(list?.querySelectorAll('[data-promo-slide-index]') || []);
+    const slides = rows.map((row, index) => normalizePromoPopupSlide({
+        id: row.dataset.promoSlideId || '',
+        imageUrl: row.querySelector('[data-promo-field="imageUrl"]')?.value || '',
+        linkUrl: row.querySelector('[data-promo-field="linkUrl"]')?.value || '',
+        altText: row.querySelector('[data-promo-field="altText"]')?.value || '',
+        active: true
+    }, index));
+    return options.includeBlank ? slides : slides.filter(slide => slide.imageUrl);
+}
+
+function syncIndexPromoSlidesFromDom() {
+    const slides = readIndexPromoSlidesFromRows({ includeBlank: true });
+    if (slides.length) indexPromoSlides = slides.slice(0, INDEX_PROMO_MAX_SLIDES);
+}
+
+function promoSlideThumbHTML(slide = {}) {
+    if (!slide.imageUrl) return '<span>No image yet</span>';
+    return '<img src="' + escapeHTML(slide.imageUrl) + '" alt="">';
+}
+
+function renderIndexPromoSlides(slides = indexPromoSlides) {
+    const list = document.getElementById('index-promo-slide-list');
+    if (!list) return;
+    const rows = (slides.length ? slides : [createBlankPromoSlide()]).slice(0, INDEX_PROMO_MAX_SLIDES);
+    indexPromoSlides = rows;
+    list.innerHTML = rows.map((slide, index) => `
+        <div class="index-promo-slide" data-promo-slide-index="${index}" data-promo-slide-id="${escapeHTML(slide.id || '')}">
+            <div class="index-promo-slide-head">
+                <strong>Slide ${index + 1}</strong>
+                <button type="button" class="index-promo-remove" data-promo-action="remove" data-promo-index="${index}">Remove</button>
+            </div>
+            <div class="index-promo-slide-grid">
+                <div class="index-promo-thumb">${promoSlideThumbHTML(slide)}</div>
+                <div class="index-promo-fields">
+                    <div class="form-group">
+                        <label for="index-promo-slide-${index}-image-url">Image URL</label>
+                        <input type="text" id="index-promo-slide-${index}-image-url" data-promo-field="imageUrl" value="${escapeHTML(slide.imageUrl || '')}" placeholder="https://... or /Images/..." maxlength="500">
+                    </div>
+                    <div class="form-group">
+                        <label for="index-promo-slide-${index}-link-url">Optional link URL</label>
+                        <input type="text" id="index-promo-slide-${index}-link-url" data-promo-field="linkUrl" value="${escapeHTML(slide.linkUrl || '')}" placeholder="/shop.html or https://..." maxlength="500">
+                    </div>
+                    <div class="form-group">
+                        <label for="index-promo-slide-${index}-alt-text">Alt text</label>
+                        <input type="text" id="index-promo-slide-${index}-alt-text" data-promo-field="altText" value="${escapeHTML(slide.altText || '')}" placeholder="Promotion image description" maxlength="180">
+                    </div>
+                    <div class="form-group">
+                        <label for="index-promo-slide-${index}-upload">Upload image</label>
+                        <input type="file" id="index-promo-slide-${index}-upload" data-promo-upload="${index}" accept="image/*">
+                    </div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+
+    list.querySelectorAll('[data-promo-field]').forEach(input => {
+        input.addEventListener('input', () => {
+            syncIndexPromoSlidesFromDom();
+            window.updateIndexPreview();
+        });
+    });
+    list.querySelectorAll('[data-promo-action="remove"]').forEach(button => {
+        button.addEventListener('click', () => {
+            syncIndexPromoSlidesFromDom();
+            const index = Number(button.dataset.promoIndex);
+            if (Number.isInteger(index)) indexPromoSlides.splice(index, 1);
+            renderIndexPromoSlides(indexPromoSlides);
+        });
+    });
+    list.querySelectorAll('[data-promo-upload]').forEach(input => {
+        input.addEventListener('change', event => uploadIndexPromoSlideImage(Number(input.dataset.promoUpload), event.target.files?.[0]));
+    });
+    window.updateIndexPreview();
+}
+
+function readIndexPromoPopupForm() {
+    return normalizePromoPopupSettings({
+        enabled: indexField('index-promo-enabled')?.checked === true,
+        title: indexField('index-promo-title')?.value || '',
+        slides: readIndexPromoSlidesFromRows()
+    });
+}
+
+function updateIndexPromoPreview(promo = readIndexPromoPopupForm()) {
+    const title = document.getElementById('index-promo-preview-title');
+    const detail = document.getElementById('index-promo-preview-detail');
+    const media = document.getElementById('index-promo-preview-media');
+    const firstSlide = promo.slides[0];
+    if (media) media.style.backgroundImage = firstSlide?.imageUrl ? `url("${firstSlide.imageUrl}")` : '';
+    if (!promo.enabled) {
+        if (title) title.textContent = 'Popup disabled';
+        if (detail) detail.textContent = 'Enable the popup and add a slide image to publish it.';
+        return;
+    }
+    if (title) title.textContent = promo.title || 'Homepage promotions';
+    if (detail) detail.textContent = promo.slides.length
+        ? `${promo.slides.length} slide${promo.slides.length === 1 ? '' : 's'} ready${promo.slides.some(slide => slide.linkUrl) ? ' with optional links' : ''}.`
+        : 'Enabled, but no valid slide image has been added yet.';
+}
+
+function safePromoFileName(file, index) {
+    const base = String(file?.name || `promo-slide-${index + 1}`).replace(/\.[^.]+$/, '');
+    const slug = base.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 70) || `promo-slide-${index + 1}`;
+    return `${Date.now()}-${slug}.webp`;
+}
+
+async function uploadIndexPromoSlideImage(index, file) {
+    if (!file || !Number.isInteger(index)) return;
+    syncIndexPromoSlidesFromDom();
+    try {
+        setIndexStatus('Uploading popup slide image...');
+        const url = await uploadAdminImageFromFile(file, 'index-popup', safePromoFileName(file, index), {
+            surface: 'Index popup slide',
+            subtitle: 'homepage promotional modal',
+            targetField: `index-promo-slide-${index}-image-url`,
+            quality: 0.86
+        });
+        indexPromoSlides[index] = {
+            ...(indexPromoSlides[index] || createBlankPromoSlide()),
+            imageUrl: url
+        };
+        renderIndexPromoSlides(indexPromoSlides);
+        setIndexStatus('Popup slide image uploaded.');
+    } catch (error) {
+        console.error('Unable to upload popup slide image:', error);
+        setIndexStatus(error.message || 'Popup slide upload failed.', 'error');
+    }
+}
+
+window.addIndexPromoSlide = function() {
+    syncIndexPromoSlidesFromDom();
+    if (indexPromoSlides.length >= INDEX_PROMO_MAX_SLIDES) {
+        setIndexStatus('Maximum popup slides reached.', 'error');
+        return;
+    }
+    indexPromoSlides.push(createBlankPromoSlide());
+    renderIndexPromoSlides(indexPromoSlides);
+};
+
 function readIndexSettingsForm() {
     return normalizeIndexSettings({
         heroImageUrl: indexField('index-hero-image-url')?.value || '',
@@ -11989,7 +12185,8 @@ function readIndexSettingsForm() {
         aboutTitleTh: indexField('index-about-title-th')?.value || '',
         aboutBodyTh: indexField('index-about-body-th')?.value || '',
         aboutTitleEn: indexField('index-about-title-en')?.value || '',
-        aboutBodyEn: indexField('index-about-body-en')?.value || ''
+        aboutBodyEn: indexField('index-about-body-en')?.value || '',
+        promoPopup: readIndexPromoPopupForm()
     });
 }
 
@@ -12004,6 +12201,10 @@ function fillIndexSettingsForm(settings = DEFAULT_INDEX_SETTINGS) {
     setIndexField('index-about-body-th', normalized.aboutBodyTh);
     setIndexField('index-about-title-en', normalized.aboutTitleEn);
     setIndexField('index-about-body-en', normalized.aboutBodyEn);
+    const promoEnabled = indexField('index-promo-enabled');
+    if (promoEnabled) promoEnabled.checked = normalized.promoPopup.enabled;
+    setIndexField('index-promo-title', normalized.promoPopup.title);
+    renderIndexPromoSlides(normalized.promoPopup.slides);
     window.updateIndexPreview();
 }
 
@@ -12019,6 +12220,7 @@ window.updateIndexPreview = function() {
     setText('index-preview-hero-subtitle', settings.heroSubtitleTh);
     setText('index-preview-about-title', settings.aboutTitleTh);
     setText('index-preview-about-body', settings.aboutBodyTh);
+    updateIndexPromoPreview(settings.promoPopup);
 };
 
 window.loadIndexSettings = async function() {
@@ -12066,6 +12268,11 @@ indexSettingsForm?.addEventListener('submit', async (event) => {
 
     try {
         const settings = readIndexSettingsForm();
+        if (settings.promoPopup.enabled && !settings.promoPopup.slides.length) {
+            setIndexStatus('Enable popup needs at least one slide image.', 'error');
+            alert('Please add at least one popup slide image before enabling the popup.');
+            return;
+        }
         await setDoc(INDEX_SETTINGS_REF(), {
             ...settings,
             updatedAt: serverTimestamp(),
