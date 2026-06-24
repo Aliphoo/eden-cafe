@@ -1,5 +1,5 @@
 /* style.css */
-/* Profile dashboard asset deploy marker: profile-layout-20260624-2 */
+/* Profile dashboard asset deploy marker: profile-layout-20260624-3 */
 :root {
     --primary-color: #1A9345; /* New Eden Fresh Green */
     --accent-color: #137234; /* Darker Green for contrast/buttons */
@@ -4853,6 +4853,7 @@ footer p {
 }
 
 .profile-summary-card-premium {
+    min-width: 0;
     display: grid;
     grid-template-columns: 1fr;
     gap: 18px;
@@ -4882,6 +4883,8 @@ footer p {
 .profile-summary-top {
     position: relative;
     z-index: 1;
+    width: 100%;
+    min-width: 0;
     display: grid;
     justify-items: center;
     gap: 8px;
@@ -4891,6 +4894,8 @@ footer p {
 .profile-tier-chip {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
+    max-width: 100%;
     min-height: 28px;
     padding: 5px 12px;
     border-radius: 999px;
@@ -4899,16 +4904,22 @@ footer p {
     font-size: 0.76rem;
     font-weight: 900;
     letter-spacing: 0;
+    line-height: 1.25;
+    text-align: center;
     text-transform: uppercase;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .profile-summary-top h2 {
     margin: 0;
+    width: 100%;
     max-width: 100%;
     color: #fff;
-    font-size: 1.55rem;
+    font-size: 1.38rem;
     line-height: 1.25;
     overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .profile-summary-top p,
@@ -4928,6 +4939,7 @@ footer p {
 .profile-mini-card {
     position: relative;
     z-index: 1;
+    min-width: 0;
     display: grid;
     gap: 18px;
     min-height: 132px;
@@ -4956,6 +4968,14 @@ footer p {
 .profile-mini-card b {
     position: relative;
     z-index: 1;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.profile-mini-card > div {
+    min-width: 0;
+    max-width: 100%;
 }
 
 .profile-mini-card strong {
