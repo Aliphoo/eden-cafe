@@ -23,7 +23,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     const PHONE_AUTH_EMAIL_DOMAIN = 'phone.edencafe.co';
     let cloudOrders = null;
     let cloudBookings = null;
+    let cloudActivity = null;
+    let activityNextCursor = '';
     let cloudHistoryUid = '';
+    let cloudHistoryRangeKey = '';
     let cloudHistoryLoading = false;
     let cloudProfile = null;
     let cloudProfileUid = '';
@@ -71,8 +74,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     let activeProfileTab = 'points';
     let activeHistoryFilter = 'all';
     let historyExpanded = false;
+    let historyDateFrom = '';
+    let historyDateTo = '';
     const PROFILE_TABS = ['points', 'history', 'account'];
-    const HISTORY_FILTERS = ['all', 'orders', 'bookings', 'archery'];
+    const HISTORY_FILTERS = ['all', 'orders', 'pos', 'bookings', 'archery', 'points'];
     const CAN_LOG_CLIENT_ERRORS = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
 
     const DEFAULT_LOYALTY_CONFIG = {
@@ -501,8 +506,16 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             bookArchery: 'Book Archery',
             historyAll: 'All',
             historyOrders: 'Orders',
+            historyPos: 'POS',
             historyBookings: 'Table / Room',
             historyArchery: 'Archery',
+            historyPoints: 'Points',
+            historyDateRange: 'Date range',
+            historyFrom: 'From',
+            historyTo: 'To',
+            historyClearDates: 'Clear dates',
+            loadMoreHistory: 'Load more',
+            loadingHistory: 'Loading activity...',
             recentActivity: 'Recent activity',
             noHistory: 'No activity yet.',
             showAll: 'View all',
@@ -962,8 +975,62 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         return sortHistoryDesc(Array.from(bookingsByDocId.values())).slice(0, 20);
     }
 
-    async function refreshCloudHistory(user) {
-        if (!user?.uid || cloudHistoryLoading || cloudHistoryUid === user.uid) return;
+    function currentHistoryRangeKey() {
+        return `${historyDateFrom || ''}|${historyDateTo || ''}`;
+    }
+
+    function mergeActivityItems(existing = [], incoming = []) {
+        const byId = new Map();
+        [...(Array.isArray(existing) ? existing : []), ...(Array.isArray(incoming) ? incoming : [])].forEach(item => {
+            const key = String(item?.id || `${item?.category || 'activity'}:${item?.timestamp || item?.occurredAt || Math.random()}`);
+            byId.set(key, item);
+        });
+        return Array.from(byId.values()).sort((a, b) => timestampMillis(b.timestamp || b.occurredAt) - timestampMillis(a.timestamp || a.occurredAt));
+    }
+
+    async function fetchMyActivityFromBackend(options = {}) {
+        return profileApiRequest('/getMyActivity', {
+            limit: options.limitCount || 40,
+            cursor: options.cursor || '',
+            from: historyDateFrom || '',
+            to: historyDateTo || ''
+        });
+    }
+
+    function applyActivityPayload(payload = {}, user, options = {}) {
+        if (!Array.isArray(payload.activity)) throw new Error('Invalid activity payload');
+        const append = options.append === true;
+        cloudActivity = append
+            ? mergeActivityItems(cloudActivity, payload.activity)
+            : payload.activity;
+        activityNextCursor = cleanString(payload.nextCursor || '', 240);
+        if (!append) {
+            cloudOrders = Array.isArray(payload.orders) ? payload.orders : [];
+            cloudBookings = Array.isArray(payload.bookings) ? payload.bookings : [];
+        }
+        if (payload.loyaltyConfig && typeof payload.loyaltyConfig === 'object') {
+            loyaltyConfig = normalizeLoyaltyConfig(payload.loyaltyConfig);
+        }
+        if (payload.loyaltySummary && typeof payload.loyaltySummary === 'object') {
+            loyaltySummary = payload.loyaltySummary;
+            loyaltyUid = user.uid;
+        }
+        if (Array.isArray(payload.loyaltyLedger)) {
+            loyaltyLedger = payload.loyaltyLedger;
+            loyaltyUid = user.uid;
+        }
+        cloudHistoryUid = user.uid;
+        cloudHistoryRangeKey = currentHistoryRangeKey();
+    }
+
+    async function refreshCloudHistory(user, options = {}) {
+        const append = options.append === true;
+        const force = options.force === true;
+        const rangeKey = currentHistoryRangeKey();
+        if (!user?.uid || cloudHistoryLoading) return;
+        if (auth && !authStateResolved) return;
+        if (append && !activityNextCursor) return;
+        if (!append && !force && cloudHistoryUid === user.uid && cloudHistoryRangeKey === rangeKey) return;
         const fetchOrders = typeof window.fetchUserOrdersFromCloud === 'function'
             ? window.fetchUserOrdersFromCloud
             : fetchProfileOrdersFromCloud;
@@ -971,19 +1038,30 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             ? window.fetchUserBookingsFromCloud
             : fetchProfileBookingsFromCloud;
         cloudHistoryLoading = true;
+        if (activeProfileTab === 'history') renderProfile();
         try {
-            const [orders, bookings] = await Promise.all([
-                fetchOrders(user.uid),
-                fetchBookings(user.uid)
-            ]);
-            cloudOrders = Array.isArray(orders) ? orders : [];
-            cloudBookings = Array.isArray(bookings) ? bookings : [];
-            cloudHistoryUid = user.uid;
-            renderProfile();
+            const payload = await fetchMyActivityFromBackend({
+                limitCount: append ? 30 : 40,
+                cursor: append ? activityNextCursor : ''
+            });
+            applyActivityPayload(payload, user, { append });
         } catch (error) {
             logClientError('Unable to load profile history from cloud:', error);
+            if (!append) {
+                const [orders, bookings] = await Promise.all([
+                    fetchOrders(user.uid),
+                    fetchBookings(user.uid)
+                ]);
+                cloudActivity = null;
+                activityNextCursor = '';
+                cloudOrders = Array.isArray(orders) ? orders : [];
+                cloudBookings = Array.isArray(bookings) ? bookings : [];
+                cloudHistoryUid = user.uid;
+                cloudHistoryRangeKey = rangeKey;
+            }
         } finally {
             cloudHistoryLoading = false;
+            if (cloudHistoryUid === user.uid) renderProfile();
         }
     }
 
@@ -1160,7 +1238,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             const status = String(order.status || '').toLowerCase();
             const paymentStatus = String(order.paymentStatus || '').toLowerCase();
             if (status === 'cancelled' || paymentStatus === 'refunded' || paymentStatus === 'failed') return false;
-            if (paymentStatus) return paymentStatus === 'paid';
+            if (paymentStatus) return ['paid', 'paid_online', 'paid_counter', 'completed'].includes(paymentStatus);
             return status === 'paid' || status === 'completed';
         });
         const orderSpent = paidLikeOrders.reduce((sum, order) => sum + orderTotal(order), 0);
@@ -1600,10 +1678,53 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         return false;
     }
 
+    function setProfileHistoryDate(part, value) {
+        const normalized = cleanString(value || '', 20);
+        if (part === 'from') historyDateFrom = normalized;
+        if (part === 'to') historyDateTo = normalized;
+        if (historyDateFrom && historyDateTo && historyDateFrom > historyDateTo) {
+            if (part === 'from') historyDateTo = historyDateFrom;
+            if (part === 'to') historyDateFrom = historyDateTo;
+        }
+        activeProfileTab = 'history';
+        historyExpanded = false;
+        cloudActivity = null;
+        activityNextCursor = '';
+        cloudHistoryUid = '';
+        cloudHistoryRangeKey = '';
+        renderProfile();
+        return false;
+    }
+
+    function clearProfileHistoryDates() {
+        historyDateFrom = '';
+        historyDateTo = '';
+        activeProfileTab = 'history';
+        historyExpanded = false;
+        cloudActivity = null;
+        activityNextCursor = '';
+        cloudHistoryUid = '';
+        cloudHistoryRangeKey = '';
+        renderProfile();
+        return false;
+    }
+
     function toggleProfileHistoryExpanded() {
         historyExpanded = !historyExpanded;
         activeProfileTab = 'history';
         renderProfile();
+        return false;
+    }
+
+    function loadMoreProfileHistory() {
+        const storedUser = readUser();
+        const user = {
+            ...storedUser,
+            uid: currentAuthUser?.uid || storedUser.uid
+        };
+        if (!user.uid || cloudHistoryLoading || !activityNextCursor) return false;
+        activeProfileTab = 'history';
+        refreshCloudHistory(user, { append: true, force: true });
         return false;
     }
 
@@ -1804,17 +1925,76 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         return [...orderItems, ...bookingItems].sort((a, b) => b.timestamp - a.timestamp);
     }
 
+    function historyTypeLabel(category, labels, source = '') {
+        if (category === 'pos' || source === 'pos') return labels.historyPos || 'POS';
+        if (category === 'points') return labels.historyPoints || labels.points || 'Points';
+        if (category === 'archery') return labels.historyArchery;
+        if (category === 'bookings') return labels.historyBookings;
+        return labels.historyOrders;
+    }
+
+    function historyStatusLabel(status, labels) {
+        const value = cleanString(status || '', 80);
+        const normalized = value.toLowerCase();
+        if (['paid', 'paid_online', 'paid_counter', 'completed', 'synced'].includes(normalized)) return labels.paid;
+        if (['pending', 'unpaid', 'pending_payment', 'paid_pending_review', 'review_required'].includes(normalized)) return labels.pending;
+        return value || '-';
+    }
+
+    function normalizeBackendActivity(item = {}, labels) {
+        const source = cleanString(item.source || '', 40).toLowerCase();
+        const rawCategory = cleanString(item.category || item.type || '', 40).toLowerCase();
+        const category = rawCategory === 'pos_order' || source === 'pos' && rawCategory === 'orders'
+            ? 'pos'
+            : (HISTORY_FILTERS.includes(rawCategory) ? rawCategory : 'orders');
+        const pointsDelta = Number(item.pointsDelta || 0);
+        const amount = Number(item.amount || 0);
+        const amountText = category === 'points' && pointsDelta
+            ? `${pointsDelta > 0 ? '+' : ''}${formatNumber(pointsDelta)} ${labels.points}`
+            : (amount ? money(amount) : '');
+        const occurredAt = item.occurredAt || item.timestamp || item.createdAt || item.date;
+        return {
+            category,
+            source,
+            type: cleanString(item.type || '', 80),
+            title: cleanString(item.title || '-', 180),
+            typeLabel: historyTypeLabel(category, labels, source),
+            status: historyStatusLabel(item.status, labels),
+            meta: formatDate(occurredAt),
+            detail: cleanString(item.detail || '-', 240),
+            amount: amountText,
+            timestamp: timestampMillis(occurredAt),
+            pointsDelta
+        };
+    }
+
+    function historyItemWithinDateRange(item) {
+        const timestamp = Number(item.timestamp || 0);
+        if (!timestamp) return true;
+        const fromMs = historyDateFrom ? new Date(`${historyDateFrom}T00:00:00.000+07:00`).getTime() : 0;
+        const toMs = historyDateTo ? new Date(`${historyDateTo}T23:59:59.999+07:00`).getTime() : 0;
+        if (fromMs && timestamp < fromMs) return false;
+        if (toMs && timestamp > toMs) return false;
+        return true;
+    }
+
     function filteredHistoryItems(items) {
-        if (activeHistoryFilter === 'all') return items;
-        return items.filter(item => item.category === activeHistoryFilter);
+        const datedItems = items.filter(historyItemWithinDateRange);
+        if (activeHistoryFilter === 'all') return datedItems;
+        if (activeHistoryFilter === 'pos') {
+            return datedItems.filter(item => item.category === 'pos' || item.source === 'pos');
+        }
+        return datedItems.filter(item => item.category === activeHistoryFilter);
     }
 
     function renderHistoryFilters(labels) {
         const filterLabels = {
             all: labels.historyAll,
             orders: labels.historyOrders,
+            pos: labels.historyPos || 'POS',
             bookings: labels.historyBookings,
-            archery: labels.historyArchery
+            archery: labels.historyArchery,
+            points: labels.historyPoints || labels.points || 'Points'
         };
         return `
             <div class="profile-history-filters" role="toolbar" aria-label="${escapeHTML(labels.history)}">
@@ -1827,6 +2007,33 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                         ${escapeHTML(filterLabels[filter])}
                     </button>
                 `).join('')}
+            </div>
+        `;
+    }
+
+    function renderHistoryDateControls(labels) {
+        const dateRangeLabel = labels.historyDateRange || (isEnglishPage() ? 'Date range' : 'ช่วงวันที่');
+        const fromLabel = labels.historyFrom || (isEnglishPage() ? 'From' : 'จากวันที่');
+        const toLabel = labels.historyTo || (isEnglishPage() ? 'To' : 'ถึงวันที่');
+        const clearLabel = labels.historyClearDates || (isEnglishPage() ? 'Clear dates' : 'ล้างวันที่');
+        const showClear = historyDateFrom || historyDateTo;
+        return `
+            <div class="profile-history-controls" aria-label="${escapeHTML(dateRangeLabel)}">
+                <div class="profile-history-date-grid">
+                    <label>
+                        <span>${escapeHTML(fromLabel)}</span>
+                        <input type="date" value="${escapeHTML(historyDateFrom)}" onchange="setProfileHistoryDate('from', this.value)">
+                    </label>
+                    <label>
+                        <span>${escapeHTML(toLabel)}</span>
+                        <input type="date" value="${escapeHTML(historyDateTo)}" onchange="setProfileHistoryDate('to', this.value)">
+                    </label>
+                </div>
+                ${showClear ? `
+                    <button class="profile-history-date-clear" type="button" onclick="clearProfileHistoryDates()">
+                        ${escapeHTML(clearLabel)}
+                    </button>
+                ` : ''}
             </div>
         `;
     }
@@ -1866,8 +2073,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
     function renderHistoryTab(labels, historyItems) {
         const visibleItems = filteredHistoryItems(historyItems);
-        const limitedItems = historyExpanded ? visibleItems : visibleItems.slice(0, 5);
-        const hasMore = visibleItems.length > 5;
+        const limitedItems = historyExpanded ? visibleItems : visibleItems.slice(0, 8);
+        const hasMoreLoaded = visibleItems.length > 8;
+        const canLoadMore = !!activityNextCursor && Array.isArray(cloudActivity);
+        const loadingLabel = labels.loadingHistory || (isEnglishPage() ? 'Loading activity...' : 'กำลังโหลดกิจกรรม...');
         return `
             <section class="profile-tab-panel" id="profile-tab-history" role="tabpanel" tabindex="-1">
                 <div class="profile-panel-heading">
@@ -1876,13 +2085,22 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
                         <h2>${escapeHTML(labels.recentActivity)}</h2>
                     </div>
                 </div>
+                ${renderHistoryDateControls(labels)}
                 ${renderHistoryFilters(labels)}
+                ${cloudHistoryLoading ? `<p class="profile-history-status" role="status">${escapeHTML(loadingLabel)}</p>` : ''}
                 ${renderHistoryTimeline(limitedItems, labels)}
-                ${hasMore ? `
-                    <button class="btn btn-outline profile-history-more" type="button" onclick="toggleProfileHistoryExpanded()">
-                        ${escapeHTML(historyExpanded ? labels.showLess : labels.showAll)}
-                    </button>
-                ` : ''}
+                <div class="profile-history-actions">
+                    ${hasMoreLoaded ? `
+                        <button class="btn btn-outline profile-history-more" type="button" onclick="toggleProfileHistoryExpanded()">
+                            ${escapeHTML(historyExpanded ? labels.showLess : labels.showAll)}
+                        </button>
+                    ` : ''}
+                    ${canLoadMore ? `
+                        <button class="btn btn-outline profile-history-more" type="button" onclick="loadMoreProfileHistory()" ${cloudHistoryLoading ? 'disabled' : ''}>
+                            ${escapeHTML(labels.loadMoreHistory || (isEnglishPage() ? 'Load more' : 'โหลดเพิ่ม'))}
+                        </button>
+                    ` : ''}
+                </div>
             </section>
         `;
     }
@@ -2230,7 +2448,9 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const avatar = profileValue('photoURL', user.avatar || user.photoURL || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user.name || labels.member) + '&background=4caf50&color=fff');
         const displayName = profileValue('displayName', user.name || labels.member);
         const email = profileValue('email', user.email || '');
-        const historyItems = buildHistoryItems(orders, bookings, labels);
+        const historyItems = Array.isArray(cloudActivity)
+            ? cloudActivity.map(item => normalizeBackendActivity(item, labels)).sort((a, b) => b.timestamp - a.timestamp)
+            : buildHistoryItems(orders, bookings, labels);
         const profileLoadNotice = cloudProfileError
             ? `<p class="profile-save-message" role="status">${escapeHTML(cloudProfileError)}</p>`
             : '';
@@ -3088,7 +3308,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     window.refreshProfileLoyalty = refreshProfileLoyalty;
     window.setProfileTab = setProfileTab;
     window.setProfileHistoryFilter = setProfileHistoryFilter;
+    window.setProfileHistoryDate = setProfileHistoryDate;
+    window.clearProfileHistoryDates = clearProfileHistoryDates;
     window.toggleProfileHistoryExpanded = toggleProfileHistoryExpanded;
+    window.loadMoreProfileHistory = loadMoreProfileHistory;
     window.checkMemberEmailVerification = checkMemberEmailVerification;
     window.sendMemberEmailVerificationCode = sendMemberEmailVerificationCode;
     window.verifyMemberEmailCode = verifyMemberEmailCode;

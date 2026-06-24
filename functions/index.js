@@ -538,6 +538,506 @@ exports.updateMyProfile = onRequest(
   memberAuthHandlers.updateMyProfile
 );
 
+function activityLimit(value, fallback = 30, max = 80) {
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(max, Math.max(1, parsed));
+}
+
+function activityDateMillis(value, endOfDay = false) {
+  const raw = cleanString(value || '', 40);
+  if (!raw) return 0;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const time = endOfDay ? '23:59:59.999' : '00:00:00.000';
+    const millis = new Date(`${raw}T${time}+07:00`).getTime();
+    return Number.isFinite(millis) ? millis : 0;
+  }
+  const millis = new Date(raw).getTime();
+  return Number.isFinite(millis) ? millis : 0;
+}
+
+function activityCursorMillis(value) {
+  const raw = cleanString(value || '', 240);
+  if (!raw) return 0;
+  const direct = Number(raw);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  try {
+    const decoded = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    const millis = Number(decoded?.before || decoded?.timestamp || 0);
+    return Number.isFinite(millis) && millis > 0 ? millis : 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function activityCursorFromMillis(millis) {
+  const value = Number(millis);
+  if (!Number.isFinite(value) || value <= 0) return '';
+  return Buffer.from(JSON.stringify({ before: value }), 'utf8').toString('base64url');
+}
+
+function activityValueToMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value === 'string') {
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (typeof value === 'object' && Number.isFinite(Number(value._seconds))) {
+    return (Number(value._seconds) * 1000) + Math.floor(Number(value._nanoseconds || 0) / 1000000);
+  }
+  return 0;
+}
+
+function activityTimestampMillis(data = {}) {
+  const direct = [
+    data.paidAt,
+    data.closedAt,
+    data.completedAt,
+    data.timestamp,
+    data.createdAt,
+    data.created_at,
+    data.updatedAt,
+    data.updated_at,
+    data.date,
+  ];
+  for (const value of direct) {
+    const millis = activityValueToMillis(value);
+    if (millis) return millis;
+  }
+  const bookingDate = cleanString(data.booking_date || data.bookingDate || '', 20);
+  if (bookingDate) {
+    const start = cleanString(data.start_time || data.startTime || '00:00', 10) || '00:00';
+    const parsed = new Date(`${bookingDate}T${start}:00+07:00`).getTime();
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function activityIso(value) {
+  const millis = activityValueToMillis(value);
+  return millis ? new Date(millis).toISOString() : '';
+}
+
+function serializeActivityValue(value) {
+  if (value == null) return value;
+  if (typeof value.toDate === 'function' || typeof value.toMillis === 'function') return activityIso(value);
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map(serializeActivityValue);
+  if (typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, serializeActivityValue(item)])
+    );
+  }
+  return value;
+}
+
+function activityAmount(data = {}) {
+  return Number(
+    data.payableTotal ??
+    data.totalAmount ??
+    data.total ??
+    data.netTotal ??
+    data.amount_total ??
+    data.amountTotal ??
+    data.amount ??
+    data.price ??
+    0
+  ) || 0;
+}
+
+function activityStatus(data = {}) {
+  return cleanString(
+    data.paymentLabel ||
+    data.payment_status ||
+    data.paymentStatus ||
+    data.booking_status ||
+    data.bookingStatus ||
+    data.status ||
+    data.order_status ||
+    data.billStatus ||
+    '',
+    80
+  );
+}
+
+function isActivityArcheryBooking(data = {}) {
+  const serviceType = cleanString(data.service_type || data.serviceType || '', 40).toUpperCase();
+  const bookingType = cleanString(data.bookingType || data.booking_type || data.type || '', 80).toLowerCase();
+  return serviceType === 'ARCHERY'
+    || bookingType.includes('archery')
+    || Array.isArray(data.assigned_lane_numbers)
+    || Array.isArray(data.assigned_resource_ids)
+    || data.required_lane_count != null
+    || data.requiredLaneCount != null;
+}
+
+function activityOrderSource(data = {}) {
+  const source = cleanString(data.source || data.orderSource || data.channel || '', 40).toLowerCase();
+  if (source === 'pos' || source === 'web' || source === 'online') return source;
+  if (data.receiptNo || data.posReceiptNo || data.posTerminalId) return 'pos';
+  return 'web';
+}
+
+function activityItemsText(items = []) {
+  if (!Array.isArray(items)) return '';
+  return items
+    .map(item => cleanString(item?.name || item?.productName || item?.title || '', 100))
+    .filter(Boolean)
+    .slice(0, 4)
+    .join(', ');
+}
+
+function activityBookingDetail(data = {}) {
+  const laneNumbers = Array.isArray(data.assigned_lane_numbers)
+    ? data.assigned_lane_numbers.map(number => `Lane ${number}`).join(', ')
+    : '';
+  const laneIds = !laneNumbers && Array.isArray(data.assigned_resource_ids)
+    ? data.assigned_resource_ids.map(item => cleanString(item, 80)).filter(Boolean).join(', ')
+    : '';
+  return [
+    data.booking_date || data.bookingDate || data.date,
+    [data.start_time || data.startTime, data.end_time || data.endTime].filter(Boolean).join('-'),
+    laneNumbers || laneIds,
+    data.tableZone || data.tableNo || data.roomType || data.zone || data.table,
+    data.party_size ? `${data.party_size} people` : '',
+    data.guests ? `${data.guests} people` : '',
+    data.duration_minutes ? `${data.duration_minutes} min` : '',
+  ].map(item => cleanString(item || '', 120)).filter(Boolean).join(' | ');
+}
+
+function normalizeActivityTypes(value) {
+  const raw = Array.isArray(value) ? value : String(value || '').split(',');
+  return raw.map(item => cleanString(item, 40).toLowerCase()).filter(Boolean);
+}
+
+function activityMatchesTypes(activity, types = []) {
+  if (!types.length || types.includes('all')) return true;
+  return types.some(type => {
+    if (type === 'pos') return activity.source === 'pos' || activity.category === 'pos';
+    if (type === 'orders') return activity.category === 'orders';
+    if (type === 'bookings') return activity.category === 'bookings';
+    if (type === 'archery') return activity.category === 'archery';
+    if (type === 'points') return activity.category === 'points';
+    return activity.category === type || activity.source === type || activity.type === type;
+  });
+}
+
+async function queryActivityCollection(options = {}) {
+  const {
+    collectionName,
+    uid,
+    fields = [],
+    orderFields = [],
+    limitCount = 30,
+  } = options;
+  const docs = new Map();
+  const collectionRef = db.collection(collectionName);
+  const queryLimit = Math.min(500, Math.max(limitCount * 8, 80));
+  for (const field of Array.from(new Set(fields.filter(Boolean)))) {
+    let loadedOrdered = false;
+    for (const orderField of Array.from(new Set(orderFields.filter(Boolean)))) {
+      try {
+        const snap = await collectionRef
+          .where(field, '==', uid)
+          .orderBy(orderField, 'desc')
+          .limit(queryLimit)
+          .get();
+        snap.forEach(docSnap => docs.set(docSnap.id, {
+          firestoreId: docSnap.id,
+          ...serializeActivityValue(docSnap.data() || {}),
+        }));
+        loadedOrdered = true;
+        break;
+      } catch (error) {
+        logger.warn('Activity ordered query fallback', {
+          collectionName,
+          field,
+          orderField,
+          code: error.code || '',
+          message: error.message,
+        });
+      }
+    }
+    if (loadedOrdered) continue;
+    try {
+      const snap = await collectionRef
+        .where(field, '==', uid)
+        .limit(queryLimit)
+        .get();
+      snap.forEach(docSnap => docs.set(docSnap.id, {
+        firestoreId: docSnap.id,
+        ...serializeActivityValue(docSnap.data() || {}),
+      }));
+    } catch (error) {
+      logger.warn('Activity query failed', {
+        collectionName,
+        field,
+        code: error.code || '',
+        message: error.message,
+      });
+    }
+  }
+  return Array.from(docs.values());
+}
+
+function orderActivity(order = {}, uid = '') {
+  const customerUid = cleanString(order.customerUid || '', 180);
+  const legacyUid = cleanString(order.uid || order.userId || order.memberUid || '', 180);
+  const source = activityOrderSource(order);
+  if (order.isTestOrder === true) return null;
+  if (customerUid && customerUid !== uid) return null;
+  if (!customerUid && legacyUid !== uid) return null;
+  if (!customerUid && source === 'pos') return null;
+  const displayId = cleanString(order.receiptNo || order.orderNumber || order.id || order.firestoreId || '-', 120);
+  const amount = activityAmount(order);
+  const occurredMs = activityTimestampMillis(order);
+  return {
+    id: `order:${order.firestoreId || displayId}`,
+    category: source === 'pos' ? 'pos' : 'orders',
+    type: source === 'pos' ? 'pos_order' : 'web_order',
+    source,
+    title: source === 'pos' ? `POS receipt #${displayId}` : `Order #${displayId}`,
+    status: activityStatus(order) || 'pending',
+    detail: activityItemsText(order.items) || cleanString(order.note || order.description || '', 180) || '-',
+    amount,
+    occurredAt: occurredMs ? new Date(occurredMs).toISOString() : '',
+    timestamp: occurredMs,
+    refs: {
+      orderId: displayId,
+      firestoreId: cleanString(order.firestoreId || '', 180),
+      receiptNo: cleanString(order.receiptNo || '', 120),
+    },
+  };
+}
+
+function bookingActivity(booking = {}) {
+  const archery = isActivityArcheryBooking(booking);
+  const displayId = cleanString(booking.booking_id || booking.id || booking.firestoreId || '-', 120);
+  const occurredMs = activityTimestampMillis(booking);
+  return {
+    id: `booking:${booking.firestoreId || displayId}`,
+    category: archery ? 'archery' : 'bookings',
+    type: archery ? 'archery_booking' : 'booking',
+    source: archery ? 'archery' : 'booking',
+    title: archery ? `Eden Archery #${displayId}` : `Booking #${displayId}`,
+    status: activityStatus(booking) || 'confirmed',
+    detail: activityBookingDetail(booking) || '-',
+    amount: activityAmount(booking),
+    occurredAt: occurredMs ? new Date(occurredMs).toISOString() : '',
+    timestamp: occurredMs,
+    refs: {
+      bookingId: displayId,
+      firestoreId: cleanString(booking.firestoreId || '', 180),
+    },
+  };
+}
+
+function ledgerActivity(ledger = {}) {
+  const pointsDelta = Math.trunc(Number(ledger.pointsDelta || ledger.delta || 0));
+  const type = cleanString(ledger.type || '', 80).toLowerCase();
+  const source = cleanString(ledger.source || (type.startsWith('pos_') ? 'pos' : 'loyalty'), 40).toLowerCase();
+  const displayId = cleanString(ledger.receiptNo || ledger.orderId || ledger.firestoreId || '', 120);
+  const occurredMs = activityTimestampMillis(ledger);
+  const title = pointsDelta < 0
+    ? `Redeemed ${Math.abs(pointsDelta)} points`
+    : `Earned ${pointsDelta} points`;
+  return {
+    id: `ledger:${ledger.firestoreId || displayId || occurredMs}`,
+    category: 'points',
+    type: type || 'points',
+    source,
+    title,
+    status: 'synced',
+    detail: displayId ? `Reference #${displayId}` : cleanString(ledger.reason || ledger.note || '', 180) || '-',
+    amount: Number(ledger.amount || 0) || 0,
+    pointsDelta,
+    pointsBefore: Number(ledger.pointsBefore || 0) || 0,
+    pointsAfter: Number(ledger.pointsAfter || 0) || 0,
+    occurredAt: occurredMs ? new Date(occurredMs).toISOString() : '',
+    timestamp: occurredMs,
+    refs: {
+      ledgerId: cleanString(ledger.firestoreId || '', 180),
+      orderId: cleanString(ledger.orderId || '', 180),
+      receiptNo: cleanString(ledger.receiptNo || '', 120),
+    },
+  };
+}
+
+function activityOrderSummary(order = {}) {
+  const amount = activityAmount(order);
+  const occurredMs = activityTimestampMillis(order);
+  return {
+    firestoreId: cleanString(order.firestoreId || '', 180),
+    id: cleanString(order.receiptNo || order.orderNumber || order.id || order.firestoreId || '-', 120),
+    receiptNo: cleanString(order.receiptNo || '', 120),
+    orderNumber: cleanString(order.orderNumber || '', 120),
+    source: activityOrderSource(order),
+    status: cleanString(order.status || order.order_status || order.billStatus || '', 80),
+    paymentStatus: cleanString(order.paymentStatus || order.payment_status || '', 80),
+    totalAmount: amount,
+    total: amount,
+    date: occurredMs ? new Date(occurredMs).toISOString() : '',
+    timestamp: occurredMs ? new Date(occurredMs).toISOString() : '',
+    items: Array.isArray(order.items)
+      ? order.items.slice(0, 20).map(item => ({
+        name: cleanString(item?.name || item?.productName || item?.title || '', 120),
+        quantity: Number(item?.quantity || item?.qty || 0) || 0,
+        price: Number(item?.price || item?.unitPrice || item?.total || 0) || 0,
+      }))
+      : [],
+  };
+}
+
+function activityBookingSummary(booking = {}) {
+  const occurredMs = activityTimestampMillis(booking);
+  return {
+    firestoreId: cleanString(booking.firestoreId || '', 180),
+    id: cleanString(booking.booking_id || booking.id || booking.firestoreId || '-', 120),
+    service_type: cleanString(booking.service_type || booking.serviceType || '', 40),
+    bookingType: cleanString(booking.bookingType || booking.booking_type || '', 40),
+    status: cleanString(booking.status || booking.booking_status || '', 80),
+    paymentStatus: cleanString(booking.paymentStatus || booking.payment_status || '', 80),
+    booking_date: cleanString(booking.booking_date || booking.bookingDate || booking.date || '', 20),
+    start_time: cleanString(booking.start_time || booking.startTime || '', 10),
+    end_time: cleanString(booking.end_time || booking.endTime || '', 10),
+    total: activityAmount(booking),
+    timestamp: occurredMs ? new Date(occurredMs).toISOString() : '',
+    assigned_lane_numbers: Array.isArray(booking.assigned_lane_numbers) ? booking.assigned_lane_numbers.slice(0, 10) : [],
+    required_lane_count: Number(booking.required_lane_count || booking.requiredLaneCount || 0) || 0,
+    party_size: Number(booking.party_size || booking.partySize || booking.guests || 0) || 0,
+    tableNo: cleanString(booking.tableNo || '', 80),
+    tableZone: cleanString(booking.tableZone || '', 120),
+    roomType: cleanString(booking.roomType || '', 120),
+  };
+}
+
+async function getMyActivityPayload(uid, rawOptions = {}) {
+  const limitCount = activityLimit(rawOptions.limit, 30, 80);
+  const fromMs = activityDateMillis(rawOptions.from || rawOptions.dateFrom || rawOptions.startDate, false);
+  const toMs = activityDateMillis(rawOptions.to || rawOptions.dateTo || rawOptions.endDate, true);
+  const cursorMs = activityCursorMillis(rawOptions.cursor || rawOptions.before || '');
+  const types = normalizeActivityTypes(rawOptions.types || rawOptions.type || rawOptions.category || '');
+  const [orders, bookings, ledgers, loyaltySnap, summarySnap] = await Promise.all([
+    queryActivityCollection({
+      collectionName: 'orders',
+      uid,
+      fields: ['customerUid', 'uid', 'userId', 'memberUid'],
+      orderFields: ['timestamp', 'createdAt', 'paidAt', 'closedAt'],
+      limitCount,
+    }),
+    queryActivityCollection({
+      collectionName: 'bookings',
+      uid,
+      fields: ['uid', 'customerUid', 'member_id', 'memberUid', 'userId'],
+      orderFields: ['timestamp', 'createdAt', 'created_at', 'updatedAt', 'booking_date'],
+      limitCount,
+    }),
+    queryActivityCollection({
+      collectionName: 'point_ledger',
+      uid,
+      fields: ['userId'],
+      orderFields: ['createdAt', 'created_at', 'timestamp'],
+      limitCount,
+    }),
+    db.collection('site_settings').doc('loyalty').get().catch(() => null),
+    db.collection('member_summaries').doc(uid).get().catch(() => null),
+  ]);
+  const activities = []
+    .concat(orders.map(order => orderActivity(order, uid)))
+    .concat(bookings.map(bookingActivity))
+    .concat(ledgers.map(ledgerActivity))
+    .filter(Boolean)
+    .filter(activity => {
+      const timestamp = Number(activity.timestamp || 0);
+      if (!timestamp) return false;
+      if (fromMs && timestamp < fromMs) return false;
+      if (toMs && timestamp > toMs) return false;
+      if (cursorMs && timestamp >= cursorMs) return false;
+      return activityMatchesTypes(activity, types);
+    })
+    .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+  const pageItems = activities.slice(0, limitCount);
+  const nextCursor = activities.length > limitCount
+    ? activityCursorFromMillis(pageItems[pageItems.length - 1]?.timestamp)
+    : '';
+  return {
+    ok: true,
+    uid,
+    limit: limitCount,
+    cursor: rawOptions.cursor || '',
+    nextCursor,
+    generatedAt: new Date().toISOString(),
+    activity: pageItems,
+    orders: orders
+      .map(order => orderActivity(order, uid) ? activityOrderSummary(order) : null)
+      .filter(Boolean)
+      .sort((a, b) => activityValueToMillis(b.timestamp) - activityValueToMillis(a.timestamp))
+      .slice(0, 30),
+    bookings: bookings
+      .map(activityBookingSummary)
+      .sort((a, b) => activityValueToMillis(b.timestamp) - activityValueToMillis(a.timestamp))
+      .slice(0, 30),
+    loyaltyLedger: ledgers
+      .map(ledger => ({
+        id: cleanString(ledger.firestoreId || '', 180),
+        type: cleanString(ledger.type || '', 80),
+        source: cleanString(ledger.source || '', 40),
+        pointsDelta: Math.trunc(Number(ledger.pointsDelta || 0)),
+        pointsBefore: Number(ledger.pointsBefore || 0) || 0,
+        pointsAfter: Number(ledger.pointsAfter || 0) || 0,
+        amount: Number(ledger.amount || 0) || 0,
+        receiptNo: cleanString(ledger.receiptNo || '', 120),
+        orderId: cleanString(ledger.orderId || '', 180),
+        createdAt: activityIso(ledger.createdAt || ledger.created_at || ledger.timestamp),
+      }))
+      .sort((a, b) => activityValueToMillis(b.createdAt) - activityValueToMillis(a.createdAt))
+      .slice(0, 30),
+    loyaltyConfig: loyaltySnap?.exists ? serializeActivityValue(loyaltySnap.data() || {}) : null,
+    loyaltySummary: summarySnap?.exists ? serializeActivityValue(summarySnap.data() || {}) : null,
+  };
+}
+
+exports.getMyActivity = onRequest(
+  { region: 'asia-southeast1', timeoutSeconds: 30, memory: '256MiB' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    res.set('Cache-Control', 'no-store, max-age=0');
+    res.set('X-Content-Type-Options', 'nosniff');
+
+    if (!['GET', 'POST'].includes(req.method)) {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const decoded = await requireSignedInUser(req);
+      try {
+        checkRateLimitKey(`get-my-activity:${decoded.uid}`, 240, 15 * 60 * 1000);
+      } catch (rateLimitError) {
+        rateLimitError.publicMessage = 'Too many activity requests. Please wait a moment and try again.';
+        throw rateLimitError;
+      }
+      const rawOptions = req.method === 'GET' ? (req.query || {}) : (req.body || {});
+      const payload = await getMyActivityPayload(decoded.uid, rawOptions);
+      res.status(200).json(payload);
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('Member activity fetch failed', {
+        status,
+        code: error.code || '',
+        message: error.message,
+      });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to load member activity right now.');
+      res.status(status).json({ ok: false, error: publicError.message });
+    }
+  }
+);
+
 exports.checkPhoneChange = onRequest(
   { region: 'asia-southeast1' },
   memberAuthHandlers.checkPhoneChange
