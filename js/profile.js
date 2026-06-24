@@ -1962,35 +1962,54 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         return `
             <div class="modal-overlay show profile-phone-removal-modal" role="dialog" aria-modal="true" aria-labelledby="phone-removal-title">
                 <div class="modal-content profile-phone-removal-content">
-                    <button class="profile-modal-close" type="button" onclick="closePhoneRemovalModal()" aria-label="${escapeHTML(labels.cancelRemovePhone || 'Cancel')}">&times;</button>
-                    <h3 id="phone-removal-title">${escapeHTML(labels.removePhoneTitle || 'ลบเบอร์โทร')}</h3>
-                    <p>${escapeHTML(labels.removePhoneLead || '')}</p>
-                    <div class="profile-phone-removal-target">
-                        <strong>${escapeHTML(context.phone || '-')}</strong>
-                    </div>
-                    <fieldset class="profile-phone-removal-options" ${pending || phoneRemovalBusy ? 'disabled' : ''}>
-                        <legend>${escapeHTML(labels.removePhoneChannel || 'รับ OTP ผ่าน')}</legend>
-                        <label>
-                            <input type="radio" name="phoneRemovalChannel" value="phone" ${channel === 'phone' ? 'checked' : ''} onchange="setPhoneRemovalChannel('phone')">
-                            <span>${escapeHTML(labels.removePhoneByPhone || 'เบอร์โทรปัจจุบัน')}</span>
-                        </label>
-                        <label class="${emailVerified ? '' : 'is-disabled'}">
-                            <input type="radio" name="phoneRemovalChannel" value="email" ${channel === 'email' ? 'checked' : ''} ${emailVerified ? '' : 'disabled'} onchange="setPhoneRemovalChannel('email')">
-                            <span>${escapeHTML(labels.removePhoneByEmail || 'อีเมลที่ยืนยันแล้ว')}${context.email ? ` (${escapeHTML(context.email)})` : ''}</span>
-                            ${emailVerified ? '' : `<small>${escapeHTML(labels.removePhoneEmailUnavailable || '')}</small>`}
-                        </label>
-                    </fieldset>
-                    ${pending ? `
-                        <p class="profile-privacy-note">${escapeHTML((labels.removePhoneCodeSent || '') + (identifierDisplay ? ` ${identifierDisplay}` : ''))}</p>
-                        <div class="profile-phone-removal-code">
-                            <input name="phoneRemovalCode" type="text" inputmode="numeric" maxlength="6" value="${escapeHTML(profileDraftValue('phoneRemovalCode', ''))}" placeholder="${escapeHTML(labels.phoneCodePlaceholder || '123456')}" aria-label="${escapeHTML(labels.removePhoneCode || 'OTP')}">
-                            <button class="btn" type="button" onclick="verifyMemberPhoneRemovalCode()" ${phoneRemovalBusy ? 'disabled' : ''}>${escapeHTML(verifyLabel)}</button>
+                    <div class="profile-phone-removal-header">
+                        <span class="profile-phone-removal-icon" aria-hidden="true">!</span>
+                        <div>
+                            <p class="profile-phone-removal-kicker">${escapeHTML(isEnglishPage() ? 'Account security' : 'ความปลอดภัยบัญชี')}</p>
+                            <h3 id="phone-removal-title">${escapeHTML(labels.removePhoneTitle || 'ลบเบอร์โทร')}</h3>
+                            <p>${escapeHTML(labels.removePhoneLead || '')}</p>
                         </div>
-                    ` : `
-                        <button class="btn" type="button" onclick="sendMemberPhoneRemovalCode()" ${phoneRemovalBusy || cooldown ? 'disabled' : ''}>${escapeHTML(sendLabel)}</button>
-                    `}
-                    ${inlineNotice}
-                    <button class="btn btn-outline" type="button" onclick="closePhoneRemovalModal()" ${phoneRemovalBusy ? 'disabled' : ''}>${escapeHTML(labels.cancelRemovePhone || 'ยกเลิก')}</button>
+                        <button class="profile-modal-close" type="button" onclick="closePhoneRemovalModal()" aria-label="${escapeHTML(labels.cancelRemovePhone || 'Cancel')}">&times;</button>
+                    </div>
+                    <div class="profile-phone-removal-body">
+                        <div class="profile-phone-removal-target">
+                            <span>${escapeHTML(isEnglishPage() ? 'Phone number to remove' : 'เบอร์ที่จะลบ')}</span>
+                            <strong>${escapeHTML(context.phone || '-')}</strong>
+                        </div>
+                        <fieldset class="profile-phone-removal-options" ${pending || phoneRemovalBusy ? 'disabled' : ''}>
+                            <legend>${escapeHTML(labels.removePhoneChannel || 'รับ OTP ผ่าน')}</legend>
+                            <label class="profile-phone-removal-option ${channel === 'phone' ? 'is-selected' : ''}">
+                                <input type="radio" name="phoneRemovalChannel" value="phone" ${channel === 'phone' ? 'checked' : ''} onchange="setPhoneRemovalChannel('phone')">
+                                <span class="profile-phone-removal-radio" aria-hidden="true"></span>
+                                <span>
+                                    <strong>${escapeHTML(labels.removePhoneByPhone || 'เบอร์โทรปัจจุบัน')}</strong>
+                                    <small>${escapeHTML(context.phone || '')}</small>
+                                </span>
+                            </label>
+                            <label class="profile-phone-removal-option ${channel === 'email' ? 'is-selected' : ''} ${emailVerified ? '' : 'is-disabled'}">
+                                <input type="radio" name="phoneRemovalChannel" value="email" ${channel === 'email' ? 'checked' : ''} ${emailVerified ? '' : 'disabled'} onchange="setPhoneRemovalChannel('email')">
+                                <span class="profile-phone-removal-radio" aria-hidden="true"></span>
+                                <span>
+                                    <strong>${escapeHTML(labels.removePhoneByEmail || 'อีเมลที่ยืนยันแล้ว')}</strong>
+                                    <small>${escapeHTML(emailVerified && context.email ? context.email : (labels.removePhoneEmailUnavailable || ''))}</small>
+                                </span>
+                            </label>
+                        </fieldset>
+                        ${pending ? `
+                            <div class="profile-phone-removal-pending">
+                                <p>${escapeHTML((labels.removePhoneCodeSent || '') + (identifierDisplay ? ` ${identifierDisplay}` : ''))}</p>
+                                <div class="profile-phone-removal-code">
+                                    <input name="phoneRemovalCode" type="text" inputmode="numeric" maxlength="6" value="${escapeHTML(profileDraftValue('phoneRemovalCode', ''))}" placeholder="${escapeHTML(labels.phoneCodePlaceholder || '123456')}" aria-label="${escapeHTML(labels.removePhoneCode || 'OTP')}">
+                                    <button class="btn" type="button" onclick="verifyMemberPhoneRemovalCode()" ${phoneRemovalBusy ? 'disabled' : ''}>${escapeHTML(verifyLabel)}</button>
+                                </div>
+                            </div>
+                        ` : ''}
+                        ${inlineNotice}
+                    </div>
+                    <div class="profile-phone-removal-actions">
+                        <button class="btn btn-outline" type="button" onclick="closePhoneRemovalModal()" ${phoneRemovalBusy ? 'disabled' : ''}>${escapeHTML(labels.cancelRemovePhone || 'ยกเลิก')}</button>
+                        ${pending ? '' : `<button class="btn" type="button" onclick="sendMemberPhoneRemovalCode()" ${phoneRemovalBusy || cooldown ? 'disabled' : ''}>${escapeHTML(sendLabel)}</button>`}
+                    </div>
                 </div>
             </div>
         `;

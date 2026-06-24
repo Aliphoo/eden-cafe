@@ -4079,10 +4079,329 @@ footer p {
     line-height: 1.55;
 }
 
+.profile-phone-removal-modal {
+    padding: 24px;
+    background: rgba(18, 30, 24, 0.66);
+    backdrop-filter: blur(8px);
+}
+
+.profile-phone-removal-content {
+    position: relative;
+    overflow: hidden;
+    width: min(94vw, 560px);
+    max-height: calc(100vh - 48px);
+    padding: 0;
+    border: 1px solid rgba(26, 147, 69, 0.12);
+    border-radius: 22px;
+    background: #fff;
+    box-shadow: 0 28px 80px rgba(19, 48, 32, 0.28);
+    text-align: left;
+}
+
+.profile-phone-removal-header {
+    display: grid;
+    grid-template-columns: 46px minmax(0, 1fr) 38px;
+    gap: 14px;
+    align-items: flex-start;
+    padding: 28px 28px 20px;
+    background: linear-gradient(180deg, #f7fbf7 0%, #ffffff 100%);
+    border-bottom: 1px solid rgba(26, 147, 69, 0.1);
+}
+
+.profile-phone-removal-icon {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: #fff6e8;
+    color: #a45f00;
+    font-weight: 900;
+    box-shadow: inset 0 0 0 1px rgba(164, 95, 0, 0.16);
+}
+
+.profile-phone-removal-kicker {
+    margin: 0 0 5px;
+    color: #1a9345;
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+
+.profile-phone-removal-content h3 {
+    margin: 0 0 8px;
+    color: #137234;
+    font-size: clamp(1.28rem, 2vw, 1.65rem);
+    line-height: 1.22;
+    text-align: left;
+}
+
+.profile-phone-removal-header p:last-child {
+    margin: 0;
+    color: #56665b;
+    font-size: 0.95rem;
+    line-height: 1.55;
+}
+
+.profile-modal-close {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border: 1px solid rgba(19, 114, 52, 0.12);
+    border-radius: 50%;
+    background: #ffffff;
+    color: #506258;
+    cursor: pointer;
+    font-size: 1.35rem;
+    line-height: 1;
+    transition: transform 0.2s ease, border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+
+.profile-modal-close:hover {
+    background: #f1faf3;
+    border-color: rgba(26, 147, 69, 0.3);
+    color: #137234;
+    transform: translateY(-1px);
+}
+
+.profile-phone-removal-body {
+    display: grid;
+    gap: 16px;
+    padding: 20px 28px 0;
+}
+
+.profile-phone-removal-target {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: center;
+    padding: 14px 16px;
+    border: 1px solid rgba(26, 147, 69, 0.14);
+    border-radius: 14px;
+    background: #f7fbf7;
+}
+
+.profile-phone-removal-target span {
+    color: #66736a;
+    font-size: 0.88rem;
+    font-weight: 700;
+}
+
+.profile-phone-removal-target strong {
+    color: #1d2d24;
+    font-size: 1.06rem;
+    letter-spacing: 0;
+    white-space: nowrap;
+}
+
+.profile-phone-removal-options {
+    display: grid;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.profile-phone-removal-options legend {
+    margin: 0 0 2px;
+    color: #314238;
+    font-size: 0.92rem;
+    font-weight: 800;
+}
+
+.profile-phone-removal-option {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 12px;
+    align-items: flex-start;
+    padding: 14px 16px;
+    border: 1px solid #dfeae3;
+    border-radius: 14px;
+    background: #fff;
+    cursor: pointer;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.profile-phone-removal-option:hover {
+    border-color: rgba(26, 147, 69, 0.34);
+    box-shadow: 0 12px 28px rgba(19, 114, 52, 0.08);
+}
+
+.profile-phone-removal-option.is-selected {
+    border-color: rgba(26, 147, 69, 0.5);
+    background: #f3fbf5;
+    box-shadow: 0 10px 24px rgba(19, 114, 52, 0.1);
+}
+
+.profile-phone-removal-option.is-disabled {
+    cursor: not-allowed;
+    opacity: 0.58;
+}
+
+.profile-phone-removal-option input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.profile-phone-removal-radio {
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+    border: 2px solid #b8c9be;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: inset 0 0 0 4px #fff;
+}
+
+.profile-phone-removal-option.is-selected .profile-phone-removal-radio {
+    border-color: #1a9345;
+    background: #1a9345;
+}
+
+.profile-phone-removal-option strong {
+    display: block;
+    color: #213229;
+    font-size: 0.98rem;
+}
+
+.profile-phone-removal-option small {
+    display: block;
+    margin-top: 3px;
+    color: #6b7c70;
+    line-height: 1.4;
+}
+
+.profile-phone-removal-pending {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid rgba(26, 147, 69, 0.16);
+    border-radius: 16px;
+    background: #f3fbf5;
+}
+
+.profile-phone-removal-pending p {
+    margin: 0;
+    color: #42604e;
+    font-size: 0.92rem;
+    line-height: 1.5;
+}
+
+.profile-phone-removal-code {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.profile-phone-removal-code input {
+    width: 100%;
+    min-height: 48px;
+    padding: 12px 14px;
+    border: 1px solid #dbe8df;
+    border-radius: 12px;
+    font: inherit;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-align: center;
+}
+
+.profile-phone-removal-code input:focus {
+    outline: 2px solid rgba(26, 147, 69, 0.18);
+    border-color: #1a9345;
+}
+
+.profile-phone-removal-body .profile-privacy-note {
+    border-radius: 14px;
+    background: #f7fbf7;
+    color: #40604b;
+}
+
+.profile-phone-removal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 20px 28px 28px;
+}
+
+.profile-phone-removal-actions .btn {
+    min-width: 132px;
+    margin: 0;
+    text-align: center;
+}
+
+.profile-phone-removal-actions .btn:disabled,
+.profile-phone-removal-code .btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.62;
+    transform: none;
+}
+
 @media (max-width: 760px) {
     .profile-email-verify,
     .profile-email-actions {
         grid-template-columns: 1fr;
+    }
+
+    .profile-phone-removal-modal {
+        align-items: flex-end;
+        padding: 12px;
+    }
+
+    .profile-phone-removal-content {
+        width: 100%;
+        max-height: calc(100vh - 24px);
+        max-height: calc(100dvh - 24px);
+        border-radius: 20px;
+        overflow-y: auto;
+    }
+
+    .profile-phone-removal-header {
+        grid-template-columns: 40px minmax(0, 1fr) 34px;
+        padding: 22px 18px 18px;
+    }
+
+    .profile-phone-removal-icon {
+        width: 40px;
+        height: 40px;
+    }
+
+    .profile-modal-close {
+        width: 34px;
+        height: 34px;
+    }
+
+    .profile-phone-removal-body {
+        padding: 18px 18px 0;
+    }
+
+    .profile-phone-removal-target {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .profile-phone-removal-target strong {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .profile-phone-removal-code {
+        grid-template-columns: 1fr;
+    }
+
+    .profile-phone-removal-actions {
+        flex-direction: column-reverse;
+        padding: 18px;
+    }
+
+    .profile-phone-removal-actions .btn,
+    .profile-phone-removal-code .btn {
+        width: 100%;
     }
 }
 
