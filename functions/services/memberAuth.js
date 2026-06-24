@@ -1160,6 +1160,257 @@ function createMemberAuthHandlers({
     }
   }
 
+  async function verifyFirebasePhoneProof(firebaseIdToken, memberUid, expectedPhoneNumber = '', options = {}) {
+    const token = cleanString(firebaseIdToken, 5000);
+    if (!token) return null;
+
+    let decoded = null;
+    try {
+      decoded = await admin.auth().verifyIdToken(token);
+    } catch (error) {
+      logger.warn('Firebase phone proof token verification failed', {
+        uid: memberUid,
+        code: error.code || '',
+        message: error.message,
+      });
+      throw createPublicError('Firebase phone verification could not be confirmed. Please request a new OTP.', 401);
+    }
+
+    if (cleanString(decoded.uid, 160) !== cleanString(memberUid, 160)) {
+      throw createPublicError('Firebase phone verification does not match this member account.', 401);
+    }
+
+    const phoneNumber = phoneNumberFromFirebaseToken(decoded);
+    if (!phoneNumber) {
+      throw createPublicError('Firebase phone verification did not include a phone number.', 401);
+    }
+
+    const expected = expectedPhoneNumber ? normalizeThaiPhone(expectedPhoneNumber) : '';
+    if (expected && phoneNumber !== expected) {
+      throw createPublicError('Firebase phone verification does not match this phone number.', 401);
+    }
+
+    if (options.requireRecentAuth) {
+      const authTimeMs = Math.max(0, Number(decoded.auth_time || 0)) * 1000;
+      const maxAgeMs = Math.max(60 * 1000, Number(options.maxAgeMs || 10 * 60 * 1000));
+      if (!authTimeMs || Date.now() - authTimeMs > maxAgeMs) {
+        throw createPublicError('Please verify the phone OTP again before continuing.', 401);
+      }
+    }
+
+    return { decoded, phoneNumber };
+  }
+
+  async function persistVerifiedPhoneChange(member, phoneNumber) {
+    const phoneIndexRef = db.collection(PHONE_INDEX_COLLECTION).doc(phoneIndexKey(phoneNumber));
+    const userRef = db.collection('users').doc(member.uid);
+    const credentialRef = db.collection(CREDENTIAL_COLLECTION).doc(member.uid);
+    let profileForResponse = null;
+    let credentialForResponse = null;
+    let publicFailure = null;
+
+    await db.runTransaction(async tx => {
+      const [userSnap, credentialSnap, phoneIndexSnap] = await Promise.all([
+        tx.get(userRef),
+        tx.get(credentialRef),
+        tx.get(phoneIndexRef),
+      ]);
+      const phoneIndex = phoneIndexSnap.exists ? phoneIndexSnap.data() || {} : {};
+      if (phoneIndexSnap.exists && phoneIndex.uid && phoneIndex.uid !== member.uid) {
+        publicFailure = phoneOwnedByAnotherAccountError();
+        return;
+      }
+
+      const existing = userSnap.exists ? userSnap.data() || {} : member.data || {};
+      const credential = credentialSnap.exists ? credentialSnap.data() || {} : {};
+      let oldPhoneNumber = '';
+      try {
+        oldPhoneNumber = normalizeThaiPhone(credential.phone_number || existing.phone_number || existing.phoneE164 || existing.phone || '');
+      } catch (_) {
+        oldPhoneNumber = '';
+      }
+      const oldPhoneIndexRef = oldPhoneNumber && oldPhoneNumber !== phoneNumber
+        ? db.collection(PHONE_INDEX_COLLECTION).doc(phoneIndexKey(oldPhoneNumber))
+        : null;
+      const oldPhoneIndexSnap = oldPhoneIndexRef ? await tx.get(oldPhoneIndexRef) : null;
+      const oldPhoneIndex = oldPhoneIndexSnap?.exists ? oldPhoneIndexSnap.data() || {} : {};
+
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      const phoneDisplay = displayThaiPhone(phoneNumber);
+      const existingProviders = Array.isArray(existing.authProviderIds) ? existing.authProviderIds : [];
+      const authProviderIds = Array.from(new Set([...existingProviders, 'phone']));
+      const userPayload = {
+        uid: member.uid,
+        phone_number: phoneNumber,
+        phone_display: phoneDisplay,
+        phone: phoneDisplay,
+        phoneE164: phoneNumber,
+        loginUsername: phoneNumber,
+        phoneVerified: true,
+        phoneVerifiedAt: now,
+        phone_verified: true,
+        phone_verified_at: now,
+        checkoutPhone: '',
+        checkout_phone: '',
+        contactPhone: '',
+        contact_phone: '',
+        authProviderIds,
+        updated_at: now,
+        updatedAt: now,
+      };
+      tx.set(userRef, userPayload, { merge: true });
+      tx.set(credentialRef, {
+        uid: member.uid,
+        phone_number: phoneNumber,
+        phone_index_key: phoneIndexKey(phoneNumber),
+        updated_at: now,
+      }, { merge: true });
+      tx.set(phoneIndexRef, {
+        uid: member.uid,
+        phone_number: phoneNumber,
+        updated_at: now,
+        created_at: phoneIndex.created_at || now,
+      }, { merge: true });
+      if (oldPhoneIndexRef && oldPhoneIndex.uid === member.uid) {
+        tx.delete(oldPhoneIndexRef);
+      }
+
+      profileForResponse = { ...existing, ...userPayload };
+      credentialForResponse = { ...credential, phone_number: phoneNumber, phone_index_key: phoneIndexKey(phoneNumber) };
+    });
+
+    if (publicFailure) throw publicFailure;
+    return { profileForResponse, credentialForResponse };
+  }
+
+  async function persistVerifiedPhoneRemoval(member, targetPhoneNumber, channel = 'phone', identifierKey = targetPhoneNumber, verificationId = 'firebase_phone_auth') {
+    const FieldValue = admin.firestore.FieldValue;
+    const userRef = db.collection('users').doc(member.uid);
+    const credentialRef = db.collection(CREDENTIAL_COLLECTION).doc(member.uid);
+    const summaryRef = db.collection('member_summaries').doc(member.uid);
+    const auditRef = db.collection('member_security_events').doc();
+    let profileForResponse = null;
+    let credentialForResponse = null;
+    let removedPhoneNumber = '';
+    let publicFailure = null;
+
+    await db.runTransaction(async tx => {
+      const [userSnap, credentialSnap, summarySnap] = await Promise.all([
+        tx.get(userRef),
+        tx.get(credentialRef),
+        tx.get(summaryRef),
+      ]);
+
+      const existing = userSnap.exists ? userSnap.data() || {} : member.data || {};
+      const credential = credentialSnap.exists ? credentialSnap.data() || {} : {};
+      const currentPhoneNumber = memberCurrentPhoneNumber(existing, credential);
+      if (!currentPhoneNumber || currentPhoneNumber !== targetPhoneNumber) {
+        publicFailure = createPublicError('Phone number changed before verification. Please request a new OTP.', 409);
+        return;
+      }
+
+      if (channel === 'email') {
+        const currentEmail = verifiedProfileEmail(existing);
+        if (!currentEmail || currentEmail !== identifierKey) {
+          publicFailure = createPublicError('Verified email changed before verification. Please request a new OTP.', 409);
+          return;
+        }
+      }
+
+      const phoneIndexRef = db.collection(PHONE_INDEX_COLLECTION).doc(phoneIndexKey(targetPhoneNumber));
+      const phoneIndexSnap = await tx.get(phoneIndexRef);
+      const phoneIndex = phoneIndexSnap.exists ? phoneIndexSnap.data() || {} : {};
+      const now = FieldValue.serverTimestamp();
+      const authProviderIds = (Array.isArray(existing.authProviderIds) ? existing.authProviderIds : [])
+        .filter(providerId => providerId !== 'phone');
+      const userPayload = {
+        phone_number: FieldValue.delete(),
+        phone_display: FieldValue.delete(),
+        phone: '',
+        phoneE164: FieldValue.delete(),
+        phoneVerified: false,
+        phoneVerifiedAt: FieldValue.delete(),
+        phone_verified: false,
+        phone_verified_at: FieldValue.delete(),
+        phoneRemovedAt: now,
+        phone_removed_at: now,
+        authProviderIds,
+        updated_at: now,
+        updatedAt: now,
+      };
+      if (samePhoneValue(existing.loginUsername, targetPhoneNumber)) {
+        userPayload.loginUsername = FieldValue.delete();
+      }
+      ['checkoutPhone', 'checkout_phone', 'contactPhone', 'contact_phone'].forEach(field => {
+        if (samePhoneValue(existing[field], targetPhoneNumber)) {
+          userPayload[field] = '';
+        }
+      });
+
+      tx.set(userRef, userPayload, { merge: true });
+      tx.set(credentialRef, {
+        phone_number: FieldValue.delete(),
+        phone_index_key: FieldValue.delete(),
+        phone_removed_at: now,
+        updated_at: now,
+      }, { merge: true });
+      if (summarySnap.exists) {
+        tx.set(summaryRef, {
+          phone: '',
+          phoneE164: FieldValue.delete(),
+          phone_number: FieldValue.delete(),
+          phone_display: FieldValue.delete(),
+          phoneVerified: false,
+          phoneVerifiedAt: FieldValue.delete(),
+          phone_removed_at: now,
+          updatedAt: now,
+          updated_at: now,
+        }, { merge: true });
+      }
+      if (phoneIndexSnap.exists && phoneIndex.uid === member.uid) {
+        tx.delete(phoneIndexRef);
+      }
+      tx.set(auditRef, {
+        uid: member.uid,
+        event: 'phone_removed',
+        channel,
+        phone_hash: sha256(targetPhoneNumber).slice(0, 48),
+        email_hash: channel === 'email' ? sha256(identifierKey).slice(0, 48) : null,
+        verification_id: verificationId,
+        created_at: now,
+      });
+
+      removedPhoneNumber = targetPhoneNumber;
+      const clearedProfile = {
+        ...existing,
+        phone_number: '',
+        phone_display: '',
+        phone: '',
+        phoneE164: '',
+        phoneVerified: false,
+        phoneVerifiedAt: null,
+        phone_verified: false,
+        phone_verified_at: null,
+        phoneRemovedAt: new Date().toISOString(),
+        phone_removed_at: new Date().toISOString(),
+        authProviderIds,
+      };
+      ['checkoutPhone', 'checkout_phone', 'contactPhone', 'contact_phone'].forEach(field => {
+        if (samePhoneValue(existing[field], targetPhoneNumber)) {
+          clearedProfile[field] = '';
+        }
+      });
+      if (samePhoneValue(existing.loginUsername, targetPhoneNumber)) {
+        clearedProfile.loginUsername = '';
+      }
+      profileForResponse = clearedProfile;
+      credentialForResponse = { ...credential, phone_number: '', phone_index_key: '' };
+    });
+
+    if (publicFailure) throw publicFailure;
+    return { profileForResponse, credentialForResponse, removedPhoneNumber };
+  }
+
   async function applyPasswordResetToMember(uid, passwordHash) {
     const safeUid = cleanString(uid, 160);
     if (!safeUid) throw createPublicError('ไม่พบบัญชีสมาชิกนี้ กรุณาตรวจสอบข้อมูลอีกครั้ง', 404);
@@ -1781,6 +2032,34 @@ function createMemberAuthHandlers({
       const member = await loadMemberByUid(decoded.uid);
       if (!member?.uid) throw createPublicError('ไม่พบข้อมูลสมาชิก', 404);
 
+      const firebasePhoneToken = cleanString(req.body?.firebaseIdToken || req.body?.idToken, 5000);
+      if (firebasePhoneToken) {
+        const firebasePhoneNumber = normalizeThaiPhone(req.body?.phoneNumber || req.body?.phone);
+        const firebasePhoneProof = await verifyFirebasePhoneProof(firebasePhoneToken, member.uid, firebasePhoneNumber);
+        checkRateLimitKey(`verifyPhoneChangeOtp:${member.uid}`, 12, 10 * 60 * 1000);
+        await ensurePhoneIsAvailableForUid(firebasePhoneNumber, member.uid);
+
+        const { profileForResponse, credentialForResponse } = await persistVerifiedPhoneChange(member, firebasePhoneProof.phoneNumber);
+
+        await admin.auth().updateUser(member.uid, { phoneNumber: firebasePhoneProof.phoneNumber }).catch(error => {
+          if (error.code !== 'auth/user-not-found') {
+            logger.warn('Phone verified in Firestore but Auth phone was not updated', {
+              uid: member.uid,
+              code: error.code || '',
+              message: error.message,
+            });
+          }
+        });
+
+        res.json({
+          ok: true,
+          phoneNumber: firebasePhoneProof.phoneNumber,
+          phoneDisplay: displayThaiPhone(firebasePhoneProof.phoneNumber),
+          profile: sanitizeProfile(member.uid, profileForResponse || {}, credentialForResponse || {}),
+        });
+        return;
+      }
+
       const verificationId = cleanString(req.body?.verificationId, 160);
       if (!verificationId || verificationId.includes('/')) {
         throw createPublicError('ไม่พบรายการ OTP กรุณาขอรหัสใหม่');
@@ -2068,6 +2347,38 @@ function createMemberAuthHandlers({
       const decoded = await requireSignedInUser(req);
       const member = await loadMemberByUid(decoded.uid);
       if (!member?.uid) throw createPublicError('Member profile was not found.', 404);
+
+      const firebasePhoneToken = cleanString(req.body?.firebaseIdToken || req.body?.idToken, 5000);
+      if (firebasePhoneToken) {
+        const firebasePhoneProof = await verifyFirebasePhoneProof(firebasePhoneToken, member.uid, '', { requireRecentAuth: true });
+        checkRateLimitKey(`verifyPhoneRemovalOtp:${member.uid}`, 12, 10 * 60 * 1000);
+
+        const { profileForResponse, credentialForResponse, removedPhoneNumber } = await persistVerifiedPhoneRemoval(
+          member,
+          firebasePhoneProof.phoneNumber,
+          'phone',
+          firebasePhoneProof.phoneNumber,
+          'firebase_phone_auth'
+        );
+
+        await admin.auth().updateUser(member.uid, { phoneNumber: null }).catch(error => {
+          if (error.code !== 'auth/user-not-found') {
+            logger.warn('Phone removed in Firestore but Auth phone was not cleared', {
+              uid: member.uid,
+              code: error.code || '',
+              message: error.message,
+            });
+          }
+        });
+
+        res.json({
+          ok: true,
+          phoneRemoved: true,
+          removedPhoneDisplay: displayThaiPhone(removedPhoneNumber),
+          profile: sanitizeProfile(member.uid, profileForResponse || {}, credentialForResponse || {}),
+        });
+        return;
+      }
 
       const verificationId = cleanString(req.body?.verificationId, 160);
       if (!verificationId || verificationId.includes('/')) {
