@@ -3,6 +3,7 @@ import { auth, db } from './firebase-config.js';
 import { onAuthStateChanged, PhoneAuthProvider, RecaptchaVerifier, reauthenticateWithCredential, signInWithCustomToken, updatePhoneNumber } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, doc, getDoc, getDocs, limit, orderBy, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getTierRules } from './membership.js';
+import { autoEnhanceOtpInputs, setOtpUiStatus } from './eden-otp-experience.js?v=otp-experience-20260624-1';
 import {
     checkPhoneChange,
     getMyProfile,
@@ -14,6 +15,8 @@ import {
     verifyPhoneRemovalOtp
 } from './member-auth-service.js?v=firebase-phone-20260624-1';
 import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
+
+autoEnhanceOtpInputs();
 
 (() => {
     const USER_KEY = 'eden_user';
@@ -896,6 +899,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         if ((!profileEditing && name !== 'phoneRemovalCode') || !profileFormDraft) return fallback;
         if (!Object.prototype.hasOwnProperty.call(profileFormDraft, name)) return fallback;
         return profileFormDraft[name];
+    }
+
+    function markOtpAfterRender(selector, state, message = '') {
+        requestAnimationFrame(() => setOtpUiStatus(selector, state, message));
     }
 
     function readOrders() {
@@ -2560,6 +2567,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             setPhoneRemovalNotice(message, true);
             showSaveMessage(message, true);
             renderProfile();
+            markOtpAfterRender('input[name="phoneRemovalCode"]', 'error', message);
             return false;
         }
         if (!/^\d{6}$/.test(code)) {
@@ -2568,6 +2576,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             setPhoneRemovalNotice(message, true);
             showSaveMessage(message, true);
             renderProfile();
+            markOtpAfterRender('input[name="phoneRemovalCode"]', 'error', message);
             return false;
         }
 
@@ -2577,6 +2586,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         setPhoneRemovalNotice(verifyingMessage);
         showSaveMessage(verifyingMessage);
         renderProfile();
+        markOtpAfterRender('input[name="phoneRemovalCode"]', 'loading', verifyingMessage);
         let finalMessage = labels.removePhoneSuccess || labels.saved;
         let finalError = false;
         try {
@@ -2625,7 +2635,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             phoneRemovalBusy = false;
             if (finalError) setPhoneRemovalNotice(finalMessage, true);
             renderProfile();
-            requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
+            requestAnimationFrame(() => {
+                if (finalError) setOtpUiStatus('input[name="phoneRemovalCode"]', 'error', finalMessage);
+                showSaveMessage(finalMessage, finalError);
+            });
         }
         return false;
     }
@@ -2815,11 +2828,16 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const form = document.getElementById('member-profile-form');
         const code = cleanString(form?.querySelector('input[name="emailCode"]')?.value, 6);
         if (!/^\d{6}$/.test(code)) {
-            showSaveMessage(isEnglishPage() ? 'Please enter the 6-digit code.' : 'กรุณากรอกรหัส 6 หลัก', true);
+            const message = isEnglishPage() ? 'Please enter the 6-digit code.' : 'กรุณากรอกรหัส 6 หลัก';
+            updateProfileFormDraft({ emailCode: code });
+            setOtpUiStatus(form?.querySelector('input[name="emailCode"]'), 'error', message);
+            showSaveMessage(message, true);
             return false;
         }
 
         emailVerificationBusy = true;
+        updateProfileFormDraft({ emailCode: code });
+        setOtpUiStatus(form?.querySelector('input[name="emailCode"]'), 'loading', labels.verifyingEmailCode);
         showSaveMessage(labels.verifyingEmailCode);
         let finalMessage = labels.emailCodeVerified;
         let finalError = false;
@@ -2833,12 +2851,16 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser({ ...cloudProfile, uid: user.uid || cloudProfile?.uid || '', email })));
         } catch (error) {
             logClientError('Email verification failed:', error);
+            updateProfileFormDraft({ emailCode: code });
             finalMessage = error?.userMessage ? error.message : labels.emailCodeFailed;
             finalError = true;
         } finally {
             emailVerificationBusy = false;
             renderProfile();
-            requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
+            requestAnimationFrame(() => {
+                if (finalError) setOtpUiStatus('input[name="emailCode"]', 'error', finalMessage);
+                showSaveMessage(finalMessage, finalError);
+            });
         }
         return false;
     }
@@ -2913,6 +2935,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             setPhoneVerificationNotice(message, true);
             showSaveMessage(message, true);
             renderProfile();
+            markOtpAfterRender('input[name="phoneCode"]', 'error', message);
             return false;
         }
         if (!/^\d{6}$/.test(code)) {
@@ -2921,6 +2944,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             setPhoneVerificationNotice(message, true);
             showSaveMessage(message, true);
             renderProfile();
+            markOtpAfterRender('input[name="phoneCode"]', 'error', message);
             return false;
         }
 
@@ -2930,6 +2954,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         setPhoneVerificationNotice(verifyingMessage);
         showSaveMessage(verifyingMessage);
         renderProfile();
+        markOtpAfterRender('input[name="phoneCode"]', 'loading', verifyingMessage);
         let finalMessage = labels.phoneCodeVerified || 'ยืนยันเบอร์โทรเรียบร้อยแล้ว';
         let finalError = false;
         try {
@@ -2976,7 +3001,10 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             phoneVerificationBusy = false;
             setPhoneVerificationNotice(finalMessage, finalError);
             renderProfile();
-            requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
+            requestAnimationFrame(() => {
+                if (finalError) setOtpUiStatus('input[name="phoneCode"]', 'error', finalMessage);
+                showSaveMessage(finalMessage, finalError);
+            });
         }
         return false;
     }

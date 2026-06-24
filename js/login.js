@@ -1,4 +1,5 @@
 import './page-telemetry.js';
+import { autoEnhanceOtpInputs, clearOtpUiStatus, setOtpUiStatus } from './eden-otp-experience.js?v=otp-experience-20260624-1';
 import { auth } from './firebase-config.js';
 import {
     GoogleAuthProvider,
@@ -36,6 +37,8 @@ const els = {
     forgotPassword: document.getElementById('forgot-password'),
     forgotPasswordConfirm: document.getElementById('forgot-password-confirm')
 };
+
+autoEnhanceOtpInputs();
 
 let authResolved = false;
 let loginInProgress = false;
@@ -288,6 +291,7 @@ els.forgotRequestForm?.addEventListener('submit', async event => {
         els.forgotRequestForm.hidden = true;
         els.forgotCompleteForm.hidden = false;
         els.forgotOtp?.focus();
+        clearOtpUiStatus(els.forgotOtp);
         setStatus('ส่ง OTP สำเร็จ กรุณาตรวจสอบรหัสแล้วตั้งรหัสผ่านใหม่', 'success');
     } catch (error) {
         resetState.phoneConfirmationResult = null;
@@ -305,6 +309,7 @@ els.forgotCompleteForm?.addEventListener('submit', async event => {
     const password = String(els.forgotPassword?.value || '');
     const confirmPassword = String(els.forgotPasswordConfirm?.value || '');
     if (!/^\d{6}$/.test(otp)) {
+        setOtpUiStatus(els.forgotOtp, 'error');
         setStatus('กรุณากรอก OTP 6 หลัก', 'error');
         return;
     }
@@ -320,6 +325,7 @@ els.forgotCompleteForm?.addEventListener('submit', async event => {
     setForgotBusy(els.forgotCompleteForm, true, 'กำลังรีเซ็ต...');
     setStatus('กำลังรีเซ็ตรหัสผ่าน...', 'info');
     try {
+        setOtpUiStatus(els.forgotOtp, 'loading');
         let firebaseIdToken = '';
         if (resetState.firebasePhoneAuth) {
             if (!resetState.phoneConfirmationResult) throw new Error('ไม่พบรายการ OTP กรุณาขอรหัสใหม่');
@@ -337,11 +343,13 @@ els.forgotCompleteForm?.addEventListener('submit', async event => {
             firebaseIdToken
         });
         const resetIdentifier = resetState.identifier;
+        setOtpUiStatus(els.forgotOtp, 'success');
         closeForgotPanel();
         setStatus(result.message || 'รีเซ็ตรหัสผ่านสำเร็จ กรุณาเข้าสู่ระบบด้วยรหัสผ่านใหม่', 'success');
         if (els.identifier) els.identifier.value = resetIdentifier || els.identifier.value;
         els.password?.focus();
     } catch (error) {
+        setOtpUiStatus(els.forgotOtp, 'error');
         setStatus(error.message || 'OTP ไม่ถูกต้อง กรุณาตรวจสอบแล้วลองอีกครั้ง', 'error');
     } finally {
         setForgotBusy(els.forgotCompleteForm, false);

@@ -1,4 +1,5 @@
 import './page-telemetry.js';
+import { autoEnhanceOtpInputs, clearOtpUiStatus, setOtpUiStatus } from './eden-otp-experience.js?v=otp-experience-20260624-1';
 import { auth } from './firebase-config.js';
 import {
     GoogleAuthProvider,
@@ -52,6 +53,8 @@ const els = {
     password: document.getElementById('register-password'),
     passwordConfirm: document.getElementById('register-password-confirm')
 };
+
+autoEnhanceOtpInputs();
 
 function setStatus(message, type = 'info') {
     if (!els.status) return;
@@ -270,6 +273,7 @@ els.phoneForm?.addEventListener('submit', async event => {
     try {
         await sendOtp();
         activateStep('otp');
+        clearOtpUiStatus(els.otp);
         setStatus('ส่ง OTP สำเร็จ กรุณาตรวจสอบ SMS แล้วกรอกรหัส 6 หลัก', 'success');
     } catch (error) {
         resetRecaptcha();
@@ -286,6 +290,7 @@ els.otpForm?.addEventListener('submit', async event => {
     try {
         const otp = validateOtp();
         if (!state.confirmationResult) throw new Error('ไม่พบรายการ OTP กรุณาส่ง OTP ใหม่');
+        setOtpUiStatus(els.otp, 'loading');
 
         const credential = await state.confirmationResult.confirm(otp);
         const firebaseUser = credential.user;
@@ -296,8 +301,10 @@ els.otpForm?.addEventListener('submit', async event => {
         setPasswordStepForPhone();
 
         activateStep('profile');
+        setOtpUiStatus(els.otp, 'success');
         setStatus('ยืนยัน OTP สำเร็จ กรุณาตั้งรหัสผ่าน', 'success');
     } catch (error) {
+        setOtpUiStatus(els.otp, 'error');
         setStatus(error.message || 'OTP ไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง', 'error');
     } finally {
         setBusy(els.otpForm, false);
@@ -322,6 +329,7 @@ els.resend?.addEventListener('click', async () => {
         resetRecaptcha();
         await sendOtp();
         activateStep('otp');
+        clearOtpUiStatus(els.otp);
         setStatus('ส่ง OTP อีกครั้งสำเร็จ', 'success');
     } catch (error) {
         resetRecaptcha();
