@@ -2610,7 +2610,11 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         if (!profileEditing) return false;
         if (phoneVerificationBusy) return false;
         phoneVerificationBusy = true;
-        showSaveMessage(labels.checkingPhone || 'กำลังตรวจสอบเบอร์...');
+        const checkingMessage = labels.checkingPhone || labels.sendingPhoneCode || 'กำลังตรวจสอบเบอร์...';
+        captureProfileFormDraft();
+        setPhoneVerificationNotice(checkingMessage);
+        showSaveMessage(checkingMessage);
+        renderProfile();
         let finalMessage = labels.phoneReadyToSend || 'ตรวจสอบเบอร์แล้ว สามารถส่ง OTP ได้';
         let finalError = false;
         try {
@@ -2637,6 +2641,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             finalError = true;
         } finally {
             phoneVerificationBusy = false;
+            setPhoneVerificationNotice(finalMessage, finalError);
             renderProfile();
             requestAnimationFrame(() => showSaveMessage(finalMessage, finalError));
         }
