@@ -1,17 +1,17 @@
 import { auth, db } from './firebase-config.js';
-import { onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { onAuthStateChanged, PhoneAuthProvider, RecaptchaVerifier, reauthenticateWithCredential, signInWithCustomToken, updatePhoneNumber } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, doc, getDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getTierRules } from './membership.js';
 import {
     checkPhoneChange,
     getMyProfile,
+    normalizeThaiPhone,
     profileToStoredUser,
-    requestPhoneChangeOtp,
     requestPhoneRemovalOtp,
     updateMyProfile,
     verifyPhoneChangeOtp,
     verifyPhoneRemovalOtp
-} from './member-auth-service.js?v=phone-removal-20260623-1';
+} from './member-auth-service.js?v=firebase-phone-20260624-1';
 import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 (() => {
@@ -55,9 +55,11 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         channel: 'phone',
         verificationId: '',
         identifierDisplay: '',
-        phoneDisplay: ''
+        phoneDisplay: '',
+        phoneNumber: ''
     };
     let phoneRemovalNotice = { message: '', isError: false };
+    let profilePhoneRecaptchaVerifier = null;
     let loyaltyConfig = null;
     let loyaltyLedger = [];
     let loyaltySummary = null;
@@ -164,6 +166,65 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
     function displayThaiPhone(phoneNumber = '') {
         const phone = cleanString(phoneNumber, 40);
         return phone.startsWith('+66') ? '0' + phone.slice(3) : phone;
+    }
+
+    function firebasePhoneVerificationId(verificationId = '') {
+        return `firebase:${cleanString(verificationId, 1200)}`;
+    }
+
+    function isFirebasePhoneVerification(verificationId = '') {
+        return cleanString(verificationId, 1400).startsWith('firebase:');
+    }
+
+    function firebasePhoneVerificationRawId(verificationId = '') {
+        return cleanString(verificationId, 1400).replace(/^firebase:/, '');
+    }
+
+    function ensureProfilePhoneRecaptchaContainer() {
+        const containerId = 'profile-phone-recaptcha-container';
+        let container = document.getElementById(containerId);
+        if (!container) {
+            container = document.createElement('div');
+            container.id = containerId;
+            container.style.position = 'fixed';
+            container.style.left = '-9999px';
+            container.style.bottom = '0';
+            container.style.width = '1px';
+            container.style.height = '1px';
+            document.body.appendChild(container);
+        }
+        return containerId;
+    }
+
+    function resetProfilePhoneRecaptcha() {
+        try {
+            profilePhoneRecaptchaVerifier?.clear?.();
+        } catch (_) {
+            // Ignore stale verifier cleanup errors.
+        }
+        profilePhoneRecaptchaVerifier = null;
+    }
+
+    function getProfilePhoneRecaptchaVerifier() {
+        if (!profilePhoneRecaptchaVerifier) {
+            const containerId = ensureProfilePhoneRecaptchaContainer();
+            profilePhoneRecaptchaVerifier = new RecaptchaVerifier(auth, containerId, {
+                size: 'invisible',
+                callback: () => {},
+                'expired-callback': () => resetProfilePhoneRecaptcha()
+            });
+        }
+        return profilePhoneRecaptchaVerifier;
+    }
+
+    async function requestFirebasePhoneOtp(phoneNumber) {
+        const normalizedPhone = normalizeThaiPhone(phoneNumber);
+        const provider = new PhoneAuthProvider(auth);
+        return provider.verifyPhoneNumber(normalizedPhone, getProfilePhoneRecaptchaVerifier());
+    }
+
+    function buildFirebasePhoneCredential(verificationId, code) {
+        return PhoneAuthProvider.credential(firebasePhoneVerificationRawId(verificationId), cleanString(code, 6));
     }
 
     function profileTextValue(key, fallback = '') {
@@ -824,7 +885,8 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             channel: 'phone',
             verificationId: '',
             identifierDisplay: '',
-            phoneDisplay: ''
+            phoneDisplay: '',
+            phoneNumber: ''
         };
     }
 
@@ -2304,7 +2366,13 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         const user = readUser() || {};
         const phoneVerified = !!(cloudProfile?.phoneVerified || cloudProfile?.phoneVerifiedAt || user.phoneVerified || user.phoneVerifiedAt);
         const phone = cleanString(cloudProfile?.phone_display || user.phone || '', 40);
-        if (!phoneVerified || !phone) {
+        let phoneNumber = '';
+        try {
+            phoneNumber = normalizeThaiPhone(cloudProfile?.phone_number || cloudProfile?.phoneE164 || user.phoneE164 || user.phone_number || phone);
+        } catch (_) {
+            phoneNumber = '';
+        }
+        if (!phoneVerified || !phone || !phoneNumber) {
             showSaveMessage(labels.phoneUnverified || labels.removePhoneFailed || labels.saveFailed, true);
             return false;
         }
@@ -2313,7 +2381,8 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             channel: 'phone',
             verificationId: '',
             identifierDisplay: '',
-            phoneDisplay: phone
+            phoneDisplay: phone,
+            phoneNumber
         };
         setPhoneRemovalNotice();
         updateProfileFormDraft({ phoneRemovalCode: '' });
@@ -2368,22 +2437,42 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         renderProfile();
         let finalMessage = labels.removePhoneCodeSent || labels.phoneCodeSent;
         let finalError = false;
+        const selectedChannel = phoneRemovalState.channel || 'phone';
         try {
-            const result = await requestPhoneRemovalOtp(phoneRemovalState.channel || 'phone');
-            const resendSeconds = Math.max(1, Number(result.resendAfterSeconds || result.expiresInSeconds || 300));
-            phoneRemovalState = {
-                open: true,
-                channel: result.channel || phoneRemovalState.channel || 'phone',
-                verificationId: result.verificationId || '',
-                identifierDisplay: result.identifierDisplay || '',
-                phoneDisplay: result.phoneDisplay || phoneRemovalState.phoneDisplay || ''
-            };
-            updateProfileFormDraft({ phoneRemovalCode: '' });
-            phoneRemovalCooldownUntil = Date.now() + (resendSeconds * 1000);
-            window.setTimeout(renderProfile, resendSeconds * 1000);
-            if (result.reused) finalMessage = labels.removePhoneCodeReused || finalMessage;
+            if (selectedChannel === 'phone') {
+                const phoneNumber = normalizeThaiPhone(phoneRemovalState.phoneNumber || phoneRemovalState.phoneDisplay);
+                const verificationId = await requestFirebasePhoneOtp(phoneNumber);
+                const resendSeconds = 300;
+                phoneRemovalState = {
+                    open: true,
+                    channel: 'phone',
+                    verificationId: firebasePhoneVerificationId(verificationId),
+                    identifierDisplay: displayThaiPhone(phoneNumber),
+                    phoneDisplay: phoneRemovalState.phoneDisplay || displayThaiPhone(phoneNumber),
+                    phoneNumber
+                };
+                updateProfileFormDraft({ phoneRemovalCode: '' });
+                phoneRemovalCooldownUntil = Date.now() + (resendSeconds * 1000);
+                window.setTimeout(renderProfile, resendSeconds * 1000);
+            } else {
+                const result = await requestPhoneRemovalOtp('email');
+                const resendSeconds = Math.max(1, Number(result.resendAfterSeconds || result.expiresInSeconds || 300));
+                phoneRemovalState = {
+                    open: true,
+                    channel: result.channel || 'email',
+                    verificationId: result.verificationId || '',
+                    identifierDisplay: result.identifierDisplay || '',
+                    phoneDisplay: result.phoneDisplay || phoneRemovalState.phoneDisplay || '',
+                    phoneNumber: phoneRemovalState.phoneNumber || ''
+                };
+                updateProfileFormDraft({ phoneRemovalCode: '' });
+                phoneRemovalCooldownUntil = Date.now() + (resendSeconds * 1000);
+                window.setTimeout(renderProfile, resendSeconds * 1000);
+                if (result.reused) finalMessage = labels.removePhoneCodeReused || finalMessage;
+            }
         } catch (error) {
             logClientError('Phone removal OTP send failed:', error);
+            if (selectedChannel === 'phone') resetProfilePhoneRecaptcha();
             const retrySeconds = retryAfterSeconds(error);
             if (error?.status === 429 && retrySeconds) {
                 phoneRemovalCooldownUntil = Date.now() + (retrySeconds * 1000);
@@ -2429,10 +2518,19 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         let finalMessage = labels.removePhoneSuccess || labels.saved;
         let finalError = false;
         try {
-            const result = await verifyPhoneRemovalOtp({
-                verificationId: phoneRemovalState.verificationId,
-                otp: code
-            });
+            let result = null;
+            if (isFirebasePhoneVerification(phoneRemovalState.verificationId)) {
+                if (!auth?.currentUser) throw new Error('Sign in required');
+                const credential = buildFirebasePhoneCredential(phoneRemovalState.verificationId, code);
+                await reauthenticateWithCredential(auth.currentUser, credential);
+                const firebaseIdToken = await auth.currentUser.getIdToken(true);
+                result = await verifyPhoneRemovalOtp({ firebaseIdToken });
+            } else {
+                result = await verifyPhoneRemovalOtp({
+                    verificationId: phoneRemovalState.verificationId,
+                    otp: code
+                });
+            }
             const profile = result.profile || {};
             cloudProfile = {
                 ...(cloudProfile || {}),
@@ -2457,6 +2555,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             profileEditing = false;
         } catch (error) {
             logClientError('Phone removal verification failed:', error);
+            if (isFirebasePhoneVerification(phoneRemovalState.verificationId)) resetProfilePhoneRecaptcha();
             updateProfileFormDraft({ phoneRemovalCode: code });
             finalMessage = phoneRemovalErrorMessage(error, labels);
             finalError = true;
@@ -2709,26 +2808,23 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             setPhoneVerificationNotice(sendingMessage);
             showSaveMessage(sendingMessage);
             renderProfile();
-            const result = await requestPhoneChangeOtp(phone);
-            if (result.alreadyVerified) {
-                phoneVerificationState = { verificationId: '', phoneNumber: '', phoneDisplay: '', checkedPhoneInput: '', checkedPhoneNumber: '' };
-                finalMessage = labels.phoneVerified || 'ยืนยันเบอร์โทรแล้ว';
-            } else {
-                const resendSeconds = Math.max(1, Number(result.resendAfterSeconds || result.expiresInSeconds || 300));
-                phoneVerificationState = {
-                    verificationId: result.verificationId || '',
-                    phoneNumber: result.phoneNumber || phone,
-                    phoneDisplay: result.phoneDisplay || phone,
-                    checkedPhoneInput: result.phoneDisplay || phone,
-                    checkedPhoneNumber: result.phoneNumber || ''
-                };
-                updateProfileFormDraft({ phone: result.phoneDisplay || phone, phoneCode: '' });
-                phoneVerificationCooldownUntil = Date.now() + (resendSeconds * 1000);
-                window.setTimeout(renderProfile, resendSeconds * 1000);
-                if (result.reused) finalMessage = labels.phoneCodeReused || finalMessage;
-            }
+            const phoneNumber = normalizeThaiPhone(phoneVerificationState.checkedPhoneNumber || phone);
+            const verificationId = await requestFirebasePhoneOtp(phoneNumber);
+            const phoneDisplay = displayThaiPhone(phoneNumber);
+            const resendSeconds = 300;
+            phoneVerificationState = {
+                verificationId: firebasePhoneVerificationId(verificationId),
+                phoneNumber,
+                phoneDisplay,
+                checkedPhoneInput: phoneDisplay,
+                checkedPhoneNumber: phoneNumber
+            };
+            updateProfileFormDraft({ phone: phoneDisplay, phoneCode: '' });
+            phoneVerificationCooldownUntil = Date.now() + (resendSeconds * 1000);
+            window.setTimeout(renderProfile, resendSeconds * 1000);
         } catch (error) {
             logClientError('Phone verification send failed:', error);
+            resetProfilePhoneRecaptcha();
             const retrySeconds = retryAfterSeconds(error);
             if (error?.status === 429 && retrySeconds) {
                 phoneVerificationCooldownUntil = Date.now() + (retrySeconds * 1000);
@@ -2775,11 +2871,23 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
         let finalMessage = labels.phoneCodeVerified || 'ยืนยันเบอร์โทรเรียบร้อยแล้ว';
         let finalError = false;
         try {
-            const result = await verifyPhoneChangeOtp({
-                verificationId: phoneVerificationState.verificationId,
-                phoneNumber: phoneVerificationState.phoneNumber,
-                otp: code
-            });
+            let result = null;
+            if (isFirebasePhoneVerification(phoneVerificationState.verificationId)) {
+                if (!auth?.currentUser) throw new Error('Sign in required');
+                const credential = buildFirebasePhoneCredential(phoneVerificationState.verificationId, code);
+                await updatePhoneNumber(auth.currentUser, credential);
+                const firebaseIdToken = await auth.currentUser.getIdToken(true);
+                result = await verifyPhoneChangeOtp({
+                    phoneNumber: phoneVerificationState.phoneNumber,
+                    firebaseIdToken
+                });
+            } else {
+                result = await verifyPhoneChangeOtp({
+                    verificationId: phoneVerificationState.verificationId,
+                    phoneNumber: phoneVerificationState.phoneNumber,
+                    otp: code
+                });
+            }
             const profile = result.profile || {};
             cloudProfile = {
                 ...(cloudProfile || {}),
@@ -2799,6 +2907,7 @@ import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
             phoneVerificationCooldownUntil = 0;
         } catch (error) {
             logClientError('Phone verification failed:', error);
+            if (isFirebasePhoneVerification(phoneVerificationState.verificationId)) resetProfilePhoneRecaptcha();
             finalMessage = phoneOtpErrorMessage(error, labels, labels.phoneCodeFailed || labels.saveFailed);
             finalError = true;
         } finally {
