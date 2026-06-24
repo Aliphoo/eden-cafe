@@ -1,5 +1,5 @@
 /* style.css */
-/* Profile dashboard asset deploy marker: profile-assets-20260621-1 */
+/* Profile dashboard asset deploy marker: profile-layout-20260624-1 */
 :root {
     --primary-color: #1A9345; /* New Eden Fresh Green */
     --accent-color: #137234; /* Darker Green for contrast/buttons */
@@ -29,6 +29,12 @@ body {
     max-width: 1200px;
     margin: 0 auto;
     padding: 0 5%;
+}
+
+#profile-content {
+    max-width: 1320px;
+    padding-left: clamp(18px, 3vw, 42px);
+    padding-right: clamp(18px, 3vw, 42px);
 }
 
 /* Typography */
@@ -4468,9 +4474,11 @@ footer p {
 }
 
 .profile-layout.profile-dashboard {
-    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
-    gap: 24px;
-    max-width: 1180px;
+    width: 100%;
+    grid-template-columns: minmax(300px, 330px) minmax(0, 1fr);
+    gap: clamp(24px, 2.3vw, 34px);
+    max-width: 1240px;
+    margin: 0 auto;
     align-items: start;
 }
 
@@ -4582,6 +4590,7 @@ footer p {
 }
 
 .profile-dashboard-main {
+    width: 100%;
     min-width: 0;
     display: grid;
     gap: 18px;
@@ -5225,6 +5234,11 @@ footer p {
 }
 
 @media (max-width: 980px) {
+    #profile-content {
+        padding-left: 18px;
+        padding-right: 18px;
+    }
+
     .profile-layout.profile-dashboard {
         grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
         gap: 18px;
@@ -5252,6 +5266,11 @@ footer p {
 }
 
 @media (max-width: 768px) {
+    #profile-content {
+        padding-left: 14px;
+        padding-right: 14px;
+    }
+
     .profile-container {
         padding: 24px 18px;
         border-radius: 12px;
