@@ -4097,12 +4097,35 @@ function orderItemCategoryKey(item = {}) {
     return String(item.category || item.categoryId || item.categoryKey || item.group || '').trim() || 'uncategorized';
 }
 
+function orderCategoryRecordLabel(category, fallbackKey) {
+    if (!category) return '';
+    if (typeof category === 'string') return category;
+    return category.name || category.label || category.title || category.nameTh || category.name_th || fallbackKey;
+}
+
+function getOrdersCategorySources() {
+    const sources = [];
+    if (categoriesData && typeof categoriesData === 'object') sources.push(categoriesData);
+    const globalShopCategories = typeof window !== 'undefined' && window.shopCategoriesData && typeof window.shopCategoriesData === 'object'
+        ? window.shopCategoriesData
+        : null;
+    if (globalShopCategories && globalShopCategories !== categoriesData) sources.push(globalShopCategories);
+    return sources;
+}
+
+function orderCategoryLabelFromKey(key) {
+    for (const source of getOrdersCategorySources()) {
+        const label = orderCategoryRecordLabel(source[key], key);
+        if (label) return label;
+    }
+    return '';
+}
+
 function orderItemCategoryLabel(item = {}) {
     const key = orderItemCategoryKey(item);
     return item.categoryName
         || item.categoryLabel
-        || shopCategoriesData[key]?.name
-        || categoriesData[key]?.name
+        || orderCategoryLabelFromKey(key)
         || (key === 'uncategorized' ? 'ไม่ระบุหมวดหมู่' : key);
 }
 
@@ -4181,7 +4204,7 @@ function setOrdersDatePreset(preset) {
 
 function setOrdersViewMode(mode) {
     ordersFilterState.view = ['orders', 'category', 'date'].includes(mode) ? mode : 'orders';
-    renderOrdersProView();
+    renderOrdersProViewSafely('view-mode');
 }
 
 function resetOrdersFilters() {
@@ -4231,6 +4254,19 @@ function setOrdersLoadState(state = 'idle', message = '') {
                     : `Loaded ${ordersFilterState.loadedCount.toLocaleString('th-TH')} orders`);
     }
     updateOrdersControls();
+}
+
+function setOrdersRenderError(error, context = 'orders-render') {
+    const message = error?.message || String(error || 'Unknown render error');
+    console.error(`Error rendering Orders UI (${context}):`, error);
+    ordersFilterState.lastError = message;
+    setOrdersLoadState('error', `Orders render failed: ${message}`);
+    const body = document.getElementById('orders-table-body');
+    if (body) {
+        body.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#b42318;">Orders loaded but could not render: '
+            + escapeHTML(message)
+            + ' <button class="btn-action" type="button" onclick="retryOrdersLoad()">Reload</button></td></tr>';
+    }
 }
 
 function startOrdersLoadTimer() {
@@ -4443,7 +4479,7 @@ function bindOrdersControls() {
     document.addEventListener('input', event => {
         if (event.target?.id === 'orders-search') {
             ordersFilterState.search = event.target.value || '';
-            renderOrdersProView();
+            renderOrdersProViewSafely('search');
         }
         if (event.target?.id === 'orders-start-date') {
             ordersFilterState.datePreset = 'custom';
@@ -4471,7 +4507,7 @@ function bindOrdersControls() {
         if (target.id === 'orders-status-filter') ordersFilterState.status = target.value;
         if (target.id === 'orders-payment-filter') ordersFilterState.payment = target.value;
         if (target.id === 'orders-category-filter') ordersFilterState.category = target.value;
-        if (target.id.startsWith('orders-') && target.id.endsWith('-filter')) renderOrdersProView();
+        if (target.id.startsWith('orders-') && target.id.endsWith('-filter')) renderOrdersProViewSafely('filter-change');
     });
     document.addEventListener('click', event => {
         const preset = event.target?.closest?.('[data-orders-date-preset]')?.dataset.ordersDatePreset;
@@ -4527,7 +4563,9 @@ function refreshOrdersCategoryFilter() {
     if (!select) return;
     const categories = new Map();
     ordersData.forEach(order => orderCategories(order).forEach(cat => categories.set(cat.key, cat.label)));
-    Object.entries(shopCategoriesData || {}).forEach(([key, cat]) => categories.set(key, cat.name || key));
+    getOrdersCategorySources().forEach(source => {
+        Object.entries(source || {}).forEach(([key, cat]) => categories.set(key, orderCategoryRecordLabel(cat, key) || key));
+    });
     const current = ordersFilterState.category;
     const options = Array.from(categories, ([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label, 'th'));
     select.innerHTML = '<option value="all">ทุกหมวดหมู่</option>' + options.map(cat => `<option value="${escapeHTML(cat.key)}">${escapeHTML(cat.label)}</option>`).join('');
@@ -4654,6 +4692,16 @@ function renderOrdersProView() {
     }
 }
 
+function renderOrdersProViewSafely(context = 'orders-render') {
+    try {
+        renderOrdersProView();
+        return true;
+    } catch (error) {
+        setOrdersRenderError(error, context);
+        return false;
+    }
+}
+
 function setupRealtimeOrders() {
     if (ordersUnsubscribe) {
         ordersUnsubscribe();
@@ -4674,9 +4722,14 @@ function setupRealtimeOrders() {
         dashboardOrdersLoaded = true;
         ordersFilterState.loadedCount = reportOrders.length;
         ordersFilterState.lastError = '';
-        setOrdersLoadState(reportOrders.length ? 'ready' : 'empty');
-        renderDashboardSalesReport();
-        renderOrdersProView();
+        try {
+            renderDashboardSalesReport();
+        } catch (error) {
+            console.error('Error rendering dashboard sales report after Orders load:', error);
+        }
+        if (renderOrdersProViewSafely('snapshot')) {
+            setOrdersLoadState(reportOrders.length ? 'ready' : 'empty');
+        }
     }, (error) => {
         clearOrdersLoadTimer();
         console.error("Error listening to orders:", error);
@@ -8734,24 +8787,41 @@ window.voidPosOrder = async (id) => {
 let blogsData = {};
 let quill;
 
-document.addEventListener("DOMContentLoaded", () => {
-    // Initialize Quill Rich Text Editor if not already initialized
-    if (!quill && document.getElementById('blogContentEditor')) {
-        quill = new Quill('#blogContentEditor', {
-            theme: 'snow',
-            modules: {
-                toolbar: [
-                    [{ 'header': [1, 2, 3, false] }],
-                    ['bold', 'italic', 'underline', 'strike'],
-                    ['blockquote', 'code-block'],
-                    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-                    [{ 'color': [] }, { 'background': [] }],
-                    ['link', 'image', 'video'],
-                    ['clean']
-                ]
-            }
-        });
+function isLegacyBlogEditorActive() {
+    const blogsSection = document.getElementById('blogs');
+    const legacyModal = document.getElementById('blogModal');
+    const modalOpen = legacyModal
+        && legacyModal.style.display !== 'none'
+        && getComputedStyle(legacyModal).display !== 'none';
+    return blogsSection?.classList.contains('active') || modalOpen;
+}
+
+function initLegacyBlogQuillEditor() {
+    const editor = document.getElementById('blogContentEditor');
+    if (!editor || quill || !isLegacyBlogEditorActive()) return;
+    if (typeof window.Quill !== 'function') {
+        console.warn('Legacy Blog Quill editor skipped because Quill is not loaded.');
+        return;
     }
+    quill = new window.Quill('#blogContentEditor', {
+        theme: 'snow',
+        modules: {
+            toolbar: [
+                [{ 'header': [1, 2, 3, false] }],
+                ['bold', 'italic', 'underline', 'strike'],
+                ['blockquote', 'code-block'],
+                [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                [{ 'color': [] }, { 'background': [] }],
+                ['link', 'image', 'video'],
+                ['clean']
+            ]
+        }
+    });
+}
+
+document.addEventListener("DOMContentLoaded", initLegacyBlogQuillEditor);
+window.addEventListener('eden-admin-tab-activated', event => {
+    if (event.detail?.tabId === 'blogs') initLegacyBlogQuillEditor();
 });
 
 const blogModal = document.getElementById('blogModal');
