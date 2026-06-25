@@ -74,19 +74,6 @@ const ADMIN_PANEL_SKELETONS = [
     { id: 'promptpay-account-list', type: 'list', options: { rows: 3 } }
 ];
 
-function safeOptionalLinkURL(value) {
-    const url = String(value ?? '').trim();
-    if (!url) return '';
-    if (/^(https?:|mailto:|tel:)/i.test(url)) return url.slice(0, 500);
-    if (/^\/(?!\/)/.test(url) || /^#/.test(url)) return url.slice(0, 500);
-    return '';
-}
-
-function safeNumber(value, fallback = 0) {
-    const number = Number(value);
-    return Number.isFinite(number) ? number : fallback;
-}
-
 let adminSkeletonsPrimed = false;
 
 function primeAdminSkeletons() {
@@ -1289,35 +1276,6 @@ function dispatchAdminTabActivated(tabId) {
     } catch (error) {
         console.warn('Unable to dispatch admin tab event:', error);
     }
-}
-
-async function loadBlogCmsAdminModule(options = {}) {
-    const root = document.getElementById('blog-cms-admin-root');
-    if (!root) return null;
-    if (!blogCmsAdminModulePromise) {
-        root.innerHTML = '<div class="blog-cms-admin-loading">Loading Blog CMS module...</div>';
-        blogCmsAdminModulePromise = import(`./blog-cms-admin.js?v=${ADMIN_LAZY_MODULE_VERSION}`)
-            .then(module => {
-                window.EdenTelemetry?.report?.('admin_lazy_module_loaded', { label: 'blog-cms-admin' });
-                return module;
-            })
-            .catch(error => {
-                blogCmsAdminModulePromise = null;
-                root.innerHTML = '<div class="blog-cms-alert error">Blog CMS module failed to load. Please refresh and try again.</div>';
-                window.EdenTelemetry?.report?.('admin_lazy_module_error', {
-                    label: 'blog-cms-admin',
-                    message: error.message || String(error)
-                });
-                throw error;
-            });
-    }
-    const module = await blogCmsAdminModulePromise;
-    if (typeof module.initBlogCmsAdmin === 'function') {
-        await module.initBlogCmsAdmin({ forceRefresh: options.forceRefresh === true });
-    } else if (typeof window.fetchBlogsFromCloud === 'function') {
-        await window.fetchBlogsFromCloud();
-    }
-    return module;
 }
 
 function installAdminTabSwitchHook() {
