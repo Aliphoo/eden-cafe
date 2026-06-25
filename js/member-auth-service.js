@@ -283,14 +283,16 @@ export function checkPhoneChange(phoneNumber) {
     });
 }
 
-export function verifyPhoneChangeOtp({ verificationId, phoneNumber, otp }) {
+export function verifyPhoneChangeOtp({ verificationId, phoneNumber, otp, firebaseIdToken, idToken }) {
+    const body = {
+        phoneNumber: normalizeThaiPhone(phoneNumber)
+    };
+    if (firebaseIdToken || idToken) body.firebaseIdToken = cleanString(firebaseIdToken || idToken, 5000);
+    if (verificationId) body.verificationId = cleanString(verificationId, 160);
+    if (otp) body.otp = cleanString(otp, 6);
     return edenAuthRequest('/verifyPhoneChangeOtp', {
         authenticated: true,
-        body: {
-            verificationId: cleanString(verificationId, 160),
-            phoneNumber: normalizeThaiPhone(phoneNumber),
-            otp: cleanString(otp, 6)
-        }
+        body
     });
 }
 
@@ -302,12 +304,13 @@ export function requestPhoneRemovalOtp(channel = 'phone') {
     });
 }
 
-export function verifyPhoneRemovalOtp({ verificationId, otp }) {
+export function verifyPhoneRemovalOtp({ verificationId, otp, firebaseIdToken, idToken }) {
+    const body = {};
+    if (firebaseIdToken || idToken) body.firebaseIdToken = cleanString(firebaseIdToken || idToken, 5000);
+    if (verificationId) body.verificationId = cleanString(verificationId, 160);
+    if (otp) body.otp = cleanString(otp, 6);
     return edenAuthRequest('/verifyPhoneRemovalOtp', {
         authenticated: true,
-        body: {
-            verificationId: cleanString(verificationId, 160),
-            otp: cleanString(otp, 6)
-        }
+        body
     });
 }
