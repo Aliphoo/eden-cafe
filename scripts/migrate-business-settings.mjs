@@ -89,7 +89,7 @@ function buildBusinessDoc({ footer = {}, index = {} } = {}) {
   const instagram = cleanUrl(footer.instagram);
   const facebook = cleanUrl(footer.facebook);
   const line = cleanUrl(footer.line);
-  const googleMapsUrl = cleanUrl(footer.googleMapsUrl || footer.google_maps_url);
+  const googleMapsUrl = cleanUrl(footer.googleMapsUrl || footer.google_maps_url) || 'https://maps.app.goo.gl/BYJNa4mXjVNaLDPy5';
   const business = {
     brandName: cleanText(footer.brandName, 'Eden Cafe.', 120),
     brandNameEn: cleanText(footer.brandNameEn || footer.brandName, 'Eden Cafe.', 120),
