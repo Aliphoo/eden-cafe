@@ -131,6 +131,15 @@ const FOOTER_EMAIL_PATTERN = /edencafe\.2565@gmail\.com/i;
 const FOOTER_PHONE_PATTERN = /098-?008-?0383/;
 const LEGACY_BLOG_FOOTER_PATTERN = /คาเฟ่ธรรมชาติในตำบลนางแล[\s\S]{0,220}เน้นกาแฟคุณภาพ[\s\S]{0,220}คนที่มาเที่ยวเชียงราย/;
 const COPYRIGHT_ONLY_FOOTER_PATTERN = /<footer\b[^>]*>\s*<div class=["']container["']>\s*<p class=["']copyright["'][\s\S]*?<\/p>\s*<\/div>\s*<\/footer>/i;
+const ENGLISH_REVIEW_FALLBACK_ROUTES = new Set([
+    'en.html',
+    'menu-en.html',
+    'shop-en.html',
+    'booking-en.html',
+    'checkout-en.html',
+    'profile-en.html',
+    'blog-en.html'
+]);
 
 const issues = [];
 const stats = {
@@ -308,6 +317,49 @@ function validateFooterContract(relPath, html) {
     }
 }
 
+function stripTags(value) {
+    return String(value || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function validateGoogleReviewFallbackContract(files) {
+    for (const file of files.filter(file => file.endsWith('.html'))) {
+        const relPath = toRepoRelative(file);
+        const html = readFileSync(file, 'utf8');
+        const fallbackSpans = [...html.matchAll(/<span\b[^>]*\bid=["']google-rating-count["'][^>]*>([\s\S]*?)<\/span>/gi)];
+
+        for (const match of fallbackSpans) {
+            const fallbackText = stripTags(match[1]);
+            if (/\b\d[\d,]*\b/.test(fallbackText)) {
+                addIssue(relPath, `Google Reviews raw fallback must not hardcode a review count: ${fallbackText}`);
+            }
+            if (/Updating/i.test(fallbackText)) {
+                addIssue(relPath, 'Google Reviews raw fallback must not use an updating placeholder.');
+            }
+            if (!/Google Maps/i.test(fallbackText)) {
+                addIssue(relPath, `Google Reviews raw fallback must name Google Maps: ${fallbackText}`);
+            }
+            if (ENGLISH_REVIEW_FALLBACK_ROUTES.has(relPath) && !/Google Maps reviews/i.test(fallbackText)) {
+                addIssue(relPath, `English Google Reviews raw fallback must be English text: ${fallbackText}`);
+            }
+        }
+    }
+
+    if (!existsSync(repoPath('js/reviews.js'))) {
+        addIssue('js/reviews.js', 'Google Reviews runtime loader is missing.');
+        return;
+    }
+    const reviewsJs = readRepoFile('js/reviews.js');
+    if (!/documents\/google_reviews\?pageSize=1/.test(reviewsJs)) {
+        addIssue('js/reviews.js', 'Google Reviews runtime must read the google_reviews cache collection.');
+    }
+    if (!/cache:\s*['"]no-store['"]/.test(reviewsJs)) {
+        addIssue('js/reviews.js', 'Google Reviews runtime must bypass browser cache for the Firestore cache read.');
+    }
+    if (!/userRatingsTotal/.test(reviewsJs)) {
+        addIssue('js/reviews.js', 'Google Reviews runtime must render userRatingsTotal from Firestore.');
+    }
+}
+
 function validateRouteContracts() {
     for (const [relPath, canonical] of PUBLIC_ROUTES) {
         if (!existsSync(repoPath(relPath))) {
@@ -381,6 +433,7 @@ const files = walkFiles(ROOT);
 scanPlaceholders(files);
 validateJsonLd(files);
 validateRouteContracts();
+validateGoogleReviewFallbackContract(files);
 validateBusinessSettingsWiring();
 validateEnglishHeroContract();
 
