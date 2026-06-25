@@ -36,6 +36,7 @@ const HIGH_RISK_PATTERNS = [
     { label: 'old opening time', pattern: /07:30/ },
     { label: 'footer review loading placeholder', pattern: /Updating\.\.\./i },
     { label: 'menu loading-only fallback', pattern: />\s*(?:กำลังโหลดเมนู|Loading menu)\.\.\.\s*</i },
+    { label: 'booking room loading-only fallback', pattern: />\s*(?:กำลังโหลดข้อมูลห้อง|Loading rooms)\.\.\.\s*</i },
     { label: 'visitor stats loading placeholder', pattern: /Updating stats|กำลังอัปเดตสถิติ|&#3585;&#3635;&#3621;&#3633;&#3591;&#3629;&#3633;&#3611;/i },
     { label: 'fake official page placeholder', pattern: /your-official-page/i },
     { label: 'fake official id placeholder', pattern: /your-official-id/i },
@@ -343,6 +344,24 @@ function validateRouteContracts() {
     }
 }
 
+function validateEnglishHeroContract() {
+    if (!existsSync(repoPath('en.html'))) {
+        addIssue('en.html', 'English homepage is missing.');
+        return;
+    }
+    const html = readRepoFile('en.html');
+    const heroSubtitle = html.match(/data-index-setting=["']hero-subtitle["'][^>]*>([\s\S]*?)<\/p>/i)?.[1] || '';
+    if (!/Nang Lae/i.test(heroSubtitle) || !/Chiang Rai/i.test(heroSubtitle)) {
+        addIssue('en.html', 'English hero subtitle must mention Nang Lae and Chiang Rai in raw HTML.');
+    }
+    if (existsSync(repoPath('js/index-settings.js'))) {
+        const indexSettings = readRepoFile('js/index-settings.js');
+        if (!/heroSubtitleEn:[\s\S]*Nang Lae[\s\S]*Chiang Rai/i.test(indexSettings)) {
+            addIssue('js/index-settings.js', 'English hero fallback settings must mention Nang Lae and Chiang Rai.');
+        }
+    }
+}
+
 function validateBusinessSettingsWiring() {
     for (const relPath of ['js/business-settings.js', 'js/footer-settings.js', 'admin.html', 'js/admin.js', 'firestore.rules', 'scripts/migrate-business-settings.mjs']) {
         if (!existsSync(repoPath(relPath))) addIssue(relPath, 'Required business settings file is missing.');
@@ -363,6 +382,7 @@ scanPlaceholders(files);
 validateJsonLd(files);
 validateRouteContracts();
 validateBusinessSettingsWiring();
+validateEnglishHeroContract();
 
 if (issues.length) {
     console.error('Static site audit failed:');

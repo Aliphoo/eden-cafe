@@ -341,7 +341,11 @@
                             <div class="form-group" id="room-selection-group" style="display: none;">
                                 <label for="room-type">ประเภทห้อง (Room Type)</label>
                                 <select id="room-type">
-                                    <option value="" disabled selected>กำลังโหลดข้อมูลห้อง...</option>
+                                    <option value="" disabled selected>เลือกประเภทห้อง</option>
+                                    <option value="coworking">Co-working Space (150 THB/hr)</option>
+                                    <option value="meeting-room">Meeting Room (500 THB/hr)</option>
+                                    <option value="boardroom">Boardroom (900 THB/hr)</option>
+                                    <option value="event-space">Event Space (2,500 THB/hr)</option>
                                 </select>
                                 <div id="room-preview-container" style="display: none; margin-top: 15px; border-radius: 8px; overflow: hidden; height: 180px; border: 1px solid #ddd; position: relative;">
                                     <img loading="lazy" id="room-preview-img" src="Images/Logo.webp" alt="Room Preview" style="width: 100%; height: 100%; object-fit: cover;">
@@ -559,7 +563,6 @@
 <script type="module" src="js/counter.js?v=5"></script>
 <script type="module" src="js/booking.js?v=phase5-1"></script>
 </body>
-
 
 
 

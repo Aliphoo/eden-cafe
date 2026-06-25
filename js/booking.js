@@ -1,6 +1,13 @@
 import './page-telemetry.js';
 import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
+const FALLBACK_ROOMS = [
+    { id: 'coworking', name: 'Co-working Space', price: 150, imageUrl: '/Hero/Hero.webp' },
+    { id: 'meeting-room', name: 'Meeting Room', price: 500, imageUrl: '/Hero/Hero.webp' },
+    { id: 'boardroom', name: 'Boardroom', price: 900, imageUrl: '/Hero/Hero.webp' },
+    { id: 'event-space', name: 'Event Space', price: 2500, imageUrl: '/Hero/Hero.webp' }
+];
+
 document.addEventListener('DOMContentLoaded', async () => {
     const bookingTypeRadios = document.querySelectorAll('input[name="booking-type-radio"]');
     const tableSelectionGroup = document.getElementById('table-selection-group');
@@ -22,6 +29,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     const timeSelectionContainer = document.getElementById('time-selection-container');
 
     let roomsMap = {};
+
+    function renderRoomOptions(rooms, placeholder = 'Select Room / เลือกห้อง') {
+        if (!roomSelect) return;
+        roomsMap = {};
+        roomSelect.innerHTML = '<option value="" disabled selected>' + placeholder + '</option>';
+        rooms.forEach(room => {
+            roomsMap[room.id] = room;
+            const opt = document.createElement('option');
+            opt.value = room.id;
+            opt.textContent = room.name + ' (' + room.price + ' THB/hr)';
+            roomSelect.appendChild(opt);
+        });
+    }
 
     function setRoomSkeleton(isLoading) {
         if (!roomSelectionGroup) return;
@@ -125,22 +145,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         const fetchRoomsFromCloud = await waitForWindowFunction('fetchRoomsFromCloud');
         if (typeof fetchRoomsFromCloud !== 'function') {
             setRoomSkeleton(false);
+            renderRoomOptions(FALLBACK_ROOMS);
             return;
         }
 
         try {
             const rooms = await fetchRoomsFromCloud();
-            roomSelect.innerHTML = '<option value="" disabled selected>Select Room / เลือกห้อง</option>';
-            rooms.forEach(room => {
-                roomsMap[room.id] = room;
-                const opt = document.createElement('option');
-                opt.value = room.id;
-                opt.textContent = room.name + ' (' + room.price + ' THB/hr)';
-                roomSelect.appendChild(opt);
-            });
+            renderRoomOptions(Array.isArray(rooms) && rooms.length ? rooms : FALLBACK_ROOMS);
         } catch (err) {
             console.error('Error loading rooms:', err);
-            roomSelect.innerHTML = '<option value="" disabled selected>Error loading rooms</option>';
+            renderRoomOptions(FALLBACK_ROOMS);
         } finally {
             setRoomSkeleton(false);
         }

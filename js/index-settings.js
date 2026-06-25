@@ -9,7 +9,7 @@ const FALLBACK_INDEX = {
     heroTitleTh: 'จากใจเรา สู่มือคุณ',
     heroSubtitleTh: 'ยินดีต้อนรับสู่ Eden Cafe - พื้นที่พักผ่อนท่ามกลางธรรมชาติของเชียงราย สัมผัสเมล็ดกาแฟที่ปลูกอย่างใส่ใจและคั่วอย่างพิถีพิถันจากเกษตรกรไทย',
     heroTitleEn: 'Discover the True Taste of Thai Specialty Coffee',
-    heroSubtitleEn: 'Welcome to Eden Cafe - a calm nature escape in Chiang Rai. Experience locally sourced, ethically grown coffee beans roasted with care.',
+    heroSubtitleEn: 'Welcome to Eden Cafe in Nang Lae, Chiang Rai - a calm nature escape with locally sourced, ethically grown coffee beans roasted with care.',
     aboutTitleTh: 'เรื่องราวของเรา: จากยอดดอยสู่แก้วกาแฟของคุณ',
     aboutBodyTh: 'Eden Cafe เกิดขึ้นจากความหลงใหลในศิลปะการชงกาแฟและการสนับสนุนเกษตรกรไทย เราคัดสรรเมล็ดกาแฟจากแหล่งปลูกที่ดีที่สุดบนยอดดอยในประเทศไทย คั่วด้วยเทคนิคพิเศษเพื่อให้ได้รสชาติที่เป็นเอกลักษณ์ ไม่เหมือนใคร บรรยากาศร้านของเราออกแบบสไตล์มินิมอล อิงธรรมชาติ เพื่อให้คุณได้พักผ่อนอย่างแท้จริง',
     aboutTitleEn: 'Our Story: From Thai Mountains to Your Cup',
@@ -35,12 +35,13 @@ function isEnglishPage() {
 }
 
 function normalizeIndexSettings(data = {}) {
+    const heroSubtitleEn = cleanText(data.heroSubtitleEn, FALLBACK_INDEX.heroSubtitleEn, 320);
     return {
         heroImageUrl: safeImageURL(data.heroImageUrl || data.hero_image_url || FALLBACK_INDEX.heroImageUrl),
         heroTitleTh: cleanText(data.heroTitleTh, FALLBACK_INDEX.heroTitleTh, 120),
         heroSubtitleTh: cleanText(data.heroSubtitleTh, FALLBACK_INDEX.heroSubtitleTh, 320),
         heroTitleEn: cleanText(data.heroTitleEn, FALLBACK_INDEX.heroTitleEn, 120),
-        heroSubtitleEn: cleanText(data.heroSubtitleEn, FALLBACK_INDEX.heroSubtitleEn, 320),
+        heroSubtitleEn: /Nang Lae/i.test(heroSubtitleEn) ? heroSubtitleEn : FALLBACK_INDEX.heroSubtitleEn,
         aboutTitleTh: cleanText(data.aboutTitleTh, FALLBACK_INDEX.aboutTitleTh, 140),
         aboutBodyTh: cleanText(data.aboutBodyTh, FALLBACK_INDEX.aboutBodyTh, 900),
         aboutTitleEn: cleanText(data.aboutTitleEn, FALLBACK_INDEX.aboutTitleEn, 140),
