@@ -116,6 +116,19 @@ const FOOTER_ROUTES = [
     'archery/booking/confirm.html'
 ];
 
+const CENTRAL_FOOTER_TAGLINE_PATTERNS = [
+    /กาแฟพิเศษระดับพรีเมียม/,
+    /Premium specialty coffee and a calm garden escape in Chiang Rai\./
+];
+const CENTRAL_FOOTER_CONTACT_PATTERNS = [
+    /306 หมู่ 7 ตำบลนางแล อำเภอเมืองเชียงราย จังหวัดเชียงราย 57100/,
+    /306 Moo 7, Nang Lae, Mueang Chiang Rai, Chiang Rai 57100/
+];
+const FOOTER_EMAIL_PATTERN = /edencafe\.2565@gmail\.com/i;
+const FOOTER_PHONE_PATTERN = /098-?008-?0383/;
+const LEGACY_BLOG_FOOTER_PATTERN = /คาเฟ่ธรรมชาติในตำบลนางแล[\s\S]{0,220}เน้นกาแฟคุณภาพ[\s\S]{0,220}คนที่มาเที่ยวเชียงราย/;
+const COPYRIGHT_ONLY_FOOTER_PATTERN = /<footer\b[^>]*>\s*<div class=["']container["']>\s*<p class=["']copyright["'][\s\S]*?<\/p>\s*<\/div>\s*<\/footer>/i;
+
 const issues = [];
 const stats = {
     filesScanned: 0,
@@ -248,6 +261,50 @@ function hasMeta(html, nameOrProperty, valuePattern) {
     return valuePattern ? valuePattern.test(value) : Boolean(value);
 }
 
+function extractFooter(html) {
+    return html.match(/<footer\b[\s\S]*?<\/footer>/i)?.[0] || '';
+}
+
+function hasAnyPattern(value, patterns) {
+    return patterns.some(pattern => pattern.test(value));
+}
+
+function validateFooterContract(relPath, html) {
+    const footer = extractFooter(html);
+    if (!footer) {
+        addIssue(relPath, 'Missing raw HTML footer.');
+        return;
+    }
+
+    if (!/<footer\b[^>]*\bid=["']contact["']/i.test(footer)) {
+        addIssue(relPath, 'Footer must expose id="contact" for shared footer behavior.');
+    }
+    if (!/\bfooter-grid\b/.test(footer)) {
+        addIssue(relPath, 'Footer raw HTML must include .footer-grid so business settings can hydrate it.');
+    }
+    if (!hasAnyPattern(footer, CENTRAL_FOOTER_TAGLINE_PATTERNS)) {
+        addIssue(relPath, 'Footer raw HTML is missing the central brand/tagline fallback.');
+    }
+    if (!hasAnyPattern(footer, CENTRAL_FOOTER_CONTACT_PATTERNS)) {
+        addIssue(relPath, 'Footer raw HTML is missing the central address fallback.');
+    }
+    if (!FOOTER_EMAIL_PATTERN.test(footer)) {
+        addIssue(relPath, 'Footer raw HTML is missing the central email fallback.');
+    }
+    if (!FOOTER_PHONE_PATTERN.test(footer)) {
+        addIssue(relPath, 'Footer raw HTML is missing the central phone fallback.');
+    }
+    if (!/<p\b[^>]*class=["'][^"']*\bcopyright\b/i.test(footer)) {
+        addIssue(relPath, 'Footer raw HTML is missing a copyright row.');
+    }
+    if (/^blog(?:\.html|-post\.html|\/)/.test(relPath) && LEGACY_BLOG_FOOTER_PATTERN.test(footer)) {
+        addIssue(relPath, 'Blog footer still uses the old hardcoded nature-cafe footer copy.');
+    }
+    if (/^archery(?:\.html|-en\.html|\/)/.test(relPath) && COPYRIGHT_ONLY_FOOTER_PATTERN.test(footer)) {
+        addIssue(relPath, 'Archery footer is still copyright-only instead of the shared footer contract.');
+    }
+}
+
 function validateRouteContracts() {
     for (const [relPath, canonical] of PUBLIC_ROUTES) {
         if (!existsSync(repoPath(relPath))) {
@@ -280,6 +337,7 @@ function validateRouteContracts() {
         if (!/footer-settings\.js\?v=business-1/.test(html)) {
             addIssue(relPath, 'Missing central footer settings loader.');
         }
+        validateFooterContract(relPath, html);
     }
 }
 

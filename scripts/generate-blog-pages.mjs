@@ -111,13 +111,14 @@ function renderFooter() {
             <div class="footer-grid">
                 <div>
                     <h4>Eden Cafe.</h4>
-                    <p>คาเฟ่ธรรมชาติใน${escapeHTML(SITE.locality)} เน้นกาแฟคุณภาพ วิวธรรมชาติ และพื้นที่พักผ่อนสำหรับคนที่มาเที่ยวเชียงราย</p>
+                    <p>กาแฟพิเศษระดับพรีเมียม ท่ามกลางสวนธรรมชาติและบรรยากาศสงบ พื้นที่พักผ่อนสำหรับการใช้ชีวิตช้า ๆ พร้อมอาหาร เครื่องดื่ม และประสบการณ์ Wellness เพื่อสุขภาพ</p>
                 </div>
                 <div>
                     <h4>ติดต่อและสถานที่ตั้ง</h4>
-                    <p>${escapeHTML(SITE.address.streetAddress)} ${escapeHTML(SITE.address.addressLocality)} ${escapeHTML(SITE.address.addressRegion)} ${escapeHTML(SITE.address.postalCode)}</p>
-                    <p>โทร: <a href="tel:${escapeHTML(SITE.telephone.replace(/-/g, ''))}">${escapeHTML(SITE.telephone)}</a></p>
-                    <p>เปิดทุกวัน 09:00-18:00 น. โปรดตรวจสอบข้อมูลล่าสุดก่อนเดินทาง</p>
+                    <p>306 หมู่ 7 ตำบลนางแล อำเภอเมืองเชียงราย จังหวัดเชียงราย 57100</p>
+                    <p>อีเมล: edencafe.2565@gmail.com</p>
+                    <p>โทร: ${escapeHTML(SITE.telephone)}</p>
+                    <p>เปิดทุกวัน 09:00-18:00 น.</p>
                 </div>
                 <div>
                     <h4>ลิงก์สำคัญ</h4>
@@ -127,7 +128,7 @@ function renderFooter() {
                 </div>
             </div>
             <div class="footer-bottom">
-                <p class="copyright">© 2026 Eden Cafe Thailand. Optimized for SEO, AEO & GEO.</p>
+                <p class="copyright">© 2026 Eden Cafe Thailand. สงวนลิขสิทธิ์ | Optimized for SEO, AEO & GEO</p>
             </div>
         </div>
     </footer>`;
