@@ -35,6 +35,8 @@ const HIGH_RISK_PATTERNS = [
     { label: 'Bangkok longitude placeholder', pattern: /100\.5018/ },
     { label: 'old opening time', pattern: /07:30/ },
     { label: 'footer review loading placeholder', pattern: /Updating\.\.\./i },
+    { label: 'menu loading-only fallback', pattern: />\s*(?:กำลังโหลดเมนู|Loading menu)\.\.\.\s*</i },
+    { label: 'visitor stats loading placeholder', pattern: /Updating stats|กำลังอัปเดตสถิติ|&#3585;&#3635;&#3621;&#3633;&#3591;&#3629;&#3633;&#3611;/i },
     { label: 'fake official page placeholder', pattern: /your-official-page/i },
     { label: 'fake official id placeholder', pattern: /your-official-id/i },
     { label: 'example.com data placeholder', pattern: /example\.com/i },
