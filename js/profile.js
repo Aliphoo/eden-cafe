@@ -29,7 +29,10 @@ autoEnhanceOtpInputs();
     let cloudBookings = null;
     let cloudHistoryUid = '';
     let profileActivityUid = '';
+    let profileActivityRangeKey = '';
     let cloudHistoryLoading = false;
+    let historyReceiptNotice = '';
+    let historyReceiptBusyActionId = '';
     let cloudProfile = null;
     let cloudProfileUid = '';
     let cloudProfileLoading = false;
@@ -76,8 +79,11 @@ autoEnhanceOtpInputs();
     let activeProfileTab = 'points';
     let activeHistoryFilter = 'all';
     let historyExpanded = false;
+    const DEFAULT_HISTORY_DATE_RANGE = getCurrentMonthDateRange();
+    let historyDateFrom = DEFAULT_HISTORY_DATE_RANGE.from;
+    let historyDateTo = DEFAULT_HISTORY_DATE_RANGE.to;
     const PROFILE_TABS = ['points', 'history', 'account'];
-    const HISTORY_FILTERS = ['all', 'orders', 'bookings', 'archery'];
+    const HISTORY_FILTERS = ['all', 'orders', 'pos', 'bookings', 'archery'];
     const CAN_LOG_CLIENT_ERRORS = /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
 
     const DEFAULT_LOYALTY_CONFIG = {
@@ -121,6 +127,35 @@ autoEnhanceOtpInputs();
 
     function cleanString(value, maxLength = 300) {
         return String(value ?? '').trim().slice(0, maxLength);
+    }
+
+    function formatDateInputValue(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    function getCurrentMonthDateRange() {
+        const now = new Date();
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        return {
+            from: formatDateInputValue(firstDay),
+            to: formatDateInputValue(lastDay)
+        };
+    }
+
+    function historyRangeKey() {
+        return `${historyDateFrom || ''}:${historyDateTo || ''}`;
+    }
+
+    function resetProfileActivityCache() {
+        profileActivityUid = '';
+        profileActivityRangeKey = '';
+        cloudHistoryUid = '';
+        cloudOrders = null;
+        cloudBookings = null;
     }
 
     function normalizeShippingAddressStructured(value = {}, fallbackText = '') {
@@ -508,10 +543,19 @@ autoEnhanceOtpInputs();
             historyOrders: 'Orders',
             historyBookings: 'Table / Room',
             historyArchery: 'Archery',
+            historyPos: 'In-store',
+            historyDateRange: 'Date range',
+            historyFrom: 'From',
+            historyTo: 'To',
+            historyClearDates: 'Clear dates',
             recentActivity: 'Recent activity',
             noHistory: 'No activity yet.',
             showAll: 'View all',
             showLess: 'Show less',
+            downloadReceipt: 'Download receipt',
+            preparingReceipt: 'Preparing receipt...',
+            receiptDownloadReady: 'Receipt downloaded.',
+            receiptDownloadFailed: 'Unable to download receipt right now.',
             activityStatus: 'Status',
             tableBooking: 'Table booking',
             roomBooking: 'Room booking',
@@ -975,7 +1019,9 @@ autoEnhanceOtpInputs();
         return profileApiRequest('/getMyActivity', {
             limit: limitCount,
             cursor,
-            ledgerLimit
+            ledgerLimit,
+            from: historyDateFrom || '',
+            to: historyDateTo || ''
         });
     }
 
@@ -1019,11 +1065,13 @@ autoEnhanceOtpInputs();
         cloudHistoryUid = user.uid;
         loyaltyUid = user.uid;
         profileActivityUid = user.uid;
+        profileActivityRangeKey = historyRangeKey();
     }
 
     async function refreshProfileActivity(user, options = {}) {
         const force = options.force === true;
-        if (!user?.uid || cloudHistoryLoading || (!force && profileActivityUid === user.uid)) return;
+        const rangeKey = historyRangeKey();
+        if (!user?.uid || cloudHistoryLoading || (!force && profileActivityUid === user.uid && profileActivityRangeKey === rangeKey)) return;
         cloudHistoryLoading = true;
         loyaltyLoading = true;
         if (force) renderProfile();
@@ -1131,8 +1179,7 @@ autoEnhanceOtpInputs();
         const user = readUser();
         if (!user?.uid) return;
         loyaltyUid = '';
-        profileActivityUid = '';
-        cloudHistoryUid = '';
+        resetProfileActivityCache();
         await refreshProfileActivity(user, { force: true });
     }
 
@@ -1650,6 +1697,34 @@ autoEnhanceOtpInputs();
         return false;
     }
 
+    function setProfileHistoryDate(part, value) {
+        const nextValue = cleanString(value || '', 10);
+        if (part === 'from') historyDateFrom = nextValue;
+        if (part === 'to') historyDateTo = nextValue;
+        if (historyDateFrom && historyDateTo && historyDateFrom > historyDateTo) {
+            const previousFrom = historyDateFrom;
+            historyDateFrom = historyDateTo;
+            historyDateTo = previousFrom;
+        }
+        activeProfileTab = 'history';
+        historyExpanded = false;
+        historyReceiptNotice = '';
+        resetProfileActivityCache();
+        renderProfile();
+        return false;
+    }
+
+    function clearProfileHistoryDates() {
+        historyDateFrom = '';
+        historyDateTo = '';
+        activeProfileTab = 'history';
+        historyExpanded = false;
+        historyReceiptNotice = '';
+        resetProfileActivityCache();
+        renderProfile();
+        return false;
+    }
+
     function toggleProfileHistoryExpanded() {
         historyExpanded = !historyExpanded;
         activeProfileTab = 'history';
@@ -1819,23 +1894,199 @@ autoEnhanceOtpInputs();
         ].filter(Boolean).join(' / ');
     }
 
+    function normalizeHistoryStatus(value) {
+        return cleanString(value || '', 80).toLowerCase().replace(/[\s-]+/g, '_');
+    }
+
+    function isReceiptBlockedStatus(value) {
+        return [
+            'pending',
+            'unpaid',
+            'pending_payment',
+            'paid_pending_review',
+            'review_required',
+            'cancelled',
+            'canceled',
+            'failed',
+            'payment_failed',
+            'expired',
+            'void',
+            'voided',
+            'refunded'
+        ].includes(normalizeHistoryStatus(value));
+    }
+
+    function normalizeActivityReceiptAction(item = {}) {
+        const actions = Array.isArray(item.actions) ? item.actions : [];
+        const action = actions.find(candidate => candidate?.type === 'download_receipt' && candidate.enabled !== false) || null;
+        const receipt = item.receipt && typeof item.receipt === 'object' ? item.receipt : {};
+        const sourceType = cleanString(action?.sourceType || receipt.sourceType || '', 80);
+        const sourceId = cleanString(action?.sourceId || receipt.sourceId || item.firestoreId || item.id || '', 180);
+        const actionId = cleanString(action?.actionId || receipt.actionId || (sourceType && sourceId ? `${sourceType}:${sourceId}` : ''), 260);
+        const available = item.receiptAvailable === true || receipt.available === true || !!action;
+        if (!available || !actionId || !sourceType || !sourceId || isReceiptBlockedStatus(receipt.status || item.paymentStatus || item.payment_status || item.status)) {
+            return null;
+        }
+        return {
+            available: true,
+            actionId,
+            sourceType,
+            sourceId,
+            receiptNo: cleanString(action?.receiptNo || receipt.receiptNo || item.receiptNo || item.posReceiptNo || '', 120),
+            receiptId: cleanString(action?.receiptId || receipt.receiptId || item.receiptId || '', 180)
+        };
+    }
+
+    function receiptMoney(value, currency = 'THB') {
+        const amount = Number(value) || 0;
+        const symbol = String(currency || 'THB').toUpperCase() === 'THB' ? '฿' : `${currency} `;
+        return symbol + amount.toLocaleString(isEnglishPage() ? 'en-US' : 'th-TH', {
+            minimumFractionDigits: amount % 1 ? 2 : 0,
+            maximumFractionDigits: 2
+        });
+    }
+
+    function receiptDateTime(value) {
+        return formatDate(value);
+    }
+
+    function receiptFilenamePart(value) {
+        return cleanString(value || Date.now(), 80).replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '') || String(Date.now());
+    }
+
+    function receiptPaymentLabel(receipt = {}) {
+        return cleanString(receipt.paymentMethod || receipt.status || '', 80) || (isEnglishPage() ? 'Paid' : 'ชำระเงินแล้ว');
+    }
+
+    function buildCustomerReceiptHTML(receipt = {}) {
+        const en = isEnglishPage();
+        const items = Array.isArray(receipt.items) ? receipt.items : [];
+        const currency = cleanString(receipt.currency || 'THB', 12) || 'THB';
+        const row = (label, value) => value ? `
+            <div class="receipt-row">
+                <span>${escapeHTML(label)}</span>
+                <strong>${escapeHTML(value)}</strong>
+            </div>
+        ` : '';
+        const receiptBody = `
+            <div class="receipt-card">
+                <div class="receipt-brand">Eden Cafe</div>
+                <div class="receipt-title">${escapeHTML(en ? 'Receipt' : 'ใบเสร็จรับเงิน')}</div>
+                <div class="receipt-rule"></div>
+                ${row(en ? 'Receipt no.' : 'เลขที่', receipt.receiptNo || '-')}
+                ${row(en ? 'Date' : 'เวลา', receiptDateTime(receipt.issuedAt))}
+                ${receipt.cashierName ? row(en ? 'Cashier' : 'แคชเชียร์', receipt.cashierName) : ''}
+                ${receipt.customerName ? row(en ? 'Customer' : 'ลูกค้า', receipt.customerName) : ''}
+                <div class="receipt-rule"></div>
+                ${items.map(item => `
+                    <div class="receipt-item">
+                        <span>${escapeHTML(item.name || 'Eden Cafe item')}${item.variantName ? ` / ${escapeHTML(item.variantName)}` : ''} x${Number(item.quantity || 1).toLocaleString('th-TH')}</span>
+                        <strong>${receiptMoney(item.lineTotal, currency)}</strong>
+                    </div>
+                `).join('')}
+                <div class="receipt-rule"></div>
+                ${row('Subtotal', receiptMoney(receipt.subtotal, currency))}
+                ${Number(receipt.discount || 0) ? row('Discount', '-' + receiptMoney(receipt.discount, currency)) : ''}
+                ${Number(receipt.taxIncluded || 0) ? row('VAT included', receiptMoney(receipt.taxIncluded, currency)) : ''}
+                ${row('Total', receiptMoney(receipt.totalAmount, currency))}
+                ${row('Payment', receiptPaymentLabel(receipt))}
+                ${Number(receipt.paidAmount || 0) ? row('Paid', receiptMoney(receipt.paidAmount, currency)) : ''}
+                ${Number(receipt.changeAmount || 0) ? row('Change', receiptMoney(receipt.changeAmount, currency)) : ''}
+                <div class="receipt-rule"></div>
+                <div class="receipt-footer">${escapeHTML(en ? 'Thank you for supporting Eden Cafe' : 'ขอบคุณที่อุดหนุน Eden Cafe')}</div>
+            </div>
+        `;
+        return `<!doctype html>
+<html lang="${en ? 'en' : 'th'}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${escapeHTML(receipt.receiptNo || 'Eden Cafe Receipt')}</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; padding: 24px; background: #f4f8f1; color: #172f24; font-family: Arial, "Noto Sans Thai", sans-serif; }
+        .receipt-card { width: min(380px, 100%); margin: 0 auto; padding: 22px; border: 1px solid #dce8dc; border-radius: 12px; background: #fff; box-shadow: 0 14px 32px rgba(15, 62, 46, 0.12); }
+        .receipt-brand { text-align: center; color: #159947; font-size: 1.2rem; font-weight: 900; }
+        .receipt-title, .receipt-footer { text-align: center; color: #365847; }
+        .receipt-title { margin-top: 4px; font-weight: 800; }
+        .receipt-rule { border-top: 1px dashed #9aa; margin: 12px 0; }
+        .receipt-row, .receipt-item { display: flex; justify-content: space-between; gap: 12px; margin: 6px 0; line-height: 1.45; }
+        .receipt-row span, .receipt-item span { min-width: 0; overflow-wrap: anywhere; }
+        .receipt-row strong, .receipt-item strong { flex: 0 0 auto; text-align: right; }
+        @media print { body { padding: 0; background: #fff; } .receipt-card { width: 100%; border: 0; box-shadow: none; } }
+    </style>
+</head>
+<body>${receiptBody}</body>
+</html>`;
+    }
+
+    function downloadCustomerReceipt(receipt = {}) {
+        const html = buildCustomerReceiptHTML(receipt);
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `EdenCafe-Receipt-${receiptFilenamePart(receipt.receiptNo || receipt.sourceId)}.html`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    async function requestProfileReceiptDownload(target) {
+        const dataset = target?.dataset || target || {};
+        const payload = {
+            actionId: cleanString(dataset.receiptAction || dataset.actionId || '', 260),
+            sourceType: cleanString(dataset.receiptSourceType || dataset.sourceType || '', 80),
+            sourceId: cleanString(dataset.receiptSourceId || dataset.sourceId || '', 180),
+            receiptNo: cleanString(dataset.receiptNo || '', 120),
+            receiptId: cleanString(dataset.receiptId || '', 180)
+        };
+        if (!payload.actionId || !payload.sourceType || !payload.sourceId) return false;
+        const labels = getLabels();
+        historyReceiptBusyActionId = payload.actionId;
+        historyReceiptNotice = labels.preparingReceipt || (isEnglishPage() ? 'Preparing receipt...' : 'กำลังเตรียมใบเสร็จ...');
+        activeProfileTab = 'history';
+        renderProfile();
+        try {
+            const result = await profileApiRequest('/getMyReceipt', payload);
+            if (!result?.receipt) throw new Error(labels.receiptDownloadFailed || 'Unable to download receipt right now.');
+            downloadCustomerReceipt(result.receipt);
+            historyReceiptNotice = labels.receiptDownloadReady || (isEnglishPage() ? 'Receipt downloaded.' : 'ดาวน์โหลดใบเสร็จแล้ว');
+        } catch (error) {
+            logClientError('Receipt download failed:', error);
+            historyReceiptNotice = error.message || labels.receiptDownloadFailed || (isEnglishPage()
+                ? 'Unable to download receipt right now.'
+                : 'ไม่สามารถดาวน์โหลดใบเสร็จได้ในขณะนี้');
+        } finally {
+            historyReceiptBusyActionId = '';
+            renderProfile();
+        }
+        return false;
+    }
+
     function buildHistoryItems(orders, bookings, labels) {
         const orderItems = orders.map(order => {
             const items = Array.isArray(order.items) ? order.items.map(item => item.name || '').filter(Boolean).join(', ') : '';
             const paymentStatus = String(order.paymentStatus || order.payment_status || '').toLowerCase();
             const orderStatus = String(order.status || order.order_status || '').toLowerCase();
+            const source = String(order.source || order.orderSource || order.channel || '').toLowerCase()
+                || (order.receiptNo || order.posReceiptNo || order.posTerminalId ? 'pos' : 'web');
+            const category = source === 'pos' ? 'pos' : 'orders';
             const status = paymentStatus === 'paid' || paymentStatus === 'paid_online' || orderStatus === 'paid' || orderStatus === 'completed'
                 ? labels.paid
                 : labels.pending;
             return {
-                category: 'orders',
+                category,
+                source,
                 title: `${labels.orderId} ${order.id || '-'}`,
-                typeLabel: labels.orders,
+                typeLabel: category === 'pos' ? (labels.historyPos || (isEnglishPage() ? 'In-store' : 'หน้าร้าน')) : labels.orders,
                 status,
                 meta: formatDate(order.date || order.timestamp || order.createdAt),
                 detail: items || '-',
                 amount: money(order.totalAmount || order.total || 0),
-                timestamp: timestampMillis(order.timestamp || order.createdAt || order.date)
+                timestamp: timestampMillis(order.timestamp || order.createdAt || order.date),
+                receipt: normalizeActivityReceiptAction(order)
             };
         });
         const bookingItems = bookings.map(booking => {
@@ -1848,21 +2099,31 @@ autoEnhanceOtpInputs();
                 meta: bookingTimeText(booking),
                 detail: bookingDetailText(booking) || booking.id || '-',
                 amount: booking.total ? money(booking.total) : booking.price || '',
-                timestamp: timestampMillis(booking.timestamp || booking.createdAt || booking.booking_date || booking.date)
+                timestamp: timestampMillis(booking.timestamp || booking.createdAt || booking.booking_date || booking.date),
+                receipt: normalizeActivityReceiptAction(booking)
             };
         });
         return [...orderItems, ...bookingItems].sort((a, b) => b.timestamp - a.timestamp);
     }
 
     function filteredHistoryItems(items) {
-        if (activeHistoryFilter === 'all') return items;
-        return items.filter(item => item.category === activeHistoryFilter);
+        const fromMs = historyDateFrom ? new Date(`${historyDateFrom}T00:00:00`).getTime() : 0;
+        const toMs = historyDateTo ? new Date(`${historyDateTo}T23:59:59.999`).getTime() : 0;
+        return items.filter(item => {
+            const timestamp = Number(item.timestamp || 0);
+            if (fromMs && timestamp && timestamp < fromMs) return false;
+            if (toMs && timestamp && timestamp > toMs) return false;
+            if (activeHistoryFilter === 'all') return true;
+            if (activeHistoryFilter === 'pos') return item.category === 'pos' || item.source === 'pos';
+            return item.category === activeHistoryFilter;
+        });
     }
 
     function renderHistoryFilters(labels) {
         const filterLabels = {
             all: labels.historyAll,
             orders: labels.historyOrders,
+            pos: labels.historyPos || (isEnglishPage() ? 'In-store' : 'หน้าร้าน'),
             bookings: labels.historyBookings,
             archery: labels.historyArchery
         };
@@ -1878,6 +2139,54 @@ autoEnhanceOtpInputs();
                     </button>
                 `).join('')}
             </div>
+        `;
+    }
+
+    function renderHistoryDateControls(labels) {
+        const dateRangeLabel = labels.historyDateRange || (isEnglishPage() ? 'Date range' : 'ช่วงวันที่');
+        const fromLabel = labels.historyFrom || (isEnglishPage() ? 'From' : 'จากวันที่');
+        const toLabel = labels.historyTo || (isEnglishPage() ? 'To' : 'ถึงวันที่');
+        const clearLabel = labels.historyClearDates || (isEnglishPage() ? 'Clear dates' : 'ล้างวันที่');
+        const showClear = historyDateFrom || historyDateTo;
+        return `
+            <div class="profile-history-controls" aria-label="${escapeHTML(dateRangeLabel)}">
+                <div class="profile-history-date-grid">
+                    <label>
+                        <span>${escapeHTML(fromLabel)}</span>
+                        <input type="date" value="${escapeHTML(historyDateFrom)}" onchange="setProfileHistoryDate('from', this.value)">
+                    </label>
+                    <label>
+                        <span>${escapeHTML(toLabel)}</span>
+                        <input type="date" value="${escapeHTML(historyDateTo)}" onchange="setProfileHistoryDate('to', this.value)">
+                    </label>
+                </div>
+                ${showClear ? `
+                    <button class="profile-history-date-clear" type="button" onclick="clearProfileHistoryDates()">
+                        ${escapeHTML(clearLabel)}
+                    </button>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    function renderHistoryReceiptAction(item, labels) {
+        if (!item?.receipt?.available) return '';
+        const isBusy = historyReceiptBusyActionId === item.receipt.actionId;
+        return `
+            <button
+                class="profile-timeline-receipt"
+                type="button"
+                data-receipt-action="${escapeHTML(item.receipt.actionId)}"
+                data-receipt-source-type="${escapeHTML(item.receipt.sourceType)}"
+                data-receipt-source-id="${escapeHTML(item.receipt.sourceId)}"
+                data-receipt-no="${escapeHTML(item.receipt.receiptNo)}"
+                data-receipt-id="${escapeHTML(item.receipt.receiptId)}"
+                onclick="return requestProfileReceiptDownload(this)"
+                ${isBusy ? 'disabled' : ''}>
+                ${escapeHTML(isBusy
+                    ? (labels.preparingReceipt || (isEnglishPage() ? 'Preparing receipt...' : 'กำลังเตรียมใบเสร็จ...'))
+                    : (labels.downloadReceipt || (isEnglishPage() ? 'Download receipt' : 'ดาวน์โหลดใบเสร็จ')))}
+            </button>
         `;
     }
 
@@ -1899,6 +2208,7 @@ autoEnhanceOtpInputs();
                             <p>${escapeHTML(item.meta)}</p>
                             <small>${escapeHTML(item.detail)}</small>
                             ${item.amount ? `<b>${escapeHTML(item.amount)}</b>` : ''}
+                            ${renderHistoryReceiptAction(item, labels)}
                         </div>
                     </article>
                 `).join('')}
@@ -1926,7 +2236,10 @@ autoEnhanceOtpInputs();
                         <h2>${escapeHTML(labels.recentActivity)}</h2>
                     </div>
                 </div>
+                ${renderHistoryDateControls(labels)}
                 ${renderHistoryFilters(labels)}
+                ${historyReceiptNotice ? `<p class="profile-history-status" role="status" aria-live="polite">${escapeHTML(historyReceiptNotice)}</p>` : ''}
+                ${cloudHistoryLoading ? `<p class="profile-history-status" role="status">${escapeHTML(isEnglishPage() ? 'Loading activity...' : 'กำลังโหลดประวัติ...')}</p>` : ''}
                 ${renderHistoryTimeline(limitedItems, labels)}
                 ${hasMore ? `
                     <button class="btn btn-outline profile-history-more" type="button" onclick="toggleProfileHistoryExpanded()">
@@ -3159,7 +3472,10 @@ autoEnhanceOtpInputs();
     window.refreshProfileLoyalty = refreshProfileLoyalty;
     window.setProfileTab = setProfileTab;
     window.setProfileHistoryFilter = setProfileHistoryFilter;
+    window.setProfileHistoryDate = setProfileHistoryDate;
+    window.clearProfileHistoryDates = clearProfileHistoryDates;
     window.toggleProfileHistoryExpanded = toggleProfileHistoryExpanded;
+    window.requestProfileReceiptDownload = requestProfileReceiptDownload;
     window.checkMemberEmailVerification = checkMemberEmailVerification;
     window.sendMemberEmailVerificationCode = sendMemberEmailVerificationCode;
     window.verifyMemberEmailCode = verifyMemberEmailCode;
@@ -3185,9 +3501,9 @@ autoEnhanceOtpInputs();
                     window.location.href = '/login';
                     return;
                 }
-                cloudOrders = null;
-                cloudBookings = null;
-                cloudHistoryUid = '';
+                resetProfileActivityCache();
+                historyReceiptNotice = '';
+                historyReceiptBusyActionId = '';
                 cloudProfile = null;
                 cloudProfileUid = '';
                 cloudProfileError = '';
@@ -3209,9 +3525,9 @@ autoEnhanceOtpInputs();
 
     window.addEventListener('storage', renderProfile);
     window.addEventListener('eden:user-changed', () => {
-        cloudOrders = null;
-        cloudBookings = null;
-        cloudHistoryUid = '';
+        resetProfileActivityCache();
+        historyReceiptNotice = '';
+        historyReceiptBusyActionId = '';
         cloudProfile = null;
         cloudProfileUid = '';
         cloudProfileError = '';
