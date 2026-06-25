@@ -897,6 +897,7 @@ function normalizeAdminPermissions(role, raw = {}) {
     'faqs',
     'promptpay',
     'marketing',
+    'business',
     'index',
     'footer',
   ];

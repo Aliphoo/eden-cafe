@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Eden Cafe - Admin Dashboard</title>
+    <title>Eden Cafe Admin Dashboard</title>
     <link rel="icon" href="Images/Logo.webp" type="image/webp">
     <link rel="stylesheet" href="archery.css?v=mobile-ux-20260619-2">
     <!-- Google Fonts -->
@@ -777,6 +777,19 @@
         }
 
     </style>
+    <meta name="description" content="Eden Cafe internal admin dashboard.">
+    <link rel="canonical" href="https://edencafe.co/admin">
+    <meta name="robots" content="noindex, nofollow">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://edencafe.co/admin">
+    <meta property="og:title" content="Eden Cafe Admin Dashboard">
+    <meta property="og:description" content="Eden Cafe internal admin dashboard.">
+    <meta property="og:image" content="https://edencafe.co/Images/Logo.webp">
+    <meta property="og:site_name" content="Eden Cafe">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Eden Cafe Admin Dashboard">
+    <meta name="twitter:description" content="Eden Cafe internal admin dashboard.">
+    <meta name="twitter:image" content="https://edencafe.co/Images/Logo.webp">
 </head>
 <body>
 
@@ -792,7 +805,7 @@
             <form id="email-login-form">
                 <div class="login-form-group">
                     <label for="admin-email">อีเมล (Email)</label>
-                    <input type="email" id="admin-email" placeholder="admin@edencafe.com" required autocomplete="email">
+                    <input type="email" id="admin-email" placeholder="อีเมลแอดมิน" required autocomplete="email">
                 </div>
                 <div class="login-form-group">
                     <label for="admin-password">รหัสผ่าน (Password)</label>
@@ -837,6 +850,7 @@
             <li onclick="switchTab('blogs', this)">📝 จัดการบทความ (Blogs)</li>
             <li onclick="switchTab('faqs', this)">❓ คำถามที่พบบ่อย (FAQ)</li>
             <li onclick="switchTab('promptpay', this)">&#128184; &#x0E08;&#x0E31;&#x0E14;&#x0E01;&#x0E32;&#x0E23;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C; (PromptPay)</li>
+            <li onclick="switchTab('business-settings', this)">Business Info</li>
             <li data-title="จัดการ Index" onclick="switchTab('index-settings', this)">จัดการ Index</li>
             <li onclick="switchTab('footer-settings', this)">🦶 จัดการ Footer</li>
             <li onclick="switchTab('marketing-settings', this)">Marketing Tools</li>
@@ -1305,7 +1319,7 @@
                         </label>
                         <label>
                             Storage path / Spaceship URL
-                            <input id="pos-apk-storage-path" placeholder="https://www.edencafe.co/pos-apk/releases/eden-pos-1.23-v24-test.apk">
+                            <input id="pos-apk-storage-path" placeholder="https://edencafe.co/pos-apk/releases/eden-pos-1.23-v24-test.apk">
                         </label>
                         <label>
                             <span><input id="pos-apk-force-update" type="checkbox"> Force update</span>
@@ -1512,7 +1526,7 @@
                             </div>
                             <div class="form-group">
                                 <label for="access-email">อีเมล</label>
-                                <input type="email" id="access-email" placeholder="manager@example.com" required>
+                                <input type="email" id="access-email" placeholder="manager@edencafe.co" required>
                             </div>
                             <div class="form-group">
                                 <label for="access-display-name">ชื่อที่แสดง</label>
@@ -2712,6 +2726,209 @@
             </div>
         </div>
 
+        <!-- Business Settings Section -->
+        <div id="business-settings" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <div>
+                        <h2>Business Info</h2>
+                        <p style="color:#667; margin-top:4px;">Central business source for footer, SEO metadata, LocalBusiness schema, social profiles, and public fallback copy.</p>
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button class="btn-action btn-view" type="button" onclick="loadBusinessSettings()">Load Current Settings</button>
+                        <button class="btn-action" type="button" style="background:#789;" onclick="migrateBusinessSettingsFromFooter()">Import Footer Data</button>
+                    </div>
+                </div>
+
+                <div class="footer-preview-strip" id="business-live-preview">
+                    <p style="font-size: 0.78rem; opacity: 0.7; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.1em;">site_settings/business preview</p>
+                    <div class="footer-preview-grid">
+                        <div>
+                            <h4 id="business-preview-brand">Eden Cafe.</h4>
+                            <p id="business-preview-tagline">Premium specialty coffee and a calm garden escape in Chiang Rai.</p>
+                        </div>
+                        <div>
+                            <h4>Location and contact</h4>
+                            <p id="business-preview-address">306 Moo 7, Nang Lae, Mueang Chiang Rai, Chiang Rai 57100</p>
+                            <p id="business-preview-contact">edencafe.2565@gmail.com / 098-008-0383</p>
+                        </div>
+                        <div>
+                            <h4>Schema signals</h4>
+                            <p id="business-preview-hours">09:00-18:00</p>
+                            <p id="business-preview-geo">Chiang Rai geo ready</p>
+                        </div>
+                    </div>
+                </div>
+
+                <form id="businessSettingsForm">
+                    <div class="footer-settings-grid">
+                        <div class="footer-settings-card">
+                            <h3>Brand</h3>
+                            <div class="form-group">
+                                <label for="business-brand-name">Brand name (TH/default)</label>
+                                <input type="text" id="business-brand-name" maxlength="120" value="Eden Cafe." oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-brand-name-en">Brand name (EN)</label>
+                                <input type="text" id="business-brand-name-en" maxlength="120" value="Eden Cafe." oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-legal-name">Legal / organization name</label>
+                                <input type="text" id="business-legal-name" maxlength="160" placeholder="Eden Cafe Thailand" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-tagline-th">Tagline TH</label>
+                                <textarea id="business-tagline-th" maxlength="320" oninput="updateBusinessPreview()"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="business-tagline-en">Tagline EN</label>
+                                <textarea id="business-tagline-en" maxlength="320" oninput="updateBusinessPreview()"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="footer-settings-card">
+                            <h3>Contact</h3>
+                            <div class="form-group">
+                                <label for="business-phone">Phone canonical</label>
+                                <input type="tel" id="business-phone" maxlength="40" value="0980080383" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-phone-display">Phone display</label>
+                                <input type="tel" id="business-phone-display" maxlength="40" value="098-008-0383" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-email">Email</label>
+                                <input type="email" id="business-email" maxlength="180" value="edencafe.2565@gmail.com" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-google-maps-url">Google Maps URL</label>
+                                <input type="url" id="business-google-maps-url" maxlength="500" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-website-url">Website URL</label>
+                                <input type="url" id="business-website-url" maxlength="220" value="https://edencafe.co/" oninput="updateBusinessPreview()">
+                            </div>
+                        </div>
+
+                        <div class="footer-settings-card footer-settings-full">
+                            <h3>SEO descriptions</h3>
+                            <div class="form-group">
+                                <label for="business-description-th">Description TH</label>
+                                <textarea id="business-description-th" maxlength="900" oninput="updateBusinessPreview()"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="business-description-en">Description EN</label>
+                                <textarea id="business-description-en" maxlength="900" oninput="updateBusinessPreview()"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="footer-settings-card">
+                            <h3>Address text</h3>
+                            <div class="form-group">
+                                <label for="business-address-th">Address TH</label>
+                                <textarea id="business-address-th" maxlength="500" oninput="updateBusinessPreview()"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="business-address-en">Address EN</label>
+                                <textarea id="business-address-en" maxlength="500" oninput="updateBusinessPreview()"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="footer-settings-card">
+                            <h3>Structured address</h3>
+                            <div class="form-group">
+                                <label for="business-street-address">Street address</label>
+                                <input type="text" id="business-street-address" maxlength="180" value="306 Moo 7, Nang Lae" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-locality">Locality / district</label>
+                                <input type="text" id="business-locality" maxlength="120" value="Mueang Chiang Rai" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-region">Province / region</label>
+                                <input type="text" id="business-region" maxlength="120" value="Chiang Rai" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-postal-code">Postal code</label>
+                                <input type="text" id="business-postal-code" maxlength="20" value="57100" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-country">Country code</label>
+                                <input type="text" id="business-country" maxlength="2" value="TH" oninput="updateBusinessPreview()">
+                            </div>
+                        </div>
+
+                        <div class="footer-settings-card">
+                            <h3>Geo and hours</h3>
+                            <div class="form-group">
+                                <label for="business-latitude">Latitude</label>
+                                <input type="number" id="business-latitude" step="0.000001" inputmode="decimal" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-longitude">Longitude</label>
+                                <input type="number" id="business-longitude" step="0.000001" inputmode="decimal" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-opens">Opens</label>
+                                <input type="time" id="business-opens" value="09:00" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-closes">Closes</label>
+                                <input type="time" id="business-closes" value="18:00" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-opening-hours-text-th">Opening hours TH</label>
+                                <input type="text" id="business-opening-hours-text-th" maxlength="160" value="เปิดทุกวัน 09:00-18:00 น." oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-opening-hours-text-en">Opening hours EN</label>
+                                <input type="text" id="business-opening-hours-text-en" maxlength="160" value="Open daily 09:00-18:00" oninput="updateBusinessPreview()">
+                            </div>
+                        </div>
+
+                        <div class="footer-settings-card">
+                            <h3>Social links</h3>
+                            <div class="form-group">
+                                <label for="business-instagram">Instagram URL</label>
+                                <input type="url" id="business-instagram" maxlength="500" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-facebook">Facebook URL</label>
+                                <input type="url" id="business-facebook" maxlength="500" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-line">LINE URL</label>
+                                <input type="url" id="business-line" maxlength="500" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-same-as">sameAs URLs, one per line</label>
+                                <textarea id="business-same-as" maxlength="1200" oninput="updateBusinessPreview()"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="footer-settings-card">
+                            <h3>Copyright</h3>
+                            <div class="form-group">
+                                <label for="business-copyright-th">Copyright TH</label>
+                                <input type="text" id="business-copyright-th" maxlength="220" value="© 2017 Eden Cafe Thailand. สงวนลิขสิทธิ์ | Optimized for SEO, AEO & GEO" oninput="updateBusinessPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="business-copyright-en">Copyright EN</label>
+                                <input type="text" id="business-copyright-en" maxlength="220" value="© 2017 Eden Cafe Thailand. All rights reserved | Optimized for SEO, AEO & GEO" oninput="updateBusinessPreview()">
+                            </div>
+                        </div>
+                    </div>
+
+                    <p class="index-settings-status" id="business-settings-status"></p>
+                    <div class="index-settings-actions">
+                        <button type="button" class="btn-action" style="background:#789; padding: 10px 24px;" onclick="loadBusinessSettings()">Cancel / Reload</button>
+                        <button type="button" class="btn-action btn-view" style="padding: 10px 24px;" onclick="migrateBusinessSettingsFromFooter()">Import Footer Data</button>
+                        <button type="submit" class="btn-submit" style="width: auto; padding: 10px 32px; background: var(--accent-color);">Save Business Info</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <!-- Index Settings Section -->
         <div id="index-settings" class="content-section">
             <div class="section-container">
@@ -2843,7 +3060,7 @@
                     <div class="footer-preview-grid">
                         <div>
                             <h4 id="fp-brand">Eden Cafe.</h4>
-                            <p id="fp-tagline">กาแฟพิเศษระดับพรีเมียม สวนพักผ่อนส่วนตัวของคุณในเมืองใหญ่</p>
+                            <p id="fp-tagline">กาแฟพิเศษระดับพรีเมียม ท่ามกลางสวนธรรมชาติและบรรยากาศสงบ พื้นที่พักผ่อนสำหรับการใช้ชีวิตช้า ๆ พร้อมอาหาร เครื่องดื่ม และประสบการณ์ Wellness เพื่อสุขภาพ</p>
                         </div>
                         <div>
                             <h4>ติดต่อและสถานที่ตั้ง</h4>
@@ -2874,7 +3091,7 @@
                             </div>
                             <div class="form-group">
                                 <label for="footer-tagline">คำอธิบาย / Tagline</label>
-                                <input type="text" id="footer-tagline" value="กาแฟพิเศษระดับพรีเมียม สวนพักผ่อนส่วนตัวของคุณในเมืองใหญ่" oninput="updateFooterPreview()">
+                                <input type="text" id="footer-tagline" value="กาแฟพิเศษระดับพรีเมียม ท่ามกลางสวนธรรมชาติและบรรยากาศสงบ พื้นที่พักผ่อนสำหรับการใช้ชีวิตช้า ๆ พร้อมอาหาร เครื่องดื่ม และประสบการณ์ Wellness เพื่อสุขภาพ" oninput="updateFooterPreview()">
                             </div>
                             <div class="form-group">
                                 <label for="footer-copyright">ข้อความลิขสิทธิ์ (Copyright)</label>
@@ -2905,15 +3122,15 @@
                             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px;">
                                 <div class="form-group">
                                     <label for="footer-instagram">Instagram URL</label>
-                                    <input type="url" id="footer-instagram" value="" placeholder="https://instagram.com/your-official-page" oninput="updateFooterPreview()">
+                                    <input type="url" id="footer-instagram" value="" placeholder="https://www.instagram.com/edencafe_2565?igsh=MTUzdHdnOWQxaG4zaw==" oninput="updateFooterPreview()">
                                 </div>
                                 <div class="form-group">
                                     <label for="footer-facebook">Facebook URL</label>
-                                    <input type="url" id="footer-facebook" value="" placeholder="https://facebook.com/your-official-page" oninput="updateFooterPreview()">
+                                    <input type="url" id="footer-facebook" value="" placeholder="https://www.facebook.com/EdenCafeChaingrai" oninput="updateFooterPreview()">
                                 </div>
                                 <div class="form-group">
                                     <label for="footer-line">LINE URL</label>
-                                    <input type="url" id="footer-line" value="" placeholder="https://line.me/your-official-id" oninput="updateFooterPreview()">
+                                    <input type="url" id="footer-line" value="" placeholder="https://page.line.me/811ojjgi?openQrModal=true" oninput="updateFooterPreview()">
                                 </div>
                             </div>
                         </div>

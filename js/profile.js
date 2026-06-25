@@ -2184,7 +2184,7 @@ autoEnhanceOtpInputs();
                         </label>
                         <label>
                             <span>${escapeHTML(labels.email)}</span>
-                            <input name="email" type="email" autocomplete="email" maxlength="180" value="${escapeHTML(email)}" placeholder="name@example.com" oninput="syncEmailVerificationAction()" ${readOnlyAttr}>
+                            <input name="email" type="email" autocomplete="email" maxlength="180" value="${escapeHTML(email)}" placeholder="อีเมลของคุณ" oninput="syncEmailVerificationAction()" ${readOnlyAttr}>
                         </label>
                         <div class="profile-email-verify profile-form-full ${emailStatusClass}">
                             <div>

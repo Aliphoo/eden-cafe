@@ -7,16 +7,7 @@ const PUBLIC_CACHE_TTL_MS = 5 * 60 * 1000;
 const SHOP_CATEGORY_LIMIT = 160;
 const SHOP_PRODUCT_LIMIT = 180;
 
-const FALLBACK_PRODUCTS = [
-    { id: 'p1_light', category: 'coffee', categoryNameTh: 'เมล็ดกาแฟ', categoryNameEn: 'Coffee Beans', nameTh: 'Light Roast Beans', nameEn: 'Light Roast Beans', descriptionTh: 'โทนผลไม้สดชื่น เหมาะกับดริปและอเมริกาโน่', descriptionEn: 'Bright fruity notes for pour-over and americano.', price: 450, imageUrl: 'https://images.unsplash.com/photo-1559525839-b184a4d698c7?auto=format&fit=crop&w=600&q=80', stock: 12 },
-    { id: 'p1_medium', category: 'coffee', categoryNameTh: 'เมล็ดกาแฟ', categoryNameEn: 'Coffee Beans', nameTh: 'Medium Roast Beans', nameEn: 'Medium Roast Beans', descriptionTh: 'บาลานซ์ดี หอมหวาน ดื่มง่ายทุกวัน', descriptionEn: 'Balanced, sweet, and easy to drink every day.', price: 450, imageUrl: 'https://images.unsplash.com/photo-1587734195503-904fca47e0e9?auto=format&fit=crop&w=600&q=80', stock: 10 },
-    { id: 'p1_house', category: 'coffee', categoryNameTh: 'เมล็ดกาแฟ', categoryNameEn: 'Coffee Beans', nameTh: 'Eden House Blend', nameEn: 'Eden House Blend', descriptionTh: 'เบลนด์ประจำร้าน หอมช็อกโกแลตและคาราเมล', descriptionEn: 'Our signature blend with chocolate and caramel notes.', price: 490, imageUrl: 'https://images.unsplash.com/photo-1541167760496-1628856ab772?auto=format&fit=crop&w=600&q=80', stock: 15 },
-    { id: 'p2_matcha', category: 'tea', categoryNameTh: 'ชาและมัทฉะ', categoryNameEn: 'Tea & Matcha', nameTh: 'Premium Matcha Powder', nameEn: 'Premium Matcha Powder', descriptionTh: 'มัทฉะเกรดพรีเมียมสำหรับชงลาเต้', descriptionEn: 'Premium matcha powder for cafe-style latte.', price: 250, imageUrl: 'https://images.unsplash.com/photo-1582793988951-9aed5509eb97?auto=format&fit=crop&w=600&q=80', stock: 9 },
-    { id: 'p3_cookie', category: 'bakery', categoryNameTh: 'เบเกอรี่', categoryNameEn: 'Bakery', nameTh: 'Soft Cookies', nameEn: 'Soft Cookies', descriptionTh: 'คุกกี้เนื้อนุ่ม หอมเนย อบสดใหม่', descriptionEn: 'Soft butter cookies, freshly baked.', price: 85, imageUrl: 'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?auto=format&fit=crop&w=600&q=80', stock: 18 },
-    { id: 'p3_croissant', category: 'bakery', categoryNameTh: 'เบเกอรี่', categoryNameEn: 'Bakery', nameTh: 'French Butter Croissant', nameEn: 'French Butter Croissant', descriptionTh: 'ครัวซองต์เนยฝรั่งเศส กรอบนอกนุ่มใน', descriptionEn: 'French butter croissant, crisp outside and soft inside.', price: 120, imageUrl: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?auto=format&fit=crop&w=600&q=80', stock: 8 },
-    { id: 'p4_tumbler', category: 'merch', categoryNameTh: 'ของที่ระลึก', categoryNameEn: 'Merchandise', nameTh: 'Eden Insulated Tumbler', nameEn: 'Eden Insulated Tumbler', descriptionTh: 'แก้วเก็บอุณหภูมิสำหรับกาแฟแก้วโปรด', descriptionEn: 'Insulated tumbler for your favorite coffee.', price: 890, imageUrl: 'https://images.unsplash.com/photo-1517256064527-09c73fc73e38?auto=format&fit=crop&w=600&q=80', stock: 6 },
-    { id: 'p4_bag', category: 'merch', categoryNameTh: 'ของที่ระลึก', categoryNameEn: 'Merchandise', nameTh: 'Canvas Tote Bag', nameEn: 'Canvas Tote Bag', descriptionTh: 'กระเป๋าผ้าแคนวาส Eden Cafe ใช้ซ้ำได้', descriptionEn: 'Reusable Eden Cafe canvas tote bag.', price: 290, imageUrl: 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=600&q=80', stock: 11 }
-];
+const FALLBACK_PRODUCTS = [];
 
 function isEnglishPage() {
     return location.pathname.includes('-en') || location.pathname.endsWith('/en');
@@ -93,6 +84,15 @@ function renderProducts(container, products, note = '') {
     const en = isEnglishPage();
     const fallbackMode = Boolean(note);
     clearSkeleton(container);
+    if (!products.length) {
+        container.innerHTML = `
+            ${note ? `<div class="shop-data-note" style="background:#fff8e1; border:1px solid #f1d58a; color:#6b4f00; padding:12px 16px; border-radius:12px; margin-bottom:18px;">${escapeHTML(note)}</div>` : ''}
+            <div class="shop-empty-state" style="background:#fff; border:1px solid #e5eee8; border-radius:12px; padding:28px; text-align:center; color:#536159;">
+                ${en ? 'Online products are being prepared. Please check back soon or contact Eden Cafe directly.' : 'กำลังเตรียมสินค้าออนไลน์ กรุณากลับมาใหม่อีกครั้งหรือติดต่อ Eden Cafe โดยตรง'}
+            </div>
+        `;
+        return;
+    }
     const grouped = products.reduce((acc, product) => {
         if (!acc[product.category]) acc[product.category] = { title: product.categoryName, items: [] };
         acc[product.category].items.push(product);
@@ -202,10 +202,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (products.length) {
             renderProducts(onlineShopContainer, products);
         } else {
-            renderProducts(onlineShopContainer, fallbackProducts(), en ? 'Showing sample products while the online catalog is empty.' : 'แสดงสินค้าตัวอย่างระหว่างรอข้อมูลจากหลังบ้าน');
+            renderProducts(onlineShopContainer, fallbackProducts(), en ? 'Online catalog is empty right now.' : 'ยังไม่มีสินค้าออนไลน์ที่พร้อมแสดงในขณะนี้');
         }
     } catch (error) {
         console.error('Error loading shop products:', error);
-        renderProducts(onlineShopContainer, fallbackProducts(), en ? 'Could not load live catalog. Showing fallback products.' : 'ไม่สามารถโหลดสินค้าจากหลังบ้านได้ จึงแสดงสินค้าสำรองไว้ก่อน');
+        renderProducts(onlineShopContainer, fallbackProducts(), en ? 'Could not load the live catalog right now.' : 'ไม่สามารถโหลดสินค้าจากหลังบ้านได้ในขณะนี้');
     }
 });

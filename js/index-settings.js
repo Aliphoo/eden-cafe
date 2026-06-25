@@ -9,9 +9,9 @@ const PROMO_MAX_SLIDES = 8;
 const FALLBACK_INDEX = {
     heroImageUrl: '/Hero/Hero.webp',
     heroTitleTh: 'จากใจเรา สู่มือคุณ',
-    heroSubtitleTh: 'ยินดีต้อนรับสู่ Eden Cafe - พื้นที่พักผ่อนที่เงียบสงบใจกลางเมือง สัมผัสประสบการณ์เมล็ดกาแฟที่ปลูกอย่างใส่ใจและคั่วอย่างพิถีพิถันจากเกษตรกรไทย',
+    heroSubtitleTh: 'ยินดีต้อนรับสู่ Eden Cafe - พื้นที่พักผ่อนท่ามกลางธรรมชาติของเชียงราย สัมผัสเมล็ดกาแฟที่ปลูกอย่างใส่ใจและคั่วอย่างพิถีพิถันจากเกษตรกรไทย',
     heroTitleEn: 'Discover the True Taste of Thai Specialty Coffee',
-    heroSubtitleEn: 'Welcome to Eden Cafe - Your serene escape in the heart of Thailand. Experience locally-sourced, ethically-grown coffee beans roasted to perfection.',
+    heroSubtitleEn: 'Welcome to Eden Cafe - a calm nature escape in Chiang Rai. Experience locally sourced, ethically grown coffee beans roasted with care.',
     aboutTitleTh: 'เรื่องราวของเรา: จากยอดดอยสู่แก้วกาแฟของคุณ',
     aboutBodyTh: 'Eden Cafe เกิดขึ้นจากความหลงใหลในศิลปะการชงกาแฟและการสนับสนุนเกษตรกรไทย เราคัดสรรเมล็ดกาแฟจากแหล่งปลูกที่ดีที่สุดบนยอดดอยในประเทศไทย คั่วด้วยเทคนิคพิเศษเพื่อให้ได้รสชาติที่เป็นเอกลักษณ์ ไม่เหมือนใคร บรรยากาศร้านของเราออกแบบสไตล์มินิมอล อิงธรรมชาติ เพื่อให้คุณได้พักผ่อนอย่างแท้จริง',
     aboutTitleEn: 'Our Story: From Thai Mountains to Your Cup',

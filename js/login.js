@@ -91,7 +91,7 @@ function updateForgotChannelUi() {
     if (els.forgotIdentifier) {
         els.forgotIdentifier.value = '';
         els.forgotIdentifier.type = channel === 'email' ? 'email' : 'text';
-        els.forgotIdentifier.placeholder = channel === 'email' ? 'name@example.com' : '08X-XXX-XXXX';
+        els.forgotIdentifier.placeholder = channel === 'email' ? 'อีเมลของคุณ' : '08X-XXX-XXXX';
         els.forgotIdentifier.inputMode = channel === 'email' ? 'email' : 'tel';
         els.forgotIdentifier.autocomplete = channel === 'email' ? 'email' : 'tel';
     }

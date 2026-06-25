@@ -13,12 +13,7 @@ const MENU_PRODUCT_LIMIT = 300;
 let menuOrderAccess = { ready: false, allowed: false, reason: 'checking' };
 let lastMenuRender = { container: null, items: [], note: '', categories: [] };
 
-const FALLBACK_MENU = [
-    { id: 'm-coffee-1', category: 'coffee', categoryNameTh: '\u0e01\u0e32\u0e41\u0e1f', categoryNameEn: 'Coffee', nameTh: 'Drip Coffee Thai Arabica', nameEn: 'Drip Coffee Thai Arabica', descriptionTh: '\u0e01\u0e32\u0e41\u0e1f\u0e14\u0e23\u0e34\u0e1b\u0e40\u0e21\u0e25\u0e47\u0e14\u0e44\u0e17\u0e22\u0e2d\u0e32\u0e23\u0e32\u0e1a\u0e34\u0e01\u0e49\u0e32', descriptionEn: 'Thai Arabica pour-over with gentle floral and fruity notes.', price: 80, imageUrl: 'https://images.unsplash.com/photo-1497935586351-b67a49e012bf?auto=format&fit=crop&w=600&q=80' },
-    { id: 'm-coffee-2', category: 'coffee', categoryNameTh: '\u0e01\u0e32\u0e41\u0e1f', categoryNameEn: 'Coffee', nameTh: 'Eden Iced Latte', nameEn: 'Eden Iced Latte', descriptionTh: '\u0e40\u0e2d\u0e2a\u0e40\u0e1e\u0e23\u0e2a\u0e42\u0e0b\u0e48\u0e40\u0e02\u0e49\u0e21\u0e02\u0e49\u0e19 \u0e19\u0e21\u0e2a\u0e14 \u0e41\u0e25\u0e30\u0e19\u0e49\u0e33\u0e15\u0e32\u0e25\u0e21\u0e30\u0e1e\u0e23\u0e49\u0e32\u0e27', descriptionEn: 'Rich espresso, fresh milk, and a soft coconut sugar finish.', price: 95, imageUrl: 'https://images.unsplash.com/photo-1461023058943-07fcbe16d735?auto=format&fit=crop&w=600&q=80' },
-    { id: 'm-tea-1', category: 'tea', categoryNameTh: '\u0e0a\u0e32\u0e41\u0e25\u0e30\u0e21\u0e31\u0e17\u0e09\u0e30', categoryNameEn: 'Tea & Matcha', nameTh: 'Matcha Yuzu Sparkling', nameEn: 'Matcha Yuzu Sparkling', descriptionTh: '\u0e21\u0e31\u0e17\u0e09\u0e30\u0e1e\u0e23\u0e35\u0e40\u0e21\u0e35\u0e22\u0e21 \u0e22\u0e39\u0e0b\u0e38 \u0e41\u0e25\u0e30\u0e42\u0e0b\u0e14\u0e32', descriptionEn: 'Premium matcha with yuzu and sparkling soda.', price: 110, imageUrl: 'https://images.unsplash.com/photo-1536935338788-846bb9981813?auto=format&fit=crop&w=600&q=80' },
-    { id: 'm-bakery-1', category: 'bakery', categoryNameTh: '\u0e40\u0e1a\u0e40\u0e01\u0e2d\u0e23\u0e35\u0e48', categoryNameEn: 'Bakery', nameTh: 'Homemade Butter Croissant', nameEn: 'Homemade Butter Croissant', descriptionTh: '\u0e04\u0e23\u0e31\u0e27\u0e0b\u0e2d\u0e07\u0e15\u0e4c\u0e40\u0e19\u0e22\u0e2a\u0e14 \u0e2d\u0e1a\u0e43\u0e2b\u0e21\u0e48\u0e17\u0e38\u0e01\u0e40\u0e0a\u0e49\u0e32', descriptionEn: 'Freshly baked butter croissant, crisp outside and soft inside.', price: 65, imageUrl: 'https://images.unsplash.com/photo-1549996647-190b679b33d7?auto=format&fit=crop&w=600&q=80' }
-];
+const FALLBACK_MENU = [];
 
 const CATEGORY_LABELS = {
     coffee: { th: '\u0e01\u0e32\u0e41\u0e1f', en: 'Coffee' },
@@ -434,6 +429,13 @@ function renderMenu(container, items, note = '', categories = []) {
     const categoryFilters = buildCategoryFilters(items, categories);
     lastMenuRender = { container, items, note, categories };
     clearSkeleton(container);
+    if (!items.length) {
+        container.innerHTML = (note ? '<div class="shop-data-note" style="background:#fff8e1; border:1px solid #f1d58a; color:#6b4f00; padding:12px 16px; border-radius:12px; margin-bottom:18px;">' + escapeHTML(note) + '</div>' : '')
+            + '<div class="shop-empty-state" style="background:#fff; border:1px solid #e5eee8; border-radius:12px; padding:28px; text-align:center; color:#536159;">'
+            + (en ? 'The live menu is being prepared. Please check back soon or contact Eden Cafe directly.' : 'กำลังเตรียมเมนูออนไลน์ กรุณากลับมาใหม่อีกครั้งหรือติดต่อ Eden Cafe โดยตรง')
+            + '</div>';
+        return;
+    }
 
     const cardsHTML = items.map(item => {
         const stockDisabled = fallbackMode || !item.canSell;
@@ -519,9 +521,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         const items = Array.isArray(result) ? result : result.items;
         const categories = Array.isArray(result?.categories) ? result.categories : [];
         if (items.length) renderMenu(container, items, '', categories);
-        else renderMenu(container, fallbackMenu(), en ? 'Showing sample menu while the live menu is empty.' : '\u0e41\u0e2a\u0e14\u0e07\u0e40\u0e21\u0e19\u0e39\u0e15\u0e31\u0e27\u0e2d\u0e22\u0e48\u0e32\u0e07\u0e23\u0e30\u0e2b\u0e27\u0e48\u0e32\u0e07\u0e23\u0e2d\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e08\u0e32\u0e01\u0e2b\u0e25\u0e31\u0e07\u0e1a\u0e49\u0e32\u0e19');
+        else renderMenu(container, fallbackMenu(), en ? 'Live menu is empty right now.' : 'ยังไม่มีเมนูออนไลน์ที่พร้อมแสดงในขณะนี้');
     } catch (error) {
         console.error('Error loading menu:', error);
-        renderMenu(container, fallbackMenu(), en ? 'Could not load live menu. Showing fallback menu.' : '\u0e44\u0e21\u0e48\u0e2a\u0e32\u0e21\u0e32\u0e23\u0e16\u0e42\u0e2b\u0e25\u0e14\u0e40\u0e21\u0e19\u0e39\u0e08\u0e32\u0e01\u0e2b\u0e25\u0e31\u0e07\u0e1a\u0e49\u0e32\u0e19\u0e44\u0e14\u0e49');
+        renderMenu(container, fallbackMenu(), en ? 'Could not load the live menu right now.' : 'ไม่สามารถโหลดเมนูจากหลังบ้านได้ในขณะนี้');
     }
 });

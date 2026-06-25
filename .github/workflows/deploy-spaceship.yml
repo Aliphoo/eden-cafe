@@ -15,6 +15,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Static site audit guard
+        run: node scripts/audit-static-site.mjs
+
       - name: Deploy static site by FTPS
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
@@ -29,7 +37,17 @@ jobs:
             **/.git*
             **/.git*/**
             **/.github/**
+            **/.codex/**
+            **/.codex-remote-attachments/**
+            **/.agents/**
             **/node_modules/**
+            backups/**
+            reports/**
+            canonical-html-fix-package/**
+            og-jsonld-host-fix-package/**
+            htaccess-www-to-apex-package/**
+            firebase-default-hosting-minimal/**
+            eden-pos-apk/**
             functions/**
             blog-cms/**
             docs/**

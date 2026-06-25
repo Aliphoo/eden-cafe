@@ -74,6 +74,19 @@ const ADMIN_PANEL_SKELETONS = [
     { id: 'promptpay-account-list', type: 'list', options: { rows: 3 } }
 ];
 
+function safeOptionalLinkURL(value) {
+    const url = String(value ?? '').trim();
+    if (!url) return '';
+    if (/^(https?:|mailto:|tel:)/i.test(url)) return url.slice(0, 500);
+    if (/^\/(?!\/)/.test(url) || /^#/.test(url)) return url.slice(0, 500);
+    return '';
+}
+
+function safeNumber(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+}
+
 let adminSkeletonsPrimed = false;
 
 function primeAdminSkeletons() {
@@ -263,6 +276,7 @@ const ADMIN_PERMISSION_LABELS = {
     faqs: 'FAQ',
     promptpay: '\u0e08\u0e31\u0e14\u0e01\u0e32\u0e23\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e40\u0e1e\u0e22\u0e4c',
     marketing: 'Marketing Tools',
+    business: 'Business Info',
     index: '\u0e08\u0e31\u0e14\u0e01\u0e32\u0e23 Index',
     footer: 'Footer'
 };
@@ -297,6 +311,7 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
         faqs: false,
         promptpay: false,
         marketing: false,
+        business: false,
         index: false,
         footer: false
     }
@@ -321,6 +336,7 @@ const ADMIN_TAB_PERMISSIONS = {
     blogs: 'blogs',
     faqs: 'faqs',
     promptpay: 'promptpay',
+    'business-settings': 'business',
     'index-settings': 'index',
     'marketing-settings': 'marketing',
     'footer-settings': 'footer'
@@ -869,7 +885,7 @@ const XLSX_CATEGORY_CONFIG = {
         numberFields: ['price', 'amount', 'order'],
         booleanFields: [],
         arrayFields: [],
-        template: { id: 'meeting', name: 'Meeting Room', capacity: '3-6 ท่าน', price: 350, amount: 2, imageUrl: 'https://example.com/room.webp', order: 1 }
+        template: { id: 'meeting', name: 'Meeting Room', capacity: '3-6 ท่าน', price: 350, amount: 2, imageUrl: '/Images/Logo.webp', order: 1 }
     },
     tables: {
         label: 'โต๊ะ/โซน (tables)',
@@ -887,7 +903,7 @@ const XLSX_CATEGORY_CONFIG = {
         numberFields: ['order'],
         booleanFields: [],
         arrayFields: [],
-        template: { id: 'blog-001', title: 'หัวข้อบทความ', category: 'ความรู้เรื่องกาแฟ', status: 'draft', excerpt: 'สรุปสั้น', imageUrl: 'https://example.com/blog.webp', content: '<p>เนื้อหา</p>', order: 1 }
+        template: { id: 'blog-001', title: 'หัวข้อบทความ', category: 'ความรู้เรื่องกาแฟ', status: 'draft', excerpt: 'สรุปสั้น', imageUrl: '/Hero/Hero.webp', content: '<p>เนื้อหา</p>', order: 1 }
     },
     faqs: {
         label: 'คำถามที่พบบ่อย (faqs)',
@@ -896,7 +912,7 @@ const XLSX_CATEGORY_CONFIG = {
         numberFields: ['order'],
         booleanFields: [],
         arrayFields: [],
-        template: { id: 'faq-001', question: 'เปิดกี่โมง?', answer: 'เปิดทุกวัน 07:30-18:00', order: 1 }
+        template: { id: 'faq-001', question: 'เปิดกี่โมง?', answer: 'เปิดทุกวัน 09:00-18:00', order: 1 }
     },
     users: {
         label: 'สมาชิก (users)',
@@ -905,7 +921,7 @@ const XLSX_CATEGORY_CONFIG = {
         numberFields: ['points', 'totalSpent', 'visitCount', 'orderCount', 'bookingCount'],
         booleanFields: [],
         arrayFields: ['adminTags'],
-        template: { id: 'uid_xxxxx', uid: 'uid_xxxxx', displayName: 'ลูกค้าตัวอย่าง', email: 'member@example.com', phone: '08x-xxx-xxxx', points: 120, totalSpent: 4500, visitCount: 8, adminTags: 'vip|coffee_lover', status: 'active' }
+        template: { id: 'uid_xxxxx', uid: 'uid_xxxxx', displayName: 'ลูกค้าใหม่', email: '', phone: '', points: 0, totalSpent: 0, visitCount: 0, adminTags: '', status: 'active' }
     }
 };
 
@@ -1250,6 +1266,181 @@ function adminMenuItemForTab(tabId) {
         .find(li => adminTabIdFromMenuItem(li) === tabId && li.style.display !== 'none');
 }
 
+function normalizeAdminInitTabId(tabId = '') {
+    const id = String(tabId || '').trim();
+    if (id === 'room-bookings' || id === 'all-bookings') return 'bookings';
+    return id;
+}
+
+function getActiveAdminTabId() {
+    const active = document.querySelector('.content-section.active');
+    if (active?.id && window.canAccessAdminTab(active.id)) return active.id;
+    return getPreferredAdminTabId();
+}
+
+function dispatchAdminTabActivated(tabId) {
+    try {
+        window.dispatchEvent(new CustomEvent('eden-admin-tab-activated', { detail: { tabId } }));
+    } catch (error) {
+        console.warn('Unable to dispatch admin tab event:', error);
+    }
+}
+
+async function loadBlogCmsAdminModule(options = {}) {
+    const root = document.getElementById('blog-cms-admin-root');
+    if (!root) return null;
+    if (!blogCmsAdminModulePromise) {
+        root.innerHTML = '<div class="blog-cms-admin-loading">Loading Blog CMS module...</div>';
+        blogCmsAdminModulePromise = import(`./blog-cms-admin.js?v=${ADMIN_LAZY_MODULE_VERSION}`)
+            .then(module => {
+                window.EdenTelemetry?.report?.('admin_lazy_module_loaded', { label: 'blog-cms-admin' });
+                return module;
+            })
+            .catch(error => {
+                blogCmsAdminModulePromise = null;
+                root.innerHTML = '<div class="blog-cms-alert error">Blog CMS module failed to load. Please refresh and try again.</div>';
+                window.EdenTelemetry?.report?.('admin_lazy_module_error', {
+                    label: 'blog-cms-admin',
+                    message: error.message || String(error)
+                });
+                throw error;
+            });
+    }
+    const module = await blogCmsAdminModulePromise;
+    if (typeof module.initBlogCmsAdmin === 'function') {
+        await module.initBlogCmsAdmin({ forceRefresh: options.forceRefresh === true });
+    } else if (typeof window.fetchBlogsFromCloud === 'function') {
+        await window.fetchBlogsFromCloud();
+    }
+    return module;
+}
+
+function installAdminTabSwitchHook() {
+    if (adminTabHookInstalled) return;
+
+    const install = () => {
+        if (typeof window.switchTab !== 'function') return false;
+        if (window.switchTab.__edenLazyInitHook) {
+            adminTabHookInstalled = true;
+            return true;
+        }
+        const originalSwitchTab = window.switchTab;
+        window.switchTab = function(tabId, el) {
+            const result = originalSwitchTab.apply(this, arguments);
+            window.requestAnimationFrame(() => {
+                if (document.getElementById(tabId)?.classList.contains('active')) {
+                    initAdminTab(tabId);
+                }
+            });
+            return result;
+        };
+        window.switchTab.__edenLazyInitHook = true;
+        adminTabHookInstalled = true;
+        if (adminTabHookTimer) {
+            window.clearInterval(adminTabHookTimer);
+            adminTabHookTimer = null;
+        }
+        return true;
+    };
+
+    if (install()) return;
+    let attempts = 0;
+    adminTabHookTimer = window.setInterval(() => {
+        attempts += 1;
+        if (install() || attempts >= 40) {
+            window.clearInterval(adminTabHookTimer);
+            adminTabHookTimer = null;
+        }
+    }, 50);
+}
+
+function initAdminTab(tabId, options = {}) {
+    const normalizedTabId = normalizeAdminInitTabId(tabId);
+    if (!normalizedTabId || !window.canAccessAdminTab(tabId || normalizedTabId)) return;
+    const force = options.force === true;
+    if (!force && initializedAdminTabs.has(normalizedTabId)) {
+        dispatchAdminTabActivated(tabId || normalizedTabId);
+        return;
+    }
+    initializedAdminTabs.add(normalizedTabId);
+    dispatchAdminTabActivated(tabId || normalizedTabId);
+
+    switch (normalizedTabId) {
+        case 'dashboard':
+            bindDashboardFilters();
+            fetchStats();
+            bindSalesReportNav();
+            scheduleDashboardRender();
+            if (canAdmin('orders') || canAdmin('pos')) setupRealtimeOrders();
+            if (!categoriesUnsubscribe) setupRealtimeCategories();
+            break;
+        case 'orders':
+            setupRealtimeOrders();
+            break;
+        case 'pos-apk-updates':
+            setupRealtimePosApkUpdates();
+            break;
+        case 'discounts':
+            setupRealtimeDiscounts();
+            break;
+        case 'members':
+            setupRealtimeMembers();
+            break;
+        case 'loyalty':
+            setupRealtimeMembers();
+            setupRealtimeLoyalty();
+            break;
+        case 'bookings':
+            bindAllBookingsControls();
+            setupRealtimeBookings();
+            break;
+        case 'archery':
+            bindArcheryAdminControls();
+            setupRealtimeArcheryAdminData();
+            break;
+        case 'tables':
+            setupRealtimeTables();
+            break;
+        case 'rooms':
+            setupRealtimeRooms();
+            break;
+        case 'products':
+            setupRealtimeCategories();
+            setupRealtimeProducts();
+            initLoyverseImportTool();
+            break;
+        case 'categories':
+            setupRealtimeCategories();
+            break;
+        case 'blogs':
+            loadBlogCmsAdminModule().catch(error => console.error('Unable to load Blog CMS admin module:', error));
+            break;
+        case 'faqs':
+            if (typeof window.fetchFaqsFromCloud === 'function') window.fetchFaqsFromCloud();
+            break;
+        case 'promptpay':
+            if (typeof window.loadPromptPaySettings === 'function') window.loadPromptPaySettings();
+            break;
+        case 'business-settings':
+            if (typeof window.loadBusinessSettings === 'function') window.loadBusinessSettings();
+            break;
+        case 'index-settings':
+            if (typeof window.loadIndexSettings === 'function') window.loadIndexSettings();
+            break;
+        case 'marketing-settings':
+            if (typeof window.loadMarketingSettings === 'function') window.loadMarketingSettings();
+            break;
+        case 'footer-settings':
+            if (typeof window.loadFooterSettings === 'function') window.loadFooterSettings();
+            break;
+        case 'admin-access':
+            if (isOwnerAccess()) setupRealtimeAdminAccess();
+            break;
+        default:
+            break;
+    }
+}
+
 function decodeAdminTabId(value = '') {
     const raw = String(value || '').replace(/^#/, '');
     let decoded = raw;
@@ -1423,6 +1614,9 @@ window.refreshAdminSection = async (tabId, button = null) => {
                 break;
             case 'promptpay':
                 if (typeof window.loadPromptPaySettings === 'function') await window.loadPromptPaySettings();
+                break;
+            case 'business-settings':
+                if (typeof window.loadBusinessSettings === 'function') await window.loadBusinessSettings();
                 break;
             case 'index-settings':
                 if (typeof window.loadIndexSettings === 'function') await window.loadIndexSettings();
@@ -9171,14 +9365,7 @@ async function migrateProducts() {
         const q = query(collection(db, "products"));
         const snap = await getDocs(q);
         if (snap.empty) {
-            console.log("Migrating initial products...");
-            const initialProducts = [
-                { name: "Drip Coffee (Thai Arabica)", description: "กาแฟดริป หอมละมุน ดึงรสชาติผลไม้และดอกไม้ตามธรรมชาติของกาแฟบนดอยไทย คั่วใหม่ทุกวัน", price: 80, imageUrl: "https://images.unsplash.com/photo-1497935586351-b67a49e012bf?auto=format&fit=crop&w=600&q=80", category: "coffee", isSignature: true },
-                { name: "Eden Iced Latte", description: "ผสมผสานเอสเพรสโซ่เข้มข้นกับนมสด เพิ่มความหอมหวานด้วยน้ำตาลมะพร้าวออร์แกนิกแท้", price: 95, imageUrl: "https://images.unsplash.com/photo-1461023058943-07fcbe16d735?auto=format&fit=crop&w=600&q=80", category: "coffee", isSignature: true },
-                { name: "Homemade Butter Croissant", description: "ครัวซองต์เนยสด กรอบนอกนุ่มใน อบใหม่ทุกเช้า ทานคู่กับกาแฟแก้วโปรดได้อย่างลงตัว", price: 65, imageUrl: "https://images.unsplash.com/photo-1549996647-190b679b33d7?auto=format&fit=crop&w=600&q=80", category: "bakery", isSignature: true },
-                { name: "Matcha Yuzu Sparkling", description: "มัทฉะเกรดพรีเมียมผสมผสานความเปรี้ยวอมหวานของส้มยูซุ เพิ่มความสดชื่นด้วยโซดา", price: 110, imageUrl: "https://images.unsplash.com/photo-1536935338788-846bb9981813?auto=format&fit=crop&w=600&q=80", category: "tea", isSignature: true }
-            ];
-            for (const p of initialProducts) { await addDoc(collection(db, "products"), p); }
+            console.warn("Products collection is empty. Import real menu/shop data instead of creating placeholder products.");
         }
     } catch (e) { console.error("Migrate failed", e); }
 }
@@ -10939,7 +11126,7 @@ function renderMemberDetail(uid, member, activity = { orders: [], bookings: [] }
                 </div>
                 <div class="form-group">
                     <label>Admin note</label>
-                    <textarea id="member-admin-note" placeholder="Example: prefers Garden zone / dairy allergy / call before delivery">${escapeHTML(member.adminNote || '')}</textarea>
+                    <textarea id="member-admin-note" placeholder="เช่น ชอบโซน Garden / แพ้นม / โทรยืนยันก่อนจัดส่ง">${escapeHTML(member.adminNote || '')}</textarea>
                 </div>
                 <button type="submit" class="btn-submit" style="max-width:220px;">Save admin info</button>
                 <span id="member-admin-save-status" style="margin-left:12px; color:#2e7d32;"></span>
@@ -11938,6 +12125,430 @@ marketingSettingsForm?.addEventListener('submit', async (event) => {
 });
 
 // ==========================================
+// Business Settings Management Logic
+// ==========================================
+
+const BUSINESS_SETTINGS_REF = () => doc(db, 'site_settings', 'business');
+const businessSettingsForm = document.getElementById('businessSettingsForm');
+const DEFAULT_BUSINESS_SETTINGS = {
+    brandName: 'Eden Cafe.',
+    brandNameEn: 'Eden Cafe.',
+    legalName: 'Eden Cafe Thailand',
+    tagline: 'กาแฟพิเศษระดับพรีเมียม ท่ามกลางสวนธรรมชาติและบรรยากาศสงบ พื้นที่พักผ่อนสำหรับการใช้ชีวิตช้า ๆ พร้อมอาหาร เครื่องดื่ม และประสบการณ์ Wellness เพื่อสุขภาพ',
+    taglineEn: 'Premium specialty coffee and a calm garden escape in Chiang Rai.',
+    description: 'Eden Cafe เป็นคาเฟ่ธรรมชาติและร้านกาแฟพิเศษในตำบลนางแล อำเภอเมืองเชียงราย จังหวัดเชียงราย พร้อมอาหาร เครื่องดื่ม และพื้นที่พักผ่อนสำหรับทุกวัน',
+    descriptionEn: 'Eden Cafe is a nature cafe and specialty coffee destination in Nang Lae, Mueang Chiang Rai, Chiang Rai, Thailand.',
+    address: '306 หมู่ 7 ตำบลนางแล อำเภอเมืองเชียงราย จังหวัดเชียงราย 57100',
+    addressEn: '306 Moo 7, Nang Lae, Mueang Chiang Rai, Chiang Rai 57100',
+    streetAddress: '306 Moo 7, Nang Lae',
+    addressLocality: 'Mueang Chiang Rai',
+    addressRegion: 'Chiang Rai',
+    postalCode: '57100',
+    addressCountry: 'TH',
+    latitude: null,
+    longitude: null,
+    phone: '0980080383',
+    phoneDisplay: '098-008-0383',
+    email: 'edencafe.2565@gmail.com',
+    websiteUrl: 'https://edencafe.co/',
+    googleMapsUrl: 'https://maps.app.goo.gl/BYJNa4mXjVNaLDPy5',
+    opens: '09:00',
+    closes: '18:00',
+    openingHoursText: 'เปิดทุกวัน 09:00-18:00 น.',
+    openingHoursTextEn: 'Open daily 09:00-18:00',
+    instagram: 'https://www.instagram.com/edencafe_2565?igsh=MTUzdHdnOWQxaG4zaw==',
+    facebook: 'https://www.facebook.com/EdenCafeChaingrai',
+    line: 'https://page.line.me/811ojjgi?openQrModal=true',
+    sameAs: [
+        'https://www.instagram.com/edencafe_2565?igsh=MTUzdHdnOWQxaG4zaw==',
+        'https://www.facebook.com/EdenCafeChaingrai',
+        'https://page.line.me/811ojjgi?openQrModal=true',
+        'https://maps.app.goo.gl/BYJNa4mXjVNaLDPy5'
+    ],
+    copyright: '© 2017 Eden Cafe Thailand. สงวนลิขสิทธิ์ | Optimized for SEO, AEO & GEO',
+    copyrightEn: '© 2017 Eden Cafe Thailand. All rights reserved | Optimized for SEO, AEO & GEO',
+    source: 'site_settings/business'
+};
+
+function cleanBusinessText(value, fallback = '', maxLength = 500) {
+    const text = String(value ?? '').trim();
+    return (text || fallback).slice(0, maxLength);
+}
+
+function businessField(id) {
+    return document.getElementById(id);
+}
+
+function businessFieldValue(id) {
+    return String(businessField(id)?.value || '').trim();
+}
+
+function setBusinessFieldValue(id, value = '') {
+    const field = businessField(id);
+    if (field) field.value = value ?? '';
+}
+
+function parseBusinessNumber(value) {
+    const text = String(value ?? '').trim();
+    if (!text) return null;
+    const number = Number(text);
+    return Number.isFinite(number) ? number : null;
+}
+
+function normalizeSameAs(value) {
+    const rows = Array.isArray(value) ? value : String(value || '').split(/\r?\n|,/);
+    const urls = rows
+        .map(item => safeOptionalLinkURL(item))
+        .filter(Boolean);
+    return Array.from(new Set(urls)).slice(0, 12);
+}
+
+function normalizeLegacyBusinessAddress(value) {
+    const text = cleanBusinessText(value, '', 500);
+    if (!text || /อำเมือง/.test(text) || !/57100/.test(text)) return DEFAULT_BUSINESS_SETTINGS.address;
+    return text;
+}
+
+function normalizeLegacyPhoneDisplay(value) {
+    const text = cleanBusinessText(value, '', 40);
+    if (/^\d{10}$/.test(text)) return text.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
+    return text || DEFAULT_BUSINESS_SETTINGS.phoneDisplay;
+}
+
+function normalizeBusinessSettings(data = {}) {
+    const fallback = DEFAULT_BUSINESS_SETTINGS;
+    const phone = cleanBusinessText(data.phone, fallback.phone, 40);
+    const instagram = safeOptionalLinkURL(data.instagram || data.socials?.instagram || '');
+    const facebook = safeOptionalLinkURL(data.facebook || data.socials?.facebook || '');
+    const line = safeOptionalLinkURL(data.line || data.socials?.line || '');
+    const googleMapsUrl = safeOptionalLinkURL(data.googleMapsUrl || data.google_maps_url || '');
+    const sameAs = normalizeSameAs([
+        ...(Array.isArray(data.sameAs) ? data.sameAs : [data.sameAs]),
+        ...(Array.isArray(data.same_as) ? data.same_as : [data.same_as]),
+        instagram,
+        facebook,
+        line,
+        googleMapsUrl
+    ]);
+
+    return {
+        brandName: cleanBusinessText(data.brandName || data.name, fallback.brandName, 120),
+        brandNameEn: cleanBusinessText(data.brandNameEn || data.nameEn || data.brandName, fallback.brandNameEn, 120),
+        legalName: cleanBusinessText(data.legalName, fallback.legalName, 160),
+        tagline: cleanBusinessText(data.tagline || data.taglineTh, fallback.tagline, 320),
+        taglineEn: cleanBusinessText(data.taglineEn, fallback.taglineEn, 320),
+        description: cleanBusinessText(data.description || data.descriptionTh, fallback.description, 900),
+        descriptionEn: cleanBusinessText(data.descriptionEn, fallback.descriptionEn, 900),
+        address: cleanBusinessText(data.address || data.addressTh, fallback.address, 500),
+        addressEn: cleanBusinessText(data.addressEn, fallback.addressEn, 500),
+        streetAddress: cleanBusinessText(data.streetAddress || data.addressStructured?.streetAddress, fallback.streetAddress, 180),
+        addressLocality: cleanBusinessText(data.addressLocality || data.addressStructured?.addressLocality, fallback.addressLocality, 120),
+        addressRegion: cleanBusinessText(data.addressRegion || data.addressStructured?.addressRegion, fallback.addressRegion, 120),
+        postalCode: cleanBusinessText(data.postalCode || data.addressStructured?.postalCode, fallback.postalCode, 20),
+        addressCountry: cleanBusinessText(data.addressCountry || data.addressStructured?.addressCountry, fallback.addressCountry, 2).toUpperCase(),
+        latitude: parseBusinessNumber(data.latitude ?? data.geo?.latitude),
+        longitude: parseBusinessNumber(data.longitude ?? data.geo?.longitude),
+        phone,
+        phoneDisplay: cleanBusinessText(data.phoneDisplay, phone || fallback.phoneDisplay, 40),
+        email: cleanBusinessText(data.email, fallback.email, 180),
+        websiteUrl: safeOptionalLinkURL(data.websiteUrl || data.url || fallback.websiteUrl),
+        googleMapsUrl,
+        opens: cleanBusinessText(data.opens || data.openingHours?.opens, fallback.opens, 5),
+        closes: cleanBusinessText(data.closes || data.openingHours?.closes, fallback.closes, 5),
+        openingHoursText: cleanBusinessText(data.openingHoursText || data.openingHoursTextTh, fallback.openingHoursText, 160),
+        openingHoursTextEn: cleanBusinessText(data.openingHoursTextEn, fallback.openingHoursTextEn, 160),
+        instagram,
+        facebook,
+        line,
+        sameAs,
+        copyright: cleanBusinessText(data.copyright || data.copyrightTh, fallback.copyright, 220),
+        copyrightEn: cleanBusinessText(data.copyrightEn, fallback.copyrightEn, 220),
+        source: cleanBusinessText(data.source, fallback.source, 80)
+    };
+}
+
+function buildBusinessSettingsPayload(settings) {
+    const normalized = normalizeBusinessSettings(settings);
+    return {
+        ...normalized,
+        addressStructured: {
+            streetAddress: normalized.streetAddress,
+            addressLocality: normalized.addressLocality,
+            addressRegion: normalized.addressRegion,
+            postalCode: normalized.postalCode,
+            addressCountry: normalized.addressCountry
+        },
+        geo: {
+            latitude: normalized.latitude,
+            longitude: normalized.longitude
+        },
+        openingHours: {
+            days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
+            opens: normalized.opens,
+            closes: normalized.closes
+        },
+        socials: {
+            instagram: normalized.instagram,
+            facebook: normalized.facebook,
+            line: normalized.line
+        },
+        updatedAt: serverTimestamp(),
+        updatedBy: auth.currentUser?.uid || '',
+        updatedByEmail: auth.currentUser?.email || ''
+    };
+}
+
+function businessSettingsFromForm() {
+    return normalizeBusinessSettings({
+        brandName: businessFieldValue('business-brand-name'),
+        brandNameEn: businessFieldValue('business-brand-name-en'),
+        legalName: businessFieldValue('business-legal-name'),
+        tagline: businessFieldValue('business-tagline-th'),
+        taglineEn: businessFieldValue('business-tagline-en'),
+        description: businessFieldValue('business-description-th'),
+        descriptionEn: businessFieldValue('business-description-en'),
+        address: businessFieldValue('business-address-th'),
+        addressEn: businessFieldValue('business-address-en'),
+        streetAddress: businessFieldValue('business-street-address'),
+        addressLocality: businessFieldValue('business-locality'),
+        addressRegion: businessFieldValue('business-region'),
+        postalCode: businessFieldValue('business-postal-code'),
+        addressCountry: businessFieldValue('business-country'),
+        latitude: businessFieldValue('business-latitude'),
+        longitude: businessFieldValue('business-longitude'),
+        phone: businessFieldValue('business-phone'),
+        phoneDisplay: businessFieldValue('business-phone-display'),
+        email: businessFieldValue('business-email'),
+        websiteUrl: businessFieldValue('business-website-url'),
+        googleMapsUrl: businessFieldValue('business-google-maps-url'),
+        opens: businessFieldValue('business-opens'),
+        closes: businessFieldValue('business-closes'),
+        openingHoursText: businessFieldValue('business-opening-hours-text-th'),
+        openingHoursTextEn: businessFieldValue('business-opening-hours-text-en'),
+        instagram: businessFieldValue('business-instagram'),
+        facebook: businessFieldValue('business-facebook'),
+        line: businessFieldValue('business-line'),
+        sameAs: businessFieldValue('business-same-as'),
+        copyright: businessFieldValue('business-copyright-th'),
+        copyrightEn: businessFieldValue('business-copyright-en')
+    });
+}
+
+function fillBusinessSettingsForm(settings = DEFAULT_BUSINESS_SETTINGS) {
+    const data = normalizeBusinessSettings(settings);
+    setBusinessFieldValue('business-brand-name', data.brandName);
+    setBusinessFieldValue('business-brand-name-en', data.brandNameEn);
+    setBusinessFieldValue('business-legal-name', data.legalName);
+    setBusinessFieldValue('business-tagline-th', data.tagline);
+    setBusinessFieldValue('business-tagline-en', data.taglineEn);
+    setBusinessFieldValue('business-description-th', data.description);
+    setBusinessFieldValue('business-description-en', data.descriptionEn);
+    setBusinessFieldValue('business-address-th', data.address);
+    setBusinessFieldValue('business-address-en', data.addressEn);
+    setBusinessFieldValue('business-street-address', data.streetAddress);
+    setBusinessFieldValue('business-locality', data.addressLocality);
+    setBusinessFieldValue('business-region', data.addressRegion);
+    setBusinessFieldValue('business-postal-code', data.postalCode);
+    setBusinessFieldValue('business-country', data.addressCountry);
+    setBusinessFieldValue('business-latitude', data.latitude ?? '');
+    setBusinessFieldValue('business-longitude', data.longitude ?? '');
+    setBusinessFieldValue('business-phone', data.phone);
+    setBusinessFieldValue('business-phone-display', data.phoneDisplay);
+    setBusinessFieldValue('business-email', data.email);
+    setBusinessFieldValue('business-website-url', data.websiteUrl);
+    setBusinessFieldValue('business-google-maps-url', data.googleMapsUrl);
+    setBusinessFieldValue('business-opens', data.opens);
+    setBusinessFieldValue('business-closes', data.closes);
+    setBusinessFieldValue('business-opening-hours-text-th', data.openingHoursText);
+    setBusinessFieldValue('business-opening-hours-text-en', data.openingHoursTextEn);
+    setBusinessFieldValue('business-instagram', data.instagram);
+    setBusinessFieldValue('business-facebook', data.facebook);
+    setBusinessFieldValue('business-line', data.line);
+    setBusinessFieldValue('business-same-as', data.sameAs.join('\n'));
+    setBusinessFieldValue('business-copyright-th', data.copyright);
+    setBusinessFieldValue('business-copyright-en', data.copyrightEn);
+    window.updateBusinessPreview();
+}
+
+function setBusinessStatus(message = '', tone = '') {
+    const status = document.getElementById('business-settings-status');
+    if (!status) return;
+    status.textContent = message;
+    status.className = 'index-settings-status' + (tone ? ' ' + tone : '');
+}
+
+function validateBusinessSettings(settings) {
+    const badCopy = [
+        /คาเฟ่กรุงเทพ/i,
+        /เมืองใหญ่/i,
+        /heart of Thailand/i,
+        /Bangkok\s*10110/i,
+        /อำเมือง/i,
+        /123\s+Sukhumvit/i,
+        /your-official-page/i,
+        /your-official-id/i
+    ];
+    const copyFields = [
+        settings.tagline,
+        settings.taglineEn,
+        settings.description,
+        settings.descriptionEn,
+        settings.address,
+        settings.addressEn,
+        settings.copyright,
+        settings.copyrightEn,
+        settings.instagram,
+        settings.facebook,
+        settings.line
+    ].join('\n');
+    if (badCopy.some(pattern => pattern.test(copyFields))) {
+        throw new Error('Business Info contains old placeholder copy. Remove Bangkok/city/social placeholder text before saving.');
+    }
+    if (settings.opens === '07:30') {
+        throw new Error('Old 07:30 opening-hours placeholder is not allowed in Business Info.');
+    }
+    if (Math.abs(Number(settings.latitude) - 13.7563) < 0.001 && Math.abs(Number(settings.longitude) - 100.5018) < 0.001) {
+        throw new Error('Bangkok placeholder coordinates are not allowed in Business Info.');
+    }
+    if (!settings.brandName || !settings.email || !settings.phone) {
+        throw new Error('Brand name, email, and phone are required.');
+    }
+}
+
+window.updateBusinessPreview = function() {
+    const data = businessSettingsFromForm();
+    const setText = (id, value) => {
+        const element = document.getElementById(id);
+        if (element) element.textContent = value || '';
+    };
+    setText('business-preview-brand', data.brandName);
+    setText('business-preview-tagline', data.tagline);
+    setText('business-preview-address', data.address || data.addressEn);
+    setText('business-preview-contact', [data.email, data.phoneDisplay || data.phone].filter(Boolean).join(' / '));
+    setText('business-preview-hours', data.openingHoursText || `${data.opens}-${data.closes}`);
+    setText('business-preview-geo', data.latitude && data.longitude ? `${data.latitude}, ${data.longitude}` : 'Geo coordinates not set');
+};
+
+async function buildBusinessSettingsFromLegacyDocs() {
+    const [businessSnap, footerSnap, indexSnap] = await Promise.all([
+        getDoc(BUSINESS_SETTINGS_REF()).catch(() => null),
+        getDoc(doc(db, 'site_settings', 'footer')).catch(() => null),
+        getDoc(doc(db, 'site_settings', 'index')).catch(() => null)
+    ]);
+    if (businessSnap?.exists()) {
+        return { settings: businessSnap.data(), source: 'site_settings/business' };
+    }
+
+    const footer = footerSnap?.exists() ? footerSnap.data() : {};
+    const index = indexSnap?.exists() ? indexSnap.data() : {};
+    return {
+        settings: {
+            ...DEFAULT_BUSINESS_SETTINGS,
+            brandName: footer.brandName || DEFAULT_BUSINESS_SETTINGS.brandName,
+            brandNameEn: footer.brandNameEn || footer.brandName || DEFAULT_BUSINESS_SETTINGS.brandNameEn,
+            tagline: footer.tagline || DEFAULT_BUSINESS_SETTINGS.tagline,
+            taglineEn: footer.taglineEn || DEFAULT_BUSINESS_SETTINGS.taglineEn,
+            description: index.aboutBodyTh || footer.tagline || DEFAULT_BUSINESS_SETTINGS.description,
+            descriptionEn: index.aboutBodyEn || footer.taglineEn || DEFAULT_BUSINESS_SETTINGS.descriptionEn,
+            address: normalizeLegacyBusinessAddress(footer.address),
+            addressEn: footer.addressEn || DEFAULT_BUSINESS_SETTINGS.addressEn,
+            phone: footer.phone || DEFAULT_BUSINESS_SETTINGS.phone,
+            phoneDisplay: normalizeLegacyPhoneDisplay(footer.phoneDisplay || footer.phone),
+            email: footer.email || DEFAULT_BUSINESS_SETTINGS.email,
+            instagram: footer.instagram || '',
+            facebook: footer.facebook || '',
+            line: footer.line || '',
+            copyright: footer.copyright || DEFAULT_BUSINESS_SETTINGS.copyright,
+            copyrightEn: footer.copyrightEn || DEFAULT_BUSINESS_SETTINGS.copyrightEn,
+            source: 'legacy-footer-index-prefill'
+        },
+        source: 'site_settings/footer + site_settings/index prefill'
+    };
+}
+
+window.loadBusinessSettings = async function() {
+    try {
+        const { settings, source } = await buildBusinessSettingsFromLegacyDocs();
+        fillBusinessSettingsForm(settings);
+        setBusinessStatus(
+            source === 'site_settings/business'
+                ? 'Loaded from site_settings/business.'
+                : 'No business doc yet. Prefilled from footer/index; review and save to create site_settings/business.',
+            source === 'site_settings/business' ? '' : 'warning'
+        );
+    } catch (error) {
+        console.error('Error loading business settings:', error);
+        fillBusinessSettingsForm(DEFAULT_BUSINESS_SETTINGS);
+        setBusinessStatus('Unable to load business settings. Defaults are shown.', 'error');
+    }
+};
+
+window.migrateBusinessSettingsFromFooter = async function() {
+    try {
+        const footerSnap = await getDoc(doc(db, 'site_settings', 'footer'));
+        const indexSnap = await getDoc(doc(db, 'site_settings', 'index')).catch(() => null);
+        const footer = footerSnap.exists() ? footerSnap.data() : {};
+        const index = indexSnap?.exists() ? indexSnap.data() : {};
+        fillBusinessSettingsForm({
+            ...DEFAULT_BUSINESS_SETTINGS,
+            brandName: footer.brandName,
+            tagline: footer.tagline,
+            taglineEn: footer.taglineEn,
+            description: index.aboutBodyTh || footer.tagline,
+            descriptionEn: index.aboutBodyEn || footer.taglineEn,
+            address: normalizeLegacyBusinessAddress(footer.address),
+            addressEn: footer.addressEn,
+            phone: footer.phone,
+            phoneDisplay: normalizeLegacyPhoneDisplay(footer.phoneDisplay || footer.phone),
+            email: footer.email,
+            instagram: footer.instagram,
+            facebook: footer.facebook,
+            line: footer.line,
+            copyright: footer.copyright,
+            copyrightEn: footer.copyrightEn,
+            source: 'manual-footer-import'
+        });
+        setBusinessStatus('Imported footer/index values into the form. Review geo, hours, EN fields, then Save Business Info.', 'warning');
+    } catch (error) {
+        console.error('Unable to import footer settings:', error);
+        setBusinessStatus('Unable to import footer settings.', 'error');
+    }
+};
+
+businessSettingsForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!canAdmin('business')) {
+        setBusinessStatus('This account cannot edit Business Info.', 'error');
+        return;
+    }
+
+    const submitBtn = businessSettingsForm.querySelector('button[type="submit"]');
+    const originalText = submitBtn?.textContent || '';
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+    }
+
+    try {
+        const settings = businessSettingsFromForm();
+        validateBusinessSettings(settings);
+        await setDoc(BUSINESS_SETTINGS_REF(), buildBusinessSettingsPayload(settings), { merge: true });
+        fillBusinessSettingsForm(settings);
+        setBusinessStatus('Business Info saved to site_settings/business.', '');
+        alert('Business Info saved to site_settings/business.');
+    } catch (error) {
+        console.error('Unable to save business settings:', error);
+        setBusinessStatus(error.message || 'Unable to save Business Info.', 'error');
+        alert(safeAdminError(error.message || 'Unable to save Business Info.'));
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+        }
+    }
+});
+
+// ==========================================
 // Index Settings Management Logic
 // ==========================================
 
@@ -11945,9 +12556,9 @@ const INDEX_SETTINGS_REF = () => doc(db, 'site_settings', 'index');
 const DEFAULT_INDEX_SETTINGS = {
     heroImageUrl: '/Hero/Hero.webp',
     heroTitleTh: 'จากใจเรา สู่มือคุณ',
-    heroSubtitleTh: 'ยินดีต้อนรับสู่ Eden Cafe - พื้นที่พักผ่อนที่เงียบสงบใจกลางเมือง สัมผัสประสบการณ์เมล็ดกาแฟที่ปลูกอย่างใส่ใจและคั่วอย่างพิถีพิถันจากเกษตรกรไทย',
+    heroSubtitleTh: 'ยินดีต้อนรับสู่ Eden Cafe - พื้นที่พักผ่อนท่ามกลางธรรมชาติของเชียงราย สัมผัสเมล็ดกาแฟที่ปลูกอย่างใส่ใจและคั่วอย่างพิถีพิถันจากเกษตรกรไทย',
     heroTitleEn: 'Discover the True Taste of Thai Specialty Coffee',
-    heroSubtitleEn: 'Welcome to Eden Cafe - Your serene escape in the heart of Thailand. Experience locally-sourced, ethically-grown coffee beans roasted to perfection.',
+    heroSubtitleEn: 'Welcome to Eden Cafe - a calm nature escape in Chiang Rai. Experience locally sourced, ethically grown coffee beans roasted with care.',
     aboutTitleTh: 'เรื่องราวของเรา: จากยอดดอยสู่แก้วกาแฟของคุณ',
     aboutBodyTh: 'Eden Cafe เกิดขึ้นจากความหลงใหลในศิลปะการชงกาแฟและการสนับสนุนเกษตรกรไทย เราคัดสรรเมล็ดกาแฟจากแหล่งปลูกที่ดีที่สุดบนยอดดอยในประเทศไทย คั่วด้วยเทคนิคพิเศษเพื่อให้ได้รสชาติที่เป็นเอกลักษณ์ ไม่เหมือนใคร บรรยากาศร้านของเราออกแบบสไตล์มินิมอล อิงธรรมชาติ เพื่อให้คุณได้พักผ่อนอย่างแท้จริง',
     aboutTitleEn: 'Our Story: From Thai Mountains to Your Cup',

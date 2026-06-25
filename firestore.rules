@@ -708,6 +708,7 @@ service cloud.firestore {
     match /site_settings/{docId} {
       allow read: if true;
       allow write: if (docId == 'footer' && hasAdminPermission('footer'))
+        || (docId == 'business' && hasAdminPermission('business'))
         || (docId == 'index' && hasAdminPermission('index'))
         || (docId == 'promptpay' && hasAdminPermission('promptpay'))
         || (docId == 'marketing' && hasAdminPermission('marketing'))

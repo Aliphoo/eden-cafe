@@ -173,7 +173,9 @@ function localBusinessSchema() {
         servesCuisine: ['Coffee', 'Thai food', 'Bakery', 'Dessert'],
         acceptsReservations: true,
         hasMap: SITE.mapUrl,
-        sameAs: [SITE.mapUrl, SITE.oldOfficialSite]
+        sameAs: Array.isArray(SITE.sameAs) && SITE.sameAs.length
+            ? SITE.sameAs
+            : [SITE.mapUrl, SITE.oldOfficialSite]
     };
 }
 
@@ -423,6 +425,7 @@ ${renderHeader('blog')}
 ${renderFooter()}
 ${renderMobileNavScript()}
 <script type="module" src="/js/blog.js?v=cms-4"></script>
+<script type="module" src="/js/footer-settings.js?v=business-1"></script>
 <script type="module" src="/js/marketing-consent.js?v=1"></script>
 <script src="/js/cart.js?v=1"></script>
 <script type="module" src="/js/auth.js?v=7"></script>
@@ -649,6 +652,7 @@ ${renderHeader('blog')}
 ${renderFooter()}
 ${renderMobileNavScript()}
 <script type="module" src="/js/blog.js?v=cms-4"></script>
+<script type="module" src="/js/footer-settings.js?v=business-1"></script>
 <script type="module" src="/js/marketing-consent.js?v=1"></script>
 <script src="/js/cart.js?v=1"></script>
 <script type="module" src="/js/auth.js?v=7"></script>
@@ -764,6 +768,7 @@ ${renderHeader('blog')}
 ${renderFooter()}
 ${renderMobileNavScript()}
 <script type="module" src="/js/blog.js?v=cms-4"></script>
+<script type="module" src="/js/footer-settings.js?v=business-1"></script>
 <script type="module" src="/js/marketing-consent.js?v=1"></script>
 <script src="/js/cart.js?v=1"></script>
 <script type="module" src="/js/auth.js?v=7"></script>
