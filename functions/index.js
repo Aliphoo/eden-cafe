@@ -1341,6 +1341,7 @@ function normalizeAdminPermissions(role, raw = {}) {
     'marketing',
     'business',
     'index',
+    'promotions',
     'footer',
   ];
   const all = Object.fromEntries(allowed.map(key => [key, true]));
@@ -1692,6 +1693,7 @@ function cleanString(value, maxLength) {
 function permissionFromImageFolder(folder) {
   const value = cleanString(folder, 40).toLowerCase().replace(/[^a-z0-9_-]/g, '_');
   if (value === 'index' || value === 'index_popup') return 'index';
+  if (value === 'promo-popup' || value === 'promo_popup' || value === 'promotional_popup') return 'promotions';
   if (value === 'shop_products') return 'products';
   if (value === 'blogs') return 'blogs';
   if (value === 'rooms') return 'rooms';

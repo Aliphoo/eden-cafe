@@ -278,11 +278,13 @@ const ADMIN_PERMISSION_LABELS = {
     marketing: 'Marketing Tools',
     business: 'Business Info',
     index: '\u0e08\u0e31\u0e14\u0e01\u0e32\u0e23 Index',
+    promotions: 'Promotional Popup',
     footer: 'Footer'
 };
 const ADMIN_PERMISSION_HELP = {
     pos: 'อนุญาตให้ล็อกอิน Eden POS APK และซิงค์บิล/ใบเสร็จหน้าร้าน',
-    archery: 'Manage Eden Archery lanes, walk-ins, payments, page settings, and operation logs.'
+    archery: 'Manage Eden Archery lanes, walk-ins, payments, page settings, and operation logs.',
+    promotions: 'Manage promotional popup carousel, display locations, audiences, images, and optional links.'
 };
 const ADMIN_ROLE_LABELS = {
     owner: 'Owner',
@@ -313,6 +315,7 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
         marketing: false,
         business: false,
         index: false,
+        promotions: false,
         footer: false
     }
 };
@@ -338,6 +341,7 @@ const ADMIN_TAB_PERMISSIONS = {
     promptpay: 'promptpay',
     'business-settings': 'business',
     'index-settings': 'index',
+    'promo-popup-settings': 'promotions',
     'marketing-settings': 'marketing',
     'footer-settings': 'footer'
 };
@@ -1248,6 +1252,7 @@ function initializeAdminModules() {
     if (canAdmin('pos')) setupRealtimePosApkUpdates();
     if (canAdmin('promptpay') && typeof window.loadPromptPaySettings === 'function') window.loadPromptPaySettings();
     if (canAdmin('index') && typeof window.loadIndexSettings === 'function') window.loadIndexSettings();
+    if (canAdmin('promotions') && typeof window.loadPromoPopupSettings === 'function') window.loadPromoPopupSettings();
     if (canAdmin('marketing') && typeof window.loadMarketingSettings === 'function') window.loadMarketingSettings();
     if (isOwnerAccess()) setupRealtimeAdminAccess();
     initXLSXTools();
@@ -1426,6 +1431,9 @@ function initAdminTab(tabId, options = {}) {
             break;
         case 'index-settings':
             if (typeof window.loadIndexSettings === 'function') window.loadIndexSettings();
+            break;
+        case 'promo-popup-settings':
+            if (typeof window.loadPromoPopupSettings === 'function') window.loadPromoPopupSettings();
             break;
         case 'marketing-settings':
             if (typeof window.loadMarketingSettings === 'function') window.loadMarketingSettings();
@@ -1620,6 +1628,9 @@ window.refreshAdminSection = async (tabId, button = null) => {
                 break;
             case 'index-settings':
                 if (typeof window.loadIndexSettings === 'function') await window.loadIndexSettings();
+                break;
+            case 'promo-popup-settings':
+                if (typeof window.loadPromoPopupSettings === 'function') await window.loadPromoPopupSettings();
                 break;
             case 'marketing-settings':
                 if (typeof window.loadMarketingSettings === 'function') await window.loadMarketingSettings();
@@ -12562,17 +12573,21 @@ const DEFAULT_INDEX_SETTINGS = {
     aboutTitleTh: 'เรื่องราวของเรา: จากยอดดอยสู่แก้วกาแฟของคุณ',
     aboutBodyTh: 'Eden Cafe เกิดขึ้นจากความหลงใหลในศิลปะการชงกาแฟและการสนับสนุนเกษตรกรไทย เราคัดสรรเมล็ดกาแฟจากแหล่งปลูกที่ดีที่สุดบนยอดดอยในประเทศไทย คั่วด้วยเทคนิคพิเศษเพื่อให้ได้รสชาติที่เป็นเอกลักษณ์ ไม่เหมือนใคร บรรยากาศร้านของเราออกแบบสไตล์มินิมอล อิงธรรมชาติ เพื่อให้คุณได้พักผ่อนอย่างแท้จริง',
     aboutTitleEn: 'Our Story: From Thai Mountains to Your Cup',
-    aboutBodyEn: 'Eden Cafe was born out of a passion for the art of coffee brewing and supporting Thai farmers. We carefully select coffee beans from the best high-altitude farms in Thailand, roasted with special techniques to achieve a unique flavor. Our minimalist, nature-inspired design offers a true sanctuary for relaxation.',
-    promoPopup: {
-        enabled: false,
-        title: 'Eden Cafe promotions',
-        slides: []
-    }
+    aboutBodyEn: 'Eden Cafe was born out of a passion for the art of coffee brewing and supporting Thai farmers. We carefully select coffee beans from the best high-altitude farms in Thailand, roasted with special techniques to achieve a unique flavor. Our minimalist, nature-inspired design offers a true sanctuary for relaxation.'
 };
 
 const indexSettingsForm = document.getElementById('indexSettingsForm');
-const INDEX_PROMO_MAX_SLIDES = 8;
-let indexPromoSlides = [];
+const promoPopupSettingsForm = document.getElementById('promoPopupSettingsForm');
+const PROMO_POPUP_SETTINGS_REF = () => doc(db, 'site_settings', 'promo_popup');
+const PROMO_POPUP_MAX_SLIDES = 8;
+const DEFAULT_PROMO_POPUP_SETTINGS = {
+    enabled: false,
+    title: 'Eden Cafe promotions',
+    displayLocation: 'home',
+    audience: 'everyone',
+    slides: []
+};
+let promoPopupSlides = [];
 
 function cleanIndexText(value, fallback = '', maxLength = 500) {
     const text = String(value ?? '').trim();
@@ -12603,11 +12618,15 @@ function normalizePromoPopupSlide(slide = {}, index = 0) {
 
 function normalizePromoPopupSettings(raw = {}) {
     const slides = Array.isArray(raw.slides)
-        ? raw.slides.map((slide, index) => normalizePromoPopupSlide(slide, index)).filter(slide => slide.imageUrl).slice(0, INDEX_PROMO_MAX_SLIDES)
+        ? raw.slides.map((slide, index) => normalizePromoPopupSlide(slide, index)).filter(slide => slide.imageUrl).slice(0, PROMO_POPUP_MAX_SLIDES)
         : [];
+    const displayLocation = cleanIndexText(raw.displayLocation || raw.display_location || raw.location, DEFAULT_PROMO_POPUP_SETTINGS.displayLocation, 40);
+    const audience = cleanIndexText(raw.audience || raw.targetAudience || raw.target_audience, DEFAULT_PROMO_POPUP_SETTINGS.audience, 40);
     return {
         enabled: raw.enabled === true,
-        title: cleanIndexText(raw.title || raw.titleTh || raw.titleEn, DEFAULT_INDEX_SETTINGS.promoPopup.title, 90),
+        title: cleanIndexText(raw.title || raw.titleTh || raw.titleEn, DEFAULT_PROMO_POPUP_SETTINGS.title, 90),
+        displayLocation: ['home', 'profile', 'home_profile', 'all_public'].includes(displayLocation) ? displayLocation : DEFAULT_PROMO_POPUP_SETTINGS.displayLocation,
+        audience: ['everyone', 'members', 'guests'].includes(audience) ? audience : DEFAULT_PROMO_POPUP_SETTINGS.audience,
         slides
     };
 }
@@ -12623,13 +12642,19 @@ function normalizeIndexSettings(data = {}) {
         aboutTitleTh: pick('aboutTitleTh', 140),
         aboutBodyTh: pick('aboutBodyTh', 900),
         aboutTitleEn: pick('aboutTitleEn', 140),
-        aboutBodyEn: pick('aboutBodyEn', 900),
-        promoPopup: normalizePromoPopupSettings(data.promoPopup || data.promo_popup || {})
+        aboutBodyEn: pick('aboutBodyEn', 900)
     };
 }
 
 function setIndexStatus(message = '', tone = '') {
     const status = document.getElementById('index-settings-status');
+    if (!status) return;
+    status.textContent = message;
+    status.className = 'index-settings-status' + (tone ? ' ' + tone : '');
+}
+
+function setPromoPopupStatus(message = '', tone = '') {
+    const status = document.getElementById('promo-popup-settings-status');
     if (!status) return;
     status.textContent = message;
     status.className = 'index-settings-status' + (tone ? ' ' + tone : '');
@@ -12645,7 +12670,7 @@ function setIndexField(id, value) {
 }
 
 function readIndexPromoSlidesFromRows(options = {}) {
-    const list = document.getElementById('index-promo-slide-list');
+    const list = document.getElementById('promo-popup-slide-list');
     const rows = Array.from(list?.querySelectorAll('[data-promo-slide-index]') || []);
     const slides = rows.map((row, index) => normalizePromoPopupSlide({
         id: row.dataset.promoSlideId || '',
@@ -12659,7 +12684,7 @@ function readIndexPromoSlidesFromRows(options = {}) {
 
 function syncIndexPromoSlidesFromDom() {
     const slides = readIndexPromoSlidesFromRows({ includeBlank: true });
-    if (slides.length) indexPromoSlides = slides.slice(0, INDEX_PROMO_MAX_SLIDES);
+    if (slides.length) promoPopupSlides = slides.slice(0, PROMO_POPUP_MAX_SLIDES);
 }
 
 function promoSlideThumbHTML(slide = {}) {
@@ -12667,11 +12692,11 @@ function promoSlideThumbHTML(slide = {}) {
     return '<img src="' + escapeHTML(slide.imageUrl) + '" alt="">';
 }
 
-function renderIndexPromoSlides(slides = indexPromoSlides) {
-    const list = document.getElementById('index-promo-slide-list');
+function renderIndexPromoSlides(slides = promoPopupSlides) {
+    const list = document.getElementById('promo-popup-slide-list');
     if (!list) return;
-    const rows = (slides.length ? slides : [createBlankPromoSlide()]).slice(0, INDEX_PROMO_MAX_SLIDES);
-    indexPromoSlides = rows;
+    const rows = (slides.length ? slides : [createBlankPromoSlide()]).slice(0, PROMO_POPUP_MAX_SLIDES);
+    promoPopupSlides = rows;
     list.innerHTML = rows.map((slide, index) => `
         <div class="index-promo-slide" data-promo-slide-index="${index}" data-promo-slide-id="${escapeHTML(slide.id || '')}">
             <div class="index-promo-slide-head">
@@ -12682,20 +12707,20 @@ function renderIndexPromoSlides(slides = indexPromoSlides) {
                 <div class="index-promo-thumb">${promoSlideThumbHTML(slide)}</div>
                 <div class="index-promo-fields">
                     <div class="form-group">
-                        <label for="index-promo-slide-${index}-image-url">Image URL</label>
-                        <input type="text" id="index-promo-slide-${index}-image-url" data-promo-field="imageUrl" value="${escapeHTML(slide.imageUrl || '')}" placeholder="https://... or /Images/..." maxlength="500">
+                        <label for="promo-popup-slide-${index}-image-url">Image URL</label>
+                        <input type="text" id="promo-popup-slide-${index}-image-url" data-promo-field="imageUrl" value="${escapeHTML(slide.imageUrl || '')}" placeholder="https://... or /Images/..." maxlength="500">
                     </div>
                     <div class="form-group">
-                        <label for="index-promo-slide-${index}-link-url">Optional link URL</label>
-                        <input type="text" id="index-promo-slide-${index}-link-url" data-promo-field="linkUrl" value="${escapeHTML(slide.linkUrl || '')}" placeholder="/shop.html or https://..." maxlength="500">
+                        <label for="promo-popup-slide-${index}-link-url">Optional link URL</label>
+                        <input type="text" id="promo-popup-slide-${index}-link-url" data-promo-field="linkUrl" value="${escapeHTML(slide.linkUrl || '')}" placeholder="/shop.html or https://..." maxlength="500">
                     </div>
                     <div class="form-group">
-                        <label for="index-promo-slide-${index}-alt-text">Alt text</label>
-                        <input type="text" id="index-promo-slide-${index}-alt-text" data-promo-field="altText" value="${escapeHTML(slide.altText || '')}" placeholder="Promotion image description" maxlength="180">
+                        <label for="promo-popup-slide-${index}-alt-text">Alt text</label>
+                        <input type="text" id="promo-popup-slide-${index}-alt-text" data-promo-field="altText" value="${escapeHTML(slide.altText || '')}" placeholder="Promotion image description" maxlength="180">
                     </div>
                     <div class="form-group">
-                        <label for="index-promo-slide-${index}-upload">Upload image</label>
-                        <input type="file" id="index-promo-slide-${index}-upload" data-promo-upload="${index}" accept="image/*">
+                        <label for="promo-popup-slide-${index}-upload">Upload image</label>
+                        <input type="file" id="promo-popup-slide-${index}-upload" data-promo-upload="${index}" accept="image/*">
                     </div>
                 </div>
             </div>
@@ -12705,35 +12730,37 @@ function renderIndexPromoSlides(slides = indexPromoSlides) {
     list.querySelectorAll('[data-promo-field]').forEach(input => {
         input.addEventListener('input', () => {
             syncIndexPromoSlidesFromDom();
-            window.updateIndexPreview();
+            window.updatePromoPopupPreview();
         });
     });
     list.querySelectorAll('[data-promo-action="remove"]').forEach(button => {
         button.addEventListener('click', () => {
             syncIndexPromoSlidesFromDom();
             const index = Number(button.dataset.promoIndex);
-            if (Number.isInteger(index)) indexPromoSlides.splice(index, 1);
-            renderIndexPromoSlides(indexPromoSlides);
+            if (Number.isInteger(index)) promoPopupSlides.splice(index, 1);
+            renderIndexPromoSlides(promoPopupSlides);
         });
     });
     list.querySelectorAll('[data-promo-upload]').forEach(input => {
         input.addEventListener('change', event => uploadIndexPromoSlideImage(Number(input.dataset.promoUpload), event.target.files?.[0]));
     });
-    window.updateIndexPreview();
+    window.updatePromoPopupPreview();
 }
 
 function readIndexPromoPopupForm() {
     return normalizePromoPopupSettings({
-        enabled: indexField('index-promo-enabled')?.checked === true,
-        title: indexField('index-promo-title')?.value || '',
+        enabled: indexField('promo-popup-enabled')?.checked === true,
+        title: indexField('promo-popup-title')?.value || '',
+        displayLocation: indexField('promo-popup-display-location')?.value || '',
+        audience: indexField('promo-popup-audience')?.value || '',
         slides: readIndexPromoSlidesFromRows()
     });
 }
 
 function updateIndexPromoPreview(promo = readIndexPromoPopupForm()) {
-    const title = document.getElementById('index-promo-preview-title');
-    const detail = document.getElementById('index-promo-preview-detail');
-    const media = document.getElementById('index-promo-preview-media');
+    const title = document.getElementById('promo-popup-preview-title');
+    const detail = document.getElementById('promo-popup-preview-detail');
+    const media = document.getElementById('promo-popup-preview-media');
     const firstSlide = promo.slides[0];
     if (media) media.style.backgroundImage = firstSlide?.imageUrl ? `url("${firstSlide.imageUrl}")` : '';
     if (!promo.enabled) {
@@ -12741,9 +12768,9 @@ function updateIndexPromoPreview(promo = readIndexPromoPopupForm()) {
         if (detail) detail.textContent = 'Enable the popup and add a slide image to publish it.';
         return;
     }
-    if (title) title.textContent = promo.title || 'Homepage promotions';
+    if (title) title.textContent = promo.title || 'Eden Cafe promotions';
     if (detail) detail.textContent = promo.slides.length
-        ? `${promo.slides.length} slide${promo.slides.length === 1 ? '' : 's'} ready${promo.slides.some(slide => slide.linkUrl) ? ' with optional links' : ''}.`
+        ? `${promo.slides.length} slide${promo.slides.length === 1 ? '' : 's'} ready for ${promo.displayLocation.replace('_', ' ')} / ${promo.audience}${promo.slides.some(slide => slide.linkUrl) ? ' with optional links' : ''}.`
         : 'Enabled, but no valid slide image has been added yet.';
 }
 
@@ -12757,33 +12784,33 @@ async function uploadIndexPromoSlideImage(index, file) {
     if (!file || !Number.isInteger(index)) return;
     syncIndexPromoSlidesFromDom();
     try {
-        setIndexStatus('Uploading popup slide image...');
-        const url = await uploadAdminImageFromFile(file, 'index-popup', safePromoFileName(file, index), {
-            surface: 'Index popup slide',
-            subtitle: 'homepage promotional modal',
-            targetField: `index-promo-slide-${index}-image-url`,
+        setPromoPopupStatus('Uploading popup slide image...');
+        const url = await uploadAdminImageFromFile(file, 'promo-popup', safePromoFileName(file, index), {
+            surface: 'Promotional popup slide',
+            subtitle: 'promotional modal',
+            targetField: `promo-popup-slide-${index}-image-url`,
             quality: 0.86
         });
-        indexPromoSlides[index] = {
-            ...(indexPromoSlides[index] || createBlankPromoSlide()),
+        promoPopupSlides[index] = {
+            ...(promoPopupSlides[index] || createBlankPromoSlide()),
             imageUrl: url
         };
-        renderIndexPromoSlides(indexPromoSlides);
-        setIndexStatus('Popup slide image uploaded.');
+        renderIndexPromoSlides(promoPopupSlides);
+        setPromoPopupStatus('Popup slide image uploaded.');
     } catch (error) {
         console.error('Unable to upload popup slide image:', error);
-        setIndexStatus(error.message || 'Popup slide upload failed.', 'error');
+        setPromoPopupStatus(error.message || 'Popup slide upload failed.', 'error');
     }
 }
 
-window.addIndexPromoSlide = function() {
+window.addPromoPopupSlide = function() {
     syncIndexPromoSlidesFromDom();
-    if (indexPromoSlides.length >= INDEX_PROMO_MAX_SLIDES) {
-        setIndexStatus('Maximum popup slides reached.', 'error');
+    if (promoPopupSlides.length >= PROMO_POPUP_MAX_SLIDES) {
+        setPromoPopupStatus('Maximum popup slides reached.', 'error');
         return;
     }
-    indexPromoSlides.push(createBlankPromoSlide());
-    renderIndexPromoSlides(indexPromoSlides);
+    promoPopupSlides.push(createBlankPromoSlide());
+    renderIndexPromoSlides(promoPopupSlides);
 };
 
 function readIndexSettingsForm() {
@@ -12796,8 +12823,7 @@ function readIndexSettingsForm() {
         aboutTitleTh: indexField('index-about-title-th')?.value || '',
         aboutBodyTh: indexField('index-about-body-th')?.value || '',
         aboutTitleEn: indexField('index-about-title-en')?.value || '',
-        aboutBodyEn: indexField('index-about-body-en')?.value || '',
-        promoPopup: readIndexPromoPopupForm()
+        aboutBodyEn: indexField('index-about-body-en')?.value || ''
     });
 }
 
@@ -12812,10 +12838,6 @@ function fillIndexSettingsForm(settings = DEFAULT_INDEX_SETTINGS) {
     setIndexField('index-about-body-th', normalized.aboutBodyTh);
     setIndexField('index-about-title-en', normalized.aboutTitleEn);
     setIndexField('index-about-body-en', normalized.aboutBodyEn);
-    const promoEnabled = indexField('index-promo-enabled');
-    if (promoEnabled) promoEnabled.checked = normalized.promoPopup.enabled;
-    setIndexField('index-promo-title', normalized.promoPopup.title);
-    renderIndexPromoSlides(normalized.promoPopup.slides);
     window.updateIndexPreview();
 }
 
@@ -12831,7 +12853,56 @@ window.updateIndexPreview = function() {
     setText('index-preview-hero-subtitle', settings.heroSubtitleTh);
     setText('index-preview-about-title', settings.aboutTitleTh);
     setText('index-preview-about-body', settings.aboutBodyTh);
-    updateIndexPromoPreview(settings.promoPopup);
+};
+
+function fillPromoPopupSettingsForm(settings = DEFAULT_PROMO_POPUP_SETTINGS) {
+    const normalized = normalizePromoPopupSettings(settings);
+    const enabled = indexField('promo-popup-enabled');
+    if (enabled) enabled.checked = normalized.enabled;
+    setIndexField('promo-popup-title', normalized.title);
+    setIndexField('promo-popup-display-location', normalized.displayLocation);
+    setIndexField('promo-popup-audience', normalized.audience);
+    renderIndexPromoSlides(normalized.slides);
+    window.updatePromoPopupPreview();
+}
+
+window.updatePromoPopupPreview = function() {
+    updateIndexPromoPreview(readIndexPromoPopupForm());
+};
+
+async function buildPromoPopupSettingsFromLegacyDocs() {
+    const [promoSnap, indexSnap] = await Promise.all([
+        getDoc(PROMO_POPUP_SETTINGS_REF()).catch(() => null),
+        getDoc(INDEX_SETTINGS_REF()).catch(() => null)
+    ]);
+    if (promoSnap?.exists()) {
+        return { settings: promoSnap.data(), source: 'site_settings/promo_popup' };
+    }
+    const legacyPopup = indexSnap?.exists() ? indexSnap.data()?.promoPopup || indexSnap.data()?.promo_popup : null;
+    return {
+        settings: legacyPopup
+            ? { ...DEFAULT_PROMO_POPUP_SETTINGS, ...legacyPopup, displayLocation: 'home', audience: 'everyone' }
+            : DEFAULT_PROMO_POPUP_SETTINGS,
+        source: legacyPopup ? 'legacy site_settings/index.promoPopup prefill' : 'defaults'
+    };
+}
+
+window.loadPromoPopupSettings = async function() {
+    try {
+        setPromoPopupStatus('Loading promotional popup settings...');
+        const { settings, source } = await buildPromoPopupSettingsFromLegacyDocs();
+        fillPromoPopupSettingsForm(settings);
+        setPromoPopupStatus(
+            source === 'site_settings/promo_popup'
+                ? 'Loaded from site_settings/promo_popup.'
+                : 'No popup doc yet. Prefilled from legacy Index popup/defaults; review and save to create site_settings/promo_popup.',
+            source === 'site_settings/promo_popup' ? '' : 'warning'
+        );
+    } catch (error) {
+        console.error('Error loading promotional popup settings:', error);
+        fillPromoPopupSettingsForm(DEFAULT_PROMO_POPUP_SETTINGS);
+        setPromoPopupStatus('Unable to load popup settings. Defaults are shown.', 'error');
+    }
 };
 
 window.loadIndexSettings = async function() {
@@ -12879,11 +12950,6 @@ indexSettingsForm?.addEventListener('submit', async (event) => {
 
     try {
         const settings = readIndexSettingsForm();
-        if (settings.promoPopup.enabled && !settings.promoPopup.slides.length) {
-            setIndexStatus('Enable popup needs at least one slide image.', 'error');
-            alert('Please add at least one popup slide image before enabling the popup.');
-            return;
-        }
         await setDoc(INDEX_SETTINGS_REF(), {
             ...settings,
             updatedAt: serverTimestamp(),
@@ -12896,6 +12962,48 @@ indexSettingsForm?.addEventListener('submit', async (event) => {
         console.error('Unable to save index settings:', error);
         setIndexStatus(safeAdminError('\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01 Index \u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08'), 'error');
         alert(safeAdminError('\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01 Index \u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08'));
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+        }
+    }
+});
+
+promoPopupSettingsForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!canAdmin('promotions')) {
+        setPromoPopupStatus('This account cannot edit Promotional Popup.', 'error');
+        return;
+    }
+
+    const submitBtn = promoPopupSettingsForm.querySelector('button[type="submit"]');
+    const originalText = submitBtn?.textContent;
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+    }
+
+    try {
+        const settings = readIndexPromoPopupForm();
+        if (settings.enabled && !settings.slides.length) {
+            setPromoPopupStatus('Enable popup needs at least one slide image.', 'error');
+            alert('Please add at least one popup slide image before enabling the popup.');
+            return;
+        }
+        await setDoc(PROMO_POPUP_SETTINGS_REF(), {
+            ...settings,
+            updatedAt: serverTimestamp(),
+            updatedBy: auth.currentUser?.uid || '',
+            updatedByEmail: auth.currentUser?.email || ''
+        }, { merge: true });
+        fillPromoPopupSettingsForm(settings);
+        setPromoPopupStatus('Promotional Popup saved to site_settings/promo_popup.');
+        alert('Promotional Popup saved.');
+    } catch (error) {
+        console.error('Unable to save promotional popup settings:', error);
+        setPromoPopupStatus(safeAdminError('Save Promotional Popup failed'), 'error');
+        alert(safeAdminError('Save Promotional Popup failed'));
     } finally {
         if (submitBtn) {
             submitBtn.disabled = false;

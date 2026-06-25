@@ -710,6 +710,7 @@ service cloud.firestore {
       allow write: if (docId == 'footer' && hasAdminPermission('footer'))
         || (docId == 'business' && hasAdminPermission('business'))
         || (docId == 'index' && hasAdminPermission('index'))
+        || (docId == 'promo_popup' && hasAdminPermission('promotions'))
         || (docId == 'promptpay' && hasAdminPermission('promptpay'))
         || (docId == 'marketing' && hasAdminPermission('marketing'))
         || (docId == 'loyalty' && hasAdminPermission('loyalty'))
