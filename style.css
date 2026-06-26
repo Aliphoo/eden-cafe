@@ -1706,6 +1706,46 @@ footer p {
     text-align: center;
 }
 
+.menu-load-more-wrap {
+    display: flex;
+    justify-content: center;
+    margin-top: 26px;
+    width: 100%;
+}
+
+.menu-load-more-wrap[hidden] {
+    display: none;
+}
+
+.menu-load-more-btn {
+    align-items: center;
+    background: var(--primary-color);
+    border: 1px solid var(--primary-color);
+    border-radius: 999px;
+    color: var(--white);
+    cursor: pointer;
+    display: inline-flex;
+    font-family: 'Prompt', sans-serif;
+    font-size: 0.95rem;
+    font-weight: 700;
+    justify-content: center;
+    min-height: 44px;
+    min-width: 148px;
+    padding: 10px 24px;
+    transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.menu-load-more-btn:hover,
+.menu-load-more-btn:focus-visible {
+    background: #0b6f35;
+    outline: none;
+    transform: translateY(-1px);
+}
+
+.menu-load-more-btn[hidden] {
+    display: none;
+}
+
 @media (min-width: 768px) {
     .shop-grid {
         grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));

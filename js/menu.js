@@ -10,8 +10,12 @@ const MENU_ORDER_ACCESS_EVENT = 'eden:menu-order-access-changed';
 const PUBLIC_CACHE_TTL_MS = 5 * 60 * 1000;
 const MENU_CATEGORY_LIMIT = 160;
 const MENU_PRODUCT_LIMIT = 300;
+const MENU_DEFAULT_FILTER = 'all';
+const MENU_COLLAPSED_ROWS = 2;
 let menuOrderAccess = { ready: false, allowed: false, reason: 'checking' };
 let lastMenuRender = { container: null, items: [], note: '', categories: [] };
+let menuDisplayState = { activeFilter: MENU_DEFAULT_FILTER, expandedFilters: new Set() };
+let cleanupMenuVisibilityRefresh = null;
 
 const FALLBACK_MENU = [];
 
@@ -280,6 +284,55 @@ function buildCategoryFilters(items, categories = []) {
     return [...fromCategories, ...fromItems];
 }
 
+function disposeMenuVisibilityRefresh() {
+    if (typeof cleanupMenuVisibilityRefresh === 'function') {
+        cleanupMenuVisibilityRefresh();
+        cleanupMenuVisibilityRefresh = null;
+    }
+}
+
+function getMenuGridColumnCount(grid) {
+    const columns = window.getComputedStyle(grid).gridTemplateColumns;
+    if (!columns || columns === 'none') return 1;
+    return Math.max(1, columns.split(' ').filter(Boolean).length);
+}
+
+function getMenuCollapsedLimit(grid) {
+    return getMenuGridColumnCount(grid) * MENU_COLLAPSED_ROWS;
+}
+
+function menuCardMatchesFilter(card, filter) {
+    return filter === MENU_DEFAULT_FILTER || card.dataset.category === filter;
+}
+
+function updateMenuVisibility(grid, cards, loadMoreButton, en) {
+    const activeFilter = menuDisplayState.activeFilter || MENU_DEFAULT_FILTER;
+    const expanded = menuDisplayState.expandedFilters.has(activeFilter);
+    const limit = getMenuCollapsedLimit(grid);
+    const matchingCards = cards.filter(card => menuCardMatchesFilter(card, activeFilter));
+    let visibleMatches = 0;
+
+    cards.forEach(card => {
+        if (!menuCardMatchesFilter(card, activeFilter)) {
+            card.style.display = 'none';
+            return;
+        }
+
+        visibleMatches += 1;
+        card.style.display = expanded || visibleMatches <= limit ? 'flex' : 'none';
+    });
+
+    if (!loadMoreButton) return;
+
+    const hasOverflow = matchingCards.length > limit;
+    loadMoreButton.hidden = !hasOverflow;
+    if (loadMoreButton.parentElement) loadMoreButton.parentElement.hidden = !hasOverflow;
+    loadMoreButton.textContent = expanded
+        ? (en ? 'Show less' : '\u0e22\u0e48\u0e2d\u0e23\u0e32\u0e22\u0e01\u0e32\u0e23')
+        : (en ? 'View more' : '\u0e14\u0e39\u0e40\u0e1e\u0e34\u0e48\u0e21\u0e40\u0e15\u0e34\u0e21');
+    loadMoreButton.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+
 function getDefaultVariant(item) {
     const variants = Array.isArray(item.variants) ? item.variants : [];
     if (!variants.length) return null;
@@ -427,7 +480,15 @@ function renderMenu(container, items, note = '', categories = []) {
     const en = isEnglishPage();
     const fallbackMode = Boolean(note);
     const categoryFilters = buildCategoryFilters(items, categories);
+    const availableFilters = new Set([MENU_DEFAULT_FILTER, ...items.map(item => 'cat-' + item.category)]);
     lastMenuRender = { container, items, note, categories };
+    disposeMenuVisibilityRefresh();
+    if (!availableFilters.has(menuDisplayState.activeFilter)) {
+        menuDisplayState.activeFilter = MENU_DEFAULT_FILTER;
+    }
+    menuDisplayState.expandedFilters.forEach(filter => {
+        if (!availableFilters.has(filter)) menuDisplayState.expandedFilters.delete(filter);
+    });
     clearSkeleton(container);
     if (!items.length) {
         container.innerHTML = (note ? '<div class="shop-data-note" style="background:#fff8e1; border:1px solid #f1d58a; color:#6b4f00; padding:12px 16px; border-radius:12px; margin-bottom:18px;">' + escapeHTML(note) + '</div>' : '')
@@ -486,20 +547,48 @@ function renderMenu(container, items, note = '', categories = []) {
         + '<div class="category-filters menu-category-filters">'
         + '<button class="filter-btn active" data-filter="all">' + (en ? 'All' : '\u0e17\u0e31\u0e49\u0e07\u0e2b\u0e21\u0e14') + '</button>'
         + categoryFilters.map(category => '<button class="filter-btn" data-filter="cat-' + escapeHTML(category.id) + '">' + escapeHTML(category.name) + '</button>').join('')
-        + '</div><div class="shop-grid shop-grid-online menu-grid-online">' + cardsHTML + '</div>';
+        + '</div><div class="shop-grid shop-grid-online menu-grid-online">' + cardsHTML + '</div>'
+        + '<div class="menu-load-more-wrap"><button type="button" class="menu-load-more-btn" hidden aria-expanded="false"></button></div>';
 
     const buttons = container.querySelectorAll('.filter-btn');
-    const cards = container.querySelectorAll('.menu-card');
+    const grid = container.querySelector('.menu-grid-online');
+    const cards = Array.from(container.querySelectorAll('.menu-card'));
+    const loadMoreButton = container.querySelector('.menu-load-more-btn');
+    const refreshVisibility = () => updateMenuVisibility(grid, cards, loadMoreButton, en);
+
     buttons.forEach(button => {
+        button.classList.toggle('active', button.dataset.filter === menuDisplayState.activeFilter);
         button.addEventListener('click', () => {
             buttons.forEach(item => item.classList.remove('active'));
             button.classList.add('active');
-            const filter = button.dataset.filter;
-            cards.forEach(card => {
-                card.style.display = filter === 'all' || card.dataset.category === filter ? 'flex' : 'none';
-            });
+            menuDisplayState.activeFilter = button.dataset.filter || MENU_DEFAULT_FILTER;
+            refreshVisibility();
         });
     });
+
+    if (loadMoreButton) {
+        loadMoreButton.addEventListener('click', () => {
+            const activeFilter = menuDisplayState.activeFilter || MENU_DEFAULT_FILTER;
+            if (menuDisplayState.expandedFilters.has(activeFilter)) {
+                menuDisplayState.expandedFilters.delete(activeFilter);
+            } else {
+                menuDisplayState.expandedFilters.add(activeFilter);
+            }
+            refreshVisibility();
+        });
+    }
+
+    let resizeFrame = 0;
+    const handleResize = () => {
+        if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
+        resizeFrame = window.requestAnimationFrame(refreshVisibility);
+    };
+    window.addEventListener('resize', handleResize);
+    cleanupMenuVisibilityRefresh = () => {
+        if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
+        window.removeEventListener('resize', handleResize);
+    };
+    refreshVisibility();
 
     container.querySelectorAll('.menu-variant-select').forEach(select => {
         syncVariantSelection(select, en);
