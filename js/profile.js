@@ -630,6 +630,7 @@ autoEnhanceOtpInputs();
             sendingEmailCode: 'Sending code...',
             verifyingEmailCode: 'Verifying...',
             emailCodeSent: 'Verification code sent. Please check your email.',
+            emailCodeReused: 'Verification code was already sent. Please use the latest code or wait before requesting another one.',
             emailCodeVerified: 'Email verified successfully.',
             emailCodeFailed: 'Unable to verify email right now.',
             phone: 'Phone number',
@@ -3075,10 +3076,12 @@ autoEnhanceOtpInputs();
                 emailVerificationState = { email: '', checkedEmail: '' };
                 finalMessage = labels.emailVerifiedLocked || labels.emailCodeVerified;
             } else {
+                const resendSeconds = Math.max(1, Number(result.resendAfterSeconds || 5 * 60));
                 emailVerificationState = { email, checkedEmail: email };
                 updateProfileFormDraft({ email, emailCode: '' });
-                emailVerificationCooldownUntil = Date.now() + (5 * 60 * 1000);
-                window.setTimeout(renderProfile, 5 * 60 * 1000);
+                emailVerificationCooldownUntil = Date.now() + (resendSeconds * 1000);
+                window.setTimeout(renderProfile, resendSeconds * 1000);
+                if (result.reused) finalMessage = labels.emailCodeReused || labels.phoneCodeReused || finalMessage;
             }
         } catch (error) {
             logClientError('Email verification send failed:', error);

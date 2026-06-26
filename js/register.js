@@ -19,6 +19,7 @@ import {
 } from './member-auth-service.js';
 
 const GOOGLE_SETUP_KEY = 'eden_google_password_setup';
+const FIREBASE_OTP_RESEND_COOLDOWN_MS = 60 * 1000;
 
 const state = {
     authMode: '',
@@ -31,7 +32,10 @@ const state = {
     recaptchaVerifier: null,
     registrationStarted: false,
     googleSetupStarted: false,
-    otpRequestedAt: 0
+    otpRequestedAt: 0,
+    otpSendPromise: null,
+    otpSendKey: '',
+    nextOtpAllowedAt: 0
 };
 
 const els = {
@@ -95,8 +99,27 @@ function createRegisterError(code, message) {
     return error;
 }
 
+function otpCooldownSeconds() {
+    return Math.max(0, Math.ceil((state.nextOtpAllowedAt - Date.now()) / 1000));
+}
+
+function createOtpAlreadySentError() {
+    const seconds = otpCooldownSeconds();
+    const error = createRegisterError(
+        'eden/otp-already-sent',
+        seconds
+            ? `ส่ง OTP ไปแล้ว กรุณาใช้รหัสล่าสุด หรือรอ ${seconds} วินาทีก่อนส่งใหม่`
+            : 'ส่ง OTP ไปแล้ว กรุณาใช้รหัสล่าสุดก่อนขอรหัสใหม่'
+    );
+    error.retryAfterSeconds = seconds;
+    return error;
+}
+
 function registerOtpErrorMessage(error, fallback) {
     const code = String(error?.code || error?.responseBody?.code || '').toLowerCase();
+    if (code === 'eden/otp-already-sent') {
+        return error.message || 'ส่ง OTP ไปแล้ว กรุณาใช้รหัสล่าสุดก่อนขอรหัสใหม่';
+    }
     if (code === 'auth/invalid-verification-code' || code === 'auth/missing-verification-code') {
         return 'รหัส OTP ไม่ถูกต้อง กรุณาตรวจ SMS ล่าสุดและกรอกใหม่อีกครั้ง';
     }
@@ -192,26 +215,47 @@ function getRecaptchaVerifier() {
     return state.recaptchaVerifier;
 }
 
-async function sendOtp() {
+async function sendOtp({ refreshRecaptcha = false } = {}) {
     const phoneNumber = normalizeThaiPhone(els.phone?.value);
-    const checkResult = await checkRegisterPhone(phoneNumber);
-    const verifier = getRecaptchaVerifier();
-    const result = await signInWithPhoneNumber(auth, phoneNumber, verifier);
+    const sendKey = `register:${phoneNumber}`;
+    if (state.otpSendPromise && state.otpSendKey === sendKey) return state.otpSendPromise;
+    if (
+        state.confirmationResult
+        && state.phoneNumber === phoneNumber
+        && Date.now() < state.nextOtpAllowedAt
+    ) {
+        throw createOtpAlreadySentError();
+    }
 
-    state.registrationStarted = true;
-    state.authMode = 'phone';
-    state.phoneNumber = phoneNumber;
-    state.phoneDisplay = displayThaiPhone(phoneNumber);
-    state.confirmationResult = result;
-    state.firebaseIdToken = '';
-    state.googleEmail = '';
-    state.googleName = '';
-    state.otpRequestedAt = Date.now();
-    sessionStorage.removeItem(GOOGLE_SETUP_KEY);
+    state.otpSendKey = sendKey;
+    state.otpSendPromise = (async () => {
+        const checkResult = await checkRegisterPhone(phoneNumber);
+        if (refreshRecaptcha) resetRecaptcha();
+        const verifier = getRecaptchaVerifier();
+        const result = await signInWithPhoneNumber(auth, phoneNumber, verifier);
 
-    if (els.phonePreview) els.phonePreview.textContent = state.phoneDisplay;
-    setPasswordStepForPhone();
-    return checkResult || {};
+        state.registrationStarted = true;
+        state.authMode = 'phone';
+        state.phoneNumber = phoneNumber;
+        state.phoneDisplay = displayThaiPhone(phoneNumber);
+        state.confirmationResult = result;
+        state.firebaseIdToken = '';
+        state.googleEmail = '';
+        state.googleName = '';
+        state.otpRequestedAt = Date.now();
+        state.nextOtpAllowedAt = state.otpRequestedAt + FIREBASE_OTP_RESEND_COOLDOWN_MS;
+        sessionStorage.removeItem(GOOGLE_SETUP_KEY);
+
+        if (els.phonePreview) els.phonePreview.textContent = state.phoneDisplay;
+        setPasswordStepForPhone();
+        return checkResult || {};
+    })();
+
+    try {
+        return await state.otpSendPromise;
+    } finally {
+        state.otpSendPromise = null;
+    }
 }
 
 function isGoogleUser(user) {
@@ -358,7 +402,7 @@ els.phoneForm?.addEventListener('submit', async event => {
         });
         setStatus('ส่ง OTP สำเร็จ กรุณาตรวจสอบ SMS แล้วกรอกรหัส 6 หลัก', 'success');
     } catch (error) {
-        resetRecaptcha();
+        if (error?.code !== 'eden/otp-already-sent') resetRecaptcha();
         reportRegisterOtpStage('send_fail', {
             phoneLast4: phoneLast4(els.phone?.value || state.phoneNumber),
             ...errorDetails(error)
@@ -422,11 +466,10 @@ els.resend?.addEventListener('click', async () => {
     setStatus('กำลังส่ง OTP อีกครั้ง...', 'info');
     try {
         if (els.phone) els.phone.value = displayThaiPhone(state.phoneNumber);
-        resetRecaptcha();
         reportRegisterOtpStage('send_start', {
             phoneLast4: phoneLast4(state.phoneNumber)
         });
-        const checkResult = await sendOtp();
+        const checkResult = await sendOtp({ refreshRecaptcha: true });
         activateStep('otp');
         clearOtpUiStatus(els.otp);
         reportRegisterOtpStage('send_ok', {
@@ -435,7 +478,7 @@ els.resend?.addEventListener('click', async () => {
         });
         setStatus('ส่ง OTP อีกครั้งสำเร็จ', 'success');
     } catch (error) {
-        resetRecaptcha();
+        if (error?.code !== 'eden/otp-already-sent') resetRecaptcha();
         reportRegisterOtpStage('send_fail', errorDetails(error));
         setStatus(registerOtpErrorMessage(error, 'ส่ง OTP อีกครั้งไม่สำเร็จ'), 'error');
     } finally {

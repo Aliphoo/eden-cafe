@@ -18,6 +18,7 @@ import {
 } from './member-auth-service.js?v=phone-reset-firebase-20260605';
 
 const GOOGLE_SETUP_KEY = 'eden_google_password_setup';
+const FIREBASE_OTP_RESEND_COOLDOWN_MS = 60 * 1000;
 
 const els = {
     form: document.getElementById('login-form'),
@@ -49,7 +50,10 @@ const resetState = {
     phoneNumber: '',
     phoneConfirmationResult: null,
     recaptchaVerifier: null,
-    firebasePhoneAuth: false
+    firebasePhoneAuth: false,
+    otpRequestPromise: null,
+    otpRequestKey: '',
+    nextOtpAllowedAt: 0
 };
 
 function setStatus(message, type = 'info') {
@@ -84,6 +88,9 @@ function updateForgotChannelUi() {
     resetState.channel = channel;
     resetState.phoneConfirmationResult = null;
     resetState.firebasePhoneAuth = false;
+    resetState.otpRequestPromise = null;
+    resetState.otpRequestKey = '';
+    resetState.nextOtpAllowedAt = 0;
     resetRecaptcha();
     if (els.forgotIdentifierLabel) {
         els.forgotIdentifierLabel.textContent = channel === 'email' ? 'อีเมล' : 'เบอร์โทรศัพท์';
@@ -119,6 +126,66 @@ function getForgotRecaptchaVerifier() {
         'expired-callback': () => resetRecaptcha()
     });
     return resetState.recaptchaVerifier;
+}
+
+function forgotOtpCooldownSeconds() {
+    return Math.max(0, Math.ceil((resetState.nextOtpAllowedAt - Date.now()) / 1000));
+}
+
+function createForgotOtpAlreadySentError() {
+    const seconds = forgotOtpCooldownSeconds();
+    const error = new Error(seconds
+        ? `ส่ง OTP ไปแล้ว กรุณาใช้รหัสล่าสุด หรือรอ ${seconds} วินาทีก่อนส่งใหม่`
+        : 'ส่ง OTP ไปแล้ว กรุณาใช้รหัสล่าสุดก่อนขอรหัสใหม่');
+    error.code = 'eden/otp-already-sent';
+    error.userMessage = true;
+    error.retryAfterSeconds = seconds;
+    return error;
+}
+
+async function requestForgotOtpOnce(channel, identifier) {
+    const requestKey = `${channel}:${String(identifier || '').trim()}`;
+    if (resetState.otpRequestPromise && resetState.otpRequestKey === requestKey) {
+        return resetState.otpRequestPromise;
+    }
+    if (
+        resetState.otpRequestKey === requestKey
+        && resetState.phoneConfirmationResult
+        && Date.now() < resetState.nextOtpAllowedAt
+    ) {
+        throw createForgotOtpAlreadySentError();
+    }
+
+    resetState.otpRequestKey = requestKey;
+    resetState.otpRequestPromise = (async () => {
+        const result = await requestPasswordResetOtp({ channel, identifier });
+        resetState.channel = channel;
+        resetState.identifier = identifier;
+        resetState.verificationId = result.verificationId || '';
+        resetState.phoneNumber = result.phoneNumber || '';
+        resetState.phoneConfirmationResult = null;
+        resetState.firebasePhoneAuth = result.firebasePhoneAuth === true;
+
+        if (resetState.firebasePhoneAuth) {
+            if (!resetState.phoneNumber) throw new Error('ไม่พบเบอร์โทรศัพท์สำหรับส่ง OTP');
+            resetState.phoneConfirmationResult = await signInWithPhoneNumber(
+                auth,
+                resetState.phoneNumber,
+                getForgotRecaptchaVerifier()
+            );
+        } else if (!resetState.verificationId) {
+            throw new Error('ไม่พบรายการ OTP กรุณาขอรหัสใหม่');
+        }
+
+        resetState.nextOtpAllowedAt = Date.now() + FIREBASE_OTP_RESEND_COOLDOWN_MS;
+        return result;
+    })();
+
+    try {
+        return await resetState.otpRequestPromise;
+    } finally {
+        resetState.otpRequestPromise = null;
+    }
 }
 
 function setForgotBusy(form, isBusy, label) {
@@ -157,6 +224,9 @@ function closeForgotPanel() {
     resetState.phoneNumber = '';
     resetState.phoneConfirmationResult = null;
     resetState.firebasePhoneAuth = false;
+    resetState.otpRequestPromise = null;
+    resetState.otpRequestKey = '';
+    resetState.nextOtpAllowedAt = 0;
     resetRecaptcha();
 }
 
@@ -269,24 +339,7 @@ els.forgotRequestForm?.addEventListener('submit', async event => {
     setForgotBusy(els.forgotRequestForm, true, 'กำลังส่ง OTP...');
     setStatus('กำลังตรวจสอบบัญชีและส่ง OTP...', 'info');
     try {
-        const result = await requestPasswordResetOtp({ channel, identifier });
-        resetState.channel = channel;
-        resetState.identifier = identifier;
-        resetState.verificationId = result.verificationId || '';
-        resetState.phoneNumber = result.phoneNumber || '';
-        resetState.phoneConfirmationResult = null;
-        resetState.firebasePhoneAuth = result.firebasePhoneAuth === true;
-
-        if (resetState.firebasePhoneAuth) {
-            if (!resetState.phoneNumber) throw new Error('ไม่พบเบอร์โทรศัพท์สำหรับส่ง OTP');
-            resetState.phoneConfirmationResult = await signInWithPhoneNumber(
-                auth,
-                resetState.phoneNumber,
-                getForgotRecaptchaVerifier()
-            );
-        } else if (!resetState.verificationId) {
-            throw new Error('ไม่พบรายการ OTP กรุณาขอรหัสใหม่');
-        }
+        await requestForgotOtpOnce(channel, identifier);
 
         els.forgotRequestForm.hidden = true;
         els.forgotCompleteForm.hidden = false;
@@ -294,10 +347,17 @@ els.forgotRequestForm?.addEventListener('submit', async event => {
         clearOtpUiStatus(els.forgotOtp);
         setStatus('ส่ง OTP สำเร็จ กรุณาตรวจสอบรหัสแล้วตั้งรหัสผ่านใหม่', 'success');
     } catch (error) {
-        resetState.phoneConfirmationResult = null;
-        resetState.firebasePhoneAuth = false;
-        resetRecaptcha();
-        setStatus(error.message || 'ไม่พบบัญชีสมาชิกนี้ กรุณาตรวจสอบข้อมูลอีกครั้ง', 'error');
+        if (error?.code === 'eden/otp-already-sent') {
+            els.forgotRequestForm.hidden = true;
+            els.forgotCompleteForm.hidden = false;
+            els.forgotOtp?.focus();
+            setStatus(error.message, 'info');
+        } else {
+            resetState.phoneConfirmationResult = null;
+            resetState.firebasePhoneAuth = false;
+            resetRecaptcha();
+            setStatus(error.message || 'ไม่พบบัญชีสมาชิกนี้ กรุณาตรวจสอบข้อมูลอีกครั้ง', 'error');
+        }
     } finally {
         setForgotBusy(els.forgotRequestForm, false);
     }
