@@ -169,6 +169,8 @@ async function edenAuthRequest(path, { method = 'POST', body = null, authenticat
     return data;
 }
 
+// Legacy register OTP endpoints are kept for compatibility. The public
+// register page uses Firebase Phone Auth as the phone-verification source.
 export function requestRegisterOtp(phoneNumber) {
     return edenAuthRequest('/requestRegisterOtp', {
         body: { phoneNumber: normalizeThaiPhone(phoneNumber) }

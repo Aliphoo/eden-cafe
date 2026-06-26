@@ -30,7 +30,8 @@ const state = {
     firebaseIdToken: '',
     recaptchaVerifier: null,
     registrationStarted: false,
-    googleSetupStarted: false
+    googleSetupStarted: false,
+    otpRequestedAt: 0
 };
 
 const els = {
@@ -55,6 +56,78 @@ const els = {
 };
 
 autoEnhanceOtpInputs();
+
+function cleanTelemetryText(value, maxLength = 160) {
+    return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
+function phoneLast4(value = state.phoneNumber || state.phoneDisplay || '') {
+    const digits = String(value || '').replace(/\D/g, '');
+    return digits.slice(-4);
+}
+
+function currentAttemptAgeMs() {
+    return state.otpRequestedAt ? Math.max(0, Date.now() - state.otpRequestedAt) : 0;
+}
+
+function reportRegisterOtpStage(stage, details = {}) {
+    try {
+        window.EdenTelemetry?.report?.('register_otp', {
+            stage,
+            authMode: state.authMode || details.authMode || 'phone',
+            phoneLast4: details.phoneLast4 || phoneLast4(),
+            hasConfirmationResult: !!state.confirmationResult,
+            attemptAgeMs: currentAttemptAgeMs(),
+            firebaseProvider: cleanTelemetryText(details.firebaseProvider || '', 80),
+            errorCode: cleanTelemetryText(details.errorCode || details.code || '', 80),
+            message: cleanTelemetryText(details.message || '', 220),
+            status: details.status || 0,
+            recoverable: details.recoverable === true
+        });
+    } catch (_) {
+    }
+}
+
+function createRegisterError(code, message) {
+    const error = new Error(message);
+    error.code = code;
+    error.userMessage = true;
+    return error;
+}
+
+function registerOtpErrorMessage(error, fallback) {
+    const code = String(error?.code || error?.responseBody?.code || '').toLowerCase();
+    if (code === 'auth/invalid-verification-code' || code === 'auth/missing-verification-code') {
+        return 'รหัส OTP ไม่ถูกต้อง กรุณาตรวจ SMS ล่าสุดและกรอกใหม่อีกครั้ง';
+    }
+    if (code === 'auth/code-expired' || code === 'auth/session-expired' || code === 'eden/no-confirmation-result') {
+        return 'รหัส OTP หมดอายุหรือ session หายไปแล้ว กรุณากดส่ง OTP ใหม่';
+    }
+    if (code === 'auth/too-many-requests' || code === 'auth/quota-exceeded') {
+        return 'ระบบส่ง/ยืนยัน OTP ถี่เกินไป กรุณารอสักครู่แล้วกดส่ง OTP ใหม่';
+    }
+    if (code === 'auth/network-request-failed') {
+        return 'เครือข่ายไม่เสถียรหรือถูกบล็อก กรุณาเชื่อมต่ออินเทอร์เน็ตแล้วลองใหม่';
+    }
+    if (code === 'auth/captcha-check-failed' || code === 'auth/missing-app-credential') {
+        return 'การยืนยันความปลอดภัยหมดอายุ กรุณากดส่ง OTP ใหม่';
+    }
+    if (code === 'auth/invalid-phone-number' || code === 'auth/missing-phone-number') {
+        return 'เบอร์โทรศัพท์ไม่ถูกต้อง กรุณากลับไปกรอกเบอร์ใหม่';
+    }
+    if (code === 'auth/unauthorized-domain' || code === 'auth/app-not-authorized') {
+        return 'โดเมนนี้ยังไม่ได้รับอนุญาตสำหรับ Firebase Phone Auth กรุณาติดต่อผู้ดูแลระบบ';
+    }
+    return error?.userMessage && error.message ? error.message : (error?.message || fallback);
+}
+
+function errorDetails(error) {
+    return {
+        errorCode: error?.code || error?.responseBody?.code || '',
+        message: error?.message || '',
+        status: error?.status || 0
+    };
+}
 
 function setStatus(message, type = 'info') {
     if (!els.status) return;
@@ -121,7 +194,7 @@ function getRecaptchaVerifier() {
 
 async function sendOtp() {
     const phoneNumber = normalizeThaiPhone(els.phone?.value);
-    await checkRegisterPhone(phoneNumber);
+    const checkResult = await checkRegisterPhone(phoneNumber);
     const verifier = getRecaptchaVerifier();
     const result = await signInWithPhoneNumber(auth, phoneNumber, verifier);
 
@@ -133,10 +206,12 @@ async function sendOtp() {
     state.firebaseIdToken = '';
     state.googleEmail = '';
     state.googleName = '';
+    state.otpRequestedAt = Date.now();
     sessionStorage.removeItem(GOOGLE_SETUP_KEY);
 
     if (els.phonePreview) els.phonePreview.textContent = state.phoneDisplay;
     setPasswordStepForPhone();
+    return checkResult || {};
 }
 
 function isGoogleUser(user) {
@@ -270,14 +345,25 @@ els.phoneForm?.addEventListener('submit', async event => {
     event.preventDefault();
     setBusy(els.phoneForm, true, 'กำลังส่ง OTP...');
     setStatus('กำลังส่ง OTP ผ่าน Firebase Phone Auth...', 'info');
+    reportRegisterOtpStage('send_start', {
+        phoneLast4: phoneLast4(els.phone?.value)
+    });
     try {
-        await sendOtp();
+        const checkResult = await sendOtp();
         activateStep('otp');
         clearOtpUiStatus(els.otp);
+        reportRegisterOtpStage('send_ok', {
+            phoneLast4: phoneLast4(state.phoneNumber),
+            recoverable: checkResult.recoverable === true
+        });
         setStatus('ส่ง OTP สำเร็จ กรุณาตรวจสอบ SMS แล้วกรอกรหัส 6 หลัก', 'success');
     } catch (error) {
         resetRecaptcha();
-        setStatus(error.message || 'ส่ง OTP ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง', 'error');
+        reportRegisterOtpStage('send_fail', {
+            phoneLast4: phoneLast4(els.phone?.value || state.phoneNumber),
+            ...errorDetails(error)
+        });
+        setStatus(registerOtpErrorMessage(error, 'ส่ง OTP ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'), 'error');
     } finally {
         setBusy(els.phoneForm, false);
     }
@@ -289,11 +375,17 @@ els.otpForm?.addEventListener('submit', async event => {
     setStatus('กำลังยืนยัน OTP กับ Firebase...', 'info');
     try {
         const otp = validateOtp();
-        if (!state.confirmationResult) throw new Error('ไม่พบรายการ OTP กรุณาส่ง OTP ใหม่');
+        if (!state.confirmationResult) {
+            throw createRegisterError('eden/no-confirmation-result', 'ไม่พบรายการ OTP กรุณาส่ง OTP ใหม่');
+        }
         setOtpUiStatus(els.otp, 'loading');
 
         const credential = await state.confirmationResult.confirm(otp);
         const firebaseUser = credential.user;
+        const firebaseProvider = (firebaseUser.providerData || [])
+            .map(provider => provider.providerId)
+            .filter(Boolean)
+            .join(',');
         state.authMode = 'phone';
         state.firebaseIdToken = await firebaseUser.getIdToken(true);
         state.phoneNumber = normalizeThaiPhone(firebaseUser.phoneNumber || state.phoneNumber);
@@ -302,10 +394,14 @@ els.otpForm?.addEventListener('submit', async event => {
 
         activateStep('profile');
         setOtpUiStatus(els.otp, 'success');
+        reportRegisterOtpStage('confirm_ok', {
+            firebaseProvider: firebaseProvider || 'phone'
+        });
         setStatus('ยืนยัน OTP สำเร็จ กรุณาตั้งรหัสผ่าน', 'success');
     } catch (error) {
         setOtpUiStatus(els.otp, 'error');
-        setStatus(error.message || 'OTP ไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง', 'error');
+        reportRegisterOtpStage('confirm_fail', errorDetails(error));
+        setStatus(registerOtpErrorMessage(error, 'OTP ไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง'), 'error');
     } finally {
         setBusy(els.otpForm, false);
     }
@@ -327,13 +423,21 @@ els.resend?.addEventListener('click', async () => {
     try {
         if (els.phone) els.phone.value = displayThaiPhone(state.phoneNumber);
         resetRecaptcha();
-        await sendOtp();
+        reportRegisterOtpStage('send_start', {
+            phoneLast4: phoneLast4(state.phoneNumber)
+        });
+        const checkResult = await sendOtp();
         activateStep('otp');
         clearOtpUiStatus(els.otp);
+        reportRegisterOtpStage('send_ok', {
+            phoneLast4: phoneLast4(state.phoneNumber),
+            recoverable: checkResult.recoverable === true
+        });
         setStatus('ส่ง OTP อีกครั้งสำเร็จ', 'success');
     } catch (error) {
         resetRecaptcha();
-        setStatus(error.message || 'ส่ง OTP อีกครั้งไม่สำเร็จ', 'error');
+        reportRegisterOtpStage('send_fail', errorDetails(error));
+        setStatus(registerOtpErrorMessage(error, 'ส่ง OTP อีกครั้งไม่สำเร็จ'), 'error');
     } finally {
         setBusy(els.otpForm, false);
     }
@@ -362,6 +466,11 @@ els.profileForm?.addEventListener('submit', async event => {
         }
         if (result.profile) storeProfile(result.profile);
         sessionStorage.removeItem(GOOGLE_SETUP_KEY);
+        if (state.authMode === 'phone') {
+            reportRegisterOtpStage('complete_ok', {
+                firebaseProvider: 'phone'
+            });
+        }
 
         els.profileForm?.classList.remove('active');
         if (els.complete) els.complete.hidden = false;
@@ -370,7 +479,8 @@ els.profileForm?.addEventListener('submit', async event => {
             window.location.href = '/profile';
         }, 900);
     } catch (error) {
-        setStatus(error.message || 'สมัครสมาชิกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง', 'error');
+        if (state.authMode === 'phone') reportRegisterOtpStage('complete_fail', errorDetails(error));
+        setStatus(registerOtpErrorMessage(error, 'สมัครสมาชิกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'), 'error');
     } finally {
         setBusy(els.profileForm, false);
     }
