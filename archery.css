@@ -173,6 +173,59 @@
     box-shadow: 0 0 0 2px rgba(24, 130, 60, .14);
 }
 
+.archery-participant-list {
+    display: grid;
+    gap: 10px;
+}
+
+.archery-participant-row {
+    align-items: end;
+    background: #fff;
+    border: 1px solid #d8dfd5;
+    border-radius: 8px;
+    display: grid;
+    gap: 10px;
+    grid-template-columns: 90px minmax(150px, 0.85fr) minmax(190px, 1.15fr);
+    padding: 12px;
+}
+
+.archery-participant-row strong {
+    color: #123a26;
+    line-height: 1.25;
+    padding-bottom: 12px;
+}
+
+.archery-participant-row label {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+}
+
+.archery-participant-row label span {
+    color: #4c6156;
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.archery-participant-row small {
+    color: #8a5a00;
+    font-size: 0.82rem;
+    font-weight: 700;
+    grid-column: 2 / -1;
+}
+
+.archery-pricing-warning {
+    background: #fff8e7;
+    border: 1px solid #f0d28a;
+    border-radius: 8px;
+    color: #725100;
+    font-size: 0.95rem;
+    font-weight: 700;
+    line-height: 1.45;
+    margin: 0;
+    padding: 12px 14px;
+}
+
 .archery-section-lead {
     max-width: 760px;
     color: #5f7067;
@@ -1092,6 +1145,19 @@
     .archery-form-grid,
     .archery-admin-toolbar {
         grid-template-columns: 1fr;
+    }
+
+    .archery-participant-row {
+        align-items: stretch;
+        grid-template-columns: 1fr;
+    }
+
+    .archery-participant-row strong {
+        padding-bottom: 0;
+    }
+
+    .archery-participant-row small {
+        grid-column: auto;
     }
 
     .archery-ops-summary {

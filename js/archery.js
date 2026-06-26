@@ -6,23 +6,28 @@ import qrcodeFactory from './qrcode-generator.esm.js';
 import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 const BRANCH_ID = 'BKK_MAIN';
-const PACKAGE_PRICES = { 60: 350, 120: 600, 180: 800 };
 const DEFAULT_PRICING_CONFIG = {
-    version: '2026-06-default',
+    version: '',
     packages: [
-        { durationMinutes: 60, price: 350, title: '60 min', active: true },
-        { durationMinutes: 120, price: 600, title: '120 min', active: true },
-        { durationMinutes: 180, price: 800, title: '180 min', active: true }
+        { durationMinutes: 60, price: 0, title: '60 min', active: true },
+        { durationMinutes: 120, price: 0, title: '120 min', active: true },
+        { durationMinutes: 180, price: 0, title: '180 min', active: true }
     ],
     abilityOptions: [
-        { id: 'first_time_with_coach', label: 'ครั้งแรก ต้องการโค้ช', ratePerHour: 50, coachRequired: true, active: true },
-        { id: 'experienced_with_coach', label: 'เคยยิงแล้ว ต้องการโค้ช', ratePerHour: 50, coachRequired: true, active: true },
+        { id: 'first_time_with_coach', label: 'ครั้งแรก ต้องการโค้ช', ratePerHour: 0, coachRequired: true, active: true },
+        { id: 'experienced_with_coach', label: 'เคยยิงแล้ว ต้องการโค้ช', ratePerHour: 0, coachRequired: true, active: true },
         { id: 'experienced_no_coach', label: 'เคยยิงแล้ว ไม่ต้องการโค้ช', ratePerHour: 0, coachRequired: false, active: true }
     ],
     equipmentOptions: [
-        { id: 'rent_full_set', label: 'เช่าอุปกรณ์ครบเซ็ต', ratePerHour: 100, active: true },
+        { id: 'rent_full_set', label: 'เช่าอุปกรณ์ครบเซ็ต', ratePerHour: 0, active: true },
         { id: 'bring_own', label: 'นำอุปกรณ์มาเอง', ratePerHour: 0, active: true }
     ]
+};
+const EMPTY_PRICING_CONFIG = {
+    version: '',
+    packages: [],
+    abilityOptions: [],
+    equipmentOptions: []
 };
 const OPTION_LABELS_TH = {
     first_time_with_coach: 'ครั้งแรก ต้องการโค้ช',
@@ -35,6 +40,10 @@ const STORAGE_KEY = 'eden_archery_last_booking';
 const HOLD_STORAGE_KEY = 'eden_archery_active_hold';
 const HOLD_MINUTES = 10;
 const VALID_DURATIONS = new Set([60, 120, 180]);
+const EXPERIENCE_FIRST_TIME = 'first_time';
+const EXPERIENCE_EXPERIENCED = 'experienced';
+const STAFF_REQUIRED = 'staff_required';
+const STAFF_NOT_REQUIRED = 'staff_not_required';
 
 let currentUser = null;
 let currentHold = null;
@@ -47,7 +56,10 @@ let busyAction = '';
 let isCheckingAvailability = false;
 let holdIdempotencyKey = '';
 let beamPaymentIdempotencyKey = '';
-let archeryPricingConfig = DEFAULT_PRICING_CONFIG;
+let archeryPricingConfig = EMPTY_PRICING_CONFIG;
+let pricingSettingsReady = false;
+let pricingSettingsError = '';
+let participantSelections = [];
 
 const AUTO_AVAILABILITY_DELAY_MS = 350;
 
@@ -123,38 +135,50 @@ function money(value) {
     return Math.round(Number(value) || 0).toLocaleString('th-TH') + ' THB';
 }
 
+function bookingText(th, en) {
+    return location.pathname.includes('-en') ? en : th;
+}
+
 function activeItems(items = []) {
     return (Array.isArray(items) ? items : []).filter(item => item && item.active !== false);
 }
 
 function normalizePricingConfig(data = {}) {
     const source = data.pricing || data.bookingOptions || data.booking_options || data || {};
-    const packages = Array.isArray(source.packages) && source.packages.length ? source.packages : DEFAULT_PRICING_CONFIG.packages;
+    const fallback = EMPTY_PRICING_CONFIG;
+    const packages = Array.isArray(source.packages) && source.packages.length ? source.packages : fallback.packages;
     const abilityOptions = Array.isArray(source.abilityOptions || source.ability_options) && (source.abilityOptions || source.ability_options).length
         ? (source.abilityOptions || source.ability_options)
-        : DEFAULT_PRICING_CONFIG.abilityOptions;
+        : fallback.abilityOptions;
     const equipmentOptions = Array.isArray(source.equipmentOptions || source.equipment_options) && (source.equipmentOptions || source.equipment_options).length
         ? (source.equipmentOptions || source.equipment_options)
-        : DEFAULT_PRICING_CONFIG.equipmentOptions;
+        : fallback.equipmentOptions;
     return {
-        version: source.version || source.pricingVersion || source.pricing_version || DEFAULT_PRICING_CONFIG.version,
+        version: source.version || source.pricingVersion || source.pricing_version || fallback.version || '',
         packages: packages.map((item, index) => ({
-            durationMinutes: Number(item.durationMinutes || item.duration_minutes || item.duration || DEFAULT_PRICING_CONFIG.packages[index]?.durationMinutes || 60) || 60,
-            price: Number(item.price || item.amount || item.amountTotal || item.amount_total || DEFAULT_PRICING_CONFIG.packages[index]?.price || 0) || 0,
+            durationMinutes: Number(item.durationMinutes ?? item.duration_minutes ?? item.duration ?? fallback.packages[index]?.durationMinutes ?? 0) || 0,
+            price: Number(item.price ?? item.amount ?? item.amountTotal ?? item.amount_total ?? fallback.packages[index]?.price ?? 0) || 0,
             title: String(item.title || '').trim(),
             active: item.active !== false
-        })),
-        abilityOptions: abilityOptions.map((item, index) => ({
-            id: String(item.id || item.option_id || DEFAULT_PRICING_CONFIG.abilityOptions[index]?.id || '').trim(),
-            label: String(item.label || DEFAULT_PRICING_CONFIG.abilityOptions[index]?.label || '').trim(),
-            ratePerHour: Number(item.ratePerHour || item.rate_per_hour || item.rate || 0) || 0,
-            coachRequired: item.coachRequired === true || item.coach_required === true,
-            active: item.active !== false
-        })).filter(item => item.id),
+        })).filter(item => item.durationMinutes > 0),
+        abilityOptions: abilityOptions.map((item, index) => {
+            const fallbackOption = fallback.abilityOptions[index] || {};
+            return {
+                id: String(item.id || item.option_id || fallbackOption.id || '').trim(),
+                label: String(item.label || fallbackOption.label || '').trim(),
+                ratePerHour: Number(item.ratePerHour ?? item.rate_per_hour ?? item.rate ?? fallbackOption.ratePerHour ?? 0) || 0,
+                coachRequired: item.coachRequired != null
+                    ? item.coachRequired === true
+                    : item.coach_required != null
+                        ? item.coach_required === true
+                        : fallbackOption.coachRequired === true,
+                active: item.active !== false
+            };
+        }).filter(item => item.id),
         equipmentOptions: equipmentOptions.map((item, index) => ({
-            id: String(item.id || item.option_id || DEFAULT_PRICING_CONFIG.equipmentOptions[index]?.id || '').trim(),
-            label: String(item.label || DEFAULT_PRICING_CONFIG.equipmentOptions[index]?.label || '').trim(),
-            ratePerHour: Number(item.ratePerHour || item.rate_per_hour || item.rate || 0) || 0,
+            id: String(item.id || item.option_id || fallback.equipmentOptions[index]?.id || '').trim(),
+            label: String(item.label || fallback.equipmentOptions[index]?.label || '').trim(),
+            ratePerHour: Number(item.ratePerHour ?? item.rate_per_hour ?? item.rate ?? fallback.equipmentOptions[index]?.ratePerHour ?? 0) || 0,
             active: item.active !== false
         })).filter(item => item.id)
     };
@@ -162,7 +186,7 @@ function normalizePricingConfig(data = {}) {
 
 function packagePrice(duration = packageMinutes()) {
     const item = activeItems(archeryPricingConfig.packages).find(row => row.durationMinutes === normalizeDuration(duration));
-    return Number(item?.price || PACKAGE_PRICES[normalizeDuration(duration)] || 0) || 0;
+    return Number(item?.price || 0) || 0;
 }
 
 function selectedOption(group) {
@@ -171,28 +195,148 @@ function selectedOption(group) {
     return activeItems(options).find(item => item.id === checked?.value) || activeItems(options)[0] || null;
 }
 
+function abilityOptions() {
+    return activeItems(archeryPricingConfig.abilityOptions);
+}
+
+function findAbilityOption(predicate, fallbackPredicate = () => true) {
+    const options = abilityOptions();
+    return options.find(predicate) || options.find(fallbackPredicate) || options[0] || null;
+}
+
+function firstTimeStaffOption() {
+    return findAbilityOption(
+        option => option.coachRequired && String(option.id || '').includes('first_time'),
+        option => option.coachRequired
+    );
+}
+
+function experiencedStaffOption() {
+    return findAbilityOption(
+        option => option.coachRequired && String(option.id || '').includes('experienced'),
+        option => option.coachRequired
+    );
+}
+
+function experiencedNoStaffOption() {
+    return findAbilityOption(
+        option => !option.coachRequired && String(option.id || '').includes('no_coach'),
+        option => !option.coachRequired
+    );
+}
+
+function hasRequiredPricingConfig(config = archeryPricingConfig) {
+    const packages = activeItems(config.packages).filter(item => item.durationMinutes > 0 && Number.isFinite(Number(item.price)));
+    const abilities = activeItems(config.abilityOptions);
+    const equipment = activeItems(config.equipmentOptions);
+    return Boolean(
+        packages.length
+        && equipment.length
+        && abilities.some(option => option.coachRequired && String(option.id || '').includes('first_time'))
+        && abilities.some(option => option.coachRequired && String(option.id || '').includes('experienced'))
+        && abilities.some(option => !option.coachRequired && String(option.id || '').includes('no_coach'))
+    );
+}
+
+function pricingUnavailableText() {
+    return bookingText(
+        'ไม่สามารถโหลดราคาจากหลังบ้านได้ กรุณารีเฟรชหน้า หรือติดต่อพนักงาน',
+        'Unable to load admin pricing. Please refresh or contact staff.'
+    );
+}
+
+function normalizeParticipantSelections() {
+    const people = partySize();
+    const next = [];
+    for (let index = 0; index < people; index += 1) {
+        const current = participantSelections[index] || {};
+        const experience = current.experience === EXPERIENCE_EXPERIENCED ? EXPERIENCE_EXPERIENCED : EXPERIENCE_FIRST_TIME;
+        let staffChoice = current.staffChoice === STAFF_NOT_REQUIRED ? STAFF_NOT_REQUIRED : STAFF_REQUIRED;
+        if (experience === EXPERIENCE_FIRST_TIME || !experiencedNoStaffOption()) staffChoice = STAFF_REQUIRED;
+        next.push({ participantIndex: index + 1, experience, staffChoice });
+    }
+    participantSelections = next;
+    return next;
+}
+
+function resolveParticipantAbility(selection = {}) {
+    if (selection.experience === EXPERIENCE_FIRST_TIME) return firstTimeStaffOption();
+    if (selection.staffChoice === STAFF_NOT_REQUIRED) return experiencedNoStaffOption() || experiencedStaffOption();
+    return experiencedStaffOption();
+}
+
+function participantPricingRows(hours) {
+    return normalizeParticipantSelections().map(selection => {
+        const ability = resolveParticipantAbility(selection);
+        const coachAmount = Math.round(Number(ability?.ratePerHour || 0) * hours);
+        return {
+            participantIndex: selection.participantIndex,
+            experience: selection.experience,
+            staffChoice: ability?.coachRequired ? STAFF_REQUIRED : STAFF_NOT_REQUIRED,
+            ability,
+            abilityOptionId: ability?.id || '',
+            abilityLabel: optionDisplayLabel(ability),
+            coachRequired: ability?.coachRequired === true,
+            coachRatePerHour: Number(ability?.ratePerHour || 0) || 0,
+            coachAmount
+        };
+    });
+}
+
+function participantPayloadRows(participants = []) {
+    return participants.map(item => ({
+        participant_index: item.participantIndex,
+        experience: item.experience,
+        staff_choice: item.staffChoice,
+        ability_option_id: item.abilityOptionId
+    }));
+}
+
+function staffSummaryText(pricing = calculateDraftPricing()) {
+    if (!pricing.staffCount) return '0 people / ' + money(0);
+    const groups = new Map();
+    pricing.participants
+        .filter(item => item.coachRequired)
+        .forEach(item => {
+            const key = String(item.coachAmount);
+            const current = groups.get(key) || { count: 0, amount: 0, unit: item.coachAmount };
+            current.count += 1;
+            current.amount += item.coachAmount;
+            groups.set(key, current);
+        });
+    return Array.from(groups.values())
+        .map(group => `${group.count} x ${money(group.unit)} = ${money(group.amount)}`)
+        .join(', ');
+}
+
 function calculateDraftPricing() {
     const duration = packageMinutes();
     const hours = duration / 60;
-    const ability = selectedOption('archery-ability');
     const equipment = selectedOption('archery-equipment');
     const packageAmount = packagePrice(duration);
-    const coachAmount = Math.round(Number(ability?.ratePerHour || 0) * hours);
     const equipmentAmount = Math.round(Number(equipment?.ratePerHour || 0) * hours);
     const people = partySize();
-    const perPersonTotal = packageAmount + coachAmount + equipmentAmount;
+    const participants = participantPricingRows(hours);
+    const coachTotal = participants.reduce((sum, item) => sum + item.coachAmount, 0);
+    const staffCount = participants.filter(item => item.coachRequired).length;
+    const distinctAbilityIds = [...new Set(participants.map(item => item.abilityOptionId).filter(Boolean))];
+    const primaryAbility = distinctAbilityIds.length === 1 ? participants[0]?.ability : null;
+    const perPersonTotal = packageAmount + equipmentAmount + (people ? Math.round(coachTotal / people) : 0);
     return {
         packageAmount,
-        coachAmount,
+        coachAmount: people ? Math.round(coachTotal / people) : 0,
         equipmentAmount,
         partySize: people,
         requiredLaneCount: people,
         packageTotal: packageAmount * people,
-        coachTotal: coachAmount * people,
+        coachTotal,
         equipmentTotal: equipmentAmount * people,
         perPersonTotal,
-        amountTotal: perPersonTotal * people,
-        ability,
+        amountTotal: (packageAmount * people) + coachTotal + (equipmentAmount * people),
+        staffCount,
+        participants,
+        participantOptions: participantPayloadRows(participants),
+        ability: primaryAbility || participants[0]?.ability || null,
         equipment
     };
 }
@@ -293,9 +437,11 @@ function restoreButtonStates() {
     const holdBtn = $('archery-hold-btn');
     const confirmBtn = $('archery-confirm-btn');
     if (holdBtn) {
-        holdBtn.disabled = isCheckingAvailability || !currentUser || !latestAvailability?.available || !!currentHold;
+        holdBtn.disabled = !pricingSettingsReady || isCheckingAvailability || !currentUser || !latestAvailability?.available || !!currentHold;
         holdBtn.setAttribute('aria-disabled', holdBtn.disabled ? 'true' : 'false');
-        holdBtn.title = !currentUser
+        holdBtn.title = !pricingSettingsReady
+            ? pricingUnavailableText()
+            : !currentUser
             ? 'กรุณาเข้าสู่ระบบสมาชิกก่อนยืนยันการจอง'
             : isCheckingAvailability
                 ? 'ระบบกำลังตรวจสอบเลนว่าง'
@@ -329,7 +475,7 @@ function idempotencyKey(action, keyParts = []) {
         selectedStartTime(),
         packageMinutes(),
         partySize(),
-        pricing.ability?.id || '',
+        pricing.participantOptions.map(item => item.ability_option_id).join(','),
         pricing.equipment?.id || '',
         ...keyParts
     ].join(':');
@@ -366,6 +512,7 @@ function shouldAutoCheckAvailability() {
     if (currentHold) return false;
     return Boolean(
         $('archery-booking-form')
+        && pricingSettingsReady
         && selectedDate()
         && selectedStartTime()
         && packageMinutes()
@@ -419,12 +566,22 @@ function selectionPayload() {
         package_code: packageCode(duration),
         party_size: pricing.partySize,
         ability_option_id: pricing.ability?.id || '',
+        participant_options: pricing.participantOptions,
         equipment_option_id: pricing.equipment?.id || ''
     };
 }
 
 function summaryRows(rows) {
     return rows.map(([label, value]) => `<li><span>${escapeHTML(label)}</span><strong>${escapeHTML(value || '-')}</strong></li>`).join('');
+}
+
+function renderPricingUnavailableSummary() {
+    const el = $('archery-hold-summary');
+    if (!el || currentHold) return;
+    clearSummaryListSkeleton('archery-hold-summary');
+    el.innerHTML = summaryRows([
+        ['Pricing', pricingSettingsError || pricingUnavailableText()]
+    ]);
 }
 
 function renderDraftSummaryLegacy() {
@@ -435,13 +592,17 @@ function renderDraftSummaryLegacy() {
         ['วันที่', selectedDate()],
         ['เวลา', displayTimeRange(selectedStartTime(), selectedEndTime())],
         ['แพ็กเกจ', duration + ' นาที'],
-        ['ยอดรวม', money(PACKAGE_PRICES[duration])]
+        ['ยอดรวม', money(packagePrice(duration) * partySize())]
     ]);
 }
 
 function renderDraftSummary() {
     const el = $('archery-hold-summary');
     if (!el || currentHold) return;
+    if (!pricingSettingsReady) {
+        renderPricingUnavailableSummary();
+        return;
+    }
     const duration = packageMinutes();
     const pricing = calculateDraftPricing();
     el.innerHTML = summaryRows([
@@ -451,7 +612,7 @@ function renderDraftSummary() {
         ['People', String(pricing.partySize)],
         ['Lanes needed', String(pricing.requiredLaneCount)],
         ['Package / person', money(pricing.packageAmount)],
-        ['Coach / person', `${optionDisplayLabel(pricing.ability)} / ${money(pricing.coachAmount)}`],
+        ['Staff', staffSummaryText(pricing)],
         ['Equipment / person', `${optionDisplayLabel(pricing.equipment)} / ${money(pricing.equipmentAmount)}`],
         ['Total', money(pricing.amountTotal)]
     ]);
@@ -524,7 +685,7 @@ function renderOptionCards(containerId, inputName, options = [], formatter = () 
 }
 
 function renderChoiceGridSkeleton() {
-    renderSkeleton($('archery-ability-options'), 'stats', { count: 3 });
+    renderSkeleton($('archery-participant-options'), 'stats', { count: Math.max(1, partySize()) });
     renderSkeleton($('archery-equipment-options'), 'stats', { count: 3 });
 }
 
@@ -548,19 +709,100 @@ function clearSummaryListSkeleton(id) {
     list.removeAttribute('aria-busy');
 }
 
+function participantStaffOptionHTML(selection = {}) {
+    const staffOption = selection.experience === EXPERIENCE_FIRST_TIME ? firstTimeStaffOption() : experiencedStaffOption();
+    const noStaffOption = experiencedNoStaffOption();
+    const staffRate = staffOption ? `${optionDisplayLabel(staffOption)} - ${money(staffOption.ratePerHour)} / ${bookingText('ชม.', 'hr')}` : 'Staff';
+    const noStaffLabel = noStaffOption ? optionDisplayLabel(noStaffOption) : bookingText('ไม่ต้องการ Staff', 'No Staff');
+    return `
+        <option value="${STAFF_REQUIRED}" ${selection.staffChoice !== STAFF_NOT_REQUIRED ? 'selected' : ''}>${escapeHTML(staffRate)}</option>
+        ${selection.experience === EXPERIENCE_EXPERIENCED && noStaffOption ? `<option value="${STAFF_NOT_REQUIRED}" ${selection.staffChoice === STAFF_NOT_REQUIRED ? 'selected' : ''}>${escapeHTML(noStaffLabel)} - ${bookingText('ไม่มีค่าใช้จ่ายเพิ่ม', 'No extra charge')}</option>` : ''}
+    `;
+}
+
+function renderParticipantOptions() {
+    const el = $('archery-participant-options');
+    if (!el) return;
+    clearSkeleton(el);
+    const selections = normalizeParticipantSelections();
+    el.innerHTML = selections.map(selection => `
+        <div class="archery-participant-row" data-participant-index="${selection.participantIndex}">
+            <strong>${bookingText('ผู้เล่น', 'Player')} ${selection.participantIndex}</strong>
+            <label>
+                <span>${bookingText('ระดับ', 'Level')}</span>
+                <select data-participant-field="experience">
+                    <option value="${EXPERIENCE_FIRST_TIME}" ${selection.experience === EXPERIENCE_FIRST_TIME ? 'selected' : ''}>${bookingText('มือใหม่', 'First-time')}</option>
+                    <option value="${EXPERIENCE_EXPERIENCED}" ${selection.experience === EXPERIENCE_EXPERIENCED ? 'selected' : ''}>${bookingText('เคยยิงแล้ว', 'Experienced')}</option>
+                </select>
+            </label>
+            <label>
+                <span>Staff</span>
+                <select data-participant-field="staff" ${selection.experience === EXPERIENCE_FIRST_TIME ? 'disabled' : ''}>
+                    ${participantStaffOptionHTML(selection)}
+                </select>
+            </label>
+            ${selection.experience === EXPERIENCE_FIRST_TIME ? `<small>${bookingText('มือใหม่ต้องมี Staff ดูแลเท่านั้น', 'First-time players must have Staff supervision')}</small>` : ''}
+        </div>
+    `).join('');
+
+    el.querySelectorAll('select').forEach(select => {
+        select.addEventListener('change', () => {
+            const row = select.closest('[data-participant-index]');
+            const index = Math.max(0, Number(row?.dataset.participantIndex || 1) - 1);
+            const current = participantSelections[index] || { participantIndex: index + 1 };
+            if (select.dataset.participantField === 'experience') {
+                current.experience = select.value === EXPERIENCE_EXPERIENCED ? EXPERIENCE_EXPERIENCED : EXPERIENCE_FIRST_TIME;
+                if (current.experience === EXPERIENCE_FIRST_TIME) current.staffChoice = STAFF_REQUIRED;
+            } else if (select.dataset.participantField === 'staff') {
+                current.staffChoice = select.value === STAFF_NOT_REQUIRED ? STAFF_NOT_REQUIRED : STAFF_REQUIRED;
+            }
+            participantSelections[index] = current;
+            renderParticipantOptions();
+            resetAvailabilityState();
+            resetHoldState();
+            renderDraftSummary();
+            scheduleAvailabilityRefresh();
+        });
+    });
+}
+
+function renderPricingUnavailable() {
+    const packageSelect = $('archery-package');
+    const participantList = $('archery-participant-options');
+    const equipmentList = $('archery-equipment-options');
+    const message = pricingSettingsError || pricingUnavailableText();
+    if (packageSelect) {
+        packageSelect.innerHTML = `<option value="">${escapeHTML(bookingText('ไม่พร้อมใช้งาน', 'Unavailable'))}</option>`;
+        packageSelect.disabled = true;
+    }
+    if (participantList) {
+        clearSkeleton(participantList);
+        participantList.innerHTML = `<p class="archery-pricing-warning">${escapeHTML(message)}</p>`;
+    }
+    if (equipmentList) {
+        clearSkeleton(equipmentList);
+        equipmentList.innerHTML = `<p class="archery-pricing-warning">${escapeHTML(message)}</p>`;
+    }
+    renderPricingUnavailableSummary();
+    setStatus('archery-status', message, 'error');
+    restoreButtonStates();
+}
+
 function renderPricingOptions() {
+    if (!pricingSettingsReady) {
+        renderPricingUnavailable();
+        return;
+    }
     const packageSelect = $('archery-package');
     if (packageSelect) {
+        packageSelect.disabled = false;
         const selected = packageSelect.value;
         packageSelect.innerHTML = activeItems(archeryPricingConfig.packages).map(item => (
             `<option value="${escapeHTML(item.durationMinutes)}">${escapeHTML(item.title || item.durationMinutes + ' min')} - ${escapeHTML(money(item.price))}</option>`
         )).join('');
         if (selected && Array.from(packageSelect.options).some(option => option.value === selected)) packageSelect.value = selected;
     }
-    renderOptionCards('archery-ability-options', 'archery-ability', archeryPricingConfig.abilityOptions, option => {
-        const suffix = option.ratePerHour ? `${money(option.ratePerHour)} / ชม.` : 'ไม่มีค่าใช้จ่ายเพิ่ม';
-        return option.coachRequired ? `มีโค้ชดูแล · ${suffix}` : suffix;
-    });
+    renderParticipantOptions();
     renderOptionCards('archery-equipment-options', 'archery-equipment', archeryPricingConfig.equipmentOptions, option => (
         option.ratePerHour ? `${money(option.ratePerHour)} / ชม.` : 'ไม่มีค่าใช้จ่ายเพิ่ม'
     ));
@@ -570,12 +812,20 @@ function renderPricingOptions() {
 
 async function loadPricingOptions() {
     renderChoiceGridSkeleton();
+    pricingSettingsReady = false;
+    pricingSettingsError = '';
     try {
         const snap = db ? await getDoc(doc(db, 'site_settings', 'archery')) : null;
-        archeryPricingConfig = normalizePricingConfig(snap?.exists() ? snap.data() : DEFAULT_PRICING_CONFIG);
+        if (!snap?.exists()) throw new Error('ARCHERY_PRICING_CONFIG_MISSING');
+        const nextConfig = normalizePricingConfig(snap.data());
+        if (!hasRequiredPricingConfig(nextConfig)) throw new Error('ARCHERY_PRICING_CONFIG_INCOMPLETE');
+        archeryPricingConfig = nextConfig;
+        pricingSettingsReady = true;
     } catch (error) {
         console.warn('Unable to load archery pricing settings:', error);
-        archeryPricingConfig = normalizePricingConfig(DEFAULT_PRICING_CONFIG);
+        archeryPricingConfig = EMPTY_PRICING_CONFIG;
+        pricingSettingsReady = false;
+        pricingSettingsError = pricingUnavailableText();
     }
     renderPricingOptions();
 }
@@ -593,6 +843,10 @@ function resetAvailabilityState() {
 }
 
 function sanitizeHoldResponse(hold = {}) {
+    const draft = calculateDraftPricing();
+    const participantOptions = Array.isArray(hold.participant_options)
+        ? hold.participant_options
+        : (Array.isArray(hold.participantOptions) ? hold.participantOptions : draft.participantOptions);
     return {
         booking_id: hold.booking_id || hold.id || '',
         branch_id: hold.branch_id || BRANCH_ID,
@@ -609,32 +863,35 @@ function sanitizeHoldResponse(hold = {}) {
         provider_ref: hold.provider_ref || hold.payment?.provider_ref || '',
         beam_payment_link_id: hold.beam_payment_link_id || hold.payment?.beam_payment_link_id || '',
         payment_environment: hold.payment_environment || hold.payment?.payment_environment || 'sandbox',
-        amount_total: hold.amount_total || calculateDraftPricing().amountTotal,
-        party_size: hold.party_size || hold.partySize || calculateDraftPricing().partySize,
-        required_lane_count: hold.required_lane_count || hold.requiredLaneCount || calculateDraftPricing().requiredLaneCount,
+        amount_total: hold.amount_total || draft.amountTotal,
+        party_size: hold.party_size || hold.partySize || draft.partySize,
+        required_lane_count: hold.required_lane_count || hold.requiredLaneCount || draft.requiredLaneCount,
         assigned_resource_ids: Array.isArray(hold.assigned_resource_ids) ? hold.assigned_resource_ids : [],
         assigned_lane_numbers: Array.isArray(hold.assigned_lane_numbers) ? hold.assigned_lane_numbers : [],
-        package_amount: hold.package_amount || hold.amount_breakdown?.package || calculateDraftPricing().packageTotal,
-        ability_option_id: hold.ability_option_id || calculateDraftPricing().ability?.id || '',
-        ability_label: hold.ability_label || optionDisplayLabel(calculateDraftPricing().ability),
-        coach_required: hold.coach_required === true || calculateDraftPricing().ability?.coachRequired === true,
-        coach_rate_per_hour: hold.coach_rate_per_hour || calculateDraftPricing().ability?.ratePerHour || 0,
-        coach_amount: hold.coach_amount || hold.amount_breakdown?.coach || calculateDraftPricing().coachTotal,
-        equipment_option_id: hold.equipment_option_id || calculateDraftPricing().equipment?.id || '',
-        equipment_label: hold.equipment_label || optionDisplayLabel(calculateDraftPricing().equipment),
-        equipment_rate_per_hour: hold.equipment_rate_per_hour || calculateDraftPricing().equipment?.ratePerHour || 0,
-        equipment_amount: hold.equipment_amount || hold.amount_breakdown?.equipment || calculateDraftPricing().equipmentTotal,
+        package_amount: hold.package_amount || hold.amount_breakdown?.package || draft.packageTotal,
+        ability_option_id: hold.ability_option_id || draft.ability?.id || '',
+        ability_label: hold.ability_label || optionDisplayLabel(draft.ability),
+        participant_options: participantOptions,
+        staff_count: Number(hold.staff_count ?? hold.staffCount ?? hold.amount_breakdown?.staff_count ?? draft.staffCount) || 0,
+        coach_required: hold.coach_required === true || draft.staffCount > 0,
+        coach_rate_per_hour: hold.coach_rate_per_hour || draft.ability?.ratePerHour || 0,
+        coach_amount: hold.coach_amount || hold.amount_breakdown?.coach || draft.coachTotal,
+        equipment_option_id: hold.equipment_option_id || draft.equipment?.id || '',
+        equipment_label: hold.equipment_label || optionDisplayLabel(draft.equipment),
+        equipment_rate_per_hour: hold.equipment_rate_per_hour || draft.equipment?.ratePerHour || 0,
+        equipment_amount: hold.equipment_amount || hold.amount_breakdown?.equipment || draft.equipmentTotal,
         amount_breakdown: hold.amount_breakdown || {
-            package_per_person: calculateDraftPricing().packageAmount,
-            coach_per_person: calculateDraftPricing().coachAmount,
-            equipment_per_person: calculateDraftPricing().equipmentAmount,
-            per_person_total: calculateDraftPricing().perPersonTotal,
-            party_size: calculateDraftPricing().partySize,
-            required_lane_count: calculateDraftPricing().requiredLaneCount,
-            package: calculateDraftPricing().packageTotal,
-            coach: calculateDraftPricing().coachTotal,
-            equipment: calculateDraftPricing().equipmentTotal,
-            total: calculateDraftPricing().amountTotal
+            package_per_person: draft.packageAmount,
+            coach_per_person: draft.coachAmount,
+            equipment_per_person: draft.equipmentAmount,
+            per_person_total: draft.perPersonTotal,
+            party_size: draft.partySize,
+            required_lane_count: draft.requiredLaneCount,
+            staff_count: draft.staffCount,
+            package: draft.packageTotal,
+            coach: draft.coachTotal,
+            equipment: draft.equipmentTotal,
+            total: draft.amountTotal
         },
         pricing_version: hold.pricing_version || archeryPricingConfig.version || '',
         expires_at: hold.expires_at || new Date(Date.now() + HOLD_MINUTES * 60 * 1000).toISOString(),
@@ -812,7 +1069,7 @@ function renderHoldSummaryLegacy(hold) {
         ['วันที่', hold.booking_date],
         ['เวลา', displayTimeRange(hold.start_time, hold.end_time || timeLabel(minutesFromTime(hold.start_time) + duration))],
         ['แพ็กเกจ', duration + ' นาที'],
-        ['ยอดรวม', money(hold.amount_total || PACKAGE_PRICES[duration])],
+        ['ยอดรวม', money(hold.amount_total || packagePrice(duration) * (hold.party_size || 1))],
         ['Payment', hold.payment_status || 'UNPAID']
     ]);
     startCountdown();
@@ -823,6 +1080,7 @@ function renderHoldSummary(hold) {
     if (!el || !hold) return;
     const duration = normalizeDuration(hold.duration_minutes);
     const breakdown = hold.amount_breakdown || {};
+    const staffCount = Number(hold.staff_count ?? hold.staffCount ?? breakdown.staff_count ?? 0) || 0;
     const laneNumbers = Array.isArray(hold.assigned_lane_numbers) && hold.assigned_lane_numbers.length
         ? hold.assigned_lane_numbers.map(number => `Lane ${number}`).join(', ')
         : (Array.isArray(hold.assigned_resource_ids) && hold.assigned_resource_ids.length
@@ -837,7 +1095,7 @@ function renderHoldSummary(hold) {
         ['Lanes needed', String(hold.required_lane_count || hold.party_size || 1)],
         ['Assigned lanes', laneNumbers || '-'],
         ['Package / person', money(breakdown.package_per_person || packagePrice(duration))],
-        ['Coach / person', `${optionDisplayLabel({ id: hold.ability_option_id, label: hold.ability_label })} / ${money(breakdown.coach_per_person || 0)}`],
+        ['Staff', `${staffCount} people / ${money(hold.coach_amount || breakdown.coach || 0)}`],
         ['Equipment / person', `${optionDisplayLabel({ id: hold.equipment_option_id, label: hold.equipment_label })} / ${money(breakdown.equipment_per_person || 0)}`],
         ['Total', money(hold.amount_total || breakdown.total || packagePrice(duration))],
         ['Payment', hold.payment_status || 'UNPAID']
@@ -913,6 +1171,11 @@ async function createHold(event) {
     if (!currentUser) {
         setStatus('archery-status', 'กรุณาเข้าสู่ระบบสมาชิกก่อนจอง', 'error');
         window.location.href = '/login?next=' + encodeURIComponent('/archery/booking');
+        return;
+    }
+    if (!pricingSettingsReady) {
+        setStatus('archery-status', pricingSettingsError || pricingUnavailableText(), 'error');
+        restoreButtonStates();
         return;
     }
     if (!latestAvailability?.available) {
@@ -1032,6 +1295,7 @@ function initBookingPage() {
         if (!el) return;
         el.addEventListener('change', () => {
             if (id === 'archery-package') fillTimeOptions();
+            if (id === 'archery-party-size') renderParticipantOptions();
             resetAvailabilityState();
             resetHoldState();
             renderDraftSummary();
