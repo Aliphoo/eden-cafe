@@ -5,12 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Eden Cafe Admin Dashboard</title>
     <link rel="icon" href="Images/Logo.webp" type="image/webp">
-    <link rel="stylesheet" href="archery.css?v=mobile-ux-20260619-2">
+    <link rel="stylesheet" href="archery.css?v=archery-admin-ux-2">
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.js" integrity="sha384-zYPBGXwO4633CABX/5Spf6emCKUJCfoOkhOMYyxMsatqQZPnDblmmOewfjsIVWCM" crossorigin="anonymous"></script>
-    <!-- Quill.js for Rich Text -->
     <style>
         :root {
             --primary-color: #2c3e50;
@@ -23,7 +22,12 @@
             --warning: #ff9800;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Kanit', sans-serif; }
-        body { background-color: var(--bg-color); color: var(--text-color); display: flex; height: 100vh; overflow: hidden; }
+        html { height: 100%; }
+        body {
+            background-color: var(--bg-color); color: var(--text-color); display: flex;
+            min-height: 100vh; min-height: 100dvh; height: 100vh; height: 100dvh;
+            overflow: hidden;
+        }
 
         /* Login Screen */
         #admin-login {
@@ -65,17 +69,15 @@
 
         /* Sidebar */
         .sidebar {
-            width: 250px; background: var(--white); height: 100vh; max-height: 100vh; padding: 20px 0;
+            width: 250px; background: var(--white); height: 100vh; height: 100dvh; max-height: 100vh; max-height: 100dvh; padding: 20px 0;
             box-shadow: 2px 0 10px rgba(0,0,0,0.05); display: flex; flex-direction: column;
-            flex: 0 0 250px; overflow: hidden;
+            flex: 0 0 250px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable;
         }
         .sidebar-header { padding: 0 20px 20px; border-bottom: 1px solid #eee; text-align: center; flex: 0 0 auto; }
         .sidebar-header h2 { color: var(--accent-color); font-family: 'Playfair Display', serif; }
         .sidebar-menu {
-            list-style: none; margin-top: 20px; flex: 1 1 auto; min-height: 0;
-            overflow-y: auto; overflow-x: hidden; padding-bottom: 12px;
-            scrollbar-gutter: stable; overscroll-behavior: contain;
-            -webkit-overflow-scrolling: touch;
+            list-style: none; margin-top: 20px; flex: 0 0 auto; min-height: 0;
+            overflow: visible; padding-bottom: 12px;
         }
         .sidebar-menu::-webkit-scrollbar { width: 8px; }
         .sidebar-menu::-webkit-scrollbar-track { background: transparent; }
@@ -89,7 +91,10 @@
         .logout-btn { color: var(--danger); cursor: pointer; display: block; text-align: center; padding: 10px; background: #ffebee; border-radius: 5px; }
 
         /* Main Content */
-        .main-content { flex: 1; padding: 30px; overflow-y: auto; }
+        .main-content {
+            flex: 1; min-width: 0; min-height: 0; height: 100vh; height: 100dvh;
+            padding: 30px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+        }
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
         .admin-profile { display: flex; align-items: center; gap: 10px; }
         .admin-profile img { width: 40px; height: 40px; border-radius: 50%; }
@@ -105,7 +110,7 @@
         .dashboard-control-group { min-width: 0; display: grid; gap: 8px; }
         .dashboard-control-group > label, .dashboard-control-label { color: #32453a; font-size: 0.78rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0; }
         .dashboard-segmented { display: flex; flex-wrap: wrap; gap: 6px; }
-        .dashboard-segmented button { min-height: 36px; border: 1px solid #d6e1da; background: #f8fbf9; color: #33433a; padding: 0 11px; border-radius: 6px; font: inherit; font-weight: 700; cursor: pointer; }
+        .dashboard-segmented button { min-height: 44px; border: 1px solid #d6e1da; background: #f8fbf9; color: #33433a; padding: 0 12px; border-radius: 6px; font: inherit; font-weight: 700; cursor: pointer; }
         .dashboard-segmented button.active { background: #17452f; color: #fff; border-color: #17452f; }
         .dashboard-field-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
         .dashboard-field-row input, .dashboard-control-group select { min-height: 38px; border: 1px solid #d6e1da; border-radius: 6px; background: #fff; padding: 0 10px; font: inherit; color: #1f2f27; min-width: 0; }
@@ -127,7 +132,7 @@
         .dashboard-kpi-card small, .dashboard-mini-card small, .dashboard-health-card small { color: #68776f; font-weight: 700; }
         .dashboard-kpi-card strong { color: #15241b; font-size: 1.38rem; line-height: 1.1; overflow-wrap: anywhere; }
         .dashboard-kpi-card span { color: #64736b; font-size: 0.85rem; }
-        .dashboard-link-btn { border: 0; background: transparent; color: #2368a2; font: inherit; font-weight: 800; padding: 0; cursor: pointer; text-align: left; }
+        .dashboard-link-btn { align-items: center; border: 0; background: transparent; color: #2368a2; display: inline-flex; font: inherit; font-weight: 800; min-height: 44px; padding: 0; cursor: pointer; text-align: left; }
         .dashboard-queue-grid { display: grid; grid-template-columns: repeat(5, minmax(160px, 1fr)); gap: 10px; }
         .dashboard-queue-item { text-align: left; cursor: pointer; min-height: 110px; border-left: 4px solid #b7791f; }
         .dashboard-queue-item strong { display: block; color: #15241b; font-size: 1.45rem; margin: 4px 0; }
@@ -174,7 +179,7 @@
         .sales-dashboard-shell { background: #f5f6f6; border-radius: 10px; overflow: hidden; box-shadow: 0 10px 30px rgba(17, 38, 30, 0.08); border: 1px solid #e4e8e5; }
         .sales-dashboard-topbar { min-height: 56px; background: #43ad4f; color: white; display: flex; align-items: center; gap: 18px; padding: 0 22px; box-shadow: 0 2px 7px rgba(0,0,0,0.18); }
         .sales-dashboard-topbar h2 { font-size: 1.25rem; font-weight: 700; margin: 0; }
-        .sales-dashboard-body { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 760px; }
+        .sales-dashboard-body { display: grid; grid-template-columns: 1fr; min-height: 760px; }
         .sales-dashboard-main { padding: 22px; overflow: hidden; }
         .sales-dashboard-toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
         .sales-filter-btn, .sales-filter-select, .sales-date-range-filter {
@@ -191,10 +196,10 @@
         .sales-filter-btn { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
         .sales-filter-btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .sales-filter-select { min-width: 170px; }
-        .sales-date-range-filter { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-        .sales-date-range-filter > span:first-child { color: #6f7d75; }
-        .sales-date-range-input { min-height: 34px; border: 1px solid #dfe6df; border-radius: 4px; color: #25302b; font: inherit; font-weight: 600; padding: 0 8px; }
-        .sales-date-range-separator { color: #7c8781; font-size: 0.9rem; font-weight: 600; }
+        .sales-date-range-filter { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; }
+        .sales-date-range-filter > span:first-child { color: #6e7671; font-weight: 800; }
+        .sales-date-range-input { min-height: 34px; border: 1px solid #d8e2da; border-radius: 4px; color: #1f2f27; font: inherit; font-weight: 700; padding: 0 8px; }
+        .sales-date-range-separator { color: #8a9490; font-weight: 700; }
         .sales-dashboard-layout { display: grid; grid-template-columns: 285px minmax(0, 1fr); gap: 0; align-items: start; }
         .sales-report-card { background: #fff; min-height: 320px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); border: 1px solid #e8ece8; z-index: 1; }
         .sales-report-title { display: none; }
@@ -229,10 +234,10 @@
         .sales-table-title { color: #43ad4f; font-weight: 800; }
         .sales-table-actions { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
         .sales-export-btn, .sales-table-icon-btn { border: 0; background: transparent; color: #43ad4f; font: inherit; font-weight: 700; cursor: pointer; }
-        .sales-export-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 16px; border-radius: 999px; background: #edf8ef; border: 1px solid #ccebd2; box-shadow: 0 4px 12px rgba(67, 173, 79, 0.12); }
+        .sales-export-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 16px; border-radius: 999px; background: #edf8ef; border: 1px solid #ccebd2; box-shadow: 0 4px 12px rgba(67, 173, 79, 0.12); }
         .sales-export-btn:hover { background: #dcf2e0; }
         .sales-export-btn:disabled { cursor: not-allowed; opacity: 0.5; }
-        .sales-table-icon-btn { color: #6e7671; font-size: 1.25rem; }
+        .sales-table-icon-btn { align-items: center; color: #6e7671; display: inline-flex; font-size: 1.25rem; justify-content: center; min-height: 44px; min-width: 44px; }
         .sales-table-scroll { overflow-x: auto; }
         .sales-summary-table { min-width: 1020px; }
         .sales-summary-table th { background: #fff; color: #69736d; font-weight: 500; height: 54px; white-space: nowrap; }
@@ -240,7 +245,7 @@
         .sales-summary-table .sales-date-cell { font-weight: 700; color: #263238; }
         .sales-table-footer { display: flex; align-items: center; gap: 18px; padding: 14px 28px 18px; border-top: 1px solid #edf0ed; color: #3d4641; flex-wrap: wrap; }
         .sales-table-page-btn { width: 46px; height: 40px; border: 1px solid #ecefec; background: #fff; color: #66716b; font-size: 1.2rem; cursor: pointer; }
-        .sales-table-page-input { width: 46px; height: 36px; border: 1px solid #e1e6e1; border-radius: 3px; text-align: center; }
+        .sales-table-page-input { width: 46px; min-height: 44px; border: 1px solid #e1e6e1; border-radius: 3px; text-align: center; }
         .sales-report-empty { color: #7a857f; padding: 24px; text-align: center; }
         .sales-report-mobile-summary { display: none; }
         @media (max-width: 1180px) {
@@ -258,13 +263,15 @@
         @media (max-width: 560px) {
             .sales-kpi-grid { grid-template-columns: 1fr; }
             .sales-dashboard-toolbar { gap: 8px; }
-            .sales-filter-select, .sales-date-range-filter { width: 100%; }
-            .sales-date-range-input { flex: 1 1 140px; min-width: 0; }
+            .sales-date-range-filter { width: 100%; }
+            .sales-date-range-input { flex: 1 1 135px; }
+            .sales-filter-select { width: 100%; }
         }
 
         /* Charts & Tables Section */
         .section-container { background: var(--white); padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); margin-bottom: 30px; }
         .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .blog-admin-actions { display: flex; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
         .data-tools {
             background: #fbfff8;
             border: 1px solid #e0eadc;
@@ -510,8 +517,18 @@
         @media (max-width: 700px) { .access-permission-grid, .access-password-grid { grid-template-columns: 1fr; } }
 
         /* Modal Styles */
-        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); backdrop-filter: blur(5px); }
-        .modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border-radius: 10px; width: 80%; max-width: 500px; }
+        .modal {
+            display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; height: 100dvh;
+            background-color: rgba(0,0,0,0.5); backdrop-filter: blur(5px); overflow-y: auto; padding: 24px 0;
+        }
+        .modal-content {
+            background-color: #fefefe; margin: 0 auto; padding: 20px; border-radius: 10px; width: 80%; max-width: 500px;
+            max-height: calc(100vh - 48px); max-height: calc(100dvh - 48px); overflow-y: auto; overscroll-behavior: contain;
+        }
+        .modal-content form > .btn-submit:last-child {
+            position: sticky; bottom: 0; z-index: 3; margin-top: 16px;
+            box-shadow: 0 -12px 18px rgba(255,255,255,0.92), 0 4px 12px rgba(44,62,80,0.18);
+        }
         .modal-content.product-detail-modal { max-width: 1080px; width: 92%; margin: 3% auto; max-height: 90vh; overflow-y: auto; padding: 26px; }
         .close-modal { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
         .close-modal:hover { color: black; }
@@ -538,6 +555,35 @@
         .variant-remove-btn { border: 0; border-radius: 8px; background: #ffebee; color: #c62828; padding: 8px 10px; cursor: pointer; }
         .variant-remove-btn:hover { background: #ffcdd2; }
         @media (max-width: 760px) { .modal-content.product-detail-modal { width: 96%; padding: 18px; } .menu-variant-detail-row td { padding-left: 16px; } }
+        @media (max-width: 820px) {
+            body { display: block; height: auto; min-height: 100vh; min-height: 100dvh; overflow-y: auto; overflow-x: hidden; }
+            .sidebar { width: 100%; height: auto; max-height: none; padding: 10px 0 8px; flex: none; position: sticky; top: 0; z-index: 20; overflow: hidden; }
+            .sidebar-header { padding: 0 16px 12px; }
+            .sidebar-menu { display: flex; gap: 8px; margin-top: 6px; overflow-x: auto; overflow-y: hidden; padding: 0 12px 8px; scrollbar-gutter: auto; -webkit-overflow-scrolling: touch; }
+            .sidebar-menu li { border-left: 0; border-bottom: 3px solid transparent; border-radius: 999px; flex: 0 0 auto; min-height: 44px; padding: 10px 14px; white-space: nowrap; }
+            .sidebar-menu li:hover, .sidebar-menu li.active { border-left-color: transparent; border-bottom-color: var(--accent-color); }
+            .sidebar-footer { padding: 12px 16px; }
+            .logout-btn { min-height: 44px; display: grid; place-items: center; }
+            .main-content { height: auto; min-height: 48vh; min-height: 48dvh; padding: 18px; overflow: visible; }
+            .header { align-items: flex-start; flex-direction: column; gap: 12px; }
+            .admin-profile { width: 100%; justify-content: space-between; }
+            .section-container { border-radius: 10px; padding: 16px; }
+            .section-header { align-items: flex-start; flex-direction: column; gap: 12px; }
+            .btn-action, .google-btn, .email-login-btn, .admin-refresh-btn { align-items: center; display: inline-flex; justify-content: center; min-height: 44px; padding: 10px 14px; }
+            .data-tools-row button, .data-tools-row select, .data-tools-row input[type="file"] { min-height: 44px; width: 100%; }
+            .dashboard-field-row input, .dashboard-control-group select, .sales-filter-btn, .sales-filter-select, .sales-mini-select, .map-admin-toolbar input, .map-admin-toolbar select, .map-admin-reset, .apk-admin-form input, .apk-admin-form select, .apk-admin-form textarea { min-height: 44px; }
+            .dashboard-control-band, .sales-dashboard-shell, .faq-admin-card, .discount-admin-card, .apk-admin-card { border-radius: 10px; }
+            .sales-dashboard-topbar { flex-wrap: wrap; gap: 10px; padding: 10px 14px; }
+            .sales-table-page-btn, .map-admin-page-btn, .menu-page-btn { min-height: 44px; min-width: 44px; }
+            .sales-dashboard-main { overflow: visible; }
+            .sales-table-head { align-items: flex-start; flex-direction: column; padding: 14px; }
+            .sales-table-actions { justify-content: flex-start; }
+            .sales-table-scroll, .map-admin-table-scroll, .apk-admin-table-wrap, .menu-pos-table-wrap, .product-variant-table-wrap, .discount-table-wrap { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            .map-admin-pager, .sales-table-footer, .menu-pos-footer { align-items: stretch; flex-direction: column; }
+            .map-admin-page-controls { justify-content: space-between; }
+            .modal { padding: 12px; }
+            .modal-content { width: min(100%, 500px); max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
+        }
 
 
         /* Content Sections */
@@ -643,9 +689,26 @@
         .index-preview-about { padding: 34px 28px; text-align: center; }
         .index-preview-about h3 { font-size: 1.55rem; margin-bottom: 14px; }
         .index-preview-about p { color: #556; line-height: 1.75; margin: 0; }
+        .index-preview-about small { display: block; margin-top: 12px; color: #78857d; font-weight: 800; }
         .index-settings-actions { display: flex; justify-content: flex-end; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
         .index-settings-status { min-height: 22px; color: #137234; font-weight: 700; margin-top: 12px; }
         .index-settings-status.error { color: #b42318; }
+        .index-settings-full { grid-column: 1 / -1; }
+        .index-about-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+        .index-about-toolbar h3 { margin: 0; padding: 0; border: 0; }
+        .index-about-toolbar p { margin: 0; color: #66746c; font-size: 0.9rem; }
+        .index-about-list { display: grid; gap: 14px; }
+        .index-about-row { border: 1px solid #e0eadc; border-radius: 12px; background: #fff; padding: 16px; }
+        .index-about-row-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+        .index-about-row-head strong { color: #173f2a; }
+        .index-about-remove { border: 1px solid #f1c6c6; color: #9b1c1c; background: #fff7f7; border-radius: 8px; padding: 8px 12px; cursor: pointer; font-weight: 800; }
+        .index-about-fields { display: grid; gap: 14px 16px; }
+        .index-about-fields.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .index-about-fields.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .index-about-fields label { display: grid; gap: 7px; color: #334; font-weight: 700; font-size: 0.9rem; }
+        .index-about-fields input, .index-about-fields textarea { width: 100%; border: 1px solid #d7e5d7; border-radius: 10px; padding: 10px 12px; font: inherit; background: #fff; color: #1d2d22; }
+        .index-about-fields textarea { min-height: 92px; resize: vertical; }
+        .index-about-fields .full { grid-column: 1 / -1; }
         .index-promo-card { grid-column: 1 / -1; }
         .index-promo-toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid #dbe8de; border-radius: 14px; background: #fff; padding: 14px 16px; margin-bottom: 16px; }
         .index-promo-toggle strong { display: block; color: #173f2a; }
@@ -667,7 +730,8 @@
         .index-promo-preview-media { width: 100%; aspect-ratio: 16 / 10; border-radius: 8px; background: #eaf3ec center/cover no-repeat; border: 1px solid #d6e5da; }
         .index-promo-preview strong { display: block; color: #173f2a; margin-bottom: 4px; }
         .index-promo-preview span { color: #66746c; font-size: 0.9rem; }
-        @media (max-width: 780px) { .index-promo-slide-grid, .index-promo-preview { grid-template-columns: 1fr; } .index-promo-fields { grid-template-columns: 1fr; } }
+        @media (max-width: 980px) { .index-about-fields.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 780px) { .index-promo-slide-grid, .index-promo-preview { grid-template-columns: 1fr; } .index-promo-fields, .index-about-fields.two, .index-about-fields.four { grid-template-columns: 1fr; } }
         @media (max-width: 1050px) { .index-settings-grid { grid-template-columns: 1fr; } }
 
         /* PromptPay Settings */
@@ -697,7 +761,7 @@
         .promptpay-account-title strong { display: block; color: #0b3d2a; }
         .promptpay-account-title small { display: block; color: #728178; margin-top: 2px; word-break: break-word; }
         .promptpay-account-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-        .promptpay-mini-btn { border: 1px solid #d7e8dc; background: #f5fbf7; color: #0b4a30; border-radius: 999px; padding: 7px 12px; cursor: pointer; font-weight: 800; }
+        .promptpay-mini-btn { align-items: center; border: 1px solid #d7e8dc; background: #f5fbf7; color: #0b4a30; border-radius: 999px; display: inline-flex; min-height: 44px; padding: 7px 12px; cursor: pointer; font-weight: 800; }
         .promptpay-mini-btn:hover { background: #e5f7ea; border-color: #a7dcb8; }
         .promptpay-mini-btn.danger { background: #fff3f1; border-color: #ffd4cc; color: #b3261e; }
         .promptpay-account-editor { border-top: 1px dashed #d8e7dd; padding-top: 18px; margin-top: 14px; }
@@ -738,43 +802,6 @@
         @media (max-width: 980px) { .apk-admin-grid { grid-template-columns: 1fr; } }
         @media (max-width: 980px) { .promptpay-admin-grid { grid-template-columns: 1fr; } }
         @media (max-width: 640px) { .promptpay-admin-header, .promptpay-admin-grid { padding-left: 18px; padding-right: 18px; } .promptpay-form-row { grid-template-columns: 1fr; } }
-
-
-
-        /* Codex admin mobile UX deploy overrides 2026-06-19 */
-        html { height: 100%; }
-        body { min-height: 100vh; min-height: 100dvh; height: 100vh; height: 100dvh; overflow: hidden; }
-        .sidebar { height: 100vh; height: 100dvh; max-height: 100vh; max-height: 100dvh; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable; }
-        .main-content { min-width: 0; min-height: 0; height: 100vh; height: 100dvh; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
-        .dashboard-segmented button,.sales-report-nav button,.sales-filter-btn,.sales-filter-select,.sales-date-range-filter,.sales-export-btn,.sales-table-page-input,.promptpay-mini-btn,.dashboard-link-btn { min-height: 44px; }
-        .dashboard-link-btn,.sales-export-btn,.sales-table-icon-btn,.promptpay-mini-btn { align-items: center; display: inline-flex; justify-content: center; }
-        .sales-table-icon-btn { min-height: 44px; min-width: 44px; }
-        @media (max-width: 820px) {
-            body { display: block; height: auto; min-height: 100vh; min-height: 100dvh; overflow-y: auto; overflow-x: hidden; }
-            .sidebar { width: 100%; height: auto; max-height: none; padding: 10px 0 8px; flex: none; position: sticky; top: 0; z-index: 20; overflow: hidden; }
-            .sidebar-header { padding: 0 16px 12px; }
-            .sidebar-menu { display: flex; gap: 8px; margin-top: 6px; overflow-x: auto; overflow-y: hidden; padding: 0 12px 8px; scrollbar-gutter: auto; -webkit-overflow-scrolling: touch; }
-            .sidebar-menu li { border-left: 0; border-bottom: 3px solid transparent; border-radius: 999px; flex: 0 0 auto; min-height: 44px; padding: 10px 14px; white-space: nowrap; }
-            .sidebar-menu li:hover, .sidebar-menu li.active { border-left-color: transparent; border-bottom-color: var(--accent-color); }
-            .sidebar-footer { padding: 12px 16px; }
-            .logout-btn { min-height: 44px; display: grid; place-items: center; }
-            .main-content { height: auto; min-height: 48vh; min-height: 48dvh; padding: 18px; overflow: visible; }
-            .header, .section-header { align-items: flex-start; flex-direction: column; gap: 12px; }
-            .admin-profile { width: 100%; justify-content: space-between; }
-            .section-container { border-radius: 10px; padding: 16px; }
-            .btn-action, .google-btn, .email-login-btn, .admin-refresh-btn { align-items: center; display: inline-flex; justify-content: center; min-height: 44px; padding: 10px 14px; }
-            .data-tools-row button, .data-tools-row select, .data-tools-row input[type="file"], .dashboard-field-row input, .dashboard-control-group select, .sales-filter-btn, .sales-filter-select, .sales-date-range-filter, .sales-mini-select, .map-admin-toolbar input, .map-admin-toolbar select, .map-admin-reset, .apk-admin-form input, .apk-admin-form select, .apk-admin-form textarea { min-height: 44px; }
-            .sales-dashboard-topbar { flex-wrap: wrap; gap: 10px; padding: 10px 14px; }
-            .sales-dashboard-main { overflow: visible; }
-            .sales-table-page-btn, .map-admin-page-btn, .menu-page-btn { min-height: 44px; min-width: 44px; }
-            .sales-table-head { align-items: flex-start; flex-direction: column; padding: 14px; }
-            .sales-table-actions { justify-content: flex-start; }
-            .sales-table-scroll, .map-admin-table-scroll, .apk-admin-table-wrap, .menu-pos-table-wrap, .product-variant-table-wrap, .discount-table-wrap { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-            .map-admin-pager, .sales-table-footer, .menu-pos-footer { align-items: stretch; flex-direction: column; }
-            .map-admin-page-controls { justify-content: space-between; }
-            .modal { padding: 12px; }
-            .modal-content { width: min(100%, 500px); max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
-        }
 
     </style>
     <meta name="description" content="Eden Cafe internal admin dashboard.">
@@ -852,7 +879,6 @@
             <li onclick="switchTab('promptpay', this)">&#128184; &#x0E08;&#x0E31;&#x0E14;&#x0E01;&#x0E32;&#x0E23;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C; (PromptPay)</li>
             <li onclick="switchTab('business-settings', this)">Business Info</li>
             <li data-title="จัดการ Index" onclick="switchTab('index-settings', this)">จัดการ Index</li>
-            <li onclick="switchTab('promo-popup-settings', this)">Promotional Popup</li>
             <li onclick="switchTab('footer-settings', this)">🦶 จัดการ Footer</li>
             <li onclick="switchTab('marketing-settings', this)">Marketing Tools</li>
         </ul>
@@ -1560,19 +1586,6 @@
                                 <label>สิทธิ์การใช้งาน</label>
                                 <div id="access-permissions" class="access-permission-grid"></div>
                             </div>
-                            <div class="form-group" id="access-archery-settings" style="display:none;">
-                                <label>Eden Archery access</label>
-                                <div class="access-password-grid">
-                                    <input type="text" id="access-archery-branch" value="BKK_MAIN" placeholder="Branch ID">
-                                    <select id="access-archery-role">
-                                        <option value="OWNER">Owner</option>
-                                        <option value="MANAGER">Manager</option>
-                                        <option value="ARCHERY_STAFF">Archery Staff</option>
-                                        <option value="CASHIER">Cashier</option>
-                                    </select>
-                                </div>
-                                <div class="access-field-help">Used by live Archery bookings, payment watch, walk-ins, and lane actions.</div>
-                            </div>
                             <button type="submit" class="btn-submit">บันทึกสิทธิ์</button>
                             <button type="button" class="btn-action" style="width:100%; margin-top:10px; background:#789;" onclick="resetAdminAccessForm()">ล้างฟอร์ม</button>
                         </form>
@@ -2114,14 +2127,14 @@
                         <div class="archery-form-grid">
                             <label class="archery-field full">
                                 Hero image URL
-                                <input type="text" id="archery-page-hero-url" maxlength="500" placeholder="https://www.edencafe.co/Images/uploads/archery/2026-06/1782188813037-archery-hero-1782188809834.webp">
+                                <input type="text" id="archery-page-hero-url" maxlength="500" placeholder="https://edencafe.co/Images/uploads/archery/2026-06/1781174524924-archery-hero-1781174549114.webp">
                             </label>
                             <label class="archery-field full">
                                 Upload new hero image
                                 <input type="file" id="archery-page-hero-file" accept="image/*">
                             </label>
                             <div class="archery-page-hero-preview full">
-                                <img id="archery-page-hero-preview" src="https://www.edencafe.co/Images/uploads/archery/2026-06/1782188813037-archery-hero-1782188809834.webp" alt="Archery hero preview">
+                                <img id="archery-page-hero-preview" src="https://edencafe.co/Images/uploads/archery/2026-06/1781174524924-archery-hero-1781174549114.webp" alt="Archery hero preview">
                             </div>
                             <label class="archery-field full">
                                 Package lead text
@@ -2456,10 +2469,30 @@
 
         <!-- Blogs Section -->
         <div id="blogs" class="content-section">
-            <div class="section-container">
-                <div id="blog-cms-admin-root" class="blog-cms-admin-root">
-                    <div class="blog-cms-admin-loading">กำลังโหลด Blog CMS...</div>
+            <div id="blog-cms-admin-root" class="blog-cms-admin-root"></div>
+            <div class="section-container" style="display:none">
+                <div class="section-header">
+                    <h2>จัดการบทความ (Blogs)</h2>
+                    <div class="blog-admin-actions">
+                        <button class="btn-action btn-edit" id="seed-seo-blogs-btn" onclick="seedSeoBlogPosts()">นำเข้า/อัปเดต SEO Blog 6 บทความ</button>
+                        <button class="btn-action" onclick="openBlogModal()">+ เพิ่มบทความใหม่</button>
+                    </div>
                 </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>รูปหน้าปก</th>
+                            <th>หัวข้อ</th>
+                            <th>หมวดหมู่</th>
+                            <th>สถานะ</th>
+                            <th>วันที่สร้าง</th>
+                            <th>จัดการ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="blogs-table-body">
+                        <!-- Data injected via JS -->
+                    </tbody>
+                </table>
             </div>
         </div>
 
@@ -2983,6 +3016,7 @@
                             <div class="index-preview-about">
                                 <h3 id="index-preview-about-title">เรื่องราวของเรา</h3>
                                 <p id="index-preview-about-body">Eden Cafe เกิดขึ้นจากความหลงใหลในศิลปะการชงกาแฟและการสนับสนุนเกษตรกรไทย</p>
+                                <small id="index-preview-about-seo-detail">4 facts / 2 stories / 3 FAQs / 3 links</small>
                             </div>
                         </div>
 
@@ -3006,81 +3040,123 @@
                             </div>
                         </div>
 
+                        <div class="index-settings-card index-settings-full">
+                            <h3>About Hero / SEO</h3>
+                            <div class="index-about-fields two">
+                                <label>About Hero subtitle (TH)
+                                    <textarea id="index-about-hero-subtitle-th" maxlength="320" oninput="updateIndexPreview()"></textarea>
+                                </label>
+                                <label>About Hero subtitle (EN)
+                                    <textarea id="index-about-hero-subtitle-en" maxlength="320" oninput="updateIndexPreview()"></textarea>
+                                </label>
+                                <label class="full">About image URL
+                                    <input type="text" id="index-about-image-url" maxlength="500" placeholder="/Hero/Hero.webp" oninput="updateIndexPreview()">
+                                </label>
+                                <label>Image Alt Text (TH)
+                                    <input type="text" id="index-about-image-alt-th" maxlength="180" oninput="updateIndexPreview()">
+                                </label>
+                                <label>Image Alt Text (EN)
+                                    <input type="text" id="index-about-image-alt-en" maxlength="180" oninput="updateIndexPreview()">
+                                </label>
+                                <label>SEO Title (TH)
+                                    <input type="text" id="index-about-seo-title-th" maxlength="70" oninput="updateIndexPreview()">
+                                </label>
+                                <label>SEO Title (EN)
+                                    <input type="text" id="index-about-seo-title-en" maxlength="70" oninput="updateIndexPreview()">
+                                </label>
+                                <label>Meta Description (TH)
+                                    <textarea id="index-about-meta-description-th" maxlength="170" oninput="updateIndexPreview()"></textarea>
+                                </label>
+                                <label>Meta Description (EN)
+                                    <textarea id="index-about-meta-description-en" maxlength="170" oninput="updateIndexPreview()"></textarea>
+                                </label>
+                                <label class="full">OG image URL
+                                    <input type="text" id="index-about-og-image" maxlength="500" placeholder="https://edencafe.co/Images/Logo.webp" oninput="updateIndexPreview()">
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="index-settings-card index-settings-full">
+                            <div class="index-about-toolbar">
+                                <h3>Quick Facts TH / EN</h3>
+                                <button type="button" class="btn-action btn-view" onclick="addIndexAboutQuickFact()">Add fact</button>
+                            </div>
+                            <div class="index-about-list" id="index-about-quick-facts-list"></div>
+                        </div>
+
+                        <div class="index-settings-card index-settings-full">
+                            <div class="index-about-toolbar">
+                                <h3>Story Blocks TH / EN</h3>
+                                <button type="button" class="btn-action btn-view" onclick="addIndexAboutStoryBlock()">Add story block</button>
+                            </div>
+                            <div class="index-about-list" id="index-about-story-blocks-list"></div>
+                        </div>
+
+                        <div class="index-settings-card index-settings-full">
+                            <h3>Coffee Origin TH / EN</h3>
+                            <div class="index-about-fields two">
+                                <label>Coffee Origin title (TH)
+                                    <input type="text" id="index-about-coffee-title-th" maxlength="140" oninput="updateIndexPreview()">
+                                </label>
+                                <label>Coffee Origin title (EN)
+                                    <input type="text" id="index-about-coffee-title-en" maxlength="140" oninput="updateIndexPreview()">
+                                </label>
+                                <label>Coffee Origin body (TH)
+                                    <textarea id="index-about-coffee-body-th" maxlength="700" oninput="updateIndexPreview()"></textarea>
+                                </label>
+                                <label>Coffee Origin body (EN)
+                                    <textarea id="index-about-coffee-body-en" maxlength="700" oninput="updateIndexPreview()"></textarea>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="index-settings-card index-settings-full">
+                            <div class="index-about-toolbar">
+                                <h3>About FAQ TH / EN</h3>
+                                <button type="button" class="btn-action btn-view" onclick="addIndexAboutFaq()">Add FAQ</button>
+                            </div>
+                            <div class="index-about-list" id="index-about-faq-list"></div>
+                        </div>
+
+                        <div class="index-settings-card index-settings-full">
+                            <div class="index-about-toolbar">
+                                <h3>Related Links</h3>
+                                <button type="button" class="btn-action btn-view" onclick="addIndexAboutRelatedLink()">Add link</button>
+                            </div>
+                            <div class="index-about-list" id="index-about-related-links-list"></div>
+                        </div>
+
+                        <div class="index-settings-card index-promo-card">
+                            <h3>Homepage promotional popup</h3>
+                            <label class="index-promo-toggle" for="index-promo-enabled">
+                                <span>
+                                    <strong>Enable popup carousel</strong>
+                                    <small>Show image promotions on the homepage with a "do not show again today" checkbox.</small>
+                                </span>
+                                <input type="checkbox" id="index-promo-enabled" oninput="updateIndexPreview()">
+                            </label>
+                            <div class="form-group">
+                                <label for="index-promo-title">Popup title / admin label</label>
+                                <input type="text" id="index-promo-title" maxlength="90" placeholder="Eden Cafe promotions" oninput="updateIndexPreview()">
+                            </div>
+                            <div class="index-promo-toolbar">
+                                <p>Each slide needs an image. Link URL is optional.</p>
+                                <button type="button" class="btn-action btn-view" onclick="addIndexPromoSlide()">Add slide</button>
+                            </div>
+                            <div class="index-promo-slide-list" id="index-promo-slide-list"></div>
+                            <div class="index-promo-preview" id="index-promo-preview">
+                                <div class="index-promo-preview-media" id="index-promo-preview-media"></div>
+                                <div>
+                                    <strong id="index-promo-preview-title">Popup disabled</strong>
+                                    <span id="index-promo-preview-detail">Enable the popup and add a slide image to publish it.</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <p class="index-settings-status" id="index-settings-status"></p>
                     <div class="index-settings-actions">
                         <button type="button" class="btn-action" style="background:#789; padding: 10px 24px;" onclick="loadIndexSettings()">ยกเลิก / โหลดใหม่</button>
                         <button type="submit" class="btn-submit" style="width: auto; padding: 10px 32px; background: var(--accent-color);">บันทึกข้อมูล Index</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <!-- Promotional Popup Settings Section -->
-        <div id="promo-popup-settings" class="content-section">
-            <div class="section-container">
-                <div class="section-header">
-                    <div>
-                        <h2>Promotional Popup</h2>
-                        <p style="color:#667; margin-top:4px;">Manage carousel promotional modals, display location, audience, optional links, and daily hide behavior.</p>
-                    </div>
-                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                        <button class="btn-action btn-view" type="button" onclick="loadPromoPopupSettings()">โหลดข้อมูลปัจจุบัน</button>
-                    </div>
-                </div>
-
-                <form id="promoPopupSettingsForm">
-                    <div class="index-settings-grid">
-                        <div class="index-settings-card index-promo-card">
-                            <h3>Popup carousel</h3>
-                            <label class="index-promo-toggle" for="promo-popup-enabled">
-                                <span>
-                                    <strong>Enable popup carousel</strong>
-                                    <small>Show image promotions with a "do not show again today" checkbox.</small>
-                                </span>
-                                <input type="checkbox" id="promo-popup-enabled" oninput="updatePromoPopupPreview()">
-                            </label>
-                            <div class="index-promo-fields">
-                                <div class="form-group">
-                                    <label for="promo-popup-title">Popup title / admin label</label>
-                                    <input type="text" id="promo-popup-title" maxlength="90" placeholder="Eden Cafe promotions" oninput="updatePromoPopupPreview()">
-                                </div>
-                                <div class="form-group">
-                                    <label for="promo-popup-display-location">Display location</label>
-                                    <select id="promo-popup-display-location" oninput="updatePromoPopupPreview()">
-                                        <option value="home">Home only</option>
-                                        <option value="profile">Member profile only</option>
-                                        <option value="home_profile">Home + Member profile</option>
-                                        <option value="all_public">All public pages</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label for="promo-popup-audience">Audience</label>
-                                    <select id="promo-popup-audience" oninput="updatePromoPopupPreview()">
-                                        <option value="everyone">Everyone</option>
-                                        <option value="members">Logged-in members</option>
-                                        <option value="guests">Guests only</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="index-promo-toolbar">
-                                <p>Each slide needs an image. Link URL is optional.</p>
-                                <button type="button" class="btn-action btn-view" onclick="addPromoPopupSlide()">Add slide</button>
-                            </div>
-                            <div class="index-promo-slide-list" id="promo-popup-slide-list"></div>
-                            <div class="index-promo-preview" id="promo-popup-preview">
-                                <div class="index-promo-preview-media" id="promo-popup-preview-media"></div>
-                                <div>
-                                    <strong id="promo-popup-preview-title">Popup disabled</strong>
-                                    <span id="promo-popup-preview-detail">Enable the popup and add a slide image to publish it.</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <p class="index-settings-status" id="promo-popup-settings-status"></p>
-                    <div class="index-settings-actions">
-                        <button type="button" class="btn-action" style="background:#789; padding: 10px 24px;" onclick="loadPromoPopupSettings()">ยกเลิก / โหลดใหม่</button>
-                        <button type="submit" class="btn-submit" style="width: auto; padding: 10px 32px; background: var(--accent-color);">บันทึก Promotional Popup</button>
                     </div>
                 </form>
             </div>
@@ -3535,7 +3611,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=admin-repair-20260625-1"></script>
+    <script type="module" src="js/admin.js?v=promo-popup-1"></script>
     <script>
         (function cleanRemovedAdminHash() {
             const rawHash = String(window.location.hash || '').replace(/^#/, '');
@@ -3583,7 +3659,6 @@
             // Update Content
             document.querySelectorAll('.content-section').forEach(sec => sec.classList.remove('active'));
             target.classList.add('active');
-            window.dispatchEvent(new CustomEvent('eden-admin-tab-activated', { detail: { tabId } }));
 
             // Update Title
             if (el) document.getElementById('page-title').innerText = el.dataset.title || el.innerText.split(' ').slice(1).join(' ') || el.innerText;

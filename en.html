@@ -5,24 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Eden Cafe | Nature Cafe &amp; Specialty Coffee in Chiang Rai</title>
     <link rel="icon" type="image/webp" href="Images/Logo.webp">
-    
+
     <!-- SEO Alternate Links -->
     <link rel="alternate" hreflang="th" href="/" />
     <link rel="alternate" hreflang="en" href="/en" />
     <link rel="alternate" hreflang="x-default" href="/" />
-    
+
     <!-- Meta Descriptions for SEO -->
     <meta name="description" content="Visit Eden Cafe in Nang Lae, Mueang Chiang Rai for specialty coffee, food, garden views, and a relaxed nature cafe space. Open daily 09:00-18:00.">
     <link rel="canonical" href="https://edencafe.co/en">
     <meta name="keywords" content="Eden Cafe, Chiang Rai cafe, Nang Lae cafe, specialty coffee Chiang Rai, nature cafe Thailand">
-    
-    <link rel="stylesheet" href="style.css?v=promo-popup-targeting-1">
-    
+
+    <link rel="stylesheet" href="style.css?v=promo-popup-1">
+
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
-    
+
     <!-- GEO & Local SEO: LocalBusiness Schema Markup -->
     <script type="application/ld+json">
     {
@@ -73,25 +73,32 @@
       ]
     }
     </script>
-    
-    <!-- AEO (Answer Engine Optimization): FAQ Schema Markup -->
-    <script type="application/ld+json">
+
+    <!-- AEO (Answer Engine Optimization): About FAQ Schema Markup -->
+    <script type="application/ld+json" id="eden-about-faq-schema">
     {
       "@context": "https://schema.org",
       "@type": "FAQPage",
       "mainEntity": [{
         "@type": "Question",
-        "name": "What is the recommended menu at Eden Cafe?",
+        "name": "Where is Eden Cafe located?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Our highly recommended menu is the Signature Thai Specialty Coffee, made from authentic Arabica beans from Northern Thailand, as well as our premium matcha green tea."
+          "text": "Eden Cafe is located in Nang Lae, Mueang Chiang Rai, Chiang Rai, Thailand. It is a nature cafe and specialty coffee destination."
         }
       }, {
         "@type": "Question",
-        "name": "Is Eden Cafe a good place for remote work?",
+        "name": "What makes Eden Cafe coffee special?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Absolutely! We provide complimentary high-speed Wi-Fi and multiple power outlets in a quiet, minimalist atmosphere perfect for remote working."
+          "text": "The coffee focuses on Thai highland beans and careful roasting to highlight aroma, balance, and the character of Thai specialty coffee."
+        }
+      }, {
+        "@type": "Question",
+        "name": "Who is Eden Cafe good for?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "It is a good fit for visitors looking for a calm Chiang Rai cafe for coffee, work, meeting friends, or relaxing close to nature."
         }
       }]
     }
@@ -133,7 +140,7 @@
                         <ul class="nav-dropdown-menu" aria-label="Booking options">
                             <li><a href="/booking-en?type=room">Meeting Room</a></li>
                             <li><a href="/booking-en?type=table">Table</a></li>
-                            <li><a href="/archery/">Archery</a></li>
+                            <li><a href="/archery/booking">Archery</a></li>
                         </ul>
                     </li>
                     <li><a href="/blog">Blog</a></li>
@@ -162,7 +169,7 @@
         <section id="home" class="hero">
             <div class="hero-content">
                 <h1 data-index-setting="hero-title">Discover the True Taste of Thai Specialty Coffee</h1>
-                <p data-index-setting="hero-subtitle">Welcome to Eden Cafe in Nang Lae, Chiang Rai - a calm nature escape with locally sourced, ethically grown coffee beans roasted with care.</p>
+                <p data-index-setting="hero-subtitle">Welcome to Eden Cafe in Nang Lae, Mueang Chiang Rai - a calm nature escape for locally sourced coffee, food, and garden views.</p>
                         </div>
             <a href="#about" class="scroll-down" aria-label="Scroll to About Section">
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -175,10 +182,71 @@
         <!-- About Section -->
         <section id="about" class="about">
             <div class="container">
-                <h2 data-index-setting="about-title">Our Story: From Thai Mountains to Your Cup</h2>
-                <p data-index-setting="about-body">Eden Cafe was born out of a passion for the art of coffee brewing and supporting Thai farmers. We carefully select coffee beans from the best high-altitude farms in Thailand, roasted with special techniques to achieve a unique flavor. Our minimalist, nature-inspired design offers a true sanctuary for relaxation.</p>
+                <div class="about-hero-content">
+                    <p class="about-eyebrow">Eden Cafe Chiang Rai</p>
+                    <h2 data-index-setting="about-title">Our Story: From Thai Mountains to Your Cup</h2>
+                    <p data-index-setting="about-body">Eden Cafe was born out of a passion for the art of coffee brewing and supporting Thai farmers. We carefully select coffee beans from the best high-altitude farms in Thailand, roasted with special techniques to achieve a unique flavor. Our minimalist, nature-inspired design offers a true sanctuary for relaxation.</p>
+                    <p class="about-subtitle" data-index-about="hero-subtitle">A nature cafe in Nang Lae, Chiang Rai, sharing Thai coffee through highland beans, careful roasting, and a calm space close to nature.</p>
+                </div>
+                <figure class="about-visual">
+                    <img data-index-about-image src="/Hero/Hero.webp" alt="Nature setting at Eden Cafe Chiang Rai with Thai specialty coffee" loading="lazy" decoding="async">
+                </figure>
+                <div class="about-quick-facts" data-index-about="quick-facts">
+                    <article class="about-fact"><span>Location</span><strong>Nang Lae, Mueang Chiang Rai</strong></article>
+                    <article class="about-fact"><span>Coffee</span><strong>Thai highland coffee beans</strong></article>
+                    <article class="about-fact"><span>Atmosphere</span><strong>Minimal, calm, close to nature</strong></article>
+                    <article class="about-fact"><span>Hours</span><strong>Open daily 09:00-18:00</strong></article>
+                </div>
+                <div class="about-story-grid" data-index-about="story-blocks">
+                    <article class="about-story-card">
+                        <h3>Rooted in Thai coffee</h3>
+                        <p>Eden Cafe tells its story through coffee beans grown in Thailand, with attention to quality, freshness, and the character of every cup.</p>
+                    </article>
+                    <article class="about-story-card">
+                        <h3>A calm Chiang Rai escape</h3>
+                        <p>The cafe is designed as a peaceful place to drink coffee, work, meet friends, or slow down in a nature-inspired Chiang Rai setting.</p>
+                    </article>
+                </div>
+                <article class="about-origin" data-index-about="coffee-origin">
+                    <h3>From Thai mountains to your cup</h3>
+                    <p>We focus on Thai highland coffee because cooler growing conditions help develop aroma, natural sweetness, and the layered taste expected from specialty coffee.</p>
+                </article>
+                <div class="about-faq">
+                    <h3>About Eden Cafe FAQ</h3>
+                    <div class="about-faq-list" data-index-about="faq">
+                        <article class="about-faq-item"><details open><summary>Where is Eden Cafe located?</summary><p>Eden Cafe is located in Nang Lae, Mueang Chiang Rai, Chiang Rai, Thailand. It is a nature cafe and specialty coffee destination.</p></details></article>
+                        <article class="about-faq-item"><details><summary>What makes Eden Cafe coffee special?</summary><p>The coffee focuses on Thai highland beans and careful roasting to highlight aroma, balance, and the character of Thai specialty coffee.</p></details></article>
+                        <article class="about-faq-item"><details><summary>Who is Eden Cafe good for?</summary><p>It is a good fit for visitors looking for a calm Chiang Rai cafe for coffee, work, meeting friends, or relaxing close to nature.</p></details></article>
+                    </div>
+                </div>
+                <nav class="about-related" aria-label="Related Eden Cafe links">
+                    <h3>Explore Eden Cafe</h3>
+                    <div class="about-related-grid" data-index-about="related-links">
+                        <a class="about-related-link" href="/menu"><strong>View menu</strong><span>Explore coffee, drinks, and food from Eden Cafe.</span></a>
+                        <a class="about-related-link" href="/booking"><strong>Book a table or room</strong><span>Choose your date, time, and preferred space.</span></a>
+                        <a class="about-related-link" href="/blog/chiang-rai-mountain-coffee"><strong>Chiang Rai mountain coffee</strong><span>Read more about highland coffee from Chiang Rai.</span></a>
+                    </div>
+                </nav>
             </div>
         </section>
+        <script>
+            (() => {
+                try {
+                    const cached = JSON.parse(localStorage.getItem('eden_index_settings_cache_v1') || 'null');
+                    if (!cached) return;
+                    const setText = (selector, value) => {
+                        const element = document.querySelector(selector);
+                        if (element && value) element.textContent = value;
+                    };
+                    setText('[data-index-setting="hero-title"]', cached.heroTitleEn);
+                    setText('[data-index-setting="hero-subtitle"]', cached.heroSubtitleEn);
+                    setText('[data-index-setting="about-title"]', cached.aboutTitleEn);
+                    setText('[data-index-setting="about-body"]', cached.aboutBodyEn);
+                    if (cached.heroImageUrl) document.querySelector('#home.hero')?.style.setProperty('--index-hero-image', `url("${cached.heroImageUrl}")`);
+                    document.documentElement.classList.add('index-settings-cache-applied');
+                } catch (_) {}
+            })();
+        </script>
 
         <!-- Featured products controlled from Eden Admin -->
         <section id="recommended-shop" class="products" style="background-color: var(--light-gray); padding: 80px 0;">
@@ -187,7 +255,7 @@
                     <h2 style="font-size: 2.5rem; margin-bottom: 15px;">Featured Products</h2>
                     <p style="font-size: 1.1rem; color: #555; max-width: 600px; margin: 0 auto;">Delivered straight to your door. The best roasted coffee beans and brewing accessories.</p>
                 </div>
-                
+
                 <div class="shop-grid shop-grid-4 featured-products-loading" aria-live="polite">
                     <div class="shop-card featured-skeleton-card" aria-hidden="true">
                         <div class="featured-skeleton-media"></div>
@@ -327,8 +395,8 @@
                 </div>
             </div>
         </section>
-    
-        
+
+
     </main>
 
     <!-- Footer -->
@@ -441,8 +509,8 @@
             });
         }
     </script>
-    <script type="module" src="js/auth.js?v=promo-popup-targeting-1"></script>
-    <script type="module" src="js/home-featured-products.js?v=shop-unified-2"></script>
+    <script type="module" src="js/auth.js?v=phase5-1"></script>
+    <script type="module" src="js/home-featured-products.js?v=phase4-1"></script>
     <script type="module" src="js/index-settings.js?v=promo-popup-1"></script>
     <!-- Cookie Consent Banner -->
     <div id="cookie-consent"

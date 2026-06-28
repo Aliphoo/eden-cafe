@@ -31,6 +31,10 @@ function resolveFile(urlPath) {
         if (existsSync(cleanHtml)) return cleanHtml;
         if (existsSync(indexHtml)) return indexHtml;
     }
+    if (/^\/blog\/[^/]+\/?$/.test(pathname)) {
+        const blogReader = resolve(root, './blog-post.html');
+        if (existsSync(blogReader)) return blogReader;
+    }
     return direct;
 }
 

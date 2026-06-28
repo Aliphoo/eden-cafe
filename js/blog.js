@@ -472,6 +472,7 @@ function faqHTML(post) {
 function linkPanelHTML(post, related) {
     const links = [
         { label: 'กลับไปหน้าบทความ', href: '/blog' },
+        { label: 'รู้จัก Eden Cafe', href: '/#about' },
         { label: 'ดูเมนู', href: '/menu' },
         { label: 'จองโต๊ะหรือห้องรับรอง', href: '/booking' },
         ...related.map(item => ({ label: item.title, href: blogUrl(item) }))
@@ -547,6 +548,7 @@ function renderCmsDetail(post, posts) {
                     <div class="blog-cta-actions">
                         <a class="btn" href="${escapeHTML(cta.href)}"${externalCta}>${escapeHTML(cta.label)}</a>
                         <a class="btn btn-outline" href="${escapeHTML(cta.secondaryHref)}">${escapeHTML(cta.secondaryLabel)}</a>
+                        <a class="btn btn-outline" href="/#about">รู้จัก Eden Cafe</a>
                     </div>
                 </section>
                 ${faqHTML(post)}

@@ -14,6 +14,35 @@
         "type": 301
       }
     ],
+    "rewrites": [
+      {
+        "source": "/archery",
+        "destination": "/archery.html"
+      },
+      {
+        "source": "/archery/booking",
+        "destination": "/archery/booking.html"
+      },
+      {
+        "source": "/archery/booking/confirm",
+        "destination": "/archery/booking/confirm.html"
+      },
+      {
+        "source": "/blog/**",
+        "destination": "/blog-post.html"
+      },
+      {
+        "source": "/member/profile",
+        "destination": "/profile.html"
+      },
+      {
+        "source": "/admin/archery",
+        "destination": "/admin.html"
+      }
+    ],
+    "predeploy": [
+      "node scripts/deploy-safety-guard.mjs --workflow root-hosting-predeploy --command \"firebase hosting predeploy from repo root\""
+    ],
     "ignore": [
       "firebase.json",
       "firestore.rules",
@@ -24,6 +53,7 @@
       "package-lock.json",
       "*.zip",
       "backups/**",
+      "docs/**",
       "scripts/**",
       "tools/**",
       "check_*.js",
@@ -37,6 +67,7 @@
       "live_index.html",
       "functions/**",
       "eden-pos-apk/**",
+      "admin/**",
       "db_en.js",
       "db_en.json",
       "booking-*.png",
@@ -79,9 +110,27 @@
     ]
   },
   "firestore": {
-    "rules": "firestore.rules"
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
   },
   "functions": {
     "source": "functions"
+  },
+  "emulators": {
+    "auth": {
+      "port": 9099
+    },
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "hosting": {
+      "port": 5000
+    },
+    "ui": {
+      "enabled": false
+    }
   }
 }

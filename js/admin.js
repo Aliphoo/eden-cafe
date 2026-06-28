@@ -1,16 +1,50 @@
 import './page-telemetry.js';
 import { auth, provider, db } from './firebase-config.js';
 import { getMemberTier, getTierBenefits } from './membership.js';
-import { BLOG_POSTS, SITE, getBlogUrl } from './blog-data.mjs';
 import { renderSkeleton } from './ui-skeleton.js';
-import { enhanceAdminFileInputs, runAdminFileOperationFlow, runAdminImageUploadFlow } from './admin-upload-modal.js?v=admin-file-picker-1';
+import { runAdminFileOperationFlow, runAdminImageUploadFlow } from './admin-upload-modal.js';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp, writeBatch, runTransaction, limit, startAfter } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const ADMIN_IMAGE_MAX_FILE_SIZE = 8 * 1024 * 1024;
 const ADMIN_IMAGE_MAX_EDGE = 1800;
 const ADMIN_LAZY_MODULE_VERSION = 'phase5-1';
-let blogCmsAdminModulePromise = null;
+const QUILL_CSS_URL = 'https://cdn.jsdelivr.net/npm/quill@1.3.6/dist/quill.snow.css';
+const QUILL_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/quill@1.3.6/dist/quill.js';
+const QUILL_CSS_INTEGRITY = 'sha384-07UbSXbd8HpaOfxZsiO6Y8H1HTX6v0J96b5qP6PKSpYEuSZSYD4GFFHlLRjvjVrL';
+const QUILL_SCRIPT_INTEGRITY = 'sha384-0zm5QqnR2gL4GY5AwreU3xp5AEGWqkdbamrRLeXwWwepp4JqmPRawLJFD8Cm802W';
+const ADMIN_TABLE_SKELETONS = {
+    'sales-summary-table-body': { cols: 4, rows: 5 },
+    'pos-apk-release-table-body': { cols: 7, rows: 4 },
+    'pos-apk-device-table-body': { cols: 6, rows: 4 },
+    'pos-apk-event-table-body': { cols: 6, rows: 4 },
+    'members-table-body': { cols: 10, rows: 6 },
+    'admin-access-table-body': { cols: 7, rows: 5 },
+    'discount-table-body': { cols: 6, rows: 5 },
+    'loyalty-ledger-body': { cols: 7, rows: 5 },
+    'orders-table-body': { cols: 9, rows: 6 },
+    'bookings-table-body': { cols: 8, rows: 6 },
+    'room-bookings-table-body': { cols: 8, rows: 5 },
+    'archery-bookings-table-body': { cols: 10, rows: 6 },
+    'all-bookings-table-body': { cols: 9, rows: 6 },
+    'tables-table-body': { cols: 7, rows: 6 },
+    'rooms-table-body': { cols: 6, rows: 5 },
+    'products-table-body': { cols: 8, rows: 6 },
+    'categories-table-body': { cols: 4, rows: 5 },
+    'blogs-table-body': { cols: 5, rows: 5 },
+    'faqs-table-body': { cols: 4, rows: 5 }
+};
+const ADMIN_PANEL_SKELETONS = [
+    { id: 'archery-ops-summary', type: 'stats', options: { count: 4 } },
+    { id: 'archery-payment-panel', type: 'summary', options: { rows: 5 } },
+    { id: 'archery-payment-watch', type: 'list', options: { rows: 4 } },
+    { id: 'archery-webhook-events', type: 'list', options: { rows: 4 } },
+    { id: 'archery-reconciliation-panel', type: 'list', options: { rows: 4 } },
+    { id: 'archery-audit-trail', type: 'list', options: { rows: 4 } },
+    { id: 'admin-table-map-preview', type: 'map', options: {} },
+    { id: 'promptpay-account-list', type: 'list', options: { rows: 3 } }
+];
+let adminSkeletonsPrimed = false;
 
 function escapeHTML(value) {
     return String(value ?? '')
@@ -40,41 +74,6 @@ function safeNumber(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
 }
-
-const ADMIN_TABLE_SKELETONS = {
-    'sales-summary-table-body': { cols: 4, rows: 5 },
-    'pos-apk-release-table-body': { cols: 7, rows: 4 },
-    'pos-apk-device-table-body': { cols: 6, rows: 4 },
-    'pos-apk-event-table-body': { cols: 6, rows: 4 },
-    'members-table-body': { cols: 10, rows: 6 },
-    'admin-access-table-body': { cols: 7, rows: 5 },
-    'discount-table-body': { cols: 6, rows: 5 },
-    'loyalty-ledger-body': { cols: 7, rows: 5 },
-    'orders-table-body': { cols: 9, rows: 6 },
-    'bookings-table-body': { cols: 8, rows: 6 },
-    'room-bookings-table-body': { cols: 8, rows: 5 },
-    'archery-bookings-table-body': { cols: 10, rows: 6 },
-    'all-bookings-table-body': { cols: 9, rows: 6 },
-    'tables-table-body': { cols: 7, rows: 6 },
-    'rooms-table-body': { cols: 6, rows: 5 },
-    'products-table-body': { cols: 8, rows: 6 },
-    'categories-table-body': { cols: 4, rows: 5 },
-    'blogs-table-body': { cols: 5, rows: 5 },
-    'faqs-table-body': { cols: 4, rows: 5 }
-};
-
-const ADMIN_PANEL_SKELETONS = [
-    { id: 'archery-ops-summary', type: 'stats', options: { count: 4 } },
-    { id: 'archery-payment-panel', type: 'summary', options: { rows: 5 } },
-    { id: 'archery-payment-watch', type: 'summary', options: { rows: 4 } },
-    { id: 'archery-webhook-events', type: 'list', options: { rows: 4 } },
-    { id: 'archery-reconciliation-panel', type: 'summary', options: { rows: 4 } },
-    { id: 'archery-audit-trail', type: 'list', options: { rows: 4 } },
-    { id: 'admin-table-map-preview', type: 'map', options: {} },
-    { id: 'promptpay-account-list', type: 'list', options: { rows: 3 } }
-];
-
-let adminSkeletonsPrimed = false;
 
 function primeAdminSkeletons() {
     if (adminSkeletonsPrimed) return;
@@ -265,13 +264,14 @@ const ADMIN_PERMISSION_LABELS = {
     marketing: 'Marketing Tools',
     business: 'Business Info',
     index: '\u0e08\u0e31\u0e14\u0e01\u0e32\u0e23 Index',
-    promotions: 'Promotional Popup',
     footer: 'Footer'
 };
 const ADMIN_PERMISSION_HELP = {
     pos: 'อนุญาตให้ล็อกอิน Eden POS APK และซิงค์บิล/ใบเสร็จหน้าร้าน',
-    archery: 'Manage Eden Archery lanes, walk-ins, payments, page settings, and operation logs.',
-    promotions: 'Manage promotional popup carousel, display locations, audiences, images, and optional links.'
+    archery: 'อนุญาตให้จัดการ Archery, walk-in, payment watch และ action หน้างาน'
+};
+const ADMIN_PERMISSION_FALLBACKS = {
+    archery: ['bookings']
 };
 const ADMIN_ROLE_LABELS = {
     owner: 'Owner',
@@ -302,7 +302,6 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
         marketing: false,
         business: false,
         index: false,
-        promotions: false,
         footer: false
     }
 };
@@ -328,15 +327,9 @@ const ADMIN_TAB_PERMISSIONS = {
     promptpay: 'promptpay',
     'business-settings': 'business',
     'index-settings': 'index',
-    'promo-popup-settings': 'promotions',
     'marketing-settings': 'marketing',
     'footer-settings': 'footer'
 };
-const ADMIN_PERMISSION_FALLBACKS = {
-    archery: ['bookings']
-};
-const ADMIN_ARCHERY_BRANCH_DEFAULT = 'BKK_MAIN';
-const ADMIN_ARCHERY_ROLE_VALUES = ['OWNER', 'MANAGER', 'ARCHERY_STAFF', 'CASHIER'];
 
 function normalizeEmail(value) {
     return String(value ?? '').trim().toLowerCase();
@@ -365,18 +358,6 @@ let currentAdminAccess = null;
 let adminAccessData = {};
 let adminAccessUnsubscribe = null;
 let adminAccessFormBound = false;
-
-function publishAdminAccessState() {
-    const access = currentAdminAccess ? {
-        ...currentAdminAccess,
-        permissions: { ...(currentAdminAccess.permissions || {}) },
-        explicit_permissions: { ...(currentAdminAccess.explicit_permissions || {}) }
-    } : null;
-    window.edenAdminAccess = access;
-    window.dispatchEvent(new CustomEvent('eden:admin-access-change', { detail: access }));
-}
-window.edenAdminAccess = null;
-window.getEdenAdminAccess = () => window.edenAdminAccess || null;
 let discountsData = {};
 let discountsUnsubscribe = null;
 let discountFormBound = false;
@@ -386,7 +367,6 @@ let loyaltyConfigUnsubscribe = null;
 let loyaltyLedgerUnsubscribe = null;
 let loyaltyFormsBound = false;
 let dashboardOrdersData = [];
-let dashboardOrdersLoaded = false;
 let dashboardBookingsData = [];
 let dashboardStatsData = {};
 let dashboardPromptPaySettings = null;
@@ -419,6 +399,7 @@ function buildBootstrapOwnerAccess(user) {
         role: 'owner',
         status: 'active',
         permissions: adminRoleDefaults('owner'),
+        rawPermissions: adminRoleDefaults('owner'),
         branch_ids: ['BKK_MAIN'],
         primary_branch_id: 'BKK_MAIN',
         archery_role: 'OWNER',
@@ -451,14 +432,15 @@ async function loadAdminAccess(user) {
 
     if (!ADMIN_ROLE_LABELS[data.role]) return null;
     const role = data.role;
+    const rawPermissions = data.permissions && typeof data.permissions === 'object' ? data.permissions : {};
     return {
         uid: user.uid,
         email: normalizeEmail(data.email || user.email),
         displayName: data.displayName || user.displayName || 'Manager',
         role,
         status: data.status,
-        permissions: { ...adminRoleDefaults(role), ...(data.permissions || {}) },
-        explicit_permissions: data.permissions || {},
+        permissions: { ...adminRoleDefaults(role), ...rawPermissions },
+        rawPermissions,
         branch_ids: Array.isArray(data.branch_ids) ? data.branch_ids.map(String) : [],
         primary_branch_id: data.primary_branch_id || data.branch_id || '',
         archery_role: data.archery_role || data.archeryRole || data.role || '',
@@ -489,14 +471,25 @@ function isOwnerAccess(access = currentAdminAccess) {
     return !!access && access.status === 'active' && access.role === 'owner';
 }
 
+function accessHasPermission(access, permission) {
+    if (!access || access.status !== 'active') return false;
+    if (!permission) return true;
+    if (access.role === 'owner' || access.role === 'head_manager') return true;
+    if (access.role !== 'manager') return false;
+    const rawPermissions = access.rawPermissions && typeof access.rawPermissions === 'object'
+        ? access.rawPermissions
+        : (access.permissions || {});
+    if (Object.prototype.hasOwnProperty.call(rawPermissions, permission)) {
+        return rawPermissions[permission] === true;
+    }
+    if (access.permissions?.[permission] === true) return true;
+    return (ADMIN_PERMISSION_FALLBACKS[permission] || []).some(fallback => access.permissions?.[fallback] === true);
+}
+
 function canAdmin(permission) {
     if (!currentAdminAccess || currentAdminAccess.status !== 'active') return false;
-    if (currentAdminAccess.role === 'owner') return true;
     if (permission === 'adminAccess') return false;
-    if (currentAdminAccess.role === 'head_manager') return true;
-    if (currentAdminAccess.permissions?.[permission] === true) return true;
-    if (Object.prototype.hasOwnProperty.call(currentAdminAccess.explicit_permissions || {}, permission)) return false;
-    return (ADMIN_PERMISSION_FALLBACKS[permission] || []).some(fallback => currentAdminAccess.permissions?.[fallback] === true);
+    return accessHasPermission(currentAdminAccess, permission);
 }
 
 window.canAccessAdminTab = (tabId) => {
@@ -536,30 +529,24 @@ let memberSummariesUnsubscribe = null;
 let memberOrdersMetricsUnsubscribe = null;
 let memberBookingsMetricsUnsubscribe = null;
 let ordersUnsubscribe = null;
-let ordersData = [];
 let ordersLoadTimer = null;
+let ordersControlsMounted = false;
+let ordersControlsBound = false;
+let ordersStylesMounted = false;
 let ordersPageCursors = [];
-let ordersFiltersBound = false;
-let ordersStyleMounted = false;
-const ORDERS_PRO_VIEW_VERSION = 'orders-pro-view-4';
 const ORDERS_LOAD_TIMEOUT_MS = 15000;
 const ORDERS_PAGE_SIZE_OPTIONS = [25, 50, 100];
-const ordersFilterState = {
-    datePreset: 'today',
+const ordersQueryState = {
+    preset: 'today',
     startKey: adminTodayISO(),
     endKey: adminTodayISO(),
     pageIndex: 0,
     pageSize: 50,
     hasNext: false,
     loadedCount: 0,
-    loadStatus: 'idle',
-    lastError: '',
-    source: 'all',
-    status: 'all',
-    payment: 'all',
-    category: 'all',
-    search: '',
-    view: 'orders'
+    totalHint: '',
+    status: 'idle',
+    lastError: ''
 };
 let bookingsUnsubscribe = null;
 let archeryBookingsUnsubscribe = null;
@@ -592,6 +579,14 @@ let lastMemberAuthMergeResult = null;
 let salesSummaryChart = null;
 
 const ADMIN_ACTIVE_TAB_STORAGE_KEY = 'edenAdminActiveTab';
+const initializedAdminTabs = new Set();
+let adminModulesInitialized = false;
+let adminTabHookInstalled = false;
+let adminTabHookTimer = null;
+let adminRestoreTabAttempts = 0;
+let blogCmsAdminModulePromise = null;
+let quillLoadPromise = null;
+let blogSeedDataModulePromise = null;
 
 
 const MENU_LOCATION_NAME = 'EDEN CAFE AND ETHNIC RESTAURANT.Co.,Ltd';
@@ -781,7 +776,7 @@ function normalizeMenuTemplateRow(row) {
         showOnPos: parseMenuBoolean(row[MENU_SHOW_POS_COLUMN] ?? row.showOnPos, true),
         showOnWebsite: parseMenuBoolean(row[MENU_SHOW_WEBSITE_COLUMN] ?? row.showOnWebsite, true),
         showInShop: parseMenuBoolean(row[MENU_SHOW_SHOP_COLUMN] ?? row.showInShop, false),
-        showOnIndex: parseMenuBoolean(row[MENU_SHOW_INDEX_COLUMN] ?? row.showOnIndex ?? row.isFeatured, false),
+        showOnIndex: parseMenuBoolean(row[MENU_SHOW_INDEX_COLUMN] ?? row.showOnIndex, false),
         price,
         stock,
         lowStock,
@@ -798,8 +793,6 @@ function normalizeMenuTemplateRow(row) {
     if (includedQty !== undefined) normalized.includedItemQuantity = includedQty;
     if (row.imageUrl || row.Image || row.image) normalized.imageUrl = cleanMenuCell(row.imageUrl ?? row.Image ?? row.image);
     if (row.isSignature !== undefined) normalized.isSignature = parseMenuBoolean(row.isSignature);
-    normalized.isFeatured = normalized.showOnIndex;
-
     Object.keys(normalized).forEach((key) => {
         if (normalized[key] === undefined || normalized[key] === '') delete normalized[key];
         if (Array.isArray(normalized[key]) && !normalized[key].length) delete normalized[key];
@@ -841,7 +834,7 @@ function menuProductToTemplateRow(product = {}) {
         [MENU_SHOW_POS_COLUMN]: boolToMenuText(product.showOnPos),
         [MENU_SHOW_WEBSITE_COLUMN]: boolToMenuText(product.showOnWebsite),
         [MENU_SHOW_SHOP_COLUMN]: boolToMenuText(product.showInShop),
-        [MENU_SHOW_INDEX_COLUMN]: boolToMenuText(product.showOnIndex === true || product.isFeatured === true),
+        [MENU_SHOW_INDEX_COLUMN]: boolToMenuText(product.showOnIndex === true),
         Color: product.color || '',
         Shape: product.shape || '',
         [MENU_VARIANTS_COLUMN]: variants.length ? JSON.stringify(variants) : ''
@@ -854,7 +847,7 @@ const XLSX_CATEGORY_CONFIG = {
         collection: 'products',
         permission: 'products',
         numberFields: ['price', 'order', 'cost', 'stock', 'lowStock', 'includedItemQuantity', 'taxRate'],
-        booleanFields: ['isSignature', 'isFeatured', 'soldByWeight', 'trackStock', 'availableForSale', 'taxEnabled', 'showOnPos', 'showOnWebsite', 'showInShop', 'showOnIndex'],
+        booleanFields: ['isSignature', 'soldByWeight', 'trackStock', 'availableForSale', 'taxEnabled', 'showOnPos', 'showOnWebsite', 'showInShop', 'showOnIndex'],
         arrayFields: [],
         template: MENU_TEMPLATE_ROW,
         importRow: normalizeMenuTemplateRow,
@@ -1080,7 +1073,6 @@ function initXLSXTools() {
             });
             alert(`อัปโหลดสำเร็จ รวม ${result.total} รายการ (เพิ่ม ${result.created}, อัปเดต ${result.updated})`);
             fileInput.value = '';
-            enhanceAdminFileInputs();
         } catch (error) {
             alert(safeAdminError("อัปโหลดไม่สำเร็จ"));
         } finally {
@@ -1102,7 +1094,6 @@ const loginError = document.getElementById('login-error');
 
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
-    enhanceAdminFileInputs();
     bindSalesReportNav();
     renderDashboardSalesReport();
 
@@ -1120,7 +1111,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (user) {
             const authEmails = getAuthEmails(user);
             currentAdminAccess = await loadAdminAccess(user);
-            publishAdminAccessState();
 
             if (!currentAdminAccess) {
                 // Not an admin
@@ -1144,7 +1134,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             // User is logged out
             currentAdminAccess = null;
-            publishAdminAccessState();
             loginScreen.style.display = 'flex';
         }
     });
@@ -1208,42 +1197,14 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function initializeAdminModules() {
-    if (canAdmin('dashboard')) {
-        bindDashboardFilters();
-        fetchStats();
-        bindSalesReportNav();
-        renderDashboardSalesReport();
-        if (!categoriesUnsubscribe) setupRealtimeCategories();
-    }
-    if (canAdmin('orders') || canAdmin('pos')) setupRealtimeOrders();
-    const hasBookingAccess = canAdmin('bookings');
-    const hasArcheryAccess = canAdmin('archery');
-    if (hasBookingAccess) {
-        bindAllBookingsControls();
-        setupRealtimeBookings();
-    }
-    if (hasArcheryAccess) {
-        bindArcheryAdminControls();
-        setupRealtimeArcheryAdminData();
-    }
-    if (canAdmin('products')) {
-        setupRealtimeCategories();
-        setupRealtimeProducts();
-        initLoyverseImportTool();
-    }
-    if (canAdmin('tables')) setupRealtimeTables();
-    if (canAdmin('rooms')) setupRealtimeRooms();
-    if (canAdmin('members') || canAdmin('loyalty')) setupRealtimeMembers();
-    if (canAdmin('discounts')) setupRealtimeDiscounts();
-    if (canAdmin('loyalty')) setupRealtimeLoyalty();
-    if (canAdmin('pos')) setupRealtimePosApkUpdates();
-    if (canAdmin('promptpay') && typeof window.loadPromptPaySettings === 'function') window.loadPromptPaySettings();
-    if (canAdmin('index') && typeof window.loadIndexSettings === 'function') window.loadIndexSettings();
-    if (canAdmin('promotions') && typeof window.loadPromoPopupSettings === 'function') window.loadPromoPopupSettings();
-    if (canAdmin('marketing') && typeof window.loadMarketingSettings === 'function') window.loadMarketingSettings();
-    if (isOwnerAccess()) setupRealtimeAdminAccess();
+    if (adminModulesInitialized) return;
+    adminModulesInitialized = true;
+    installAdminTabSwitchHook();
     initXLSXTools();
     installAdminRefreshButtons();
+    restoreAdminActiveTab();
+    const activeTabId = getActiveAdminTabId();
+    if (activeTabId) initAdminTab(activeTabId);
     // Keep production data stable: run seed/migration manually from console only.
     // window.migrateProducts() remains available for first-time setup.
 }
@@ -1276,6 +1237,35 @@ function dispatchAdminTabActivated(tabId) {
     } catch (error) {
         console.warn('Unable to dispatch admin tab event:', error);
     }
+}
+
+async function loadBlogCmsAdminModule(options = {}) {
+    const root = document.getElementById('blog-cms-admin-root');
+    if (!root) return null;
+    if (!blogCmsAdminModulePromise) {
+        root.innerHTML = '<div class="blog-cms-admin-loading">Loading Blog CMS module...</div>';
+        blogCmsAdminModulePromise = import(`./blog-cms-admin.js?v=${ADMIN_LAZY_MODULE_VERSION}`)
+            .then(module => {
+                window.EdenTelemetry?.report?.('admin_lazy_module_loaded', { label: 'blog-cms-admin' });
+                return module;
+            })
+            .catch(error => {
+                blogCmsAdminModulePromise = null;
+                root.innerHTML = '<div class="blog-cms-alert error">Blog CMS module failed to load. Please refresh and try again.</div>';
+                window.EdenTelemetry?.report?.('admin_lazy_module_error', {
+                    label: 'blog-cms-admin',
+                    message: error.message || String(error)
+                });
+                throw error;
+            });
+    }
+    const module = await blogCmsAdminModulePromise;
+    if (typeof module.initBlogCmsAdmin === 'function') {
+        await module.initBlogCmsAdmin({ forceRefresh: options.forceRefresh === true });
+    } else if (typeof window.fetchBlogsFromCloud === 'function') {
+        await window.fetchBlogsFromCloud();
+    }
+    return module;
 }
 
 function installAdminTabSwitchHook() {
@@ -1390,9 +1380,6 @@ function initAdminTab(tabId, options = {}) {
         case 'index-settings':
             if (typeof window.loadIndexSettings === 'function') window.loadIndexSettings();
             break;
-        case 'promo-popup-settings':
-            if (typeof window.loadPromoPopupSettings === 'function') window.loadPromoPopupSettings();
-            break;
         case 'marketing-settings':
             if (typeof window.loadMarketingSettings === 'function') window.loadMarketingSettings();
             break;
@@ -1439,6 +1426,16 @@ function getPreferredAdminTabId() {
 }
 
 function restoreAdminActiveTab() {
+    if (typeof window.switchTab !== 'function') {
+        installAdminTabSwitchHook();
+        adminRestoreTabAttempts += 1;
+        if (adminRestoreTabAttempts <= 40) {
+            window.setTimeout(restoreAdminActiveTab, 75);
+        }
+        return;
+    }
+    adminRestoreTabAttempts = 0;
+
     const preferredTab = getPreferredAdminTabId();
     if (preferredTab && window.canAccessAdminTab(preferredTab)) {
         const preferredMenu = adminMenuItemForTab(preferredTab);
@@ -1479,41 +1476,6 @@ function installAdminRefreshButtons() {
         toolbar.appendChild(button);
     });
 }
-
-async function loadBlogCmsAdminModule(options = {}) {
-    const root = document.getElementById('blog-cms-admin-root');
-    if (root && !root.querySelector('.blog-cms-topbar')) {
-        root.innerHTML = '<div class="blog-cms-admin-loading">Loading Blog CMS module...</div>';
-    }
-    if (!blogCmsAdminModulePromise) {
-        blogCmsAdminModulePromise = import(`./blog-cms-admin.js?v=${ADMIN_LAZY_MODULE_VERSION}`)
-            .then(module => {
-                window.EdenTelemetry?.report?.('admin_lazy_module_loaded', { label: 'blog-cms-admin' });
-                return module;
-            })
-            .catch(error => {
-                blogCmsAdminModulePromise = null;
-                window.EdenTelemetry?.report?.('admin_lazy_module_error', {
-                    label: 'blog-cms-admin',
-                    message: error?.message || String(error)
-                });
-                throw error;
-            });
-    }
-    const module = await blogCmsAdminModulePromise;
-    if (typeof module.initBlogCmsAdmin === 'function') {
-        await module.initBlogCmsAdmin(options);
-    } else if (typeof window.fetchBlogsFromCloud === 'function') {
-        await window.fetchBlogsFromCloud();
-    }
-    return module;
-}
-
-window.addEventListener('eden-admin-tab-activated', event => {
-    if (event.detail?.tabId === 'blogs') {
-        loadBlogCmsAdminModule().catch(error => console.error('Unable to load Blog CMS admin module:', error));
-    }
-});
 
 window.refreshAdminSection = async (tabId, button = null) => {
     if (!tabId) return;
@@ -1586,9 +1548,6 @@ window.refreshAdminSection = async (tabId, button = null) => {
                 break;
             case 'index-settings':
                 if (typeof window.loadIndexSettings === 'function') await window.loadIndexSettings();
-                break;
-            case 'promo-popup-settings':
-                if (typeof window.loadPromoPopupSettings === 'function') await window.loadPromoPopupSettings();
                 break;
             case 'marketing-settings':
                 if (typeof window.loadMarketingSettings === 'function') await window.loadMarketingSettings();
@@ -1669,7 +1628,7 @@ async function refreshDiscountsOnce() {
         discountsData[docSnap.id] = normalizeDiscountOption(docSnap.id, docSnap.data() || {});
     });
     renderDiscountsTable();
-    renderDashboardSalesReport();
+    scheduleDashboardRender();
 }
 
 function setupRealtimeDiscounts() {
@@ -1681,7 +1640,7 @@ function setupRealtimeDiscounts() {
             discountsData[docSnap.id] = normalizeDiscountOption(docSnap.id, docSnap.data() || {});
         });
         renderDiscountsTable();
-        renderDashboardSalesReport();
+        scheduleDashboardRender();
     }, error => {
         console.error('Error listening to POS discounts:', error);
         const body = document.getElementById('discount-table-body');
@@ -2053,7 +2012,7 @@ function renderLoyaltySummary() {
     setText('loyalty-stat-liability', loyaltyCurrency(totalPoints * config.pointValue));
     setText('loyalty-stat-members', membersWithPoints.toLocaleString('th-TH'));
     setText('loyalty-stat-ledger', loyaltyLedgerData.length.toLocaleString('th-TH'));
-    renderDashboardSalesReport();
+    scheduleDashboardRender();
 }
 
 function renderLoyaltyLedgerTable() {
@@ -2253,6 +2212,8 @@ function initLoyverseImportTool() {
 }
 
 function applyAdminAccessUI() {
+    installAdminTabSwitchHook();
+
     document.querySelectorAll('.sidebar-menu li').forEach(li => {
         const match = String(li.getAttribute('onclick') || '').match(/switchTab\('([^']+)'/);
         const tabId = match ? match[1] : '';
@@ -2305,7 +2266,7 @@ async function fetchStats() {
                 discountsData[docSnap.id] = normalizeDiscountOption(docSnap.id, docSnap.data() || {});
             });
         }
-        renderDashboardSalesReport();
+        scheduleDashboardRender();
     } catch (e) {
         console.error("Error fetching stats:", e);
     }
@@ -2620,14 +2581,13 @@ function setDashboardDatePreset(preset = 'today') {
 
 function setDashboardCustomDateBoundary(boundary, value) {
     const filters = ensureDashboardFilters();
-    const nextValue = value || (boundary === 'end' ? filters.endKey : filters.startKey);
     filters.datePreset = 'custom';
-    if (boundary === 'end') {
-        filters.endKey = nextValue;
-        if (filters.startKey > filters.endKey) filters.startKey = filters.endKey;
-    } else {
-        filters.startKey = nextValue;
+    if (boundary === 'start') {
+        filters.startKey = value || filters.startKey;
         if (filters.startKey > filters.endKey) filters.endKey = filters.startKey;
+    } else {
+        filters.endKey = value || filters.endKey;
+        if (filters.startKey > filters.endKey) filters.startKey = filters.endKey;
     }
     renderDashboardAfterFilterChange();
 }
@@ -2662,10 +2622,18 @@ function bindDashboardFilters() {
         const button = event.target.closest('[data-dashboard-source]');
         if (button) setDashboardSource(button.dataset.dashboardSource);
     });
-    document.getElementById('dashboard-start-date')?.addEventListener('change', event => setDashboardCustomDateBoundary('start', event.target.value));
-    document.getElementById('dashboard-end-date')?.addEventListener('change', event => setDashboardCustomDateBoundary('end', event.target.value));
-    document.getElementById('sales-report-start-date')?.addEventListener('change', event => setDashboardCustomDateBoundary('start', event.target.value));
-    document.getElementById('sales-report-end-date')?.addEventListener('change', event => setDashboardCustomDateBoundary('end', event.target.value));
+    document.getElementById('dashboard-start-date')?.addEventListener('change', event => {
+        setDashboardCustomDateBoundary('start', event.target.value);
+    });
+    document.getElementById('dashboard-end-date')?.addEventListener('change', event => {
+        setDashboardCustomDateBoundary('end', event.target.value);
+    });
+    document.getElementById('sales-report-start-date')?.addEventListener('change', event => {
+        setDashboardCustomDateBoundary('start', event.target.value);
+    });
+    document.getElementById('sales-report-end-date')?.addEventListener('change', event => {
+        setDashboardCustomDateBoundary('end', event.target.value);
+    });
     document.getElementById('dashboard-time-start')?.addEventListener('change', event => {
         const filters = ensureDashboardFilters();
         filters.timePreset = 'custom';
@@ -2841,10 +2809,6 @@ function itemReportCost(item = {}) {
     return safeNumber(item.cost) * quantity;
 }
 
-function itemReportQuantity(item = {}) {
-    return Math.max(0, safeNumber(item.quantity, 1));
-}
-
 function orderReportCost(order = {}) {
     return orderReportItems(order).reduce((sum, item) => sum + itemReportCost(item), 0);
 }
@@ -2988,381 +2952,6 @@ function buildDashboardSalesReportRows(type, orders = dashboardRevenueOrders()) 
     return sortedSalesReportGroups(groups);
 }
 
-function salesReportSku(item = {}) {
-    return item.sku || item.variantSku || item.productSku || '';
-}
-
-function salesReportOptionLabel(item = {}) {
-    return item.variantName || item.optionName || item.optionLabel || item.modifierName || '';
-}
-
-function salesReportItemName(item = {}) {
-    return [orderItemName(item), salesReportOptionLabel(item)].filter(Boolean).join(' - ');
-}
-
-function salesReportAllocatedAmount(total, itemAmount, allItemsAmount, itemCount = 1) {
-    const safeTotal = safeNumber(total);
-    if (!safeTotal) return 0;
-    if (allItemsAmount > 0) return safeTotal * (safeNumber(itemAmount) / allItemsAmount);
-    return safeTotal / Math.max(1, itemCount);
-}
-
-function salesReportProductRows(orders = dashboardRevenueOrders()) {
-    const groups = new Map();
-    orders.forEach(order => {
-        orderReportItems(order).forEach(item => {
-            const product = orderItemName(item);
-            const option = salesReportOptionLabel(item);
-            const sku = salesReportSku(item);
-            const key = [product, option, sku].join('||');
-            const current = groups.get(key) || { product, option, sku, quantity: 0, sales: 0, cost: 0, profit: 0 };
-            const amount = itemReportAmount(item);
-            const cost = itemReportCost(item);
-            current.quantity += itemReportQuantity(item);
-            current.sales += amount;
-            current.cost += cost;
-            current.profit += amount - cost;
-            groups.set(key, current);
-        });
-    });
-    return Array.from(groups.values()).sort((a, b) => (b.sales - a.sales) || String(a.product).localeCompare(String(b.product), 'th'));
-}
-
-function salesReportCategoryRows(orders = dashboardRevenueOrders(), refundOrders = dashboardRefundOrders()) {
-    const groups = new Map();
-
-    const ensureRow = (item = {}) => {
-        const name = salesReportItemName(item) || 'ไม่ระบุสินค้า';
-        const sku = salesReportSku(item);
-        const category = orderItemCategoryLabel(item);
-        const key = [name, sku, category].join('||');
-        const current = groups.get(key) || {
-            itemName: name,
-            sku,
-            category,
-            soldQuantity: 0,
-            gross: 0,
-            returnedQuantity: 0,
-            refunds: 0,
-            discounts: 0,
-            net: 0,
-            cost: 0,
-            profit: 0,
-            margin: 0,
-            tax: 0
-        };
-        groups.set(key, current);
-        return current;
-    };
-
-    orders.forEach(order => {
-        const items = orderReportItems(order);
-        const itemGrossTotal = items.reduce((sum, item) => sum + itemReportAmount(item), 0);
-        const itemDiscountTotal = items.reduce((sum, item) => sum + safeNumber(item.lineDiscount ?? item.discount), 0);
-        const discountPool = orderReportDiscount(order) || itemDiscountTotal;
-        const taxPool = orderReportTax(order);
-        items.forEach(item => {
-            const row = ensureRow(item);
-            const gross = itemReportAmount(item);
-            const cost = itemReportCost(item);
-            const discount = discountPool
-                ? salesReportAllocatedAmount(discountPool, gross, itemGrossTotal, items.length)
-                : safeNumber(item.lineDiscount ?? item.discount);
-            const tax = salesReportAllocatedAmount(taxPool, gross, itemGrossTotal, items.length);
-            row.soldQuantity += itemReportQuantity(item);
-            row.gross += gross;
-            row.discounts += discount;
-            row.net += gross - discount;
-            row.cost += cost;
-            row.tax += tax;
-        });
-    });
-
-    refundOrders.forEach(order => {
-        const items = orderReportItems(order);
-        const itemGrossTotal = items.reduce((sum, item) => sum + itemReportAmount(item), 0);
-        const refundPool = orderReportTotal(order);
-        items.forEach(item => {
-            const row = ensureRow(item);
-            const gross = itemReportAmount(item);
-            const refund = salesReportAllocatedAmount(refundPool || gross, gross, itemGrossTotal, items.length);
-            row.returnedQuantity += itemReportQuantity(item);
-            row.refunds += refund;
-            row.net -= refund;
-            row.cost -= itemReportCost(item);
-        });
-    });
-
-    groups.forEach(row => {
-        row.profit = row.net - row.cost;
-        row.margin = row.net > 0 ? Number(((row.profit / row.net) * 100).toFixed(2)) : 0;
-    });
-
-    return Array.from(groups.values()).sort((a, b) => {
-        const categorySort = String(a.category).localeCompare(String(b.category), 'th');
-        return categorySort || (b.net - a.net) || String(a.itemName).localeCompare(String(b.itemName), 'th');
-    });
-}
-
-function salesReportStaffRows(orders = dashboardRevenueOrders()) {
-    const groups = new Map();
-    orders.forEach(order => {
-        const key = salesReportEmployeeKey(order);
-        const current = groups.get(key) || { staff: salesReportEmployeeName(order), receiptCount: 0, sales: 0 };
-        current.receiptCount += 1;
-        current.sales += orderReportTotal(order);
-        groups.set(key, current);
-    });
-    return Array.from(groups.values()).sort((a, b) => (b.sales - a.sales) || String(a.staff).localeCompare(String(b.staff), 'th'));
-}
-
-function salesReportPaymentRows(orders = dashboardRevenueOrders()) {
-    const groups = new Map();
-    orders.forEach(order => {
-        const method = order.paymentLabel || salesReportPaymentLabel(order.paymentMethod);
-        const current = groups.get(method) || { method, receiptCount: 0, sales: 0 };
-        current.receiptCount += 1;
-        current.sales += orderReportTotal(order);
-        groups.set(method, current);
-    });
-    return Array.from(groups.values()).sort((a, b) => (b.sales - a.sales) || String(a.method).localeCompare(String(b.method), 'th'));
-}
-
-function salesReportReceiptDetailRows(orders = dashboardRevenueOrders()) {
-    return orders
-        .slice()
-        .sort((a, b) => orderReportDateValue(b) - orderReportDateValue(a))
-        .map(order => ({
-            receiptNo: salesReportReceiptNo(order),
-            date: salesReportOrderDateText(order),
-            customer: order.customerName || order.name || 'Walk-in Customer',
-            staff: salesReportEmployeeName(order),
-            payment: order.paymentLabel || salesReportPaymentLabel(order.paymentMethod),
-            gross: orderReportGross(order),
-            discount: orderReportDiscount(order),
-            tax: orderReportTax(order),
-            net: orderReportTotal(order)
-        }));
-}
-
-function salesReportOptionRows(orders = dashboardRevenueOrders()) {
-    const groups = new Map();
-    orders.forEach(order => {
-        orderReportItems(order).forEach(item => {
-            const option = salesReportOptionLabel(item) || 'ไม่มีตัวเลือกเพิ่มเติม';
-            const current = groups.get(option) || { option, quantity: 0, sales: 0 };
-            current.quantity += Math.max(0, safeNumber(item.quantity, 1));
-            current.sales += itemReportAmount(item);
-            groups.set(option, current);
-        });
-    });
-    return Array.from(groups.values()).sort((a, b) => (b.sales - a.sales) || String(a.option).localeCompare(String(b.option), 'th'));
-}
-
-function salesReportDiscountRows(orders = dashboardRevenueOrders()) {
-    const groups = new Map();
-    orders.forEach(order => {
-        const discountAmount = orderReportDiscount(order);
-        if (!discountAmount) return;
-        const discount = order.totals?.discountLabel || order.discountLabel || 'ส่วนลดหน้าร้าน';
-        const current = groups.get(discount) || { discount, useCount: 0, discountAmount: 0 };
-        current.useCount += 1;
-        current.discountAmount += discountAmount;
-        groups.set(discount, current);
-    });
-    return Array.from(groups.values()).sort((a, b) => (b.discountAmount - a.discountAmount) || String(a.discount).localeCompare(String(b.discount), 'th'));
-}
-
-function salesReportTaxRows(orders = dashboardRevenueOrders()) {
-    return orders
-        .slice()
-        .sort((a, b) => orderReportDateValue(b) - orderReportDateValue(a))
-        .map(order => {
-            const tax = orderReportTax(order);
-            return {
-                receiptDate: [salesReportReceiptNo(order), salesReportOrderDateText(order)].filter(Boolean).join(' / '),
-                taxBase: Math.max(0, orderReportTotal(order) - tax),
-                tax
-            };
-        })
-        .filter(row => row.tax > 0);
-}
-
-const SALES_REPORT_DEFINITIONS = {
-    summary: {
-        label: SALES_REPORT_LABELS.summary,
-        sheetName: 'summary',
-        filenameKey: 'summary',
-        labelKey: 'date',
-        amountKey: 'net',
-        showTotal: false,
-        columns: [
-            { key: 'date', label: 'วันที่', type: 'text' },
-            { key: 'gross', label: 'ยอดขาย', type: 'money', total: 'sum' },
-            { key: 'refunds', label: 'คืนเงิน', type: 'money', total: 'sum' },
-            { key: 'discounts', label: 'ส่วนลด', type: 'money', total: 'sum' },
-            { key: 'net', label: 'ยอดขายสุทธิ', type: 'money', total: 'sum' },
-            { key: 'cost', label: 'ต้นทุนของสินค้า', type: 'money', total: 'sum' },
-            { key: 'profit', label: 'กำไรรวม', type: 'money', total: 'sum' },
-            { key: 'margin', label: 'ผลต่าง (%)', type: 'percent' },
-            { key: 'tax', label: 'ภาษี', type: 'money', total: 'sum' }
-        ],
-        buildRows: () => buildDailySalesRows().map(row => ({
-            date: salesReportDateLabel(row.date),
-            gross: row.gross,
-            refunds: row.refunds,
-            discounts: row.discounts,
-            net: row.net,
-            cost: row.cost,
-            profit: row.profit,
-            margin: Number(row.margin.toFixed(2)),
-            tax: row.tax
-        }))
-    },
-    product: {
-        label: SALES_REPORT_LABELS.product,
-        sheetName: 'products',
-        filenameKey: 'product',
-        labelKey: 'product',
-        amountKey: 'sales',
-        columns: [
-            { key: 'product', label: 'สินค้า', type: 'text' },
-            { key: 'option', label: 'ตัวเลือก', type: 'text' },
-            { key: 'sku', label: 'SKU', type: 'text' },
-            { key: 'quantity', label: 'จำนวน', type: 'number', total: 'sum' },
-            { key: 'sales', label: 'ยอดขาย', type: 'money', total: 'sum' },
-            { key: 'cost', label: 'ต้นทุน', type: 'money', total: 'sum' },
-            { key: 'profit', label: 'กำไร', type: 'money', total: 'sum' }
-        ],
-        buildRows: () => salesReportProductRows()
-    },
-    category: {
-        label: SALES_REPORT_LABELS.category,
-        sheetName: 'categories',
-        filenameKey: 'category',
-        labelKey: 'itemName',
-        amountKey: 'net',
-        totalLabel: 'ยอดขายรวม',
-        columns: [
-            { key: 'itemName', label: 'รายการ', type: 'text' },
-            { key: 'sku', label: 'รหัสSKUสินค้า', type: 'text' },
-            { key: 'category', label: 'ประเภท', type: 'text' },
-            { key: 'soldQuantity', label: 'สินค้าที่ขาย', type: 'number', total: 'sum' },
-            { key: 'gross', label: 'ยอดขายรวม', type: 'money', total: 'sum' },
-            { key: 'returnedQuantity', label: 'สินค้าที่รับคืน', type: 'number', total: 'sum' },
-            { key: 'refunds', label: 'คืนเงิน', type: 'money', total: 'sum' },
-            { key: 'discounts', label: 'ส่วนลด', type: 'money', total: 'sum' },
-            { key: 'net', label: 'ยอดขายสุทธิ', type: 'money', total: 'sum' },
-            { key: 'cost', label: 'ต้นทุนของสินค้า', type: 'money', total: 'sum' },
-            { key: 'profit', label: 'กำไรรวม', type: 'money', total: 'sum' },
-            { key: 'margin', label: 'กำไร', type: 'percent' },
-            { key: 'tax', label: 'ภาษี', type: 'money', total: 'sum' }
-        ],
-        buildRows: () => salesReportCategoryRows()
-    },
-    staff: {
-        label: SALES_REPORT_LABELS.staff,
-        sheetName: 'staff',
-        filenameKey: 'staff',
-        labelKey: 'staff',
-        amountKey: 'sales',
-        columns: [
-            { key: 'staff', label: 'พนักงาน', type: 'text' },
-            { key: 'receiptCount', label: 'จำนวนใบเสร็จ', type: 'number', total: 'sum' },
-            { key: 'sales', label: 'ยอดขาย', type: 'money', total: 'sum' }
-        ],
-        buildRows: () => salesReportStaffRows()
-    },
-    payment: {
-        label: SALES_REPORT_LABELS.payment,
-        sheetName: 'payments',
-        filenameKey: 'payment',
-        labelKey: 'method',
-        amountKey: 'sales',
-        columns: [
-            { key: 'method', label: 'วิธีชำระเงิน', type: 'text' },
-            { key: 'receiptCount', label: 'จำนวนใบเสร็จ', type: 'number', total: 'sum' },
-            { key: 'sales', label: 'ยอดขาย', type: 'money', total: 'sum' }
-        ],
-        buildRows: () => salesReportPaymentRows()
-    },
-    receipts: {
-        label: SALES_REPORT_LABELS.receipts,
-        sheetName: 'receipts',
-        filenameKey: 'receipts',
-        labelKey: 'receiptNo',
-        amountKey: 'net',
-        columns: [
-            { key: 'receiptNo', label: 'เลขที่ใบเสร็จ', type: 'text' },
-            { key: 'date', label: 'วันที่', type: 'text' },
-            { key: 'customer', label: 'ลูกค้า', type: 'text' },
-            { key: 'staff', label: 'พนักงาน', type: 'text' },
-            { key: 'payment', label: 'วิธีชำระเงิน', type: 'text' },
-            { key: 'gross', label: 'ยอดก่อนส่วนลด', type: 'money', total: 'sum' },
-            { key: 'discount', label: 'ส่วนลด', type: 'money', total: 'sum' },
-            { key: 'tax', label: 'ภาษี', type: 'money', total: 'sum' },
-            { key: 'net', label: 'ยอดสุทธิ', type: 'money', total: 'sum' }
-        ],
-        buildRows: () => salesReportReceiptDetailRows()
-    },
-    options: {
-        label: SALES_REPORT_LABELS.options,
-        sheetName: 'options',
-        filenameKey: 'options',
-        labelKey: 'option',
-        amountKey: 'sales',
-        columns: [
-            { key: 'option', label: 'ตัวเลือกเพิ่มเติม', type: 'text' },
-            { key: 'quantity', label: 'จำนวน', type: 'number', total: 'sum' },
-            { key: 'sales', label: 'ยอดขาย', type: 'money', total: 'sum' }
-        ],
-        buildRows: () => salesReportOptionRows()
-    },
-    discounts: {
-        label: SALES_REPORT_LABELS.discounts,
-        sheetName: 'discounts',
-        filenameKey: 'discounts',
-        labelKey: 'discount',
-        amountKey: 'discountAmount',
-        columns: [
-            { key: 'discount', label: 'ชื่อส่วนลด', type: 'text' },
-            { key: 'useCount', label: 'จำนวนครั้ง', type: 'number', total: 'sum' },
-            { key: 'discountAmount', label: 'ยอดส่วนลด', type: 'money', total: 'sum' }
-        ],
-        buildRows: () => salesReportDiscountRows()
-    },
-    taxes: {
-        label: SALES_REPORT_LABELS.taxes,
-        sheetName: 'taxes',
-        filenameKey: 'taxes',
-        labelKey: 'receiptDate',
-        amountKey: 'tax',
-        columns: [
-            { key: 'receiptDate', label: 'เลขใบเสร็จ / วันที่', type: 'text' },
-            { key: 'taxBase', label: 'ฐานภาษี', type: 'money', total: 'sum' },
-            { key: 'tax', label: 'ภาษี', type: 'money', total: 'sum' }
-        ],
-        buildRows: () => salesReportTaxRows()
-    }
-};
-
-function getSalesReportDefinition(type = activeSalesReport) {
-    return SALES_REPORT_DEFINITIONS[type] || SALES_REPORT_DEFINITIONS.summary;
-}
-
-function buildSalesReportRows(type = activeSalesReport) {
-    const definition = getSalesReportDefinition(type);
-    return typeof definition.buildRows === 'function' ? definition.buildRows() : [];
-}
-
-function salesReportRowLabel(row = {}, definition = getSalesReportDefinition()) {
-    return row[definition.labelKey] || row.label || '';
-}
-
-function salesReportRowAmount(row = {}, definition = getSalesReportDefinition()) {
-    return safeNumber(row[definition.amountKey] ?? row.amount ?? row.sales ?? row.net);
-}
-
 function updateSalesReportEmployeeOptions() {
     const select = document.getElementById('dashboard-employee-filter') || document.getElementById('sales-report-employee-filter');
     if (!select) return;
@@ -3423,10 +3012,9 @@ function renderSalesSummaryChart() {
     const values = rows.map(row => safeNumber(row.net));
     const chartType = activeSalesReport === 'summary' ? 'line' : 'bar';
     const datasetLabel = SALES_REPORT_LABELS[activeSalesReport] || SALES_REPORT_LABELS.summary;
-    const reportDefinition = getSalesReportDefinition(activeSalesReport);
-    const reportRows = activeSalesReport === 'summary' ? [] : buildSalesReportRows(activeSalesReport).slice(0, 10);
-    const finalLabels = activeSalesReport === 'summary' ? labels : (reportRows.length ? reportRows.map(row => salesReportRowLabel(row, reportDefinition)) : ['ยังไม่มีข้อมูล']);
-    const finalValues = activeSalesReport === 'summary' ? values : (reportRows.length ? reportRows.map(row => salesReportRowAmount(row, reportDefinition)) : [0]);
+    const reportRows = activeSalesReport === 'summary' ? [] : buildDashboardSalesReportRows(activeSalesReport).slice(0, 10);
+    const finalLabels = activeSalesReport === 'summary' ? labels : (reportRows.length ? reportRows.map(row => row.label) : ['ยังไม่มีข้อมูล']);
+    const finalValues = activeSalesReport === 'summary' ? values : (reportRows.length ? reportRows.map(row => safeNumber(row.amount)) : [0]);
     const needsRecreate = !salesSummaryChart || salesSummaryChart.config.type !== chartType;
 
     if (needsRecreate && salesSummaryChart) {
@@ -3488,60 +3076,84 @@ function renderSalesSummaryChart() {
     });
 }
 
-function formatSalesReportValue(value, column = {}, target = 'table') {
-    if (column.type === 'money') return target === 'excel' ? safeNumber(value) : adminMoney(value);
-    if (column.type === 'number') return target === 'excel' ? safeNumber(value) : safeNumber(value).toLocaleString('th-TH');
-    if (column.type === 'percent') {
-        const amount = safeNumber(value);
-        return target === 'excel' ? amount : `${amount.toLocaleString('th-TH', { maximumFractionDigits: 2 })}%`;
-    }
-    return value ?? '';
-}
-
-function buildSalesReportTotalRow(definition, rows = []) {
-    const total = {};
-    definition.columns.forEach((column, index) => {
-        if (index === 0) {
-            total[column.key] = definition.totalLabel || 'รวมทั้งหมด';
-            return;
-        }
-        if (column.total === 'sum') {
-            total[column.key] = rows.reduce((sum, row) => sum + safeNumber(row[column.key]), 0);
-            return;
-        }
-        total[column.key] = '';
-    });
-    return total;
-}
-
-function renderSalesReportRowHTML(row, columns = []) {
-    return `<tr>${columns.map((column, index) => {
-        const className = index === 0 ? ' class="sales-date-cell"' : '';
-        return `<td${className}>${escapeHTML(formatSalesReportValue(row[column.key], column, 'table'))}</td>`;
-    }).join('')}</tr>`;
-}
-
 function renderSalesSummaryTable() {
     const head = document.getElementById('sales-summary-table-head');
     const body = document.getElementById('sales-summary-table-body');
     if (!body) return;
 
-    const definition = getSalesReportDefinition(activeSalesReport);
-    const columns = definition.columns || [];
-    const rows = buildSalesReportRows(activeSalesReport);
-    if (head) {
-        head.innerHTML = `<tr>${columns.map(column => `<th>${escapeHTML(column.label)}</th>`).join('')}</tr>`;
-    }
-
-    if (!rows.length) {
-        body.innerHTML = `<tr><td colspan="${Math.max(1, columns.length)}" class="sales-report-empty">ยังไม่มีข้อมูล ${escapeHTML(definition.label || 'รายงานนี้')}</td></tr>`;
+    if (activeSalesReport !== 'summary') {
+        const rows = buildDashboardSalesReportRows(activeSalesReport);
+        const totalAmount = rows.reduce((sum, row) => sum + safeNumber(row.amount), 0);
+        const totalQuantity = rows.reduce((sum, row) => sum + safeNumber(row.quantity), 0);
+        if (head) {
+            head.innerHTML = `
+                <tr>
+                    <th>รายการ</th>
+                    <th>จำนวน</th>
+                    <th>ยอดขาย</th>
+                    <th>วันที่ / ช่วงเวลา</th>
+                </tr>
+            `;
+        }
+        const totalLabel = activeSalesReport === 'category' ? 'ยอดขายรวม' : 'รวมทั้งหมด';
+        const totalRow = `
+            <tr>
+                <td class="sales-date-cell">${escapeHTML(totalLabel)}</td>
+                <td>${totalQuantity ? totalQuantity.toLocaleString('th-TH') : rows.length.toLocaleString('th-TH')}</td>
+                <td>${adminMoney(totalAmount)}</td>
+                <td>${escapeHTML(dashboardReportDateLabel())}</td>
+            </tr>
+        `;
+        if (!rows.length) {
+            body.innerHTML = totalRow + `<tr><td colspan="4" class="sales-report-empty">ยังไม่มีข้อมูล ${escapeHTML(SALES_REPORT_LABELS[activeSalesReport] || 'รายงานนี้')}</td></tr>`;
+            return;
+        }
+        body.innerHTML = totalRow + rows.slice(0, 40).map(row => `
+            <tr>
+                <td class="sales-date-cell">${escapeHTML(row.label)}</td>
+                <td>${safeNumber(row.quantity).toLocaleString('th-TH')}</td>
+                <td>${adminMoney(row.amount)}</td>
+                <td>${escapeHTML(row.meta || dashboardReportDateLabel())}</td>
+            </tr>
+        `).join('');
         const pageTotal = document.getElementById('sales-table-page-total');
-        if (pageTotal) pageTotal.textContent = 'จาก 1';
+        if (pageTotal) pageTotal.textContent = `จาก ${Math.max(1, Math.ceil(rows.length / 10)).toLocaleString('th-TH')}`;
         return;
     }
 
-    const totalRow = definition.showTotal === false ? '' : renderSalesReportRowHTML(buildSalesReportTotalRow(definition, rows), columns);
-    body.innerHTML = totalRow + rows.slice(0, 40).map(row => renderSalesReportRowHTML(row, columns)).join('');
+    if (head) {
+        head.innerHTML = `
+            <tr>
+                <th>วันที่</th>
+                <th>ยอดขาย</th>
+                <th>คืนเงิน</th>
+                <th>ส่วนลด</th>
+                <th>ยอดขายสุทธิ</th>
+                <th>ต้นทุนของสินค้า</th>
+                <th>กำไรรวม</th>
+                <th>ผลต่าง</th>
+                <th>ภาษี</th>
+            </tr>
+        `;
+    }
+    const rows = buildDailySalesRows();
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="9" class="sales-report-empty">ยังไม่มีข้อมูลยอดขาย</td></tr>';
+        return;
+    }
+    body.innerHTML = rows.map(row => `
+        <tr>
+            <td class="sales-date-cell">${escapeHTML(salesReportDateLabel(row.date))}</td>
+            <td>${adminMoney(row.gross)}</td>
+            <td>${adminMoney(row.refunds)}</td>
+            <td>${adminMoney(row.discounts)}</td>
+            <td>${adminMoney(row.net)}</td>
+            <td>${adminMoney(row.cost)}</td>
+            <td>${adminMoney(row.profit)}</td>
+            <td>${row.margin.toLocaleString('th-TH', { maximumFractionDigits: 2 })}%</td>
+            <td>${adminMoney(row.tax)}</td>
+        </tr>
+    `).join('');
     const pageTotal = document.getElementById('sales-table-page-total');
     if (pageTotal) pageTotal.textContent = `จาก ${Math.max(1, Math.ceil(rows.length / 10)).toLocaleString('th-TH')}`;
 }
@@ -3748,7 +3360,8 @@ function renderDashboardOperations(operationalOrders, bookings) {
     const bookingPending = bookings.filter(booking => String(booking.status || 'pending').toLowerCase() === 'pending');
     const loyaltyIssues = operationalOrders.filter(order => {
         const status = posLoyaltySyncStatus(order);
-        return status === 'pending' || status === 'failed' || status === 'syncing';
+        const diagnostic = posLoyaltyDiagnostic(order);
+        return status === 'syncing' || diagnostic.retryable;
     });
     const stockAlerts = dashboardProductAlertRows();
     setDashboardText('dashboard-queue-online-pending', onlinePending.length.toLocaleString('th-TH'));
@@ -3816,7 +3429,8 @@ function renderDashboardMembersAndLoyalty(revenueOrders, bookings) {
     const totalPoints = pointSource.reduce((sum, member) => sum + Math.max(0, Math.floor(safeNumber(member.points ?? member.pointsBalance ?? member._memberSummary?.pointsBalance))), 0);
     const loyaltyIssues = dashboardOperationalOrders().filter(order => {
         const status = posLoyaltySyncStatus(order);
-        return status === 'pending' || status === 'failed' || status === 'syncing';
+        const diagnostic = posLoyaltyDiagnostic(order);
+        return status === 'syncing' || diagnostic.retryable;
     }).length;
     setDashboardText('dashboard-member-new', newMembers.length.toLocaleString('th-TH'));
     setDashboardText('dashboard-member-active', activeIds.size.toLocaleString('th-TH'));
@@ -3885,6 +3499,15 @@ function renderManagerDashboard() {
     renderDashboardSystemHealth(operationalOrders);
 }
 
+let dashboardRenderTimer = null;
+function scheduleDashboardRender() {
+    if (dashboardRenderTimer) return;
+    dashboardRenderTimer = window.setTimeout(() => {
+        dashboardRenderTimer = null;
+        renderDashboardSalesReport();
+    }, 80);
+}
+
 function renderDashboardSalesReport() {
     updateSalesReportToolbar();
     renderManagerDashboard();
@@ -3941,28 +3564,11 @@ function salesReportSheetName(name) {
     return String(name || 'sales').replace(/[\\/?*[\]:]/g, '').slice(0, 31) || 'sales';
 }
 
-function salesReportExcelRow(row = {}, columns = []) {
-    return columns.reduce((output, column) => {
-        output[column.label] = formatSalesReportValue(row[column.key], column, 'excel');
-        return output;
-    }, {});
-}
-
-function salesReportExcelSheet(rows, columns = null) {
-    const exportRows = Array.isArray(columns)
-        ? rows.map(row => salesReportExcelRow(row, columns))
-        : rows;
-    const emptyRow = Array.isArray(columns)
-        ? columns.reduce((output, column) => {
-            output[column.label] = '';
-            return output;
-        }, {})
-        : { note: 'ยังไม่มีข้อมูลยอดขายในช่วงที่เลือก' };
-    const sheetRows = exportRows.length ? exportRows : [emptyRow];
-    const worksheet = worksheetFromData(sheetRows);
-    const keys = Object.keys(sheetRows[0] || { note: '' });
+function salesReportExcelSheet(rows) {
+    const worksheet = worksheetFromData(rows.length ? rows : [{ note: 'ยังไม่มีข้อมูลยอดขายในช่วงที่เลือก' }]);
+    const keys = Object.keys(rows[0] || { note: '' });
     worksheet['!cols'] = keys.map((key) => {
-        const maxLength = sheetRows.reduce((max, row) => Math.max(max, String(row[key] ?? '').length), String(key).length);
+        const maxLength = rows.reduce((max, row) => Math.max(max, String(row[key] ?? '').length), String(key).length);
         return { wch: Math.min(Math.max(maxLength + 3, 12), 42) };
     });
     return worksheet;
@@ -3982,14 +3588,100 @@ function salesReportReceiptNo(order = {}) {
     return order.receiptNo || order.orderNumber || order.id || order.firestoreId || '';
 }
 
-function salesReportOverviewRows(definition, reportRows = []) {
+function currentSalesReportExportRows(type = activeSalesReport) {
+    if (type === 'summary') {
+        return buildDailySalesRows().map(row => ({
+            'วันที่': salesReportDateLabel(row.date),
+            'ยอดขาย': row.gross,
+            'คืนเงิน': row.refunds,
+            'ส่วนลด': row.discounts,
+            'ยอดขายสุทธิ': row.net,
+            'ต้นทุนของสินค้า': row.cost,
+            'กำไรรวม': row.profit,
+            'ผลต่าง (%)': Number(row.margin.toFixed(2)),
+            'ภาษี': row.tax
+        }));
+    }
+    return buildDashboardSalesReportRows(type).map(row => ({
+        'รายงาน': SALES_REPORT_LABELS[type] || 'รายงานยอดขาย',
+        'รายการ': row.label || '',
+        'จำนวน': safeNumber(row.quantity),
+        'ยอดขาย': safeNumber(row.amount),
+        'วันที่ / ช่วงเวลา': row.meta || dashboardReportDateLabel()
+    }));
+}
+
+function salesReportReceiptRows() {
+    return dashboardRevenueOrders()
+        .slice()
+        .sort((a, b) => orderReportDateValue(b) - orderReportDateValue(a))
+        .map(order => {
+            const total = orderReportTotal(order);
+            const cost = orderReportCost(order);
+            return {
+                'เลขที่ใบเสร็จ': salesReportReceiptNo(order),
+                'วันที่': salesReportOrderDateText(order),
+                'ลูกค้า': order.customerName || 'Walk-in Customer',
+                'เบอร์โทร': order.phone || '',
+                'พนักงาน': salesReportEmployeeName(order),
+                'วิธีชำระเงิน': order.paymentLabel || salesReportPaymentLabel(order.paymentMethod),
+                'สถานะ': order.status || '',
+                'ยอดก่อนส่วนลด': orderReportGross(order),
+                'ส่วนลด': orderReportDiscount(order),
+                'ภาษี': orderReportTax(order),
+                'ยอดสุทธิ': total,
+                'ต้นทุน': cost,
+                'กำไร': total - cost,
+                'หมายเหตุ': order.note || '',
+                'Firestore ID': order.firestoreId || order.id || ''
+            };
+        });
+}
+
+function salesReportItemRows() {
+    const rows = [];
+    dashboardRevenueOrders()
+        .slice()
+        .sort((a, b) => orderReportDateValue(b) - orderReportDateValue(a))
+        .forEach(order => {
+            orderReportItems(order).forEach(item => {
+                const quantity = Math.max(0, safeNumber(item.quantity, 1));
+                const lineTotal = itemReportAmount(item);
+                const cost = itemReportCost(item);
+                rows.push({
+                    'เลขที่ใบเสร็จ': salesReportReceiptNo(order),
+                    'วันที่': salesReportOrderDateText(order),
+                    'สินค้า': item.name || item.productName || 'ไม่ระบุสินค้า',
+                    'ตัวเลือก': item.variantName || item.optionName || '',
+                    'SKU': item.sku || item.variantSku || '',
+                    'หมวดหมู่': item.categoryName || categoriesData[item.category || item.categoryId || '']?.name || item.category || item.categoryId || '',
+                    'จำนวน': quantity,
+                    'ราคาต่อหน่วย': safeNumber(item.unitPrice ?? item.price ?? item.basePrice),
+                    'ส่วนลดรายการ': safeNumber(item.lineDiscount ?? item.discount),
+                    'ยอดรวม': lineTotal,
+                    'ต้นทุนรวม': cost,
+                    'กำไรรวม': lineTotal - cost,
+                    'ลูกค้า': order.customerName || 'Walk-in Customer',
+                    'พนักงาน': salesReportEmployeeName(order)
+                });
+            });
+        });
+    return rows;
+}
+
+function exportSalesWorkbook(type = activeSalesReport) {
+    const XLSX = window.XLSX;
+    if (!XLSX) throw new Error('ไม่พบไลบรารี Excel กรุณารีเฟรชหน้าแล้วลองอีกครั้ง');
+    if (!canAdmin('orders')) throw new Error('บัญชีนี้ไม่มีสิทธิ์ดาวน์โหลดข้อมูลยอดขาย');
+
+    const workbook = XLSX.utils.book_new();
+    const activeLabel = SALES_REPORT_LABELS[type] || 'รายงานยอดขาย';
     const totals = reportSummaryTotals();
-    return [{
-        'รายงาน': definition.label || 'รายงานยอดขาย',
+    const overviewRows = [{
+        'รายงาน': activeLabel,
         'ช่วงวันที่': salesReportRangeLabel(),
         'ช่วงเวลา': salesReportTimeFilter === 'all' ? 'ตลอดทั้งวัน' : salesReportTimeFilter,
         'พนักงาน': salesReportEmployeeFilter === 'all' ? 'พนักงานทั้งหมด' : salesReportEmployeeFilter,
-        'จำนวนแถวในรายงาน': reportRows.length,
         'จำนวนใบเสร็จ': totals.count,
         'ยอดขาย': totals.gross,
         'คืนเงิน': totals.refunds,
@@ -4001,33 +3693,25 @@ function salesReportOverviewRows(definition, reportRows = []) {
         'ภาษี': totals.tax,
         'ส่งออกเมื่อ': new Date().toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })
     }];
-}
 
-function ensureSalesReportOrdersReady() {
-    if (dashboardOrdersLoaded) return;
-    if (!ordersUnsubscribe && (canAdmin('orders') || canAdmin('pos'))) setupRealtimeOrders();
-    throw new Error('กำลังโหลดข้อมูลออเดอร์ กรุณารอสักครู่แล้วลองดาวน์โหลดอีกครั้ง');
-}
+    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(overviewRows), 'overview');
+    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(currentSalesReportExportRows(type)), salesReportSheetName(activeLabel));
+    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(buildDashboardSalesReportRows('category').map(row => ({
+        'หมวดหมู่': row.label,
+        'จำนวน': safeNumber(row.quantity),
+        'ยอดขาย': safeNumber(row.amount),
+        'ช่วงวันที่': dashboardReportDateLabel()
+    }))), 'categories');
+    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(buildDashboardSalesReportRows('product').map(row => ({
+        'สินค้า': row.label,
+        'จำนวน': safeNumber(row.quantity),
+        'ยอดขาย': safeNumber(row.amount),
+        'ช่วงวันที่': dashboardReportDateLabel()
+    }))), 'products');
+    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(salesReportReceiptRows()), 'receipts');
+    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(salesReportItemRows()), 'items');
 
-function salesReportFileName(definition) {
-    const range = salesReportRange();
-    return `eden-sales-${definition.filenameKey || 'report'}-${range.startKey}-to-${range.endKey}.xlsx`;
-}
-
-function exportSalesWorkbook(type = activeSalesReport) {
-    const XLSX = window.XLSX;
-    if (!XLSX) throw new Error('ไม่พบไลบรารี Excel กรุณารีเฟรชหน้าแล้วลองอีกครั้ง');
-    if (!canAdmin('orders')) throw new Error('บัญชีนี้ไม่มีสิทธิ์ดาวน์โหลดข้อมูลยอดขาย');
-    ensureSalesReportOrdersReady();
-
-    const workbook = XLSX.utils.book_new();
-    const definition = getSalesReportDefinition(type);
-    const reportRows = buildSalesReportRows(type);
-
-    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(salesReportOverviewRows(definition, reportRows)), 'overview');
-    XLSX.utils.book_append_sheet(workbook, salesReportExcelSheet(reportRows, definition.columns), salesReportSheetName(definition.sheetName || definition.label));
-
-    XLSX.writeFile(workbook, salesReportFileName(definition));
+    XLSX.writeFile(workbook, `eden-sales-${type}-${salesReportRange().startKey}-to-${salesReportRange().endKey}.xlsx`);
 }
 
 window.exportSalesReportXLSX = () => {
@@ -4041,7 +3725,7 @@ window.exportSalesReportXLSX = () => {
         exportSalesWorkbook(activeSalesReport);
     } catch (error) {
         console.error('Export sales XLSX failed:', error);
-        alert(error?.message || safeAdminError("ดาวน์โหลดข้อมูลยอดขายไม่สำเร็จ"));
+        alert(safeAdminError("ดาวน์โหลดข้อมูลยอดขายไม่สำเร็จ"));
     } finally {
         if (button) {
             button.disabled = false;
@@ -4063,11 +3747,43 @@ function posLoyaltySyncStatus(order = {}) {
     return String(order.loyaltySyncStatus || '').trim().toLowerCase();
 }
 
+const POS_LOYALTY_NON_RETRYABLE_REASONS = new Set([
+    'no-customer',
+    'unsynced-customer',
+    'test-order',
+    'soft-launch'
+]);
+
+function normalizePosLoyaltyReason(value = '') {
+    const reason = String(value || '').trim().toLowerCase().replace(/_/g, '-');
+    return POS_LOYALTY_NON_RETRYABLE_REASONS.has(reason) ? reason : '';
+}
+
+function posLoyaltyReason(order = {}) {
+    return normalizePosLoyaltyReason(order.loyaltySkipReason)
+        || normalizePosLoyaltyReason(order.loyalty?.reason)
+        || normalizePosLoyaltyReason(order.loyaltyError);
+}
+
+function posLoyaltyDiagnostic(order = {}) {
+    const status = posLoyaltySyncStatus(order) || 'not_synced';
+    const reason = posLoyaltyReason(order);
+    const error = String(order.loyaltyError || '').trim();
+    const source = String(order.source || '').toLowerCase();
+    const nonRetryable = status === 'skipped' || POS_LOYALTY_NON_RETRYABLE_REASONS.has(reason);
+    return {
+        status,
+        reason,
+        error,
+        retryable: source === 'pos' && !nonRetryable && ['pending', 'failed', 'local'].includes(status),
+        nonRetryable
+    };
+}
+
 function posLoyaltyRetryActionHTML(order = {}, orderId = '') {
     if (String(order.source || '').toLowerCase() !== 'pos') return '';
-    const status = posLoyaltySyncStatus(order) || 'not_synced';
-    const error = String(order.loyaltyError || '').trim();
-    const retryable = status === 'pending' || status === 'failed';
+    const diagnostic = posLoyaltyDiagnostic(order);
+    const { status, reason, error, retryable, nonRetryable } = diagnostic;
     const receiptNo = order.receiptNo || order.orderNumber || order.id || orderId;
     const color = status === 'synced'
         ? '#2e7d32'
@@ -4079,12 +3795,15 @@ function posLoyaltyRetryActionHTML(order = {}, orderId = '') {
     const retryButton = retryable
         ? `<button class="btn-action btn-view" type="button" style="margin-left:6px;" onclick="retryPosLoyaltySale('${escapeJSString(orderId)}', '${escapeJSString(receiptNo)}', this)">Retry loyalty</button>`
         : '';
-    const errorText = error ? `<br><small style="color:#c62828;">${escapeHTML(error)}</small>` : '';
+    const actionText = retryable ? 'Retryable' : nonRetryable ? 'Non-retryable' : 'No retry action';
+    const reasonText = reason ? `<br><small style="color:#555;">Reason: ${escapeHTML(reason)}</small>` : '';
+    const errorText = error && error !== reason ? `<br><small style="color:#c62828;">Error: ${escapeHTML(error)}</small>` : '';
     return `
         <div style="margin-top:6px;">
-            <small style="color:${color};">Loyalty: ${escapeHTML(status)}</small>
+            <small style="color:${color};">Loyalty: ${escapeHTML(status)} / ${escapeHTML(actionText)}</small>
             ${retryButton}
             <small id="pos-loyalty-retry-${escapeHTML(orderId)}" style="display:block; margin-top:4px;"></small>
+            ${reasonText}
             ${errorText}
         </div>
     `;
@@ -4112,7 +3831,9 @@ window.retryPosLoyaltySale = async (orderId, receiptNo = '', button = null) => {
         setPosLoyaltyRetryMessage(orderId, 'Retrying loyalty sync...', '#607d8b');
         const result = await callAdminFunction('adminRetryPosLoyaltySale', { orderId });
         const status = result.status || 'synced';
-        setPosLoyaltyRetryMessage(orderId, `Loyalty ${status}`, '#2e7d32');
+        const reason = normalizePosLoyaltyReason(result.loyalty?.reason || result.reason || '');
+        const message = reason ? `Loyalty ${status}: ${reason}` : `Loyalty ${status}`;
+        setPosLoyaltyRetryMessage(orderId, message, status === 'skipped' ? '#6d6d6d' : '#2e7d32');
         if (button) button.textContent = status === 'skipped' ? 'Skipped' : 'Synced';
         if (typeof setupRealtimeOrders === 'function') setupRealtimeOrders();
     } catch (error) {
@@ -4126,55 +3847,274 @@ window.retryPosLoyaltySale = async (orderId, receiptNo = '', button = null) => {
     }
 };
 
-// Legacy real-time Orders renderer kept for reference; setupRealtimeOrders below owns the live UI.
-function setupRealtimeOrdersLegacy() {
-    if (ordersUnsubscribe) {
-        ordersUnsubscribe();
-        ordersUnsubscribe = null;
+function ordersDateRangeForPreset(preset = 'today') {
+    const today = parseLocalDateKey(adminTodayISO()) || new Date();
+    const start = new Date(today);
+    const end = new Date(today);
+    if (preset === 'yesterday') {
+        start.setDate(today.getDate() - 1);
+        end.setDate(today.getDate() - 1);
+    } else if (preset === 'week') {
+        start.setDate(today.getDate() - 6);
+    } else if (preset === 'month') {
+        start.setDate(today.getDate() - 29);
+    } else if (preset === 'all') {
+        return { startKey: '', endKey: '' };
     }
-    dashboardOrdersLoaded = false;
-    const q = query(collection(db, "orders"), orderBy("timestamp", "desc"));
-    ordersUnsubscribe = onSnapshot(q, (snapshot) => {
-        const tbody = document.getElementById('orders-table-body');
-        if (!tbody) return;
-        tbody.innerHTML = '';
+    return { startKey: localDateKey(start), endKey: localDateKey(end) };
+}
 
-        let todayOrders = 0;
-        let todayRevenue = 0;
-        const reportOrders = [];
-        const todayStr = new Date().toLocaleDateString('th-TH');
+function ordersResetPagination() {
+    ordersQueryState.pageIndex = 0;
+    ordersQueryState.hasNext = false;
+    ordersQueryState.loadedCount = 0;
+    ordersPageCursors = [];
+}
 
-        if (snapshot.empty) {
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">ไม่มีข้อมูลออเดอร์</td></tr>';
-            dashboardOrdersData = [];
-            dashboardOrdersLoaded = true;
-            renderDashboardSalesReport();
-            document.getElementById('stat-orders').innerText = todayOrders;
-            document.getElementById('stat-revenue').innerText = '฿' + todayRevenue.toLocaleString();
+function ordersDateLabel(key = '') {
+    const date = parseLocalDateKey(key);
+    return date ? date.toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
+}
+
+function ordersRangeLabel() {
+    if (ordersQueryState.preset === 'all') return 'ทุกช่วงวันที่';
+    return `${ordersDateLabel(ordersQueryState.startKey)} - ${ordersDateLabel(ordersQueryState.endKey)}`;
+}
+
+function mountOrdersStyles() {
+    if (ordersStylesMounted || document.getElementById('orders-query-style')) return;
+    const style = document.createElement('style');
+    style.id = 'orders-query-style';
+    style.textContent = `
+        .orders-query-panel{display:grid;gap:12px;margin:12px 0 18px;padding:14px;border:1px solid #dfe8e2;border-radius:8px;background:#fbfefb}
+        .orders-query-row,.orders-query-footer,.orders-page-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+        .orders-query-row{justify-content:space-between}
+        .orders-date-presets{display:flex;gap:6px;flex-wrap:wrap}
+        .orders-query-panel button,.orders-query-panel select,.orders-query-panel input{min-height:38px;border:1px solid #d6e1da;border-radius:999px;background:#fff;color:#26382f;font:inherit;font-weight:800;padding:0 12px}
+        .orders-query-panel button{cursor:pointer}
+        .orders-query-panel button.active{background:#17452f;border-color:#17452f;color:#fff}
+        .orders-query-panel button:disabled{cursor:not-allowed;opacity:.48}
+        .orders-query-panel label{display:inline-flex;gap:7px;align-items:center;color:#60706a;font-weight:800}
+        .orders-query-panel input[type="date"],.orders-query-panel select{border-radius:7px}
+        .orders-query-footer{justify-content:space-between}
+        .orders-load-status{color:#60706a;font-weight:800}
+        .orders-load-status.loading{color:#8a5a00}
+        .orders-load-status.ready{color:#1f7a3a}
+        .orders-load-status.error{color:#b42318}
+        .orders-page-label{color:#33433a;font-weight:900}
+        @media(max-width:760px){.orders-query-panel label,.orders-query-panel select,.orders-query-panel input,.orders-query-panel button{width:100%;justify-content:center}.orders-date-presets,.orders-page-controls{width:100%}}
+    `;
+    document.head.appendChild(style);
+    ordersStylesMounted = true;
+}
+
+function mountOrdersControls() {
+    const section = document.getElementById('orders');
+    const header = section?.querySelector('.section-header');
+    if (!section || !header) return;
+    mountOrdersStyles();
+    if (!document.getElementById('orders-query-controls')) {
+        const panel = document.createElement('div');
+        panel.id = 'orders-query-controls';
+        panel.className = 'orders-query-panel';
+        panel.innerHTML = `
+            <div class="orders-query-row">
+                <div class="orders-date-presets" aria-label="ช่วงวันที่ออเดอร์">
+                    <button type="button" data-orders-preset="today">วันนี้</button>
+                    <button type="button" data-orders-preset="yesterday">เมื่อวาน</button>
+                    <button type="button" data-orders-preset="week">7 วัน</button>
+                    <button type="button" data-orders-preset="month">30 วัน</button>
+                    <button type="button" data-orders-preset="all">ล่าสุดทั้งหมด</button>
+                </div>
+                <label>เริ่ม <input id="orders-start-date" type="date"></label>
+                <label>สิ้นสุด <input id="orders-end-date" type="date"></label>
+                <label>แสดง/หน้า
+                    <select id="orders-page-size">
+                        ${ORDERS_PAGE_SIZE_OPTIONS.map(size => `<option value="${size}">${size}</option>`).join('')}
+                    </select>
+                </label>
+                <button id="orders-retry-load" type="button">โหลดใหม่</button>
+            </div>
+            <div class="orders-query-footer">
+                <span id="orders-load-status" class="orders-load-status">พร้อมโหลดข้อมูล</span>
+                <div class="orders-page-controls" aria-label="เปลี่ยนหน้าออเดอร์">
+                    <button id="orders-prev-page" type="button">‹ ก่อนหน้า</button>
+                    <span id="orders-page-label" class="orders-page-label">หน้า 1</span>
+                    <button id="orders-next-page" type="button">ถัดไป ›</button>
+                </div>
+            </div>
+        `;
+        header.insertAdjacentElement('afterend', panel);
+        ordersControlsMounted = true;
+    }
+    bindOrdersControls();
+    syncOrdersControls();
+}
+
+function bindOrdersControls() {
+    if (ordersControlsBound) return;
+    const panel = document.getElementById('orders-query-controls');
+    if (!panel) return;
+    panel.addEventListener('click', event => {
+        const presetButton = event.target.closest('[data-orders-preset]');
+        if (presetButton) {
+            const preset = presetButton.dataset.ordersPreset || 'today';
+            ordersQueryState.preset = preset;
+            Object.assign(ordersQueryState, ordersDateRangeForPreset(preset));
+            ordersResetPagination();
+            setupRealtimeOrders();
             return;
         }
-
-        snapshot.forEach((docSnap) => {
-            const order = docSnap.data();
-            const id = docSnap.id;
-            reportOrders.push({ ...order, firestoreId: id });
-            const status = order.status || 'pending';
-            const paymentStatus = order.paymentStatus || (order.source === 'pos' ? 'paid' : 'pending');
-            const paymentLabel = order.paymentLabel || order.paymentMethod || '-';
-            const isTestOrder = !!order.isTestOrder;
-            const displayId = order.receiptNo || order.orderNumber || id.substring(0,8).toUpperCase();
-            const sourceLabel = order.source === 'pos' ? (isTestOrder ? 'POS TEST' : 'POS') : 'Online';
-            const canVoidPos = order.source === 'pos' && status !== 'cancelled';
-            const orderDateStr = order.timestamp ? (order.timestamp.toDate ? order.timestamp.toDate().toLocaleDateString('th-TH') : new Date(order.timestamp).toLocaleDateString('th-TH')) : '';
-            const isRevenueOrder = paymentStatus === 'paid' || status === 'completed';
-            
-            if (!isTestOrder && isRevenueOrder && status !== 'cancelled' && orderDateStr === todayStr) {
-                todayOrders++;
-                todayRevenue += (order.totalAmount || 0);
+        if (event.target.closest('#orders-retry-load')) {
+            setupRealtimeOrders();
+            return;
+        }
+        if (event.target.closest('#orders-prev-page')) {
+            if (ordersQueryState.pageIndex > 0) {
+                ordersQueryState.pageIndex -= 1;
+                setupRealtimeOrders();
             }
+            return;
+        }
+        if (event.target.closest('#orders-next-page')) {
+            if (ordersQueryState.hasNext) {
+                ordersQueryState.pageIndex += 1;
+                setupRealtimeOrders();
+            }
+        }
+    });
+    panel.addEventListener('change', event => {
+        const target = event.target;
+        if (target?.id === 'orders-page-size') {
+            ordersQueryState.pageSize = Math.max(1, safeNumber(target.value, 50));
+            ordersResetPagination();
+            setupRealtimeOrders();
+            return;
+        }
+        if (target?.id === 'orders-start-date' || target?.id === 'orders-end-date') {
+            ordersQueryState.preset = 'custom';
+            ordersQueryState.startKey = document.getElementById('orders-start-date')?.value || ordersQueryState.startKey;
+            ordersQueryState.endKey = document.getElementById('orders-end-date')?.value || ordersQueryState.endKey;
+            if (ordersQueryState.startKey && ordersQueryState.endKey && ordersQueryState.startKey > ordersQueryState.endKey) {
+                if (target.id === 'orders-start-date') ordersQueryState.endKey = ordersQueryState.startKey;
+                else ordersQueryState.startKey = ordersQueryState.endKey;
+            }
+            ordersResetPagination();
+            setupRealtimeOrders();
+        }
+    });
+    ordersControlsBound = true;
+}
 
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
+function syncOrdersControls() {
+    if (!document.getElementById('orders-query-controls')) return;
+    document.querySelectorAll('[data-orders-preset]').forEach(button => {
+        button.classList.toggle('active', button.dataset.ordersPreset === ordersQueryState.preset);
+    });
+    const startInput = document.getElementById('orders-start-date');
+    const endInput = document.getElementById('orders-end-date');
+    const pageSize = document.getElementById('orders-page-size');
+    if (startInput && startInput.value !== ordersQueryState.startKey) startInput.value = ordersQueryState.startKey || '';
+    if (endInput && endInput.value !== ordersQueryState.endKey) endInput.value = ordersQueryState.endKey || '';
+    if (pageSize && pageSize.value !== String(ordersQueryState.pageSize)) pageSize.value = String(ordersQueryState.pageSize);
+    const prev = document.getElementById('orders-prev-page');
+    const next = document.getElementById('orders-next-page');
+    const pageLabel = document.getElementById('orders-page-label');
+    const loading = ordersQueryState.status === 'loading';
+    if (prev) prev.disabled = loading || ordersQueryState.pageIndex <= 0;
+    if (next) next.disabled = loading || !ordersQueryState.hasNext;
+    if (pageLabel) pageLabel.textContent = `หน้า ${ordersQueryState.pageIndex + 1}`;
+}
+
+function clearOrdersLoadTimer() {
+    if (ordersLoadTimer) {
+        window.clearTimeout(ordersLoadTimer);
+        ordersLoadTimer = null;
+    }
+}
+
+function setOrdersLoadState(state = 'idle', message = '') {
+    ordersQueryState.status = state;
+    const statusEl = document.getElementById('orders-load-status');
+    if (statusEl) {
+        statusEl.className = `orders-load-status ${state}`;
+        statusEl.textContent = message || (state === 'loading'
+            ? `กำลังโหลดออเดอร์ ${ordersRangeLabel()}...`
+            : state === 'error'
+                ? 'โหลดออเดอร์ไม่สำเร็จ'
+                : state === 'empty'
+                    ? `ไม่มีออเดอร์ในช่วง ${ordersRangeLabel()}`
+                    : `โหลดแล้ว ${ordersQueryState.loadedCount.toLocaleString('th-TH')} รายการ / ${ordersRangeLabel()}`);
+    }
+    syncOrdersControls();
+}
+
+function startOrdersLoadTimer() {
+    clearOrdersLoadTimer();
+    ordersLoadTimer = window.setTimeout(() => {
+        ordersQueryState.lastError = `โหลดข้อมูล Orders เกิน ${Math.round(ORDERS_LOAD_TIMEOUT_MS / 1000)} วินาที`;
+        setOrdersLoadState('error', `${ordersQueryState.lastError} กรุณากดโหลดใหม่`);
+        const tbody = document.getElementById('orders-table-body');
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#b42318;">โหลดข้อมูลนานเกินไป <button class="btn-action" type="button" onclick="retryOrdersLoad()">โหลดใหม่</button></td></tr>`;
+        }
+    }, ORDERS_LOAD_TIMEOUT_MS);
+}
+
+function ordersStartDate() {
+    return ordersQueryState.startKey ? parseLocalDateKey(ordersQueryState.startKey) : null;
+}
+
+function ordersEndExclusiveDate() {
+    const end = ordersQueryState.endKey ? parseLocalDateKey(ordersQueryState.endKey) : null;
+    return end ? addLocalDays(end, 1) : null;
+}
+
+function buildOrdersQuery() {
+    const constraints = [];
+    const startDate = ordersStartDate();
+    const endDate = ordersEndExclusiveDate();
+    if (startDate && endDate) {
+        constraints.push(where('timestamp', '>=', startDate));
+        constraints.push(where('timestamp', '<', endDate));
+    }
+    constraints.push(orderBy('timestamp', 'desc'));
+    if (ordersQueryState.pageIndex > 0) {
+        const cursor = ordersPageCursors[ordersQueryState.pageIndex - 1];
+        if (cursor) constraints.push(startAfter(cursor));
+        else ordersQueryState.pageIndex = 0;
+    }
+    constraints.push(limit(Math.max(1, safeNumber(ordersQueryState.pageSize, 50)) + 1));
+    return query(collection(db, "orders"), ...constraints);
+}
+
+function ordersSnapshotPage(snapshot) {
+    const pageSize = Math.max(1, safeNumber(ordersQueryState.pageSize, 50));
+    const docs = snapshot.docs || [];
+    ordersQueryState.hasNext = docs.length > pageSize;
+    const pageDocs = docs.slice(0, pageSize);
+    if (pageDocs.length) ordersPageCursors[ordersQueryState.pageIndex] = pageDocs[pageDocs.length - 1];
+    return pageDocs.map(docSnap => ({ ...docSnap.data(), firestoreId: docSnap.id }));
+}
+
+function renderOrdersRows(orders = []) {
+    const tbody = document.getElementById('orders-table-body');
+    if (!tbody) return;
+    if (!orders.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">ไม่มีออเดอร์ในช่วงวันที่นี้</td></tr>';
+        return;
+    }
+    tbody.innerHTML = orders.map(order => {
+        const id = order.firestoreId || order.id || '';
+        const status = order.status || 'pending';
+        const paymentStatus = order.paymentStatus || (order.source === 'pos' ? 'paid' : 'pending');
+        const paymentLabel = order.paymentLabel || order.paymentMethod || '-';
+        const isTestOrder = !!order.isTestOrder;
+        const displayId = order.receiptNo || order.orderNumber || String(id).substring(0, 8).toUpperCase();
+        const sourceLabel = order.source === 'pos' ? (isTestOrder ? 'POS TEST' : 'POS') : 'Online';
+        const canVoidPos = order.source === 'pos' && status !== 'cancelled';
+        return `
+            <tr>
                 <td style="font-family: monospace;">${escapeHTML(displayId)}</td>
                 <td>${escapeHTML(order.customerName || 'Customer')}<br><small style="color:#888;">${escapeHTML([order.phone || '', sourceLabel].filter(Boolean).join(' | '))}</small></td>
                 <td style="font-weight: 500;">฿${safeNumber(order.totalAmount || order.total).toLocaleString()}</td>
@@ -4191,731 +4131,70 @@ function setupRealtimeOrdersLegacy() {
                     ${canVoidPos ? `<button class="btn-action btn-delete" type="button" style="margin-left:6px;" onclick="voidPosOrder('${escapeJSString(id)}')">Void</button>` : ''}
                     ${posLoyaltyRetryActionHTML(order, id)}
                 </td>
-            `;
-            tbody.appendChild(tr);
-        });
-
-        // Update Dashboard Stats
-        dashboardOrdersData = reportOrders;
-        dashboardOrdersLoaded = true;
-        renderDashboardSalesReport();
-        document.getElementById('stat-orders').innerText = todayOrders;
-        document.getElementById('stat-revenue').innerText = '฿' + todayRevenue.toLocaleString();
-    }, (error) => {
-        console.error("Error listening to orders:", error);
-        dashboardOrdersLoaded = false;
-        const tbody = document.getElementById('orders-table-body');
-        if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:red;">ไม่มีสิทธิ์เข้าถึงข้อมูล หรือเกิดข้อผิดพลาด</td></tr>';
-    });
-}
-
-function orderDateSource(order = {}) {
-    return order.paidAt || order.closedAt || order.timestamp || order.createdAt || order.date || order.businessDate;
-}
-
-function orderTimestampToDate(value) {
-    if (!value) return null;
-    if (value.toDate) return value.toDate();
-    if (typeof value === 'number') return new Date(value);
-    if (typeof value === 'string') {
-        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date(`${value}T00:00:00`);
-        const date = new Date(value);
-        return Number.isNaN(date.getTime()) ? null : date;
-    }
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function orderDateKey(order = {}) {
-    const date = orderTimestampToDate(orderDateSource(order));
-    return date ? localDateKey(date) : '';
-}
-
-function orderDateLabelFromKey(key = '') {
-    if (!key) return '-';
-    const date = new Date(`${key}T00:00:00`);
-    return Number.isNaN(date.getTime()) ? key : date.toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
-function orderStatusValue(order = {}) {
-    return String(order.status || 'pending').toLowerCase();
-}
-
-function orderPaymentStatusValue(order = {}) {
-    return String(order.paymentStatus || (order.source === 'pos' ? 'paid' : 'pending')).toLowerCase();
-}
-
-function orderSourceValue(order = {}) {
-    return String(order.source || 'online').toLowerCase();
-}
-
-function orderSourceLabel(order = {}) {
-    const source = orderSourceValue(order);
-    if (source === 'pos') return order.isTestOrder ? 'POS TEST' : 'POS';
-    return 'Online';
-}
-
-function orderDisplayId(order = {}) {
-    const id = order.firestoreId || order.id || '';
-    return order.receiptNo || order.orderNumber || (id ? id.substring(0, 8).toUpperCase() : '-');
-}
-
-function orderItemName(item = {}) {
-    return item.name || item.productName || item.title || item.label || item.sku || 'สินค้า';
-}
-
-function orderItemCategoryKey(item = {}) {
-    return String(item.category || item.categoryId || item.categoryKey || item.group || '').trim() || 'uncategorized';
-}
-
-function orderCategoryRecordLabel(category, fallbackKey) {
-    if (!category) return '';
-    if (typeof category === 'string') return category;
-    return category.name || category.label || category.title || category.nameTh || category.name_th || fallbackKey;
-}
-
-function getOrdersCategorySources() {
-    const sources = [];
-    if (categoriesData && typeof categoriesData === 'object') sources.push(categoriesData);
-    const globalShopCategories = typeof window !== 'undefined' && window.shopCategoriesData && typeof window.shopCategoriesData === 'object'
-        ? window.shopCategoriesData
-        : null;
-    if (globalShopCategories && globalShopCategories !== categoriesData) sources.push(globalShopCategories);
-    return sources;
-}
-
-function orderCategoryLabelFromKey(key) {
-    for (const source of getOrdersCategorySources()) {
-        const label = orderCategoryRecordLabel(source[key], key);
-        if (label) return label;
-    }
-    return '';
-}
-
-function orderItemCategoryLabel(item = {}) {
-    const key = orderItemCategoryKey(item);
-    return item.categoryName
-        || item.categoryLabel
-        || orderCategoryLabelFromKey(key)
-        || (key === 'uncategorized' ? 'ไม่ระบุหมวดหมู่' : key);
-}
-
-function orderCategories(order = {}) {
-    const map = new Map();
-    orderReportItems(order).forEach(item => {
-        const key = orderItemCategoryKey(item);
-        if (!map.has(key)) map.set(key, orderItemCategoryLabel(item));
-    });
-    if (!map.size) map.set('uncategorized', 'ไม่ระบุหมวดหมู่');
-    return Array.from(map, ([key, label]) => ({ key, label }));
-}
-
-function orderItemsSummaryHTML(order = {}) {
-    const items = orderReportItems(order);
-    if (!items.length) return '<span class="orders-muted">ไม่มีรายการสินค้า</span>';
-    const shown = items.slice(0, 3).map(item => {
-        const qty = Math.max(1, safeNumber(item.quantity, 1));
-        return `<span>${escapeHTML(orderItemName(item))}<small>x${escapeHTML(qty)}</small></span>`;
-    }).join('');
-    const more = items.length > 3 ? `<em>+${items.length - 3} รายการ</em>` : '';
-    const categories = orderCategories(order).slice(0, 2).map(cat => `<b>${escapeHTML(cat.label)}</b>`).join('');
-    return `<div class="orders-item-list">${shown}${more}</div><div class="orders-category-line">${categories}</div>`;
-}
-
-function orderSearchHaystack(order = {}) {
-    return [
-        orderDisplayId(order),
-        order.customerName,
-        order.name,
-        order.phone,
-        order.customerPhone,
-        order.email,
-        orderSourceLabel(order),
-        orderReportItems(order).map(item => `${orderItemName(item)} ${orderItemCategoryLabel(item)}`).join(' ')
-    ].filter(Boolean).join(' ').toLowerCase();
-}
-
-function orderMatchesFilters(order = {}) {
-    const key = orderDateKey(order);
-    if (ordersFilterState.datePreset !== 'all') {
-        if (ordersFilterState.startKey && (!key || key < ordersFilterState.startKey)) return false;
-        if (ordersFilterState.endKey && (!key || key > ordersFilterState.endKey)) return false;
-    }
-    if (ordersFilterState.source !== 'all' && orderSourceValue(order) !== ordersFilterState.source) return false;
-    if (ordersFilterState.status !== 'all' && orderStatusValue(order) !== ordersFilterState.status) return false;
-    if (ordersFilterState.payment !== 'all' && orderPaymentStatusValue(order) !== ordersFilterState.payment) return false;
-    if (ordersFilterState.category !== 'all' && !orderCategories(order).some(cat => cat.key === ordersFilterState.category)) return false;
-    const search = String(ordersFilterState.search || '').trim().toLowerCase();
-    return !search || orderSearchHaystack(order).includes(search);
-}
-
-function ordersDateRangeForPreset(preset) {
-    const today = new Date();
-    const start = new Date(today);
-    const end = new Date(today);
-    if (preset === 'yesterday') {
-        start.setDate(today.getDate() - 1);
-        end.setDate(today.getDate() - 1);
-    } else if (preset === 'week') {
-        start.setDate(today.getDate() - 6);
-    } else if (preset === 'month') {
-        start.setDate(today.getDate() - 29);
-    } else if (preset === 'all') {
-        return { startKey: '', endKey: '' };
-    }
-    return { startKey: localDateKey(start), endKey: localDateKey(end) };
-}
-
-function setOrdersDatePreset(preset) {
-    ordersFilterState.datePreset = preset;
-    Object.assign(ordersFilterState, ordersDateRangeForPreset(preset));
-    ordersResetPagination();
-    setupRealtimeOrders();
-}
-
-function setOrdersViewMode(mode) {
-    ordersFilterState.view = ['orders', 'category', 'date'].includes(mode) ? mode : 'orders';
-    renderOrdersProViewSafely('view-mode');
-}
-
-function resetOrdersFilters() {
-    Object.assign(ordersFilterState, {
-        datePreset: 'today',
-        ...ordersDateRangeForPreset('today'),
-        source: 'all',
-        status: 'all',
-        payment: 'all',
-        category: 'all',
-        search: '',
-        view: 'orders',
-        pageIndex: 0,
-        hasNext: false,
-        loadedCount: 0,
-        lastError: ''
-    });
-    ordersResetPagination();
-    setupRealtimeOrders();
-}
-
-function ordersResetPagination() {
-    ordersFilterState.pageIndex = 0;
-    ordersFilterState.hasNext = false;
-    ordersFilterState.loadedCount = 0;
-    ordersPageCursors = [];
-}
-
-function clearOrdersLoadTimer() {
-    if (ordersLoadTimer) {
-        window.clearTimeout(ordersLoadTimer);
-        ordersLoadTimer = null;
-    }
-}
-
-function setOrdersLoadState(state = 'idle', message = '') {
-    ordersFilterState.loadStatus = state;
-    const statusEl = document.getElementById('orders-load-status');
-    if (statusEl) {
-        statusEl.className = `orders-load-status ${state}`;
-        statusEl.textContent = message || (state === 'loading'
-            ? 'Loading orders...'
-            : state === 'error'
-                ? 'Orders failed to load'
-                : state === 'empty'
-                    ? 'No orders in this range'
-                    : `Loaded ${ordersFilterState.loadedCount.toLocaleString('th-TH')} orders`);
-    }
-    updateOrdersControls();
-}
-
-function setOrdersRenderError(error, context = 'orders-render') {
-    const message = error?.message || String(error || 'Unknown render error');
-    console.error(`Error rendering Orders UI (${context}):`, error);
-    ordersFilterState.lastError = message;
-    setOrdersLoadState('error', `Orders render failed: ${message}`);
-    const body = document.getElementById('orders-table-body');
-    if (body) {
-        body.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#b42318;">Orders loaded but could not render: '
-            + escapeHTML(message)
-            + ' <button class="btn-action" type="button" onclick="retryOrdersLoad()">Reload</button></td></tr>';
-    }
-}
-
-function startOrdersLoadTimer() {
-    clearOrdersLoadTimer();
-    ordersLoadTimer = window.setTimeout(() => {
-        ordersFilterState.lastError = `Orders load exceeded ${Math.round(ORDERS_LOAD_TIMEOUT_MS / 1000)} seconds`;
-        setOrdersLoadState('error', `${ordersFilterState.lastError}. Please retry.`);
-        const tbody = document.getElementById('orders-table-body');
-        if (tbody) {
-            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#b42318;">Orders are taking too long to load. <button class="btn-action" type="button" onclick="retryOrdersLoad()">Reload</button></td></tr>`;
-        }
-    }, ORDERS_LOAD_TIMEOUT_MS);
-}
-
-function ordersStartDate() {
-    return ordersFilterState.startKey ? parseLocalDateKey(ordersFilterState.startKey) : null;
-}
-
-function ordersEndExclusiveDate() {
-    const end = ordersFilterState.endKey ? parseLocalDateKey(ordersFilterState.endKey) : null;
-    return end ? addLocalDays(end, 1) : null;
-}
-
-function buildOrdersQuery() {
-    const constraints = [];
-    const startDate = ordersStartDate();
-    const endDate = ordersEndExclusiveDate();
-    if (startDate && endDate) {
-        constraints.push(where('timestamp', '>=', startDate));
-        constraints.push(where('timestamp', '<', endDate));
-    }
-    constraints.push(orderBy('timestamp', 'desc'));
-    if (ordersFilterState.pageIndex > 0) {
-        const cursor = ordersPageCursors[ordersFilterState.pageIndex - 1];
-        if (cursor) constraints.push(startAfter(cursor));
-        else ordersFilterState.pageIndex = 0;
-    }
-    constraints.push(limit(Math.max(1, safeNumber(ordersFilterState.pageSize, 50)) + 1));
-    return query(collection(db, 'orders'), ...constraints);
-}
-
-function ordersSnapshotPage(snapshot) {
-    const pageSize = Math.max(1, safeNumber(ordersFilterState.pageSize, 50));
-    const docs = snapshot.docs || [];
-    ordersFilterState.hasNext = docs.length > pageSize;
-    const pageDocs = docs.slice(0, pageSize);
-    if (pageDocs.length) ordersPageCursors[ordersFilterState.pageIndex] = pageDocs[pageDocs.length - 1];
-    return pageDocs.map(docSnap => ({ ...docSnap.data(), firestoreId: docSnap.id }));
-}
-
-function mountOrdersStyles() {
-    if (ordersStyleMounted || document.getElementById('orders-pro-style')) return;
-    const style = document.createElement('style');
-    style.id = 'orders-pro-style';
-    style.textContent = `
-        .orders-kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px;margin:16px 0}
-        .orders-kpi{border:1px solid #e5eadf;background:#fbfdf8;border-radius:8px;padding:14px 16px}
-        .orders-kpi span{display:block;color:#60706a;font-size:.85rem;margin-bottom:6px}
-        .orders-kpi strong{font-size:1.35rem;color:#0b3b2e}
-        .orders-pro-panel{border:1px solid #e5eadf;background:#fff;border-radius:8px;padding:14px;margin-bottom:16px}
-        .orders-toolbar{display:grid;grid-template-columns:1.3fr repeat(4,minmax(135px,1fr));gap:10px;align-items:end}
-        .orders-toolbar label{display:flex;flex-direction:column;gap:6px;color:#53665f;font-weight:700;font-size:.82rem}
-        .orders-toolbar input,.orders-toolbar select{height:38px;border:1px solid #d9e2d2;border-radius:7px;padding:0 10px;background:#fff;font:inherit}
-        .orders-segments{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-        .orders-segments button,.orders-reset-btn{border:1px solid #cfe0d0;background:#fff;color:#157a3b;border-radius:999px;padding:8px 12px;font-weight:700;cursor:pointer}
-        .orders-segments button.active{background:#0f7d3d;color:#fff;border-color:#0f7d3d}
-        .orders-actions-row{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap}
-        .orders-result-label{color:#60706a;font-weight:700}
-        .orders-load-status{color:#60706a;font-weight:800}
-        .orders-load-status.loading{color:#8a5a00}
-        .orders-load-status.ready{color:#1f7a3a}
-        .orders-load-status.error{color:#b42318}
-        .orders-page-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-        .orders-page-controls button,.orders-page-controls select{border:1px solid #cfe0d0;background:#fff;color:#157a3b;border-radius:999px;padding:8px 12px;font-weight:700;cursor:pointer}
-        .orders-page-controls button:disabled{cursor:not-allowed;opacity:.48}
-        .orders-table-wrap{overflow-x:auto;border:1px solid #edf1ea;border-radius:8px}
-        .orders-table-wrap table{min-width:1080px}
-        .orders-table-wrap th{white-space:nowrap}
-        .orders-item-list{display:flex;flex-direction:column;gap:3px;min-width:210px}
-        .orders-item-list span{display:flex;justify-content:space-between;gap:12px}
-        .orders-item-list small,.orders-item-list em,.orders-muted{color:#74827c;font-style:normal;font-size:.82rem}
-        .orders-category-line{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
-        .orders-category-line b{background:#eef7ef;color:#157a3b;border-radius:999px;padding:2px 7px;font-size:.76rem}
-        .orders-insight-panel{display:none;border:1px solid #e5eadf;background:#fbfdf8;border-radius:8px;margin:0 0 16px;padding:12px}
-        .orders-insight-panel.active{display:block}
-        .orders-insight-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}
-        .orders-insight-row{display:flex;justify-content:space-between;gap:10px;background:#fff;border:1px solid #edf1ea;border-radius:7px;padding:10px 12px}
-        .orders-insight-row small{display:block;color:#74827c;margin-top:3px}
-        .orders-source-chip{display:inline-flex;border-radius:999px;background:#eef4ff;color:#315f9f;padding:2px 8px;font-size:.78rem;font-weight:700;margin-top:4px}
-        @media(max-width:1100px){.orders-kpi-grid{grid-template-columns:repeat(2,1fr)}.orders-toolbar{grid-template-columns:1fr 1fr}}
-        @media(max-width:680px){.orders-kpi-grid,.orders-toolbar{grid-template-columns:1fr}}
-    `;
-    document.head.appendChild(style);
-    ordersStyleMounted = true;
-}
-
-function mountOrdersProScaffold() {
-    const section = document.getElementById('orders');
-    const tbody = document.getElementById('orders-table-body');
-    if (!section || !tbody) return;
-    mountOrdersStyles();
-    const table = tbody.closest('table');
-    const tableWrap = table?.parentElement;
-    if (tableWrap) tableWrap.classList.add('orders-table-wrap');
-    if (table && !table.dataset.ordersProHead) {
-        const thead = table.querySelector('thead');
-        if (thead) {
-            thead.innerHTML = `
-                <tr>
-                    <th>รหัสสั่งซื้อ</th>
-                    <th>ลูกค้า</th>
-                    <th>รายการ / หมวดหมู่</th>
-                    <th>ยอดรวม</th>
-                    <th>ชำระเงิน</th>
-                    <th>เวลา</th>
-                    <th>สถานะ</th>
-                    <th>จัดการ</th>
-                </tr>
-            `;
-        }
-        table.dataset.ordersProHead = '1';
-    }
-    if (section.querySelector('.orders-pro-panel')) return;
-    const controls = document.createElement('div');
-    controls.innerHTML = `
-        <div class="orders-kpi-grid">
-            <div class="orders-kpi"><span>ออเดอร์ที่แสดง</span><strong id="orders-summary-count">0</strong></div>
-            <div class="orders-kpi"><span>ยอดขายที่ชำระแล้ว</span><strong id="orders-summary-revenue">฿0</strong></div>
-            <div class="orders-kpi"><span>รอชำระ</span><strong id="orders-summary-pending">0</strong></div>
-            <div class="orders-kpi"><span>หมวดหมู่ในช่วงนี้</span><strong id="orders-summary-categories">0</strong></div>
-        </div>
-        <div class="orders-pro-panel">
-            <div class="orders-segments" aria-label="ช่วงวันที่">
-                <button type="button" data-orders-date-preset="today">วันนี้</button>
-                <button type="button" data-orders-date-preset="yesterday">เมื่อวาน</button>
-                <button type="button" data-orders-date-preset="week">7 วัน</button>
-                <button type="button" data-orders-date-preset="month">30 วัน</button>
-                <button type="button" data-orders-date-preset="all">ทั้งหมด</button>
-            </div>
-            <div class="orders-toolbar">
-                <label>ค้นหา
-                    <input id="orders-search" type="search" placeholder="รหัส, ลูกค้า, เบอร์, สินค้า">
-                </label>
-                <label>แหล่งที่มา
-                    <select id="orders-source-filter">
-                        <option value="all">ทุกช่องทาง</option>
-                        <option value="pos">POS</option>
-                        <option value="online">Online</option>
-                    </select>
-                </label>
-                <label>สถานะออเดอร์
-                    <select id="orders-status-filter">
-                        <option value="all">ทุกสถานะ</option>
-                        <option value="pending">รอดำเนินการ</option>
-                        <option value="processing">กำลังทำ</option>
-                        <option value="completed">เสร็จสิ้น</option>
-                        <option value="cancelled">ยกเลิก</option>
-                        <option value="refunded">คืนเงิน</option>
-                    </select>
-                </label>
-                <label>ชำระเงิน
-                    <select id="orders-payment-filter">
-                        <option value="all">ทุกสถานะ</option>
-                        <option value="paid">ชำระแล้ว</option>
-                        <option value="pending">รอชำระ</option>
-                        <option value="failed">ล้มเหลว</option>
-                        <option value="refunded">คืนเงิน</option>
-                    </select>
-                </label>
-                <label>หมวดหมู่
-                    <select id="orders-category-filter">
-                        <option value="all">ทุกหมวดหมู่</option>
-                    </select>
-                </label>
-                <label>วันที่เริ่ม
-                    <input id="orders-start-date" type="date">
-                </label>
-                <label>วันที่สิ้นสุด
-                    <input id="orders-end-date" type="date">
-                </label>
-            </div>
-            <div class="orders-actions-row">
-                <div class="orders-segments" aria-label="มุมมอง">
-                    <button type="button" data-orders-view="orders">รายการ</button>
-                    <button type="button" data-orders-view="category">ตามหมวดหมู่</button>
-                    <button type="button" data-orders-view="date">ตามวันที่</button>
-                </div>
-                <span id="orders-result-label" class="orders-result-label">กำลังโหลดข้อมูล...</span>
-                <span id="orders-load-status" class="orders-load-status">Ready</span>
-                <div class="orders-page-controls" aria-label="Orders pages">
-                    <select id="orders-page-size" aria-label="Orders per page">
-                        ${ORDERS_PAGE_SIZE_OPTIONS.map(size => `<option value="${size}">${size}</option>`).join('')}
-                    </select>
-                    <button id="orders-prev-page" type="button">Prev</button>
-                    <span id="orders-page-label">Page 1</span>
-                    <button id="orders-next-page" type="button">Next</button>
-                    <button id="orders-retry-load" type="button">Reload</button>
-                </div>
-                <button type="button" class="orders-reset-btn" id="orders-reset-filters">ล้างตัวกรอง</button>
-            </div>
-        </div>
-        <div id="orders-insight-panel" class="orders-insight-panel"></div>
-    `;
-    section.querySelector('.section-header')?.insertAdjacentElement('afterend', controls);
-}
-
-function bindOrdersControls() {
-    if (ordersFiltersBound) return;
-    ordersFiltersBound = true;
-    document.addEventListener('input', event => {
-        if (event.target?.id === 'orders-search') {
-            ordersFilterState.search = event.target.value || '';
-            renderOrdersProViewSafely('search');
-        }
-        if (event.target?.id === 'orders-start-date') {
-            ordersFilterState.datePreset = 'custom';
-            ordersFilterState.startKey = event.target.value || '';
-            ordersResetPagination();
-            setupRealtimeOrders();
-        }
-        if (event.target?.id === 'orders-end-date') {
-            ordersFilterState.datePreset = 'custom';
-            ordersFilterState.endKey = event.target.value || '';
-            ordersResetPagination();
-            setupRealtimeOrders();
-        }
-    });
-    document.addEventListener('change', event => {
-        const target = event.target;
-        if (!target?.id) return;
-        if (target.id === 'orders-page-size') {
-            ordersFilterState.pageSize = Math.max(1, safeNumber(target.value, 50));
-            ordersResetPagination();
-            setupRealtimeOrders();
-            return;
-        }
-        if (target.id === 'orders-source-filter') ordersFilterState.source = target.value;
-        if (target.id === 'orders-status-filter') ordersFilterState.status = target.value;
-        if (target.id === 'orders-payment-filter') ordersFilterState.payment = target.value;
-        if (target.id === 'orders-category-filter') ordersFilterState.category = target.value;
-        if (target.id.startsWith('orders-') && target.id.endsWith('-filter')) renderOrdersProViewSafely('filter-change');
-    });
-    document.addEventListener('click', event => {
-        const preset = event.target?.closest?.('[data-orders-date-preset]')?.dataset.ordersDatePreset;
-        if (preset) setOrdersDatePreset(preset);
-        const view = event.target?.closest?.('[data-orders-view]')?.dataset.ordersView;
-        if (view) setOrdersViewMode(view);
-        if (event.target?.id === 'orders-reset-filters') resetOrdersFilters();
-        if (event.target?.id === 'orders-retry-load') setupRealtimeOrders();
-        if (event.target?.id === 'orders-prev-page' && ordersFilterState.pageIndex > 0) {
-            ordersFilterState.pageIndex -= 1;
-            setupRealtimeOrders();
-        }
-        if (event.target?.id === 'orders-next-page' && ordersFilterState.hasNext) {
-            ordersFilterState.pageIndex += 1;
-            setupRealtimeOrders();
-        }
-    });
-}
-
-function updateOrdersControls() {
-    const values = {
-        'orders-start-date': ordersFilterState.startKey || '',
-        'orders-end-date': ordersFilterState.endKey || '',
-        'orders-source-filter': ordersFilterState.source,
-        'orders-status-filter': ordersFilterState.status,
-        'orders-payment-filter': ordersFilterState.payment
-    };
-    Object.entries(values).forEach(([id, value]) => {
-        const el = document.getElementById(id);
-        if (el) el.value = value;
-    });
-    const searchInput = document.getElementById('orders-search');
-    if (searchInput && searchInput.value !== ordersFilterState.search) searchInput.value = ordersFilterState.search || '';
-    const pageSize = document.getElementById('orders-page-size');
-    if (pageSize && pageSize.value !== String(ordersFilterState.pageSize)) pageSize.value = String(ordersFilterState.pageSize);
-    const loading = ordersFilterState.loadStatus === 'loading';
-    const prev = document.getElementById('orders-prev-page');
-    const next = document.getElementById('orders-next-page');
-    const pageLabel = document.getElementById('orders-page-label');
-    if (prev) prev.disabled = loading || ordersFilterState.pageIndex <= 0;
-    if (next) next.disabled = loading || !ordersFilterState.hasNext;
-    if (pageLabel) pageLabel.textContent = `Page ${ordersFilterState.pageIndex + 1}`;
-    document.querySelectorAll('[data-orders-date-preset]').forEach(button => {
-        button.classList.toggle('active', button.dataset.ordersDatePreset === ordersFilterState.datePreset);
-    });
-    document.querySelectorAll('[data-orders-view]').forEach(button => {
-        button.classList.toggle('active', button.dataset.ordersView === ordersFilterState.view);
-    });
-}
-
-function refreshOrdersCategoryFilter() {
-    const select = document.getElementById('orders-category-filter');
-    if (!select) return;
-    const categories = new Map();
-    ordersData.forEach(order => orderCategories(order).forEach(cat => categories.set(cat.key, cat.label)));
-    getOrdersCategorySources().forEach(source => {
-        Object.entries(source || {}).forEach(([key, cat]) => categories.set(key, orderCategoryRecordLabel(cat, key) || key));
-    });
-    const current = ordersFilterState.category;
-    const options = Array.from(categories, ([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label, 'th'));
-    select.innerHTML = '<option value="all">ทุกหมวดหมู่</option>' + options.map(cat => `<option value="${escapeHTML(cat.key)}">${escapeHTML(cat.label)}</option>`).join('');
-    if (current !== 'all' && !categories.has(current)) ordersFilterState.category = 'all';
-    select.value = ordersFilterState.category;
-}
-
-function renderOrdersSummary(orders) {
-    const paidRevenue = orders
-        .filter(order => (orderPaymentStatusValue(order) === 'paid' || orderStatusValue(order) === 'completed') && orderStatusValue(order) !== 'cancelled' && !order.isTestOrder)
-        .reduce((sum, order) => sum + orderReportTotal(order), 0);
-    const categories = new Set();
-    orders.forEach(order => orderCategories(order).forEach(cat => categories.add(cat.key)));
-    const values = {
-        'orders-summary-count': orders.length.toLocaleString('th-TH'),
-        'orders-summary-revenue': '฿' + paidRevenue.toLocaleString('th-TH'),
-        'orders-summary-pending': orders.filter(order => orderPaymentStatusValue(order) === 'pending').length.toLocaleString('th-TH'),
-        'orders-summary-categories': categories.size.toLocaleString('th-TH')
-    };
-    Object.entries(values).forEach(([id, value]) => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = value;
-    });
-}
-
-function orderGroupRows(orders, mode) {
-    const rows = new Map();
-    const addRow = (key, label, amount, quantity, orderId) => {
-        const row = rows.get(key) || { key, label, amount: 0, quantity: 0, orders: new Set() };
-        row.amount += safeNumber(amount);
-        row.quantity += safeNumber(quantity, 1);
-        if (orderId) row.orders.add(orderId);
-        rows.set(key, row);
-    };
-    orders.forEach(order => {
-        if (mode === 'date') {
-            const key = orderDateKey(order) || 'unknown';
-            addRow(key, orderDateLabelFromKey(key), orderReportTotal(order), 1, order.firestoreId);
-            return;
-        }
-        const items = orderReportItems(order);
-        if (!items.length) {
-            addRow('uncategorized', 'ไม่ระบุหมวดหมู่', orderReportTotal(order), 1, order.firestoreId);
-            return;
-        }
-        items.forEach(item => addRow(orderItemCategoryKey(item), orderItemCategoryLabel(item), itemReportAmount(item), safeNumber(item.quantity, 1), order.firestoreId));
-    });
-    return Array.from(rows.values()).map(row => ({ ...row, orderCount: row.orders.size })).sort((a, b) => mode === 'date' ? b.key.localeCompare(a.key) : b.amount - a.amount);
-}
-
-function renderOrdersInsight(orders) {
-    const panel = document.getElementById('orders-insight-panel');
-    if (!panel) return;
-    if (ordersFilterState.view === 'orders') {
-        panel.classList.remove('active');
-        panel.innerHTML = '';
-        return;
-    }
-    const rows = orderGroupRows(orders, ordersFilterState.view).slice(0, 12);
-    const title = ordersFilterState.view === 'category' ? 'สรุปตามหมวดหมู่' : 'สรุปตามวันที่';
-    panel.classList.add('active');
-    panel.innerHTML = `
-        <strong>${escapeHTML(title)}</strong>
-        <div class="orders-insight-grid">
-            ${rows.length ? rows.map(row => `
-                <div class="orders-insight-row">
-                    <div><strong>${escapeHTML(row.label)}</strong><small>${row.orderCount.toLocaleString('th-TH')} ออเดอร์ / ${safeNumber(row.quantity).toLocaleString('th-TH')} ชิ้น</small></div>
-                    <strong>฿${safeNumber(row.amount).toLocaleString('th-TH')}</strong>
-                </div>
-            `).join('') : '<div class="orders-muted">ไม่มีข้อมูลในช่วงที่เลือก</div>'}
-        </div>
-    `;
-}
-
-function renderOrdersRows(orders) {
-    const tbody = document.getElementById('orders-table-body');
-    if (!tbody) return;
-    if (!orders.length) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">ไม่มีออเดอร์ตรงกับตัวกรอง</td></tr>';
-        return;
-    }
-    tbody.innerHTML = orders.map(order => {
-        const id = order.firestoreId || order.id || '';
-        const status = orderStatusValue(order);
-        const paymentStatus = orderPaymentStatusValue(order);
-        const canVoidPos = orderSourceValue(order) === 'pos' && status !== 'cancelled';
-        return `
-            <tr>
-                <td style="font-family: monospace;">${escapeHTML(orderDisplayId(order))}</td>
-                <td><strong>${escapeHTML(order.customerName || order.name || 'Customer')}</strong><br><small style="color:#888;">${escapeHTML(order.phone || order.customerPhone || '-')}</small><br><span class="orders-source-chip">${escapeHTML(orderSourceLabel(order))}</span></td>
-                <td>${orderItemsSummaryHTML(order)}</td>
-                <td style="font-weight: 700;">฿${orderReportTotal(order).toLocaleString('th-TH')}</td>
-                <td>${getPaymentStatusBadgeHTML(paymentStatus)}<br><small style="color:#888;">${escapeHTML(order.paymentLabel || order.paymentMethod || '-')}</small></td>
-                <td>${formatDate(order.paidAt || order.closedAt || order.timestamp || order.createdAt)}</td>
-                <td>${getStatusBadgeHTML(status, 'order')}</td>
-                <td>
-                    <select onchange="updateOrderStatus('${escapeJSString(id)}', this.value)" style="padding: 5px; border-radius: 5px; border: 1px solid #ddd;">
-                        <option value="pending" ${status === 'pending' ? 'selected' : ''}>รอดำเนินการ</option>
-                        <option value="processing" ${status === 'processing' ? 'selected' : ''}>กำลังทำ</option>
-                        <option value="completed" ${status === 'completed' ? 'selected' : ''}>เสร็จสิ้น</option>
-                        <option value="cancelled" ${status === 'cancelled' ? 'selected' : ''}>ยกเลิก</option>
-                    </select>
-                    ${canVoidPos ? `<button class="btn-action btn-delete" type="button" style="margin-left:6px;" onclick="voidPosOrder('${escapeJSString(id)}')">Void</button>` : ''}
-                    ${posLoyaltyRetryActionHTML(order, id)}
-                </td>
             </tr>
         `;
     }).join('');
 }
 
-function renderOrdersProView() {
-    mountOrdersProScaffold();
-    bindOrdersControls();
-    refreshOrdersCategoryFilter();
-    updateOrdersControls();
-    const filtered = ordersData.filter(orderMatchesFilters);
-    renderOrdersSummary(filtered);
-    renderOrdersInsight(filtered);
-    renderOrdersRows(filtered);
-    const label = document.getElementById('orders-result-label');
-    if (label) {
-        const range = ordersFilterState.datePreset === 'all' ? 'ทุกวัน' : `${ordersFilterState.startKey || '-'} ถึง ${ordersFilterState.endKey || '-'}`;
-        label.textContent = `แสดง ${filtered.length.toLocaleString('th-TH')} จาก ${ordersData.length.toLocaleString('th-TH')} ออเดอร์ / ${range}`;
-    }
+function updateOrdersDashboardStats(orders = []) {
+    const todayKey = localDateKey(new Date());
+    let todayOrders = 0;
+    let todayRevenue = 0;
+    orders.forEach(order => {
+        const status = order.status || 'pending';
+        const paymentStatus = order.paymentStatus || (order.source === 'pos' ? 'paid' : 'pending');
+        const isRevenueOrder = paymentStatus === 'paid' || status === 'completed';
+        if (!order.isTestOrder && isRevenueOrder && status !== 'cancelled' && orderReportDateKey(order) === todayKey) {
+            todayOrders++;
+            todayRevenue += orderReportTotal(order);
+        }
+    });
+    const suffix = ordersQueryState.hasNext && ordersQueryState.startKey === todayKey && ordersQueryState.endKey === todayKey ? '+' : '';
+    const statOrders = document.getElementById('stat-orders');
+    const statRevenue = document.getElementById('stat-revenue');
+    if (statOrders) statOrders.innerText = todayOrders.toLocaleString('th-TH') + suffix;
+    if (statRevenue) statRevenue.innerText = '฿' + todayRevenue.toLocaleString('th-TH') + suffix;
 }
 
-function renderOrdersProViewSafely(context = 'orders-render') {
-    try {
-        renderOrdersProView();
-        return true;
-    } catch (error) {
-        setOrdersRenderError(error, context);
-        return false;
-    }
-}
-
+// Real-time Orders Listener
 function setupRealtimeOrders() {
+    mountOrdersControls();
     if (ordersUnsubscribe) {
         ordersUnsubscribe();
         ordersUnsubscribe = null;
     }
-    dashboardOrdersLoaded = false;
-    mountOrdersProScaffold();
     const tbody = document.getElementById('orders-table-body');
-    if (tbody) renderSkeleton(tbody, 'table', { cols: 8, rows: 6 });
+    if (tbody) renderSkeleton(tbody, 'table', { cols: 7, rows: 6 });
     setOrdersLoadState('loading');
     startOrdersLoadTimer();
     const q = buildOrdersQuery();
     ordersUnsubscribe = onSnapshot(q, (snapshot) => {
         clearOrdersLoadTimer();
         const reportOrders = ordersSnapshotPage(snapshot);
-        ordersData = reportOrders;
         dashboardOrdersData = reportOrders;
-        dashboardOrdersLoaded = true;
-        ordersFilterState.loadedCount = reportOrders.length;
-        ordersFilterState.lastError = '';
-        try {
-            renderDashboardSalesReport();
-        } catch (error) {
-            console.error('Error rendering dashboard sales report after Orders load:', error);
-        }
-        if (renderOrdersProViewSafely('snapshot')) {
-            setOrdersLoadState(reportOrders.length ? 'ready' : 'empty');
-        }
+        ordersQueryState.loadedCount = reportOrders.length;
+        ordersQueryState.lastError = '';
+        renderOrdersRows(reportOrders);
+        updateOrdersDashboardStats(reportOrders);
+        setOrdersLoadState(reportOrders.length ? 'ready' : 'empty');
+        scheduleDashboardRender();
     }, (error) => {
         clearOrdersLoadTimer();
         console.error("Error listening to orders:", error);
-        dashboardOrdersLoaded = false;
-        ordersFilterState.lastError = error.message || 'Unable to load Orders';
-        setOrdersLoadState('error', ordersFilterState.lastError);
-        const body = document.getElementById('orders-table-body');
-        if (body) body.innerHTML = '<tr><td colspan="8" style="text-align:center; color:red;">Orders failed to load: ' + escapeHTML(ordersFilterState.lastError) + ' <button class="btn-action" type="button" onclick="retryOrdersLoad()">Reload</button></td></tr>';
+        ordersQueryState.lastError = error.message || 'ไม่สามารถโหลดข้อมูล Orders';
+        setOrdersLoadState('error', ordersQueryState.lastError);
+        const tbody = document.getElementById('orders-table-body');
+        if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:red;">โหลด Orders ไม่สำเร็จ: ${escapeHTML(ordersQueryState.lastError)} <button class="btn-action" type="button" onclick="retryOrdersLoad()">โหลดใหม่</button></td></tr>`;
     });
 }
 
 window.retryOrdersLoad = () => setupRealtimeOrders();
-window.setOrdersDatePreset = setOrdersDatePreset;
-window.setOrdersViewMode = setOrdersViewMode;
-window.resetOrdersFilters = resetOrdersFilters;
+window.setOrdersDatePreset = (preset = 'today') => {
+    ordersQueryState.preset = preset;
+    Object.assign(ordersQueryState, ordersDateRangeForPreset(preset));
+    ordersResetPagination();
+    setupRealtimeOrders();
+};
 
 function adminTodayISO() {
     const now = new Date();
@@ -4972,7 +4251,7 @@ const ARCHERY_AUDIT_ACTIONS = new Set([
 ]);
 const ARCHERY_PAGE_SETTINGS_REF = () => doc(db, 'site_settings', 'archery');
 const DEFAULT_ARCHERY_PAGE_SETTINGS = {
-    heroImageUrl: 'https://www.edencafe.co/Images/uploads/archery/2026-06/1782188813037-archery-hero-1782188809834.webp',
+    heroImageUrl: '/Images/archery/archery-hero.png',
     packageLead: 'Open daily 10:00-20:00. Choose 60 / 120 / 180 minute packages.',
     packages: [
         {
@@ -5353,16 +4632,6 @@ function archeryBranchId() {
     if (access.branch_id) return String(access.branch_id);
     if (Array.isArray(access.branch_ids) && access.branch_ids.length) return String(access.branch_ids[0]);
     return ARCHERY_BRANCH_FALLBACK;
-}
-
-function archeryAdminAccessIssue() {
-    if (!canAdmin('archery') || isOwnerAccess()) return '';
-    const access = currentAdminAccess || {};
-    const hasBranch = !!(access.primary_branch_id || access.branch_id || (Array.isArray(access.branch_ids) && access.branch_ids.length));
-    if (!hasBranch) {
-        return `Archery access is missing branch access. Owner must save this admin with branch ${ARCHERY_BRANCH_FALLBACK}.`;
-    }
-    return '';
 }
 
 function archeryAdminRole() {
@@ -6565,14 +5834,6 @@ function setupRealtimeArcheryBookings() {
         archeryBookingsUnsubscribe = null;
     }
     if (!canAdmin('archery')) return;
-    const setupIssue = archeryAdminAccessIssue();
-    if (setupIssue) {
-        archeryBookingsData = [];
-        renderArcheryAdmin([]);
-        const tbody = document.getElementById('archery-bookings-table-body');
-        if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#c62828;">${escapeHTML(setupIssue)}</td></tr>`;
-        return;
-    }
     const branchId = archeryBranchId();
     const q = query(
         collection(db, 'bookings'),
@@ -6611,17 +5872,9 @@ function setupRealtimeArcheryPayments() {
         renderArcheryPaymentWatch(archeryBookingsData);
         return;
     }
-    const setupIssue = archeryAdminAccessIssue();
-    if (setupIssue) {
-        archeryPaymentsData = [];
-        const panel = document.getElementById('archery-payment-watch');
-        if (panel) panel.innerHTML = `<p class="archery-status error">${escapeHTML(setupIssue)}</p>`;
-        return;
-    }
     const q = query(
         collection(db, 'payments'),
         where('branch_id', '==', archeryBranchId()),
-        where('service_type', '==', 'ARCHERY'),
         limit(120)
     );
     archeryPaymentsUnsubscribe = onSnapshot(q, (snapshot) => {
@@ -6649,13 +5902,6 @@ function setupRealtimeArcheryWebhookEvents() {
     if (!['OWNER', 'MANAGER'].includes(archeryAdminRole())) {
         archeryWebhookEventsData = [];
         renderArcheryWebhookEvents();
-        return;
-    }
-    const setupIssue = archeryAdminAccessIssue();
-    if (setupIssue) {
-        archeryWebhookEventsData = [];
-        const panel = document.getElementById('archery-webhook-events');
-        if (panel) panel.innerHTML = `<p class="archery-status error">${escapeHTML(setupIssue)}</p>`;
         return;
     }
     const q = query(
@@ -6687,13 +5933,6 @@ function setupRealtimeArcheryReconciliation() {
         renderArcheryReconciliationPanel();
         return;
     }
-    const setupIssue = archeryAdminAccessIssue();
-    if (setupIssue) {
-        archeryReconciliationData = [];
-        const panel = document.getElementById('archery-reconciliation-panel');
-        if (panel) panel.innerHTML = `<p class="archery-status error">${escapeHTML(setupIssue)}</p>`;
-        return;
-    }
     const q = query(
         collection(db, 'payment_reconciliation_queue'),
         where('branch_id', '==', archeryBranchId()),
@@ -6719,12 +5958,6 @@ function setupRealtimeArcheryAuditLogs() {
         archeryAuditUnsubscribe = null;
     }
     if (!archeryCan('viewAuditTrail')) {
-        archeryAuditLogsData = [];
-        renderArcheryAuditTrail();
-        return;
-    }
-    const setupIssue = archeryAdminAccessIssue();
-    if (setupIssue) {
         archeryAuditLogsData = [];
         renderArcheryAuditTrail();
         return;
@@ -6791,14 +6024,14 @@ function setupRealtimeBookings() {
             const status = booking.status || 'pending';
             const isRoom = booking.bookingType === 'room';
             const tableNo = booking.tableNo || '';
-            
+
             if (booking.date === todayStr) {
                 if (isRoom) todayRoomBookings++;
                 else todayBookings++;
             }
 
             const tr = document.createElement('tr');
-            
+
             if (!isRoom) {
                 hasTableBookings = true;
                 const zoneStr = booking.tableZone ? `<br><small class="text-muted">โซน/โต๊ะ: ${escapeHTML(booking.tableZone)}</small>` : '';
@@ -6856,7 +6089,7 @@ function setupRealtimeBookings() {
         dashboardBookingsData = reportBookings;
         if (!archeryBookingsUnsubscribe) renderArcheryAdmin(reportBookings);
         renderAllBookings(reportBookings);
-        renderDashboardSalesReport();
+        scheduleDashboardRender();
         document.getElementById('stat-bookings').innerText = todayBookings + todayRoomBookings;
     }, (error) => {
         console.error("Error listening to bookings:", error);
@@ -6927,7 +6160,7 @@ function renderCategoriesSnapshot(snapshot) {
         if (tbody) tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;">ไม่มีข้อมูลหมวดหมู่</td></tr>';
         updateProductCategoryFilterOptions();
         renderProductsTable();
-        renderDashboardSalesReport();
+        scheduleDashboardRender();
         return;
     }
 
@@ -6979,7 +6212,7 @@ function renderCategoriesSnapshot(snapshot) {
     });
     updateProductCategoryFilterOptions();
     renderProductsTable();
-    renderDashboardSalesReport();
+    scheduleDashboardRender();
 }
 
 async function refreshCategoriesOnce() {
@@ -7018,12 +6251,12 @@ window.closeCategoryModal = () => {
 window.editCategory = (id) => {
     const cat = categoriesData[id];
     if (!cat) return;
-    
+
     document.getElementById('categoryId').value = id;
     document.getElementById('catIdInput').value = id;
     document.getElementById('catIdInput').disabled = true; // Don't allow changing ID once created
     document.getElementById('catNameInput').value = cat.name || '';
-    
+
     document.getElementById('cat-modal-title').innerText = 'แก้ไขหมวดหมู่';
     categoryModal.style.display = 'block';
 };
@@ -7041,13 +6274,13 @@ window.deleteCategory = async (id) => {
 // Handle Category Form Submit
 categoryForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    
+
     const hiddenId = document.getElementById('categoryId').value;
     const inputId = document.getElementById('catIdInput').value.trim().toLowerCase();
     const catName = document.getElementById('catNameInput').value.trim();
-    
+
     if (!inputId) return alert("กรุณาระบุรหัสหมวดหมู่");
-    
+
     try {
         const docRef = doc(db, "categories", inputId);
         await setDoc(docRef, { name: catName }, { merge: true });
@@ -7628,7 +6861,7 @@ function setupRealtimeRooms() {
         const tbody = document.getElementById('rooms-table-body');
         tbody.innerHTML = '';
         roomsData = {};
-        
+
         if (snapshot.empty) {
             tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">ไม่มีข้อมูลห้องรับรอง</td></tr>';
             return;
@@ -7638,7 +6871,7 @@ function setupRealtimeRooms() {
             const room = docSnap.data();
             const id = docSnap.id;
             roomsData[id] = room; // Store locally for edit modal
-            
+
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td><img loading="lazy" src="${safeImageURL(room.imageUrl, 'Images/Logo.webp')}" alt="${escapeHTML(room.name)}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 5px;"></td>
@@ -7679,7 +6912,7 @@ window.closeRoomModal = () => {
 window.editRoom = (id) => {
     const room = roomsData[id];
     if (!room) return;
-    
+
     document.getElementById('roomId').value = id;
     document.getElementById('roomCode').value = id;
     document.getElementById('roomCode').readOnly = true;
@@ -7688,7 +6921,7 @@ window.editRoom = (id) => {
     document.getElementById('roomPrice').value = room.price || 0;
     document.getElementById('roomAmount').value = room.amount || 1;
     document.getElementById('roomImageUrl').value = room.imageUrl || '';
-    
+
     document.getElementById('room-modal-title').innerText = 'แก้ไขห้องรับรอง';
     document.getElementById('roomSubmitBtn').innerText = 'บันทึกการแก้ไข';
     roomModal.style.display = 'block';
@@ -7707,23 +6940,23 @@ window.deleteRoom = async (id) => {
 
 roomForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    
+
     const submitBtn = document.getElementById('roomSubmitBtn');
     submitBtn.disabled = true;
     submitBtn.innerText = 'กำลังบันทึก...';
 
     const code = document.getElementById('roomCode').value.trim().toLowerCase();
     const isNew = !document.getElementById('roomId').value;
-    
+
     try {
         let finalImageUrl = document.getElementById('roomImageUrl').value;
         const fileInput = document.getElementById('roomImageFile');
-        
+
         // Handle Image Upload
         if (fileInput.files.length > 0) {
             const file = fileInput.files[0];
             submitBtn.innerText = 'กำลังอัปโหลดรูป...';
-            
+
             // Convert and upload to Spaceship hosting
             submitBtn.innerText = 'กำลังแปลงรูปภาพ...';
             finalImageUrl = await uploadAdminImageFromFile(file, 'rooms', code + '_' + Date.now() + '.webp', {
@@ -7830,35 +7063,6 @@ function productVariantsForDisplay(product = {}) {
     return optionVariants;
 }
 
-function productVariantPriceStats(product = {}) {
-    const basePrice = safeNumber(product.price);
-    const variants = productVariantsForDisplay(product);
-    const prices = variants
-        .map(variant => safeNumber(variant.price))
-        .filter(price => Number.isFinite(price));
-    const min = prices.length ? Math.min(...prices) : basePrice;
-    const max = prices.length ? Math.max(...prices) : basePrice;
-    const hasVariants = variants.length > 0;
-    const hasMismatch = hasVariants && prices.some(price => Math.abs(price - basePrice) > 0.0001);
-    const zeroCount = hasVariants ? prices.filter(price => basePrice > 0 && price <= 0).length : 0;
-    return { basePrice, variants, prices, min, max, hasVariants, hasMismatch, zeroCount };
-}
-
-function productVariantPriceLabel(product = {}) {
-    const stats = productVariantPriceStats(product);
-    const base = productMoney(stats.basePrice);
-    if (!stats.hasVariants) return `<strong>${base}</strong>`;
-    const range = stats.min === stats.max
-        ? productMoney(stats.min)
-        : `${productMoney(stats.min)} - ${productMoney(stats.max)}`;
-    const warning = stats.zeroCount
-        ? `<small class="menu-price-warning">มี variant ราคา 0 จำนวน ${stats.zeroCount}</small>`
-        : stats.hasMismatch
-            ? '<small class="menu-price-warning">ราคา variants ไม่ตรงกับราคาหลัก</small>'
-            : '<small class="menu-price-ok">ราคา variants ตรงกับราคาหลัก</small>';
-    return `<strong>${range}</strong><small class="menu-muted">ราคาหลัก ${base}</small>${warning}`;
-}
-
 function productVariantSummaryText(product = {}) {
     const variants = productVariantsForDisplay(product);
     return variants.length ? ` | ${variants.length} variants` : '';
@@ -7874,7 +7078,7 @@ function renderProductVariantDetailRow(id, product = {}) {
     const visibility = [
         product.showOnWebsite !== false ? 'แสดงในเมนูเว็บ' : 'ซ่อนจากเมนูเว็บ',
         product.showInShop ? 'แสดงในร้านค้า' : 'ไม่แสดงในร้านค้า',
-        product.showOnIndex || product.isFeatured ? 'สินค้าแนะนำหน้าแรก' : 'ไม่แสดงหน้าแรก',
+        product.showOnIndex ? 'สินค้าแนะนำหน้าแรก' : 'ไม่แสดงหน้าแรก',
         product.showOnPos !== false ? 'แสดงบน POS' : 'ซ่อนจาก POS',
         product.taxEnabled !== false ? 'ภาษี 7%' : 'ไม่คิดภาษี'
     ].join(' · ');
@@ -8167,8 +7371,6 @@ function updateProductSelectionUI(pageRows = []) {
 function renderProductsTable() {
     const tbody = document.getElementById('products-table-body');
     if (!tbody) return;
-    mountProductPriceTools();
-    mountProductPriceAuditPanel();
     bindProductManagerControls();
     updateProductCategoryFilterOptions();
 
@@ -8191,7 +7393,7 @@ function renderProductsTable() {
             const hiddenNotes = [
                 available ? '' : 'Hidden from sale',
                 product.showOnWebsite === false ? 'Hidden from website' : '',
-                product.showOnIndex || product.isFeatured ? 'Featured on Index' : '',
+                product.showOnIndex ? 'Featured on Index' : '',
                 product.showOnPos === false ? 'Hidden from POS' : ''
             ].filter(Boolean).join(' | ');
             const mainRow = `
@@ -8212,7 +7414,7 @@ function renderProductsTable() {
                             ${productCategoryOptions(product.category || '')}
                         </select>
                     </td>
-                    <td class="menu-price-cell">${productVariantPriceLabel(product)}</td>
+                    <td>${productMoney(product.price)}</td>
                     <td>${productMoney(product.cost)}</td>
                     <td><span class="${margin.className}">${escapeHTML(margin.text)}</span></td>
                     <td><span class="${stock.className}">${escapeHTML(stock.text)}</span></td>
@@ -8237,7 +7439,6 @@ function renderProductsTable() {
     if (prev) prev.disabled = productCurrentPage <= 1;
     if (next) next.disabled = productCurrentPage >= totalPages;
     updateProductSelectionUI(pageRows);
-    updateProductPriceAuditPanel();
 }
 
 function bindProductManagerControls() {
@@ -8378,7 +7579,7 @@ function renderProductsSnapshot(snapshot) {
     if (snapshot.empty) {
         if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">ไม่มีข้อมูลเมนูสินค้า</td></tr>';
         renderProductsTable();
-        renderDashboardSalesReport();
+        scheduleDashboardRender();
         return;
     }
 
@@ -8392,7 +7593,7 @@ function renderProductsSnapshot(snapshot) {
         if (!productsData[id]) selectedProductIds.delete(id);
     });
     renderProductsTable();
-    renderDashboardSalesReport();
+    scheduleDashboardRender();
 }
 
 async function refreshProductsOnce() {
@@ -8417,163 +7618,6 @@ function setupRealtimeProducts() {
 // Product Modal Logic
 const productModal = document.getElementById('productModal');
 const productForm = document.getElementById('productForm');
-
-function mountProductPriceTools() {
-    if (!document.getElementById('product-price-sync-style')) {
-        const style = document.createElement('style');
-        style.id = 'product-price-sync-style';
-        style.textContent = `
-            .menu-price-cell strong,.menu-price-cell small{display:block}
-            .menu-price-warning{color:#c2410c;font-weight:700;margin-top:3px}
-            .menu-price-ok{color:#15803d;margin-top:3px}
-            .product-price-sync-box{border:1px solid #d8e5d8;background:#f8fcf7;border-radius:8px;padding:10px 12px;margin-top:8px}
-            .product-price-sync-box label{display:flex;align-items:flex-start;gap:8px;font-weight:700;color:#173f2c}
-            .product-price-sync-box small{display:block;color:#607466;margin:4px 0 8px 24px;line-height:1.35}
-            .product-price-sync-actions{display:flex;gap:8px;flex-wrap:wrap;margin-left:24px}
-            .product-price-sync-actions button{border:1px solid #14843f;background:#fff;color:#14843f;border-radius:999px;padding:6px 10px;font-weight:700;cursor:pointer}
-            .product-price-audit{border:1px solid #f3d39b;background:#fff8e9;color:#6b4a00;border-radius:8px;padding:10px 12px;margin:10px 0 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-            .product-price-audit button{border:0;background:#14843f;color:#fff;border-radius:999px;padding:8px 12px;font-weight:700;cursor:pointer}
-        `;
-        document.head.appendChild(style);
-    }
-
-    const priceInput = document.getElementById('productPrice');
-    const priceGroup = priceInput?.closest('.form-group');
-    if (priceGroup && !document.getElementById('product-price-sync-box')) {
-        priceGroup.insertAdjacentHTML('beforeend', `
-            <div id="product-price-sync-box" class="product-price-sync-box">
-                <label><input type="checkbox" id="productSyncVariantPrices"> อัปเดตราคา variants ทั้งหมดด้วยเมื่อบันทึก</label>
-                <small id="productVariantPriceNotice">เว็บและ POS ใช้ราคา variants เป็นราคาขายจริง หากแก้เฉพาะราคาหลัก ราคาในเว็บ/POS อาจไม่เปลี่ยน</small>
-                <div class="product-price-sync-actions">
-                    <button type="button" onclick="syncProductVariantPricesToBase()">ใช้ราคาหลักกับ variants</button>
-                    <button type="button" onclick="repairVisibleZeroVariantPrices()">ซ่อมเฉพาะ variant ราคา 0</button>
-                </div>
-            </div>
-        `);
-    }
-}
-
-function currentProductBasePrice() {
-    return getProductNumberValue('productPrice', 0);
-}
-
-function syncProductVariantPricesToBase(onlyZero = false) {
-    const basePrice = currentProductBasePrice();
-    document.querySelectorAll('#productVariantsBody .product-variant-price').forEach(input => {
-        const current = Number(input.value);
-        if (!onlyZero || !Number.isFinite(current) || current <= 0) {
-            input.value = String(basePrice);
-        }
-    });
-    updateProductVariantPriceNotice();
-}
-
-function repairVisibleZeroVariantPrices() {
-    syncProductVariantPricesToBase(true);
-}
-
-function updateProductVariantPriceNotice() {
-    const notice = document.getElementById('productVariantPriceNotice');
-    if (!notice) return;
-    const basePrice = currentProductBasePrice();
-    const prices = Array.from(document.querySelectorAll('#productVariantsBody .product-variant-price'))
-        .map(input => Number(input.value))
-        .filter(price => Number.isFinite(price));
-    const zeroCount = prices.filter(price => basePrice > 0 && price <= 0).length;
-    const mismatchCount = prices.filter(price => Math.abs(price - basePrice) > 0.0001).length;
-    if (!prices.length) {
-        notice.textContent = 'ยังไม่มี variants ระบบจะสร้างจากราคาหลักเมื่อบันทึก';
-    } else if (zeroCount) {
-        notice.textContent = `พบ variant ราคา 0 จำนวน ${zeroCount} รายการ ควรซ่อมก่อนแสดงบนเว็บ/POS`;
-    } else if (mismatchCount) {
-        notice.textContent = `มี variants ${mismatchCount} รายการที่ราคาต่างจากราคาหลัก ถ้าตั้งใจให้ต่างราคาไม่ต้อง sync`;
-    } else {
-        notice.textContent = 'ราคา variants ตรงกับราคาหลักแล้ว';
-    }
-}
-
-function shouldSyncVariantPricesOnSave() {
-    return !!document.getElementById('productSyncVariantPrices')?.checked;
-}
-
-function mountProductPriceAuditPanel() {
-    const tbody = document.getElementById('products-table-body');
-    const table = tbody?.closest('table');
-    const container = table?.parentElement;
-    if (!container || document.getElementById('product-price-audit-panel')) return;
-    container.insertAdjacentHTML('beforebegin', `
-        <div id="product-price-audit-panel" class="product-price-audit">
-            <span id="product-price-audit-text">กำลังตรวจราคา variants...</span>
-            <button type="button" onclick="backfillZeroVariantPrices()">ซ่อม variant ราคา 0</button>
-        </div>
-    `);
-}
-
-function updateProductPriceAuditPanel() {
-    mountProductPriceAuditPanel();
-    const text = document.getElementById('product-price-audit-text');
-    if (!text) return;
-    let mismatch = 0;
-    let zero = 0;
-    Object.values(productsData || {}).forEach(product => {
-        const stats = productVariantPriceStats(product);
-        if (stats.hasMismatch) mismatch++;
-        zero += stats.zeroCount;
-    });
-    text.textContent = zero
-        ? `พบ variant ราคา 0 จำนวน ${zero} รายการ และสินค้า base/variant ไม่ตรง ${mismatch} รายการ`
-        : mismatch
-            ? `สินค้า ${mismatch} รายการมีราคา variants ต่างจากราคาหลัก หากตั้งใจให้ต่างราคาไม่ต้องแก้`
-            : 'ราคา variants ปกติ ไม่พบ variant ราคา 0';
-}
-
-window.syncProductVariantPricesToBase = syncProductVariantPricesToBase;
-window.repairVisibleZeroVariantPrices = repairVisibleZeroVariantPrices;
-
-window.backfillZeroVariantPrices = async () => {
-    const fixes = Object.entries(productsData || {})
-        .map(([id, product]) => {
-            const basePrice = safeNumber(product.price);
-            const variants = Array.isArray(product.variants) && product.variants.length
-                ? product.variants.map((variant, index) => normalizeProductVariant(variant, index, product))
-                : productVariantsForDisplay(product);
-            if (!basePrice || !variants.length) return null;
-            let changed = false;
-            const nextVariants = variants.map(variant => {
-                const rawPrice = variant.price;
-                const price = safeNumber(rawPrice);
-                if (rawPrice === '' || rawPrice == null || price <= 0) {
-                    changed = true;
-                    return { ...variant, price: basePrice };
-                }
-                return variant;
-            });
-            return changed ? { id, product, variants: nextVariants } : null;
-        })
-        .filter(Boolean);
-
-    if (!fixes.length) {
-        alert('ไม่พบ variant ราคา 0 หรือค่าว่างที่ต้องซ่อม');
-        return;
-    }
-    if (!confirm(`ซ่อม variant ราคา 0/ค่าว่าง จำนวน ${fixes.length} สินค้าให้เท่ากับราคาหลัก ใช่ไหม?`)) return;
-    try {
-        for (const item of fixes) {
-            await updateDoc(doc(db, 'products', item.id), {
-                variants: item.variants,
-                updatedAt: new Date().toISOString(),
-                priceSyncRepair: {
-                    repairedZeroVariantPrices: true,
-                    repairedAt: new Date().toISOString()
-                }
-            });
-        }
-        alert(`ซ่อมราคา variants สำเร็จ ${fixes.length} สินค้า`);
-    } catch (error) {
-        console.error('Backfill zero variant prices failed:', error);
-        alert(safeAdminError('ซ่อมราคา variants ไม่สำเร็จ'));
-    }
-};
 
 function setProductInputValue(id, value = '') {
     const el = document.getElementById(id);
@@ -8665,7 +7709,6 @@ function renderProductVariantRows(variants = []) {
     if (!tbody) return;
     const rows = Array.isArray(variants) && variants.length ? variants : defaultProductVariants();
     tbody.innerHTML = rows.map((variant, index) => productVariantRowTemplate(variant, index)).join('');
-    updateProductVariantPriceNotice();
 }
 
 window.addProductVariantRow = (variant = {}) => {
@@ -8719,20 +7762,10 @@ if (productVariantsBody) {
         const removeBtn = event.target.closest('.variant-remove-btn');
         if (!removeBtn) return;
         removeBtn.closest('tr')?.remove();
-        updateProductVariantPriceNotice();
-    });
-    productVariantsBody.addEventListener('input', (event) => {
-        if (event.target.closest('.product-variant-price')) updateProductVariantPriceNotice();
     });
 }
 
-document.getElementById('productPrice')?.addEventListener('input', () => {
-    if (shouldSyncVariantPricesOnSave()) syncProductVariantPricesToBase();
-    else updateProductVariantPriceNotice();
-});
-
 window.openProductModal = () => {
-    mountProductPriceTools();
     productForm.reset();
     document.getElementById('productId').value = '';
     document.getElementById('productImageFile').value = '';
@@ -8750,7 +7783,6 @@ window.openProductModal = () => {
     setProductCheckboxValue('productShowOnPos', true);
     setProductCheckboxValue('productSignature', false);
     setProductCheckboxValue('productShowOnIndex', false);
-    setProductCheckboxValue('productSyncVariantPrices', true);
     renderProductVariantRows(defaultProductVariants());
     document.getElementById('modal-title').innerText = 'เพิ่มเมนูใหม่';
     productModal.style.display = 'block';
@@ -8761,10 +7793,9 @@ window.closeProductModal = () => {
 };
 
 window.editProduct = (id) => {
-    mountProductPriceTools();
     const product = productsData[id];
     if (!product) return;
-    
+
     document.getElementById('productId').value = id;
     document.getElementById('productName').value = product.name || '';
     document.getElementById('productDesc').value = product.description || '';
@@ -8796,10 +7827,9 @@ window.editProduct = (id) => {
     setProductCheckboxValue('productShowInShop', !!product.showInShop);
     setProductCheckboxValue('productShowOnPos', product.showOnPos !== false);
     document.getElementById('productSignature').checked = !!product.isSignature;
-    setProductCheckboxValue('productShowOnIndex', !!(product.showOnIndex || product.isFeatured));
-    setProductCheckboxValue('productSyncVariantPrices', false);
+    setProductCheckboxValue('productShowOnIndex', !!product.showOnIndex);
     renderProductVariantRows(productVariantsForDisplay(product));
-    
+
     document.getElementById('modal-title').innerText = 'แก้ไขเมนูสินค้า';
     productModal.style.display = 'block';
 };
@@ -8817,18 +7847,18 @@ window.deleteProduct = async (id) => {
 // Handle Product Form Submit
 productForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    
+
     const id = document.getElementById('productId').value;
     const submitBtn = productForm.querySelector('button[type="submit"]');
     const originalText = submitBtn.innerText;
-    
+
     try {
         submitBtn.disabled = true;
         submitBtn.innerText = 'กำลังบันทึก...';
-        
+
         let finalImageUrl = document.getElementById('productImage').value;
         const imageFile = document.getElementById('productImageFile').files[0];
-        
+
         if (imageFile) {
             submitBtn.innerText = 'กำลังแปลงรูปภาพ...';
             finalImageUrl = await uploadAdminImageFromFile(imageFile, 'products', Date.now() + '_image.webp', {
@@ -8843,20 +7873,16 @@ productForm.addEventListener('submit', async (e) => {
         }
 
         const optionList = collectProductOptionsFromForm();
+        const variantList = collectProductVariantsFromForm();
         const productName = document.getElementById('productName').value;
         const productHandle = getProductInputValue('productHandle') || slugifyMenuHandle(productName);
         const soldBy = getProductSelectValue('productSoldBy', 'each');
-        const productPrice = Number(document.getElementById('productPrice').value);
-        let variantList = collectProductVariantsFromForm();
-        if (shouldSyncVariantPricesOnSave()) {
-            variantList = variantList.map(variant => ({ ...variant, price: productPrice }));
-        }
         const productData = {
             handle: productHandle,
             sku: getProductInputValue('productSku'),
             name: productName,
             description: document.getElementById('productDesc').value,
-            price: productPrice,
+            price: Number(document.getElementById('productPrice').value),
             cost: getProductNumberValue('productCost', 0),
             stock: getProductNumberValue('productStock', 0),
             lowStock: getProductNumberValue('productLowStock', 0),
@@ -8886,11 +7912,10 @@ productForm.addEventListener('submit', async (e) => {
             includedItemSku: getProductInputValue('productIncludedItemSku'),
             includedItemQuantity: getProductNumberValue('productIncludedItemQuantity', 1),
             isSignature: document.getElementById('productSignature').checked,
-            isFeatured: getProductCheckboxValue('productShowOnIndex', false),
             variants: variantList,
             updatedAt: new Date().toISOString()
         };
-        
+
         if (id) {
             // Update existing
             await updateDoc(doc(db, "products", id), productData);
@@ -8958,45 +7983,75 @@ window.voidPosOrder = async (id) => {
 let blogsData = {};
 let quill;
 
-function isLegacyBlogEditorActive() {
-    const blogsSection = document.getElementById('blogs');
-    const legacyModal = document.getElementById('blogModal');
-    const modalOpen = legacyModal
-        && legacyModal.style.display !== 'none'
-        && getComputedStyle(legacyModal).display !== 'none';
-    return blogsSection?.classList.contains('active') || modalOpen;
+function ensureQuillStylesheet() {
+    if (document.getElementById('eden-quill-css')) return;
+    const link = document.createElement('link');
+    link.id = 'eden-quill-css';
+    link.rel = 'stylesheet';
+    link.href = QUILL_CSS_URL;
+    link.integrity = QUILL_CSS_INTEGRITY;
+    link.crossOrigin = 'anonymous';
+    document.head.appendChild(link);
 }
 
-function initLegacyBlogQuillEditor() {
-    const editor = document.getElementById('blogContentEditor');
-    if (!editor || quill || !isLegacyBlogEditorActive()) return;
-    if (typeof window.Quill !== 'function') {
-        console.warn('Legacy Blog Quill editor skipped because Quill is not loaded.');
-        return;
-    }
-    quill = new window.Quill('#blogContentEditor', {
-        theme: 'snow',
-        modules: {
-            toolbar: [
-                [{ 'header': [1, 2, 3, false] }],
-                ['bold', 'italic', 'underline', 'strike'],
-                ['blockquote', 'code-block'],
-                [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-                [{ 'color': [] }, { 'background': [] }],
-                ['link', 'image', 'video'],
-                ['clean']
-            ]
+function loadQuillScript() {
+    if (window.Quill) return Promise.resolve(window.Quill);
+    if (quillLoadPromise) return quillLoadPromise;
+    quillLoadPromise = new Promise((resolve, reject) => {
+        const existing = document.getElementById('eden-quill-script');
+        if (existing) {
+            existing.addEventListener('load', () => resolve(window.Quill));
+            existing.addEventListener('error', reject);
+            return;
         }
+        const script = document.createElement('script');
+        script.id = 'eden-quill-script';
+        script.src = QUILL_SCRIPT_URL;
+        script.integrity = QUILL_SCRIPT_INTEGRITY;
+        script.crossOrigin = 'anonymous';
+        script.onload = () => resolve(window.Quill);
+        script.onerror = () => reject(new Error('Unable to load Quill editor'));
+        document.head.appendChild(script);
     });
+    return quillLoadPromise;
 }
 
-document.addEventListener("DOMContentLoaded", initLegacyBlogQuillEditor);
-window.addEventListener('eden-admin-tab-activated', event => {
-    if (event.detail?.tabId === 'blogs') initLegacyBlogQuillEditor();
-});
+async function ensureLegacyBlogEditor() {
+    if (quill || !document.getElementById('blogContentEditor')) return quill;
+    ensureQuillStylesheet();
+    await loadQuillScript();
+    if (!window.Quill) throw new Error('Quill editor is unavailable');
+    quill = new window.Quill('#blogContentEditor', {
+            theme: 'snow',
+            modules: {
+                toolbar: [
+                    [{ 'header': [1, 2, 3, false] }],
+                    ['bold', 'italic', 'underline', 'strike'],
+                    ['blockquote', 'code-block'],
+                    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                    [{ 'color': [] }, { 'background': [] }],
+                    ['link', 'image', 'video'],
+                    ['clean']
+                ]
+            }
+    });
+    return quill;
+}
 
 const blogModal = document.getElementById('blogModal');
 const blogForm = document.getElementById('blogForm');
+
+async function loadBlogSeedData() {
+    if (!blogSeedDataModulePromise) {
+        blogSeedDataModulePromise = import(`./blog-data.mjs?v=${ADMIN_LAZY_MODULE_VERSION}`)
+            .then(module => ({
+                posts: Array.isArray(module.BLOG_POSTS) ? module.BLOG_POSTS : [],
+                site: module.SITE || {},
+                getBlogUrl: typeof module.getBlogUrl === 'function' ? module.getBlogUrl : post => `/blog/${post?.slug || ''}`
+            }));
+    }
+    return blogSeedDataModulePromise;
+}
 
 function renderSeedBlogBlocks(blocks = []) {
     return blocks.map(block => {
@@ -9040,13 +8095,15 @@ function renderSeedBlogContent(post) {
     ].filter(Boolean).join('\n\n');
 }
 
-function getAbsoluteSeedImageUrl(post) {
-    const src = post?.image?.src || SITE.defaultImage;
+function getAbsoluteSeedImageUrl(post, site = {}) {
+    const src = post?.image?.src || site.defaultImage || '';
     if (/^https?:\/\//i.test(src)) return src;
-    return `${SITE.origin}${src.startsWith('/') ? src : `/${src}`}`;
+    return `${site.origin || 'https://edencafe.co'}${src.startsWith('/') ? src : `/${src}`}`;
 }
 
-function buildSeoBlogSeedData(post, index) {
+function buildSeoBlogSeedData(post, index, seedData = {}) {
+    const site = seedData.site || {};
+    const getSeedBlogUrl = seedData.getBlogUrl || (item => `/blog/${item?.slug || ''}`);
     const publishedAt = `${post.publishedDate}T09:00:00+07:00`;
     const updatedAt = `${post.updatedDate || post.publishedDate}T09:00:00+07:00`;
 
@@ -9057,7 +8114,7 @@ function buildSeoBlogSeedData(post, index) {
         status: 'published',
         excerpt: post.excerpt,
         content: renderSeedBlogContent(post),
-        imageUrl: getAbsoluteSeedImageUrl(post),
+        imageUrl: getAbsoluteSeedImageUrl(post, site),
         imageAlt: post.image?.alt || post.title,
         imageFileName: post.image?.fileName || `${post.slug}-cover.webp`,
         imagePrompt16x9: post.image?.prompt16x9 || '',
@@ -9067,7 +8124,7 @@ function buildSeoBlogSeedData(post, index) {
         metaDescription: post.metaDescription,
         focusKeyword: post.focusKeyword,
         secondaryKeywords: post.secondaryKeywords || [],
-        author: SITE.author,
+        author: site.author,
         readingTime: post.readingTime,
         publishedDate: post.publishedDate,
         updatedDate: post.updatedDate || post.publishedDate,
@@ -9076,9 +8133,9 @@ function buildSeoBlogSeedData(post, index) {
         updatedAt,
         importedAt: new Date().toISOString(),
         displayOrder: index + 1,
-        staticUrl: getBlogUrl(post),
-        canonicalUrl: `${SITE.origin}${getBlogUrl(post)}`,
-        openGraphImage: getAbsoluteSeedImageUrl(post),
+        staticUrl: getSeedBlogUrl(post),
+        canonicalUrl: `${site.origin || 'https://edencafe.co'}${getSeedBlogUrl(post)}`,
+        openGraphImage: getAbsoluteSeedImageUrl(post, site),
         twitterCard: 'summary_large_image',
         faqs: post.faqs || [],
         summary: post.summary || [],
@@ -9088,11 +8145,11 @@ function buildSeoBlogSeedData(post, index) {
         relatedSlugs: post.relatedSlugs || [],
         schemaTypes: ['BlogPosting', 'FAQPage', 'CafeOrCoffeeShop'],
         localEntity: {
-            name: SITE.name,
-            address: SITE.address,
-            telephone: SITE.telephone,
-            openingHours: SITE.openingHours,
-            mapUrl: SITE.mapUrl
+            name: site.name,
+            address: site.address,
+            telephone: site.telephone,
+            openingHours: site.openingHours,
+            mapUrl: site.mapUrl
         },
         seededFrom: 'js/blog-data.mjs',
         blogSystemVersion: 'seo-blog-v1'
@@ -9121,9 +8178,11 @@ window.seedSeoBlogPosts = async () => {
             button.innerText = 'กำลังนำเข้าบทความ...';
         }
 
+        const seedData = await loadBlogSeedData();
+        if (!seedData.posts.length) throw new Error('SEO blog seed data is empty');
         const batch = writeBatch(db);
-        BLOG_POSTS.forEach((post, index) => {
-            batch.set(doc(db, 'blogs', post.slug), buildSeoBlogSeedData(post, index), { merge: true });
+        seedData.posts.forEach((post, index) => {
+            batch.set(doc(db, 'blogs', post.slug), buildSeoBlogSeedData(post, index, seedData), { merge: true });
         });
         await batch.commit();
 
@@ -9149,22 +8208,22 @@ window.fetchBlogsFromCloud = function() {
     blogsUnsubscribe = onSnapshot(q, (snapshot) => {
         const tbody = document.getElementById('blogs-table-body');
         if (!tbody) return;
-        
+
         tbody.innerHTML = '';
         blogsData = {};
-        
+
         snapshot.forEach((docSnap) => {
             const blog = docSnap.data();
             const id = docSnap.id;
             blogsData[id] = blog;
-            
+
             const dateStr = blog.createdAt ? new Date(blog.createdAt).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }) : 'ไม่ทราบวันที่';
-            const statusBadge = blog.status === 'published' 
-                ? '<span class="status-badge status-completed">เผยแพร่</span>' 
+            const statusBadge = blog.status === 'published'
+                ? '<span class="status-badge status-completed">เผยแพร่</span>'
                 : '<span class="status-badge status-pending">ฉบับร่าง</span>';
-                
-            const imgHtml = blog.imageUrl 
-                ? `<img loading="lazy" src="${safeImageURL(blog.imageUrl)}" alt="Cover" style="width: 50px; height: 50px; object-fit: cover; border-radius: 5px;">` 
+
+            const imgHtml = blog.imageUrl
+                ? `<img loading="lazy" src="${safeImageURL(blog.imageUrl)}" alt="Cover" style="width: 50px; height: 50px; object-fit: cover; border-radius: 5px;">`
                 : `<div style="width: 50px; height: 50px; background: #eee; border-radius: 5px; display:flex; align-items:center; justify-content:center; color:#999; font-size:12px;">No Image</div>`;
 
             const tr = document.createElement('tr');
@@ -9186,10 +8245,11 @@ window.fetchBlogsFromCloud = function() {
     });
 }
 
-window.openBlogModal = () => {
+window.openBlogModal = async () => {
     blogForm.reset();
     document.getElementById('blogId').value = '';
     document.getElementById('blogImageUrl').value = '';
+    await ensureLegacyBlogEditor();
     if (quill) quill.root.innerHTML = '';
     document.getElementById('blogModalTitle').innerText = 'เพิ่มบทความใหม่';
     blogModal.style.display = 'block';
@@ -9199,21 +8259,22 @@ window.closeBlogModal = () => {
     blogModal.style.display = 'none';
 };
 
-window.editBlog = (id) => {
+window.editBlog = async (id) => {
     const blog = blogsData[id];
     if (!blog) return;
-    
+
     document.getElementById('blogId').value = id;
     document.getElementById('blogTitle').value = blog.title || '';
     document.getElementById('blogCategory').value = blog.category || 'ความรู้เรื่องกาแฟ';
     document.getElementById('blogStatus').value = blog.status || 'draft';
     document.getElementById('blogExcerpt').value = blog.excerpt || '';
     document.getElementById('blogImageUrl').value = blog.imageUrl || '';
-    
+
+    await ensureLegacyBlogEditor();
     if (quill) {
         quill.root.innerHTML = blog.content || '';
     }
-    
+
     document.getElementById('blogModalTitle').innerText = 'แก้ไขบทความ';
     blogModal.style.display = 'block';
 };
@@ -9230,7 +8291,7 @@ window.deleteBlog = async (id) => {
 
 blogForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    
+
     const submitBtn = document.getElementById('btn-submit-blog');
     const originalText = submitBtn.innerText;
     submitBtn.innerText = 'กำลังบันทึก...';
@@ -9240,7 +8301,7 @@ blogForm?.addEventListener('submit', async (e) => {
         const id = document.getElementById('blogId').value;
         const fileInput = document.getElementById('blogImageFile');
         let imageUrl = document.getElementById('blogImageUrl').value;
-        
+
         // Handle image upload if a new file is selected
         if (fileInput.files.length > 0) {
             const file = fileInput.files[0];
@@ -9261,7 +8322,7 @@ blogForm?.addEventListener('submit', async (e) => {
             imageUrl: imageUrl,
             updatedAt: new Date().toISOString()
         };
-        
+
         if (id) {
             await updateDoc(doc(db, "blogs", id), blogData);
         } else {
@@ -9297,12 +8358,8 @@ window.onclick = function(event) {
     }
 };
 
-// Start fetching blogs immediately if user is logged in
-onAuthStateChanged(auth, (user) => {
-    if (user) {
-        if(typeof fetchBlogsFromCloud === 'function') fetchBlogsFromCloud();
-    }
-});;
+// Blog data is loaded by initAdminTab('blogs') to avoid a second auth listener
+// fetching CMS data while the user is on another admin section.
 
 window.updateBookingStatus = async (id, newStatus) => {
     try {
@@ -9386,7 +8443,7 @@ function legacyShopProductTargetId(sourceId, product = {}) {
 }
 
 function legacyShopProductPayload(sourceId, product = {}, targetCategory = 'other') {
-    const featured = parseMenuBoolean(product.showOnIndex ?? product.isFeatured, false);
+    const featured = parseMenuBoolean(product.showOnIndex, false);
     const availableForSale = parseMenuBoolean(product.availableForSale, true);
     const handle = slugifyMenuHandle(product.handle || product.name || sourceId);
     const stock = safeNumber(product.stock ?? product.inStock, 0);
@@ -9409,7 +8466,6 @@ function legacyShopProductPayload(sourceId, product = {}, targetCategory = 'othe
         showInShop: true,
         showOnPos: parseMenuBoolean(product.showOnPos, false),
         showOnIndex: featured,
-        isFeatured: featured,
         taxName: product.taxName || 'eden cafe',
         taxRate: safeNumber(product.taxRate, 7),
         taxEnabled: parseMenuBoolean(product.taxEnabled, true),
@@ -9474,7 +8530,7 @@ window.auditLegacyShopCollections = async () => {
         legacyShopCategories: snapshot.shopCategories.length,
         productsTotal: snapshot.products.length,
         productsShowInShop: snapshot.products.filter(product => product.showInShop === true).length,
-        productsShowOnIndex: snapshot.products.filter(product => product.showOnIndex === true || product.isFeatured === true).length,
+        productsShowOnIndex: snapshot.products.filter(product => product.showOnIndex === true).length,
         categoriesTotal: snapshot.categories.length,
         categoriesToCreate: plan.categoriesToCreate.map(item => item.id),
         productsToUpsert: plan.productsToUpsert.map(item => ({ sourceId: item.sourceId, targetId: item.targetId, category: item.targetCategory }))
@@ -9853,10 +8909,6 @@ function renderAdminPermissionInputs(selected = adminRoleDefaults('manager'), di
         </label>
     `;
     }).join('');
-    container.querySelectorAll('[data-access-permission]').forEach(input => {
-        input.addEventListener('change', () => syncAdminArcheryAccessFields());
-    });
-    syncAdminArcheryAccessFields();
 }
 
 function getSelectedAdminPermissions() {
@@ -9865,67 +8917,6 @@ function getSelectedAdminPermissions() {
         permissions[input.dataset.accessPermission] = input.checked === true;
     });
     return permissions;
-}
-
-function adminAccessHasArchery(role, permissions = {}) {
-    return role === 'owner' || role === 'head_manager' || permissions?.archery === true;
-}
-
-function adminAccessPrimaryBranch(access = {}, fallback = '') {
-    if (access.primary_branch_id) return String(access.primary_branch_id).trim();
-    if (access.branch_id) return String(access.branch_id).trim();
-    if (Array.isArray(access.branch_ids) && access.branch_ids.length) return String(access.branch_ids[0]).trim();
-    return fallback;
-}
-
-function adminAccessDefaultArcheryRole(role) {
-    if (role === 'owner') return 'OWNER';
-    return 'MANAGER';
-}
-
-function normalizeAdminAccessArcheryRole(role, value) {
-    const upper = String(value || '').trim().toUpperCase();
-    if (role === 'owner') return 'OWNER';
-    if (ADMIN_ARCHERY_ROLE_VALUES.includes(upper) && upper !== 'OWNER') return upper;
-    return adminAccessDefaultArcheryRole(role);
-}
-
-function syncAdminArcheryAccessFields(options = {}) {
-    const section = document.getElementById('access-archery-settings');
-    const branchEl = document.getElementById('access-archery-branch');
-    const roleEl = document.getElementById('access-archery-role');
-    if (!section || !branchEl || !roleEl) return;
-
-    const role = document.getElementById('access-role')?.value || 'manager';
-    const permissions = getSelectedAdminPermissions();
-    const enabled = adminAccessHasArchery(role, permissions);
-    section.style.display = enabled ? '' : 'none';
-    branchEl.disabled = !enabled;
-    roleEl.disabled = !enabled || role === 'owner';
-    if (enabled && (!branchEl.value || options.reset)) branchEl.value = ADMIN_ARCHERY_BRANCH_DEFAULT;
-    if (enabled && (!roleEl.value || options.reset)) roleEl.value = adminAccessDefaultArcheryRole(role);
-    roleEl.value = normalizeAdminAccessArcheryRole(role, roleEl.value);
-}
-
-function collectAdminArcheryAccessPayload(role, permissions) {
-    if (!adminAccessHasArchery(role, permissions)) return {};
-    const branchId = (document.getElementById('access-archery-branch')?.value || ADMIN_ARCHERY_BRANCH_DEFAULT).trim() || ADMIN_ARCHERY_BRANCH_DEFAULT;
-    const archeryRole = normalizeAdminAccessArcheryRole(role, document.getElementById('access-archery-role')?.value);
-    return {
-        primary_branch_id: branchId,
-        branch_ids: [branchId],
-        archery_role: archeryRole
-    };
-}
-
-function adminAccessArcherySummaryHTML(access = {}) {
-    if (!adminAccessHasArchery(access.role, access.permissions || {})) return '';
-    const branchId = adminAccessPrimaryBranch(access, '');
-    if (!branchId) {
-        return '<br><small style="color:#c62828; font-weight:700;">Archery missing branch access</small>';
-    }
-    const role = normalizeAdminAccessArcheryRole(access.role, access.archery_role || access.archeryRole);
-    return `<br><small style="color:#607466; font-weight:700;">Archery: ${escapeHTML(branchId)} / ${escapeHTML(role)}</small>`;
 }
 
 function setAdminAccessStats(rows) {
@@ -9967,7 +8958,7 @@ function renderAdminAccessTable() {
             <tr>
                 <td><strong>${escapeHTML(row.displayName || 'Manager')}</strong><br><small>${escapeHTML(row.email || '-')}<br>UID: ${escapeHTML(row.uid)}</small></td>
                 <td>${adminRoleBadgeHTML(row.role)}</td>
-                <td style="max-width:260px;">${escapeHTML(permissionText)}${adminAccessArcherySummaryHTML(row)}</td>
+                <td style="max-width:260px;">${escapeHTML(permissionText)}</td>
                 <td><span class="access-auth-status ${row.passwordLoginEnabled ? '' : 'pending'}">${escapeHTML(passwordLoginText)}</span></td>
                 <td><span class="access-status-${row.status === 'active' ? 'active' : 'paused'}">${escapeHTML(row.status || 'active')}</span></td>
                 <td>${formatDate(row.updatedAt || row.createdAt)}</td>
@@ -10002,7 +8993,6 @@ function bindAdminAccessForm() {
         roleEl.addEventListener('change', () => {
             const role = roleEl.value;
             renderAdminPermissionInputs(adminRoleDefaults(role), role === 'owner' || role === 'head_manager');
-            syncAdminArcheryAccessFields({ reset: true });
         });
     }
 
@@ -10065,15 +9055,13 @@ async function saveAdminAccessFromForm() {
 
 
     const permissions = normalizePermissions(role, getSelectedAdminPermissions());
-    const archeryAccess = collectAdminArcheryAccessPayload(role, permissions);
     const payload = {
         uid,
         email,
         displayName,
         role,
         status,
-        permissions,
-        ...archeryAccess
+        permissions
     };
     if (password) payload.password = password;
     try {
@@ -10087,9 +9075,6 @@ async function saveAdminAccessFromForm() {
             role,
             status,
             permissions,
-            primary_branch_id: result.primary_branch_id || payload.primary_branch_id || '',
-            branch_ids: Array.isArray(result.branch_ids) ? result.branch_ids : (payload.branch_ids || []),
-            archery_role: result.archery_role || payload.archery_role || '',
             passwordLoginEnabled: result.passwordLoginEnabled !== false,
             updatedAt: new Date().toISOString()
         };
@@ -10116,11 +9101,6 @@ window.editAdminAccess = (uid) => {
     document.getElementById('access-role').value = data.role || 'manager';
     document.getElementById('access-status').value = data.status || 'active';
     renderAdminPermissionInputs(normalizePermissions(data.role, data.permissions), data.role === 'owner' || data.role === 'head_manager');
-    const branchEl = document.getElementById('access-archery-branch');
-    const archeryRoleEl = document.getElementById('access-archery-role');
-    if (branchEl) branchEl.value = adminAccessPrimaryBranch(data, ADMIN_ARCHERY_BRANCH_DEFAULT);
-    if (archeryRoleEl) archeryRoleEl.value = normalizeAdminAccessArcheryRole(data.role, data.archery_role || data.archeryRole);
-    syncAdminArcheryAccessFields();
 };
 
 window.deleteAdminAccess = async (uid) => {
@@ -10145,12 +9125,7 @@ window.resetAdminAccessForm = () => {
     if (uidEl) uidEl.value = '';
     if (passwordEl) passwordEl.value = '';
     if (confirmEl) confirmEl.value = '';
-    const branchEl = document.getElementById('access-archery-branch');
-    const archeryRoleEl = document.getElementById('access-archery-role');
-    if (branchEl) branchEl.value = ADMIN_ARCHERY_BRANCH_DEFAULT;
-    if (archeryRoleEl) archeryRoleEl.value = 'MANAGER';
     renderAdminPermissionInputs(adminRoleDefaults('manager'));
-    syncAdminArcheryAccessFields();
 };
 
 window.refreshAdminAccess = () => window.refreshAdminSection('admin-access');
@@ -10843,7 +9818,7 @@ function rebuildMembersData() {
     renderLoyaltyMemberOptions();
     renderArcheryMemberOptions();
     renderLoyaltySummary();
-    renderDashboardSalesReport();
+    scheduleDashboardRender();
 }
 
 function getMemberRows() {
@@ -11586,14 +10561,7 @@ function bindFaqFilters() {
 bindFaqFilters();
 setFaqFormData(null);
 
-// Start fetching FAQs when logged in
-onAuthStateChanged(auth, (user) => {
-    if (user) {
-        if (typeof fetchFaqsFromCloud === 'function') fetchFaqsFromCloud();
-        if (typeof loadIndexSettings === 'function') loadIndexSettings();
-        if (typeof loadFooterSettings === 'function') loadFooterSettings();
-    }
-});
+// FAQ, index, and footer data are lazy-loaded by their admin tabs.
 
 // ==========================================
 // PromptPay Settings Management Logic
@@ -11872,13 +10840,13 @@ window.loadPromptPaySettings = async function() {
         dashboardPromptPaySettings = settings;
         applyPromptPaySettingsToForm(settings);
         setPromptPayAdminStatus(snap.exists() ? 'PromptPay settings loaded.' : 'Using default PromptPay settings. Save once to publish them.', snap.exists() ? 'success' : 'warning');
-        renderDashboardSalesReport();
+        scheduleDashboardRender();
         return settings;
     } catch (error) {
         console.error('Error loading PromptPay settings:', error);
         applyPromptPaySettingsToForm(defaultPromptPaySettings());
         setPromptPayAdminStatus('Unable to load PromptPay settings: ' + error.message, 'error');
-        renderDashboardSalesReport();
+        scheduleDashboardRender();
         return null;
     }
 };
@@ -11986,7 +10954,7 @@ promptPaySettingsForm?.addEventListener('submit', async (event) => {
         dashboardPromptPaySettings = payload;
         applyPromptPaySettingsToForm(payload);
         setPromptPayAdminStatus('PromptPay settings saved. POS will use ' + activePromptPayAccount(payload).label + ' automatically.', 'success');
-        renderDashboardSalesReport();
+        scheduleDashboardRender();
     } catch (error) {
         console.error('Error saving PromptPay settings:', error);
         setPromptPayAdminStatus('Unable to save PromptPay settings: ' + error.message, 'error');
@@ -12522,6 +11490,10 @@ businessSettingsForm?.addEventListener('submit', async (event) => {
 // ==========================================
 
 const INDEX_SETTINGS_REF = () => doc(db, 'site_settings', 'index');
+const INDEX_ABOUT_QUICK_FACTS_MAX = 6;
+const INDEX_ABOUT_STORY_BLOCKS_MAX = 5;
+const INDEX_ABOUT_FAQ_MAX = 5;
+const INDEX_ABOUT_RELATED_LINKS_MAX = 6;
 const DEFAULT_INDEX_SETTINGS = {
     heroImageUrl: '/Hero/Hero.webp',
     heroTitleTh: 'จากใจเรา สู่มือคุณ',
@@ -12531,21 +11503,84 @@ const DEFAULT_INDEX_SETTINGS = {
     aboutTitleTh: 'เรื่องราวของเรา: จากยอดดอยสู่แก้วกาแฟของคุณ',
     aboutBodyTh: 'Eden Cafe เกิดขึ้นจากความหลงใหลในศิลปะการชงกาแฟและการสนับสนุนเกษตรกรไทย เราคัดสรรเมล็ดกาแฟจากแหล่งปลูกที่ดีที่สุดบนยอดดอยในประเทศไทย คั่วด้วยเทคนิคพิเศษเพื่อให้ได้รสชาติที่เป็นเอกลักษณ์ ไม่เหมือนใคร บรรยากาศร้านของเราออกแบบสไตล์มินิมอล อิงธรรมชาติ เพื่อให้คุณได้พักผ่อนอย่างแท้จริง',
     aboutTitleEn: 'Our Story: From Thai Mountains to Your Cup',
-    aboutBodyEn: 'Eden Cafe was born out of a passion for the art of coffee brewing and supporting Thai farmers. We carefully select coffee beans from the best high-altitude farms in Thailand, roasted with special techniques to achieve a unique flavor. Our minimalist, nature-inspired design offers a true sanctuary for relaxation.'
+    aboutBodyEn: 'Eden Cafe was born out of a passion for the art of coffee brewing and supporting Thai farmers. We carefully select coffee beans from the best high-altitude farms in Thailand, roasted with special techniques to achieve a unique flavor. Our minimalist, nature-inspired design offers a true sanctuary for relaxation.',
+    promoPopup: {
+        enabled: false,
+        title: 'Eden Cafe promotions',
+        slides: []
+    },
+    aboutSeo: {
+        hero: {
+            subtitleTh: 'คาเฟ่ธรรมชาติในนางแล เชียงราย ที่เล่าเรื่องกาแฟไทยผ่านเมล็ดจากพื้นที่สูง การคั่วอย่างพิถีพิถัน และพื้นที่พักผ่อนที่ใกล้ชิดธรรมชาติ',
+            subtitleEn: 'A nature cafe in Nang Lae, Chiang Rai, sharing Thai coffee through highland beans, careful roasting, and a calm space close to nature.',
+            imageUrl: '/Hero/Hero.webp',
+            imageAltTh: 'บรรยากาศธรรมชาติของ Eden Cafe เชียงราย พร้อมกาแฟพิเศษจากเมล็ดกาแฟไทย',
+            imageAltEn: 'Nature setting at Eden Cafe Chiang Rai with Thai specialty coffee'
+        },
+        quickFacts: [
+            { labelTh: 'ที่ตั้ง', valueTh: 'นางแล อำเภอเมืองเชียงราย', labelEn: 'Location', valueEn: 'Nang Lae, Mueang Chiang Rai' },
+            { labelTh: 'กาแฟ', valueTh: 'เมล็ดกาแฟไทยจากแหล่งปลูกบนดอย', labelEn: 'Coffee', valueEn: 'Thai highland coffee beans' },
+            { labelTh: 'บรรยากาศ', valueTh: 'มินิมอล สงบ ใกล้ธรรมชาติ', labelEn: 'Atmosphere', valueEn: 'Minimal, calm, close to nature' },
+            { labelTh: 'เวลาเปิด', valueTh: 'เปิดทุกวัน 09:00-18:00', labelEn: 'Hours', valueEn: 'Open daily 09:00-18:00' }
+        ],
+        storyBlocks: [
+            {
+                headingTh: 'เริ่มจากความตั้งใจต่อกาแฟไทย',
+                bodyTh: 'Eden Cafe เลือกเล่าเรื่องกาแฟผ่านเมล็ดจากแหล่งปลูกในประเทศไทย โดยให้ความสำคัญกับคุณภาพ ความสด และเอกลักษณ์ของรสชาติในแต่ละแก้ว',
+                headingEn: 'Rooted in Thai coffee',
+                bodyEn: 'Eden Cafe tells its story through coffee beans grown in Thailand, with attention to quality, freshness, and the character of every cup.'
+            },
+            {
+                headingTh: 'พื้นที่พักผ่อนในเชียงราย',
+                bodyTh: 'ร้านออกแบบให้เป็นพื้นที่สงบสำหรับจิบกาแฟ ทำงาน พบเพื่อน หรือใช้เวลาช้า ๆ กับตัวเอง ท่ามกลางบรรยากาศธรรมชาติของเชียงราย',
+                headingEn: 'A calm Chiang Rai escape',
+                bodyEn: 'The cafe is designed as a peaceful place to drink coffee, work, meet friends, or slow down in a nature-inspired Chiang Rai setting.'
+            }
+        ],
+        coffeeOrigin: {
+            titleTh: 'กาแฟจากยอดดอยสู่แก้วของคุณ',
+            bodyTh: 'เราให้ความสำคัญกับเมล็ดกาแฟไทยจากพื้นที่สูง เพราะอากาศเย็นและสภาพแวดล้อมช่วยสร้างกลิ่นหอม ความหวาน และมิติรสชาติที่เหมาะกับกาแฟพิเศษ',
+            titleEn: 'From Thai mountains to your cup',
+            bodyEn: 'We focus on Thai highland coffee because cooler growing conditions help develop aroma, natural sweetness, and the layered taste expected from specialty coffee.'
+        },
+        faq: [
+            {
+                questionTh: 'Eden Cafe อยู่ที่ไหน?',
+                answerTh: 'Eden Cafe ตั้งอยู่ที่ตำบลนางแล อำเภอเมืองเชียงราย จังหวัดเชียงราย เป็นคาเฟ่ธรรมชาติและร้านกาแฟพิเศษสำหรับพักผ่อนใกล้ธรรมชาติ',
+                questionEn: 'Where is Eden Cafe located?',
+                answerEn: 'Eden Cafe is located in Nang Lae, Mueang Chiang Rai, Chiang Rai, Thailand. It is a nature cafe and specialty coffee destination.'
+            },
+            {
+                questionTh: 'จุดเด่นของกาแฟ Eden Cafe คืออะไร?',
+                answerTh: 'จุดเด่นคือการคัดสรรเมล็ดกาแฟไทยจากแหล่งปลูกบนดอยและการคั่วที่ตั้งใจดึงกลิ่นหอม ความกลมกล่อม และเอกลักษณ์ของกาแฟไทย',
+                questionEn: 'What makes Eden Cafe coffee special?',
+                answerEn: 'The coffee focuses on Thai highland beans and careful roasting to highlight aroma, balance, and the character of Thai specialty coffee.'
+            },
+            {
+                questionTh: 'Eden Cafe เหมาะกับใครบ้าง?',
+                answerTh: 'เหมาะสำหรับคนที่มองหาคาเฟ่เชียงรายบรรยากาศสงบ จิบกาแฟ ทำงาน พบเพื่อน หรือพักผ่อนในพื้นที่ที่ใกล้ชิดธรรมชาติ',
+                questionEn: 'Who is Eden Cafe good for?',
+                answerEn: 'It is a good fit for visitors looking for a calm Chiang Rai cafe for coffee, work, meeting friends, or relaxing close to nature.'
+            }
+        ],
+        relatedLinks: [
+            { labelTh: 'ดูเมนู', labelEn: 'View menu', href: '/menu', descriptionTh: 'สำรวจเมนูกาแฟ เครื่องดื่ม และอาหารของ Eden Cafe', descriptionEn: 'Explore coffee, drinks, and food from Eden Cafe.' },
+            { labelTh: 'จองโต๊ะหรือห้องรับรอง', labelEn: 'Book a table or room', href: '/booking', descriptionTh: 'เลือกวัน เวลา และพื้นที่นั่งที่ต้องการ', descriptionEn: 'Choose your date, time, and preferred space.' },
+            { labelTh: 'เรื่องกาแฟดอยเชียงราย', labelEn: 'Chiang Rai mountain coffee', href: '/blog/chiang-rai-mountain-coffee', descriptionTh: 'อ่านต่อเรื่องกาแฟจากพื้นที่สูงในเชียงราย', descriptionEn: 'Read more about highland coffee from Chiang Rai.' }
+        ],
+        seo: {
+            titleTh: 'เรื่องราว Eden Cafe เชียงราย | คาเฟ่ธรรมชาติและกาแฟพิเศษนางแล',
+            titleEn: 'About Eden Cafe Chiang Rai | Nature Cafe & Thai Specialty Coffee',
+            metaDescriptionTh: 'รู้จัก Eden Cafe คาเฟ่ธรรมชาติในนางแล เชียงราย ที่ใส่ใจเมล็ดกาแฟไทยจากแหล่งปลูกบนดอย การคั่วอย่างพิถีพิถัน และพื้นที่พักผ่อนใกล้ธรรมชาติ',
+            metaDescriptionEn: 'Discover Eden Cafe in Nang Lae, Chiang Rai, a nature cafe focused on Thai highland coffee beans, careful roasting, and a calm place to relax.',
+            ogImage: 'https://edencafe.co/Images/Logo.webp'
+        }
+    }
 };
 
 const indexSettingsForm = document.getElementById('indexSettingsForm');
-const promoPopupSettingsForm = document.getElementById('promoPopupSettingsForm');
-const PROMO_POPUP_SETTINGS_REF = () => doc(db, 'site_settings', 'promo_popup');
-const PROMO_POPUP_MAX_SLIDES = 8;
-const DEFAULT_PROMO_POPUP_SETTINGS = {
-    enabled: false,
-    title: 'Eden Cafe promotions',
-    displayLocation: 'home',
-    audience: 'everyone',
-    slides: []
-};
-let promoPopupSlides = [];
+const INDEX_PROMO_MAX_SLIDES = 8;
+let indexPromoSlides = [];
 
 function cleanIndexText(value, fallback = '', maxLength = 500) {
     const text = String(value ?? '').trim();
@@ -12576,16 +11611,86 @@ function normalizePromoPopupSlide(slide = {}, index = 0) {
 
 function normalizePromoPopupSettings(raw = {}) {
     const slides = Array.isArray(raw.slides)
-        ? raw.slides.map((slide, index) => normalizePromoPopupSlide(slide, index)).filter(slide => slide.imageUrl).slice(0, PROMO_POPUP_MAX_SLIDES)
+        ? raw.slides.map((slide, index) => normalizePromoPopupSlide(slide, index)).filter(slide => slide.imageUrl).slice(0, INDEX_PROMO_MAX_SLIDES)
         : [];
-    const displayLocation = cleanIndexText(raw.displayLocation || raw.display_location || raw.location, DEFAULT_PROMO_POPUP_SETTINGS.displayLocation, 40);
-    const audience = cleanIndexText(raw.audience || raw.targetAudience || raw.target_audience, DEFAULT_PROMO_POPUP_SETTINGS.audience, 40);
     return {
         enabled: raw.enabled === true,
-        title: cleanIndexText(raw.title || raw.titleTh || raw.titleEn, DEFAULT_PROMO_POPUP_SETTINGS.title, 90),
-        displayLocation: ['home', 'profile', 'home_profile', 'all_public'].includes(displayLocation) ? displayLocation : DEFAULT_PROMO_POPUP_SETTINGS.displayLocation,
-        audience: ['everyone', 'members', 'guests'].includes(audience) ? audience : DEFAULT_PROMO_POPUP_SETTINGS.audience,
+        title: cleanIndexText(raw.title || raw.titleTh || raw.titleEn, DEFAULT_INDEX_SETTINGS.promoPopup.title, 90),
         slides
+    };
+}
+
+function cleanIndexRows(rows, mapper, maxItems) {
+    return (Array.isArray(rows) ? rows : [])
+        .map(mapper)
+        .filter(Boolean)
+        .slice(0, maxItems);
+}
+
+function normalizeAboutSeoSettings(raw = {}) {
+    const fallback = DEFAULT_INDEX_SETTINGS.aboutSeo;
+    const hero = raw.hero || {};
+    const coffeeOrigin = raw.coffeeOrigin || raw.coffee_origin || {};
+    const seo = raw.seo || {};
+    return {
+        hero: {
+            subtitleTh: cleanIndexText(hero.subtitleTh || raw.heroSubtitleTh, fallback.hero.subtitleTh, 320),
+            subtitleEn: cleanIndexText(hero.subtitleEn || raw.heroSubtitleEn, fallback.hero.subtitleEn, 320),
+            imageUrl: safeImageURL(hero.imageUrl || hero.image_url || raw.imageUrl || '', fallback.hero.imageUrl),
+            imageAltTh: cleanIndexText(hero.imageAltTh || raw.imageAltTh, fallback.hero.imageAltTh, 180),
+            imageAltEn: cleanIndexText(hero.imageAltEn || raw.imageAltEn, fallback.hero.imageAltEn, 180)
+        },
+        quickFacts: cleanIndexRows(raw.quickFacts || raw.quick_facts || fallback.quickFacts, (item = {}) => {
+            const row = {
+                labelTh: cleanIndexText(item.labelTh || item.label_th || item.label, '', 80),
+                valueTh: cleanIndexText(item.valueTh || item.value_th || item.value, '', 180),
+                labelEn: cleanIndexText(item.labelEn || item.label_en || item.label, '', 80),
+                valueEn: cleanIndexText(item.valueEn || item.value_en || item.value, '', 180)
+            };
+            return (row.labelTh || row.valueTh || row.labelEn || row.valueEn) ? row : null;
+        }, INDEX_ABOUT_QUICK_FACTS_MAX),
+        storyBlocks: cleanIndexRows(raw.storyBlocks || raw.story_blocks || fallback.storyBlocks, (item = {}) => {
+            const row = {
+                headingTh: cleanIndexText(item.headingTh || item.heading_th || item.titleTh, '', 120),
+                bodyTh: cleanIndexText(item.bodyTh || item.body_th || item.body, '', 500),
+                headingEn: cleanIndexText(item.headingEn || item.heading_en || item.titleEn, '', 120),
+                bodyEn: cleanIndexText(item.bodyEn || item.body_en || item.body, '', 500)
+            };
+            return (row.headingTh || row.bodyTh || row.headingEn || row.bodyEn) ? row : null;
+        }, INDEX_ABOUT_STORY_BLOCKS_MAX),
+        coffeeOrigin: {
+            titleTh: cleanIndexText(coffeeOrigin.titleTh || coffeeOrigin.title_th, fallback.coffeeOrigin.titleTh, 140),
+            bodyTh: cleanIndexText(coffeeOrigin.bodyTh || coffeeOrigin.body_th, fallback.coffeeOrigin.bodyTh, 700),
+            titleEn: cleanIndexText(coffeeOrigin.titleEn || coffeeOrigin.title_en, fallback.coffeeOrigin.titleEn, 140),
+            bodyEn: cleanIndexText(coffeeOrigin.bodyEn || coffeeOrigin.body_en, fallback.coffeeOrigin.bodyEn, 700)
+        },
+        faq: cleanIndexRows(raw.faq || raw.faqs || fallback.faq, (item = {}) => {
+            const row = {
+                questionTh: cleanIndexText(item.questionTh || item.question_th || item.question, '', 180),
+                answerTh: cleanIndexText(item.answerTh || item.answer_th || item.answer, '', 500),
+                questionEn: cleanIndexText(item.questionEn || item.question_en || item.question, '', 180),
+                answerEn: cleanIndexText(item.answerEn || item.answer_en || item.answer, '', 500)
+            };
+            return (row.questionTh || row.answerTh || row.questionEn || row.answerEn) ? row : null;
+        }, INDEX_ABOUT_FAQ_MAX),
+        relatedLinks: cleanIndexRows(raw.relatedLinks || raw.related_links || fallback.relatedLinks, (item = {}) => {
+            const href = safeOptionalLinkURL(item.href || item.url || '');
+            const row = {
+                labelTh: cleanIndexText(item.labelTh || item.label_th || item.label, '', 90),
+                labelEn: cleanIndexText(item.labelEn || item.label_en || item.label, '', 90),
+                href,
+                descriptionTh: cleanIndexText(item.descriptionTh || item.description_th || item.description, '', 180),
+                descriptionEn: cleanIndexText(item.descriptionEn || item.description_en || item.description, '', 180)
+            };
+            return href && (row.labelTh || row.labelEn) ? row : null;
+        }, INDEX_ABOUT_RELATED_LINKS_MAX),
+        seo: {
+            titleTh: cleanIndexText(seo.titleTh || seo.title_th, fallback.seo.titleTh, 70),
+            titleEn: cleanIndexText(seo.titleEn || seo.title_en, fallback.seo.titleEn, 70),
+            metaDescriptionTh: cleanIndexText(seo.metaDescriptionTh || seo.meta_description_th, fallback.seo.metaDescriptionTh, 170),
+            metaDescriptionEn: cleanIndexText(seo.metaDescriptionEn || seo.meta_description_en, fallback.seo.metaDescriptionEn, 170),
+            ogImage: safeImageURL(seo.ogImage || seo.og_image || '', fallback.seo.ogImage)
+        }
     };
 }
 
@@ -12600,19 +11705,14 @@ function normalizeIndexSettings(data = {}) {
         aboutTitleTh: pick('aboutTitleTh', 140),
         aboutBodyTh: pick('aboutBodyTh', 900),
         aboutTitleEn: pick('aboutTitleEn', 140),
-        aboutBodyEn: pick('aboutBodyEn', 900)
+        aboutBodyEn: pick('aboutBodyEn', 900),
+        promoPopup: normalizePromoPopupSettings(data.promoPopup || data.promo_popup || {}),
+        aboutSeo: normalizeAboutSeoSettings(data.aboutSeo || data.about_seo || {})
     };
 }
 
 function setIndexStatus(message = '', tone = '') {
     const status = document.getElementById('index-settings-status');
-    if (!status) return;
-    status.textContent = message;
-    status.className = 'index-settings-status' + (tone ? ' ' + tone : '');
-}
-
-function setPromoPopupStatus(message = '', tone = '') {
-    const status = document.getElementById('promo-popup-settings-status');
     if (!status) return;
     status.textContent = message;
     status.className = 'index-settings-status' + (tone ? ' ' + tone : '');
@@ -12627,8 +11727,241 @@ function setIndexField(id, value) {
     if (field) field.value = value || '';
 }
 
+function indexAboutFieldValue(row, field) {
+    return String(row.querySelector(`[data-about-field="${field}"]`)?.value || '').trim();
+}
+
+function readIndexAboutQuickFactsRows() {
+    return Array.from(document.querySelectorAll('[data-about-quick-row]')).map(row => ({
+        labelTh: indexAboutFieldValue(row, 'labelTh'),
+        valueTh: indexAboutFieldValue(row, 'valueTh'),
+        labelEn: indexAboutFieldValue(row, 'labelEn'),
+        valueEn: indexAboutFieldValue(row, 'valueEn')
+    }));
+}
+
+function readIndexAboutStoryRows() {
+    return Array.from(document.querySelectorAll('[data-about-story-row]')).map(row => ({
+        headingTh: indexAboutFieldValue(row, 'headingTh'),
+        bodyTh: indexAboutFieldValue(row, 'bodyTh'),
+        headingEn: indexAboutFieldValue(row, 'headingEn'),
+        bodyEn: indexAboutFieldValue(row, 'bodyEn')
+    }));
+}
+
+function readIndexAboutFaqRows() {
+    return Array.from(document.querySelectorAll('[data-about-faq-row]')).map(row => ({
+        questionTh: indexAboutFieldValue(row, 'questionTh'),
+        answerTh: indexAboutFieldValue(row, 'answerTh'),
+        questionEn: indexAboutFieldValue(row, 'questionEn'),
+        answerEn: indexAboutFieldValue(row, 'answerEn')
+    }));
+}
+
+function readIndexAboutRelatedLinkRows() {
+    return Array.from(document.querySelectorAll('[data-about-related-row]')).map(row => ({
+        labelTh: indexAboutFieldValue(row, 'labelTh'),
+        labelEn: indexAboutFieldValue(row, 'labelEn'),
+        href: indexAboutFieldValue(row, 'href'),
+        descriptionTh: indexAboutFieldValue(row, 'descriptionTh'),
+        descriptionEn: indexAboutFieldValue(row, 'descriptionEn')
+    }));
+}
+
+function renderIndexAboutQuickFacts(items = []) {
+    const container = document.getElementById('index-about-quick-facts-list');
+    if (!container) return;
+    const rows = items.length ? items : DEFAULT_INDEX_SETTINGS.aboutSeo.quickFacts;
+    container.innerHTML = rows.map((item, index) => `
+        <div class="index-about-row" data-about-quick-row>
+            <div class="index-about-row-head">
+                <strong>Quick fact ${index + 1}</strong>
+                <button type="button" class="index-about-remove" onclick="removeIndexAboutQuickFact(${index})">Remove</button>
+            </div>
+            <div class="index-about-fields four">
+                <label>Label TH<input type="text" maxlength="80" data-about-field="labelTh" value="${escapeHTML(item.labelTh || '')}" oninput="updateIndexPreview()"></label>
+                <label>Value TH<input type="text" maxlength="180" data-about-field="valueTh" value="${escapeHTML(item.valueTh || '')}" oninput="updateIndexPreview()"></label>
+                <label>Label EN<input type="text" maxlength="80" data-about-field="labelEn" value="${escapeHTML(item.labelEn || '')}" oninput="updateIndexPreview()"></label>
+                <label>Value EN<input type="text" maxlength="180" data-about-field="valueEn" value="${escapeHTML(item.valueEn || '')}" oninput="updateIndexPreview()"></label>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderIndexAboutStories(items = []) {
+    const container = document.getElementById('index-about-story-blocks-list');
+    if (!container) return;
+    const rows = items.length ? items : DEFAULT_INDEX_SETTINGS.aboutSeo.storyBlocks;
+    container.innerHTML = rows.map((item, index) => `
+        <div class="index-about-row" data-about-story-row>
+            <div class="index-about-row-head">
+                <strong>Story block ${index + 1}</strong>
+                <button type="button" class="index-about-remove" onclick="removeIndexAboutStoryBlock(${index})">Remove</button>
+            </div>
+            <div class="index-about-fields two">
+                <label>Heading TH<input type="text" maxlength="120" data-about-field="headingTh" value="${escapeHTML(item.headingTh || '')}" oninput="updateIndexPreview()"></label>
+                <label>Heading EN<input type="text" maxlength="120" data-about-field="headingEn" value="${escapeHTML(item.headingEn || '')}" oninput="updateIndexPreview()"></label>
+                <label>Body TH<textarea maxlength="500" data-about-field="bodyTh" oninput="updateIndexPreview()">${escapeHTML(item.bodyTh || '')}</textarea></label>
+                <label>Body EN<textarea maxlength="500" data-about-field="bodyEn" oninput="updateIndexPreview()">${escapeHTML(item.bodyEn || '')}</textarea></label>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderIndexAboutFaqs(items = []) {
+    const container = document.getElementById('index-about-faq-list');
+    if (!container) return;
+    const rows = items.length ? items : DEFAULT_INDEX_SETTINGS.aboutSeo.faq;
+    container.innerHTML = rows.map((item, index) => `
+        <div class="index-about-row" data-about-faq-row>
+            <div class="index-about-row-head">
+                <strong>About FAQ ${index + 1}</strong>
+                <button type="button" class="index-about-remove" onclick="removeIndexAboutFaq(${index})">Remove</button>
+            </div>
+            <div class="index-about-fields two">
+                <label>Question TH<input type="text" maxlength="180" data-about-field="questionTh" value="${escapeHTML(item.questionTh || '')}" oninput="updateIndexPreview()"></label>
+                <label>Question EN<input type="text" maxlength="180" data-about-field="questionEn" value="${escapeHTML(item.questionEn || '')}" oninput="updateIndexPreview()"></label>
+                <label>Answer TH<textarea maxlength="500" data-about-field="answerTh" oninput="updateIndexPreview()">${escapeHTML(item.answerTh || '')}</textarea></label>
+                <label>Answer EN<textarea maxlength="500" data-about-field="answerEn" oninput="updateIndexPreview()">${escapeHTML(item.answerEn || '')}</textarea></label>
+            </div>
+        </div>
+    `).join('');
+}
+
+function renderIndexAboutRelatedLinks(items = []) {
+    const container = document.getElementById('index-about-related-links-list');
+    if (!container) return;
+    const rows = items.length ? items : DEFAULT_INDEX_SETTINGS.aboutSeo.relatedLinks;
+    container.innerHTML = rows.map((item, index) => `
+        <div class="index-about-row" data-about-related-row>
+            <div class="index-about-row-head">
+                <strong>Related link ${index + 1}</strong>
+                <button type="button" class="index-about-remove" onclick="removeIndexAboutRelatedLink(${index})">Remove</button>
+            </div>
+            <div class="index-about-fields two">
+                <label>Label TH<input type="text" maxlength="90" data-about-field="labelTh" value="${escapeHTML(item.labelTh || '')}" oninput="updateIndexPreview()"></label>
+                <label>Label EN<input type="text" maxlength="90" data-about-field="labelEn" value="${escapeHTML(item.labelEn || '')}" oninput="updateIndexPreview()"></label>
+                <label class="full">URL<input type="text" maxlength="500" data-about-field="href" value="${escapeHTML(item.href || '')}" placeholder="/menu or https://..." oninput="updateIndexPreview()"></label>
+                <label>Description TH<textarea maxlength="180" data-about-field="descriptionTh" oninput="updateIndexPreview()">${escapeHTML(item.descriptionTh || '')}</textarea></label>
+                <label>Description EN<textarea maxlength="180" data-about-field="descriptionEn" oninput="updateIndexPreview()">${escapeHTML(item.descriptionEn || '')}</textarea></label>
+            </div>
+        </div>
+    `).join('');
+}
+
+function readIndexAboutSeoForm() {
+    return normalizeAboutSeoSettings({
+        hero: {
+            subtitleTh: indexField('index-about-hero-subtitle-th')?.value || '',
+            subtitleEn: indexField('index-about-hero-subtitle-en')?.value || '',
+            imageUrl: indexField('index-about-image-url')?.value || '',
+            imageAltTh: indexField('index-about-image-alt-th')?.value || '',
+            imageAltEn: indexField('index-about-image-alt-en')?.value || ''
+        },
+        quickFacts: readIndexAboutQuickFactsRows(),
+        storyBlocks: readIndexAboutStoryRows(),
+        coffeeOrigin: {
+            titleTh: indexField('index-about-coffee-title-th')?.value || '',
+            bodyTh: indexField('index-about-coffee-body-th')?.value || '',
+            titleEn: indexField('index-about-coffee-title-en')?.value || '',
+            bodyEn: indexField('index-about-coffee-body-en')?.value || ''
+        },
+        faq: readIndexAboutFaqRows(),
+        relatedLinks: readIndexAboutRelatedLinkRows(),
+        seo: {
+            titleTh: indexField('index-about-seo-title-th')?.value || '',
+            titleEn: indexField('index-about-seo-title-en')?.value || '',
+            metaDescriptionTh: indexField('index-about-meta-description-th')?.value || '',
+            metaDescriptionEn: indexField('index-about-meta-description-en')?.value || '',
+            ogImage: indexField('index-about-og-image')?.value || ''
+        }
+    });
+}
+
+function fillIndexAboutSeoForm(aboutSeo = DEFAULT_INDEX_SETTINGS.aboutSeo) {
+    const normalized = normalizeAboutSeoSettings(aboutSeo);
+    setIndexField('index-about-hero-subtitle-th', normalized.hero.subtitleTh);
+    setIndexField('index-about-hero-subtitle-en', normalized.hero.subtitleEn);
+    setIndexField('index-about-image-url', normalized.hero.imageUrl);
+    setIndexField('index-about-image-alt-th', normalized.hero.imageAltTh);
+    setIndexField('index-about-image-alt-en', normalized.hero.imageAltEn);
+    setIndexField('index-about-coffee-title-th', normalized.coffeeOrigin.titleTh);
+    setIndexField('index-about-coffee-body-th', normalized.coffeeOrigin.bodyTh);
+    setIndexField('index-about-coffee-title-en', normalized.coffeeOrigin.titleEn);
+    setIndexField('index-about-coffee-body-en', normalized.coffeeOrigin.bodyEn);
+    setIndexField('index-about-seo-title-th', normalized.seo.titleTh);
+    setIndexField('index-about-seo-title-en', normalized.seo.titleEn);
+    setIndexField('index-about-meta-description-th', normalized.seo.metaDescriptionTh);
+    setIndexField('index-about-meta-description-en', normalized.seo.metaDescriptionEn);
+    setIndexField('index-about-og-image', normalized.seo.ogImage);
+    renderIndexAboutQuickFacts(normalized.quickFacts);
+    renderIndexAboutStories(normalized.storyBlocks);
+    renderIndexAboutFaqs(normalized.faq);
+    renderIndexAboutRelatedLinks(normalized.relatedLinks);
+}
+
+window.addIndexAboutQuickFact = function() {
+    const rows = readIndexAboutQuickFactsRows();
+    if (rows.length >= INDEX_ABOUT_QUICK_FACTS_MAX) return;
+    rows.push({ labelTh: '', valueTh: '', labelEn: '', valueEn: '' });
+    renderIndexAboutQuickFacts(rows);
+    window.updateIndexPreview();
+};
+
+window.removeIndexAboutQuickFact = function(index) {
+    const rows = readIndexAboutQuickFactsRows();
+    rows.splice(index, 1);
+    renderIndexAboutQuickFacts(rows);
+    window.updateIndexPreview();
+};
+
+window.addIndexAboutStoryBlock = function() {
+    const rows = readIndexAboutStoryRows();
+    if (rows.length >= INDEX_ABOUT_STORY_BLOCKS_MAX) return;
+    rows.push({ headingTh: '', bodyTh: '', headingEn: '', bodyEn: '' });
+    renderIndexAboutStories(rows);
+    window.updateIndexPreview();
+};
+
+window.removeIndexAboutStoryBlock = function(index) {
+    const rows = readIndexAboutStoryRows();
+    rows.splice(index, 1);
+    renderIndexAboutStories(rows);
+    window.updateIndexPreview();
+};
+
+window.addIndexAboutFaq = function() {
+    const rows = readIndexAboutFaqRows();
+    if (rows.length >= INDEX_ABOUT_FAQ_MAX) return;
+    rows.push({ questionTh: '', answerTh: '', questionEn: '', answerEn: '' });
+    renderIndexAboutFaqs(rows);
+    window.updateIndexPreview();
+};
+
+window.removeIndexAboutFaq = function(index) {
+    const rows = readIndexAboutFaqRows();
+    rows.splice(index, 1);
+    renderIndexAboutFaqs(rows);
+    window.updateIndexPreview();
+};
+
+window.addIndexAboutRelatedLink = function() {
+    const rows = readIndexAboutRelatedLinkRows();
+    if (rows.length >= INDEX_ABOUT_RELATED_LINKS_MAX) return;
+    rows.push({ labelTh: '', labelEn: '', href: '', descriptionTh: '', descriptionEn: '' });
+    renderIndexAboutRelatedLinks(rows);
+    window.updateIndexPreview();
+};
+
+window.removeIndexAboutRelatedLink = function(index) {
+    const rows = readIndexAboutRelatedLinkRows();
+    rows.splice(index, 1);
+    renderIndexAboutRelatedLinks(rows);
+    window.updateIndexPreview();
+};
+
 function readIndexPromoSlidesFromRows(options = {}) {
-    const list = document.getElementById('promo-popup-slide-list');
+    const list = document.getElementById('index-promo-slide-list');
     const rows = Array.from(list?.querySelectorAll('[data-promo-slide-index]') || []);
     const slides = rows.map((row, index) => normalizePromoPopupSlide({
         id: row.dataset.promoSlideId || '',
@@ -12642,7 +11975,7 @@ function readIndexPromoSlidesFromRows(options = {}) {
 
 function syncIndexPromoSlidesFromDom() {
     const slides = readIndexPromoSlidesFromRows({ includeBlank: true });
-    if (slides.length) promoPopupSlides = slides.slice(0, PROMO_POPUP_MAX_SLIDES);
+    if (slides.length) indexPromoSlides = slides.slice(0, INDEX_PROMO_MAX_SLIDES);
 }
 
 function promoSlideThumbHTML(slide = {}) {
@@ -12650,11 +11983,11 @@ function promoSlideThumbHTML(slide = {}) {
     return '<img src="' + escapeHTML(slide.imageUrl) + '" alt="">';
 }
 
-function renderIndexPromoSlides(slides = promoPopupSlides) {
-    const list = document.getElementById('promo-popup-slide-list');
+function renderIndexPromoSlides(slides = indexPromoSlides) {
+    const list = document.getElementById('index-promo-slide-list');
     if (!list) return;
-    const rows = (slides.length ? slides : [createBlankPromoSlide()]).slice(0, PROMO_POPUP_MAX_SLIDES);
-    promoPopupSlides = rows;
+    const rows = (slides.length ? slides : [createBlankPromoSlide()]).slice(0, INDEX_PROMO_MAX_SLIDES);
+    indexPromoSlides = rows;
     list.innerHTML = rows.map((slide, index) => `
         <div class="index-promo-slide" data-promo-slide-index="${index}" data-promo-slide-id="${escapeHTML(slide.id || '')}">
             <div class="index-promo-slide-head">
@@ -12665,20 +11998,20 @@ function renderIndexPromoSlides(slides = promoPopupSlides) {
                 <div class="index-promo-thumb">${promoSlideThumbHTML(slide)}</div>
                 <div class="index-promo-fields">
                     <div class="form-group">
-                        <label for="promo-popup-slide-${index}-image-url">Image URL</label>
-                        <input type="text" id="promo-popup-slide-${index}-image-url" data-promo-field="imageUrl" value="${escapeHTML(slide.imageUrl || '')}" placeholder="https://... or /Images/..." maxlength="500">
+                        <label for="index-promo-slide-${index}-image-url">Image URL</label>
+                        <input type="text" id="index-promo-slide-${index}-image-url" data-promo-field="imageUrl" value="${escapeHTML(slide.imageUrl || '')}" placeholder="https://... or /Images/..." maxlength="500">
                     </div>
                     <div class="form-group">
-                        <label for="promo-popup-slide-${index}-link-url">Optional link URL</label>
-                        <input type="text" id="promo-popup-slide-${index}-link-url" data-promo-field="linkUrl" value="${escapeHTML(slide.linkUrl || '')}" placeholder="/shop.html or https://..." maxlength="500">
+                        <label for="index-promo-slide-${index}-link-url">Optional link URL</label>
+                        <input type="text" id="index-promo-slide-${index}-link-url" data-promo-field="linkUrl" value="${escapeHTML(slide.linkUrl || '')}" placeholder="/shop.html or https://..." maxlength="500">
                     </div>
                     <div class="form-group">
-                        <label for="promo-popup-slide-${index}-alt-text">Alt text</label>
-                        <input type="text" id="promo-popup-slide-${index}-alt-text" data-promo-field="altText" value="${escapeHTML(slide.altText || '')}" placeholder="Promotion image description" maxlength="180">
+                        <label for="index-promo-slide-${index}-alt-text">Alt text</label>
+                        <input type="text" id="index-promo-slide-${index}-alt-text" data-promo-field="altText" value="${escapeHTML(slide.altText || '')}" placeholder="Promotion image description" maxlength="180">
                     </div>
                     <div class="form-group">
-                        <label for="promo-popup-slide-${index}-upload">Upload image</label>
-                        <input type="file" id="promo-popup-slide-${index}-upload" data-promo-upload="${index}" accept="image/*">
+                        <label for="index-promo-slide-${index}-upload">Upload image</label>
+                        <input type="file" id="index-promo-slide-${index}-upload" data-promo-upload="${index}" accept="image/*">
                     </div>
                 </div>
             </div>
@@ -12688,37 +12021,35 @@ function renderIndexPromoSlides(slides = promoPopupSlides) {
     list.querySelectorAll('[data-promo-field]').forEach(input => {
         input.addEventListener('input', () => {
             syncIndexPromoSlidesFromDom();
-            window.updatePromoPopupPreview();
+            window.updateIndexPreview();
         });
     });
     list.querySelectorAll('[data-promo-action="remove"]').forEach(button => {
         button.addEventListener('click', () => {
             syncIndexPromoSlidesFromDom();
             const index = Number(button.dataset.promoIndex);
-            if (Number.isInteger(index)) promoPopupSlides.splice(index, 1);
-            renderIndexPromoSlides(promoPopupSlides);
+            if (Number.isInteger(index)) indexPromoSlides.splice(index, 1);
+            renderIndexPromoSlides(indexPromoSlides);
         });
     });
     list.querySelectorAll('[data-promo-upload]').forEach(input => {
         input.addEventListener('change', event => uploadIndexPromoSlideImage(Number(input.dataset.promoUpload), event.target.files?.[0]));
     });
-    window.updatePromoPopupPreview();
+    window.updateIndexPreview();
 }
 
 function readIndexPromoPopupForm() {
     return normalizePromoPopupSettings({
-        enabled: indexField('promo-popup-enabled')?.checked === true,
-        title: indexField('promo-popup-title')?.value || '',
-        displayLocation: indexField('promo-popup-display-location')?.value || '',
-        audience: indexField('promo-popup-audience')?.value || '',
+        enabled: indexField('index-promo-enabled')?.checked === true,
+        title: indexField('index-promo-title')?.value || '',
         slides: readIndexPromoSlidesFromRows()
     });
 }
 
 function updateIndexPromoPreview(promo = readIndexPromoPopupForm()) {
-    const title = document.getElementById('promo-popup-preview-title');
-    const detail = document.getElementById('promo-popup-preview-detail');
-    const media = document.getElementById('promo-popup-preview-media');
+    const title = document.getElementById('index-promo-preview-title');
+    const detail = document.getElementById('index-promo-preview-detail');
+    const media = document.getElementById('index-promo-preview-media');
     const firstSlide = promo.slides[0];
     if (media) media.style.backgroundImage = firstSlide?.imageUrl ? `url("${firstSlide.imageUrl}")` : '';
     if (!promo.enabled) {
@@ -12726,9 +12057,9 @@ function updateIndexPromoPreview(promo = readIndexPromoPopupForm()) {
         if (detail) detail.textContent = 'Enable the popup and add a slide image to publish it.';
         return;
     }
-    if (title) title.textContent = promo.title || 'Eden Cafe promotions';
+    if (title) title.textContent = promo.title || 'Homepage promotions';
     if (detail) detail.textContent = promo.slides.length
-        ? `${promo.slides.length} slide${promo.slides.length === 1 ? '' : 's'} ready for ${promo.displayLocation.replace('_', ' ')} / ${promo.audience}${promo.slides.some(slide => slide.linkUrl) ? ' with optional links' : ''}.`
+        ? `${promo.slides.length} slide${promo.slides.length === 1 ? '' : 's'} ready${promo.slides.some(slide => slide.linkUrl) ? ' with optional links' : ''}.`
         : 'Enabled, but no valid slide image has been added yet.';
 }
 
@@ -12742,33 +12073,33 @@ async function uploadIndexPromoSlideImage(index, file) {
     if (!file || !Number.isInteger(index)) return;
     syncIndexPromoSlidesFromDom();
     try {
-        setPromoPopupStatus('Uploading popup slide image...');
-        const url = await uploadAdminImageFromFile(file, 'promo-popup', safePromoFileName(file, index), {
-            surface: 'Promotional popup slide',
-            subtitle: 'promotional modal',
-            targetField: `promo-popup-slide-${index}-image-url`,
+        setIndexStatus('Uploading popup slide image...');
+        const url = await uploadAdminImageFromFile(file, 'index-popup', safePromoFileName(file, index), {
+            surface: 'Index popup slide',
+            subtitle: 'homepage promotional modal',
+            targetField: `index-promo-slide-${index}-image-url`,
             quality: 0.86
         });
-        promoPopupSlides[index] = {
-            ...(promoPopupSlides[index] || createBlankPromoSlide()),
+        indexPromoSlides[index] = {
+            ...(indexPromoSlides[index] || createBlankPromoSlide()),
             imageUrl: url
         };
-        renderIndexPromoSlides(promoPopupSlides);
-        setPromoPopupStatus('Popup slide image uploaded.');
+        renderIndexPromoSlides(indexPromoSlides);
+        setIndexStatus('Popup slide image uploaded.');
     } catch (error) {
         console.error('Unable to upload popup slide image:', error);
-        setPromoPopupStatus(error.message || 'Popup slide upload failed.', 'error');
+        setIndexStatus(error.message || 'Popup slide upload failed.', 'error');
     }
 }
 
-window.addPromoPopupSlide = function() {
+window.addIndexPromoSlide = function() {
     syncIndexPromoSlidesFromDom();
-    if (promoPopupSlides.length >= PROMO_POPUP_MAX_SLIDES) {
-        setPromoPopupStatus('Maximum popup slides reached.', 'error');
+    if (indexPromoSlides.length >= INDEX_PROMO_MAX_SLIDES) {
+        setIndexStatus('Maximum popup slides reached.', 'error');
         return;
     }
-    promoPopupSlides.push(createBlankPromoSlide());
-    renderIndexPromoSlides(promoPopupSlides);
+    indexPromoSlides.push(createBlankPromoSlide());
+    renderIndexPromoSlides(indexPromoSlides);
 };
 
 function readIndexSettingsForm() {
@@ -12781,7 +12112,9 @@ function readIndexSettingsForm() {
         aboutTitleTh: indexField('index-about-title-th')?.value || '',
         aboutBodyTh: indexField('index-about-body-th')?.value || '',
         aboutTitleEn: indexField('index-about-title-en')?.value || '',
-        aboutBodyEn: indexField('index-about-body-en')?.value || ''
+        aboutBodyEn: indexField('index-about-body-en')?.value || '',
+        aboutSeo: readIndexAboutSeoForm(),
+        promoPopup: readIndexPromoPopupForm()
     });
 }
 
@@ -12796,6 +12129,11 @@ function fillIndexSettingsForm(settings = DEFAULT_INDEX_SETTINGS) {
     setIndexField('index-about-body-th', normalized.aboutBodyTh);
     setIndexField('index-about-title-en', normalized.aboutTitleEn);
     setIndexField('index-about-body-en', normalized.aboutBodyEn);
+    fillIndexAboutSeoForm(normalized.aboutSeo);
+    const promoEnabled = indexField('index-promo-enabled');
+    if (promoEnabled) promoEnabled.checked = normalized.promoPopup.enabled;
+    setIndexField('index-promo-title', normalized.promoPopup.title);
+    renderIndexPromoSlides(normalized.promoPopup.slides);
     window.updateIndexPreview();
 }
 
@@ -12811,56 +12149,11 @@ window.updateIndexPreview = function() {
     setText('index-preview-hero-subtitle', settings.heroSubtitleTh);
     setText('index-preview-about-title', settings.aboutTitleTh);
     setText('index-preview-about-body', settings.aboutBodyTh);
-};
-
-function fillPromoPopupSettingsForm(settings = DEFAULT_PROMO_POPUP_SETTINGS) {
-    const normalized = normalizePromoPopupSettings(settings);
-    const enabled = indexField('promo-popup-enabled');
-    if (enabled) enabled.checked = normalized.enabled;
-    setIndexField('promo-popup-title', normalized.title);
-    setIndexField('promo-popup-display-location', normalized.displayLocation);
-    setIndexField('promo-popup-audience', normalized.audience);
-    renderIndexPromoSlides(normalized.slides);
-    window.updatePromoPopupPreview();
-}
-
-window.updatePromoPopupPreview = function() {
-    updateIndexPromoPreview(readIndexPromoPopupForm());
-};
-
-async function buildPromoPopupSettingsFromLegacyDocs() {
-    const [promoSnap, indexSnap] = await Promise.all([
-        getDoc(PROMO_POPUP_SETTINGS_REF()).catch(() => null),
-        getDoc(INDEX_SETTINGS_REF()).catch(() => null)
-    ]);
-    if (promoSnap?.exists()) {
-        return { settings: promoSnap.data(), source: 'site_settings/promo_popup' };
-    }
-    const legacyPopup = indexSnap?.exists() ? indexSnap.data()?.promoPopup || indexSnap.data()?.promo_popup : null;
-    return {
-        settings: legacyPopup
-            ? { ...DEFAULT_PROMO_POPUP_SETTINGS, ...legacyPopup, displayLocation: 'home', audience: 'everyone' }
-            : DEFAULT_PROMO_POPUP_SETTINGS,
-        source: legacyPopup ? 'legacy site_settings/index.promoPopup prefill' : 'defaults'
-    };
-}
-
-window.loadPromoPopupSettings = async function() {
-    try {
-        setPromoPopupStatus('Loading promotional popup settings...');
-        const { settings, source } = await buildPromoPopupSettingsFromLegacyDocs();
-        fillPromoPopupSettingsForm(settings);
-        setPromoPopupStatus(
-            source === 'site_settings/promo_popup'
-                ? 'Loaded from site_settings/promo_popup.'
-                : 'No popup doc yet. Prefilled from legacy Index popup/defaults; review and save to create site_settings/promo_popup.',
-            source === 'site_settings/promo_popup' ? '' : 'warning'
-        );
-    } catch (error) {
-        console.error('Error loading promotional popup settings:', error);
-        fillPromoPopupSettingsForm(DEFAULT_PROMO_POPUP_SETTINGS);
-        setPromoPopupStatus('Unable to load popup settings. Defaults are shown.', 'error');
-    }
+    setText(
+        'index-preview-about-seo-detail',
+        `${settings.aboutSeo.quickFacts.length} facts / ${settings.aboutSeo.storyBlocks.length} stories / ${settings.aboutSeo.faq.length} FAQs / ${settings.aboutSeo.relatedLinks.length} links`
+    );
+    updateIndexPromoPreview(settings.promoPopup);
 };
 
 window.loadIndexSettings = async function() {
@@ -12908,6 +12201,11 @@ indexSettingsForm?.addEventListener('submit', async (event) => {
 
     try {
         const settings = readIndexSettingsForm();
+        if (settings.promoPopup.enabled && !settings.promoPopup.slides.length) {
+            setIndexStatus('Enable popup needs at least one slide image.', 'error');
+            alert('Please add at least one popup slide image before enabling the popup.');
+            return;
+        }
         await setDoc(INDEX_SETTINGS_REF(), {
             ...settings,
             updatedAt: serverTimestamp(),
@@ -12920,48 +12218,6 @@ indexSettingsForm?.addEventListener('submit', async (event) => {
         console.error('Unable to save index settings:', error);
         setIndexStatus(safeAdminError('\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01 Index \u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08'), 'error');
         alert(safeAdminError('\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01 Index \u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08'));
-    } finally {
-        if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.textContent = originalText;
-        }
-    }
-});
-
-promoPopupSettingsForm?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    if (!canAdmin('promotions')) {
-        setPromoPopupStatus('This account cannot edit Promotional Popup.', 'error');
-        return;
-    }
-
-    const submitBtn = promoPopupSettingsForm.querySelector('button[type="submit"]');
-    const originalText = submitBtn?.textContent;
-    if (submitBtn) {
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Saving...';
-    }
-
-    try {
-        const settings = readIndexPromoPopupForm();
-        if (settings.enabled && !settings.slides.length) {
-            setPromoPopupStatus('Enable popup needs at least one slide image.', 'error');
-            alert('Please add at least one popup slide image before enabling the popup.');
-            return;
-        }
-        await setDoc(PROMO_POPUP_SETTINGS_REF(), {
-            ...settings,
-            updatedAt: serverTimestamp(),
-            updatedBy: auth.currentUser?.uid || '',
-            updatedByEmail: auth.currentUser?.email || ''
-        }, { merge: true });
-        fillPromoPopupSettingsForm(settings);
-        setPromoPopupStatus('Promotional Popup saved to site_settings/promo_popup.');
-        alert('Promotional Popup saved.');
-    } catch (error) {
-        console.error('Unable to save promotional popup settings:', error);
-        setPromoPopupStatus(safeAdminError('Save Promotional Popup failed'), 'error');
-        alert(safeAdminError('Save Promotional Popup failed'));
     } finally {
         if (submitBtn) {
             submitBtn.disabled = false;

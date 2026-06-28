@@ -17,7 +17,7 @@
     <link rel="canonical" href="https://edencafe.co/">
     <meta name="keywords" content="Eden Cafe, คาเฟ่เชียงราย, คาเฟ่นางแล, Specialty Coffee Chiang Rai, กาแฟพิเศษเชียงราย, คาเฟ่ธรรมชาติ">
 
-    <link rel="stylesheet" href="style.css?v=promo-popup-targeting-1">
+    <link rel="stylesheet" href="style.css?v=promo-popup-1">
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -77,6 +77,35 @@
     }
     </script>
 
+    <script type="application/ld+json" id="eden-about-faq-schema">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [{
+        "@type": "Question",
+        "name": "Eden Cafe อยู่ที่ไหน?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Eden Cafe ตั้งอยู่ที่ตำบลนางแล อำเภอเมืองเชียงราย จังหวัดเชียงราย เป็นคาเฟ่ธรรมชาติและร้านกาแฟพิเศษสำหรับพักผ่อนใกล้ธรรมชาติ"
+        }
+      }, {
+        "@type": "Question",
+        "name": "จุดเด่นของกาแฟ Eden Cafe คืออะไร?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "จุดเด่นคือการคัดสรรเมล็ดกาแฟไทยจากแหล่งปลูกบนดอยและการคั่วที่ตั้งใจดึงกลิ่นหอม ความกลมกล่อม และเอกลักษณ์ของกาแฟไทย"
+        }
+      }, {
+        "@type": "Question",
+        "name": "Eden Cafe เหมาะกับใครบ้าง?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "เหมาะสำหรับคนที่มองหาคาเฟ่เชียงรายบรรยากาศสงบ จิบกาแฟ ทำงาน พบเพื่อน หรือพักผ่อนในพื้นที่ที่ใกล้ชิดธรรมชาติ"
+        }
+      }]
+    }
+    </script>
+
 <!-- Open Graph / Social Media Meta Tags -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://edencafe.co/">
@@ -115,7 +144,7 @@
                         <ul class="nav-dropdown-menu" aria-label="ตัวเลือกระบบจอง">
                             <li><a href="/booking?type=room">ห้องประชุม</a></li>
                             <li><a href="/booking?type=table">โต๊ะ</a></li>
-                            <li><a href="/archery/">ยิงธนู</a></li>
+                            <li><a href="/archery/booking">ยิงธนู</a></li>
                         </ul>
                     </li>
                     <li><a href="/blog">บทความ (Blog)</a></li>
@@ -158,13 +187,74 @@
         <!-- About Section -->
         <section id="about" class="about">
             <div class="container">
-                <h2 data-index-setting="about-title">เรื่องราวของเรา: จากยอดดอยสู่แก้วกาแฟของคุณ</h2>
-                <p data-index-setting="about-body">Eden Cafe เกิดขึ้นจากความหลงใหลในศิลปะการชงกาแฟและการสนับสนุนเกษตรกรไทย
-                    เราคัดสรรเมล็ดกาแฟจากแหล่งปลูกที่ดีที่สุดบนยอดดอยในประเทศไทย
-                    คั่วด้วยเทคนิคพิเศษเพื่อให้ได้รสชาติที่เป็นเอกลักษณ์ ไม่เหมือนใคร
-                    บรรยากาศร้านของเราออกแบบสไตล์มินิมอล อิงธรรมชาติ เพื่อให้คุณได้พักผ่อนอย่างแท้จริง</p>
+                <div class="about-hero-content">
+                    <p class="about-eyebrow">Eden Cafe Chiang Rai</p>
+                    <h2 data-index-setting="about-title">เรื่องราวของเรา: จากยอดดอยสู่แก้วกาแฟของคุณ</h2>
+                    <p data-index-setting="about-body">Eden Cafe เกิดขึ้นจากความหลงใหลในศิลปะการชงกาแฟและการสนับสนุนเกษตรกรไทย
+                        เราคัดสรรเมล็ดกาแฟจากแหล่งปลูกที่ดีที่สุดบนยอดดอยในประเทศไทย
+                        คั่วด้วยเทคนิคพิเศษเพื่อให้ได้รสชาติที่เป็นเอกลักษณ์ ไม่เหมือนใคร
+                        บรรยากาศร้านของเราออกแบบสไตล์มินิมอล อิงธรรมชาติ เพื่อให้คุณได้พักผ่อนอย่างแท้จริง</p>
+                    <p class="about-subtitle" data-index-about="hero-subtitle">คาเฟ่ธรรมชาติในนางแล เชียงราย ที่เล่าเรื่องกาแฟไทยผ่านเมล็ดจากพื้นที่สูง การคั่วอย่างพิถีพิถัน และพื้นที่พักผ่อนที่ใกล้ชิดธรรมชาติ</p>
+                </div>
+                <figure class="about-visual">
+                    <img data-index-about-image src="/Hero/Hero.webp" alt="บรรยากาศธรรมชาติของ Eden Cafe เชียงราย พร้อมกาแฟพิเศษจากเมล็ดกาแฟไทย" loading="lazy" decoding="async">
+                </figure>
+                <div class="about-quick-facts" data-index-about="quick-facts">
+                    <article class="about-fact"><span>ที่ตั้ง</span><strong>นางแล อำเภอเมืองเชียงราย</strong></article>
+                    <article class="about-fact"><span>กาแฟ</span><strong>เมล็ดกาแฟไทยจากแหล่งปลูกบนดอย</strong></article>
+                    <article class="about-fact"><span>บรรยากาศ</span><strong>มินิมอล สงบ ใกล้ธรรมชาติ</strong></article>
+                    <article class="about-fact"><span>เวลาเปิด</span><strong>เปิดทุกวัน 09:00-18:00</strong></article>
+                </div>
+                <div class="about-story-grid" data-index-about="story-blocks">
+                    <article class="about-story-card">
+                        <h3>เริ่มจากความตั้งใจต่อกาแฟไทย</h3>
+                        <p>Eden Cafe เลือกเล่าเรื่องกาแฟผ่านเมล็ดจากแหล่งปลูกในประเทศไทย โดยให้ความสำคัญกับคุณภาพ ความสด และเอกลักษณ์ของรสชาติในแต่ละแก้ว</p>
+                    </article>
+                    <article class="about-story-card">
+                        <h3>พื้นที่พักผ่อนในเชียงราย</h3>
+                        <p>ร้านออกแบบให้เป็นพื้นที่สงบสำหรับจิบกาแฟ ทำงาน พบเพื่อน หรือใช้เวลาช้า ๆ กับตัวเอง ท่ามกลางบรรยากาศธรรมชาติของเชียงราย</p>
+                    </article>
+                </div>
+                <article class="about-origin" data-index-about="coffee-origin">
+                    <h3>กาแฟจากยอดดอยสู่แก้วของคุณ</h3>
+                    <p>เราให้ความสำคัญกับเมล็ดกาแฟไทยจากพื้นที่สูง เพราะอากาศเย็นและสภาพแวดล้อมช่วยสร้างกลิ่นหอม ความหวาน และมิติรสชาติที่เหมาะกับกาแฟพิเศษ</p>
+                </article>
+                <div class="about-faq">
+                    <h3>คำถามเกี่ยวกับ Eden Cafe</h3>
+                    <div class="about-faq-list" data-index-about="faq">
+                        <article class="about-faq-item"><details open><summary>Eden Cafe อยู่ที่ไหน?</summary><p>Eden Cafe ตั้งอยู่ที่ตำบลนางแล อำเภอเมืองเชียงราย จังหวัดเชียงราย เป็นคาเฟ่ธรรมชาติและร้านกาแฟพิเศษสำหรับพักผ่อนใกล้ธรรมชาติ</p></details></article>
+                        <article class="about-faq-item"><details><summary>จุดเด่นของกาแฟ Eden Cafe คืออะไร?</summary><p>จุดเด่นคือการคัดสรรเมล็ดกาแฟไทยจากแหล่งปลูกบนดอยและการคั่วที่ตั้งใจดึงกลิ่นหอม ความกลมกล่อม และเอกลักษณ์ของกาแฟไทย</p></details></article>
+                        <article class="about-faq-item"><details><summary>Eden Cafe เหมาะกับใครบ้าง?</summary><p>เหมาะสำหรับคนที่มองหาคาเฟ่เชียงรายบรรยากาศสงบ จิบกาแฟ ทำงาน พบเพื่อน หรือพักผ่อนในพื้นที่ที่ใกล้ชิดธรรมชาติ</p></details></article>
+                    </div>
+                </div>
+                <nav class="about-related" aria-label="ลิงก์ที่เกี่ยวข้องกับ Eden Cafe">
+                    <h3>สำรวจ Eden Cafe ต่อ</h3>
+                    <div class="about-related-grid" data-index-about="related-links">
+                        <a class="about-related-link" href="/menu"><strong>ดูเมนู</strong><span>สำรวจเมนูกาแฟ เครื่องดื่ม และอาหารของ Eden Cafe</span></a>
+                        <a class="about-related-link" href="/booking"><strong>จองโต๊ะหรือห้องรับรอง</strong><span>เลือกวัน เวลา และพื้นที่นั่งที่ต้องการ</span></a>
+                        <a class="about-related-link" href="/blog/chiang-rai-mountain-coffee"><strong>เรื่องกาแฟดอยเชียงราย</strong><span>อ่านต่อเรื่องกาแฟจากพื้นที่สูงในเชียงราย</span></a>
+                    </div>
+                </nav>
             </div>
         </section>
+        <script>
+            (() => {
+                try {
+                    const cached = JSON.parse(localStorage.getItem('eden_index_settings_cache_v1') || 'null');
+                    if (!cached) return;
+                    const setText = (selector, value) => {
+                        const element = document.querySelector(selector);
+                        if (element && value) element.textContent = value;
+                    };
+                    setText('[data-index-setting="hero-title"]', cached.heroTitleTh);
+                    setText('[data-index-setting="hero-subtitle"]', cached.heroSubtitleTh);
+                    setText('[data-index-setting="about-title"]', cached.aboutTitleTh);
+                    setText('[data-index-setting="about-body"]', cached.aboutBodyTh);
+                    if (cached.heroImageUrl) document.querySelector('#home.hero')?.style.setProperty('--index-hero-image', `url("${cached.heroImageUrl}")`);
+                    document.documentElement.classList.add('index-settings-cache-applied');
+                } catch (_) {}
+            })();
+        </script>
 
         <!-- Featured products controlled from Eden Admin -->
         <section id="recommended-shop" class="products" style="background-color: var(--light-gray); padding: 80px 0;">
@@ -173,7 +263,7 @@
                     <h2 style="font-size: 2.5rem; margin-bottom: 15px;">สินค้าแนะนำ</h2>
                     <p style="font-size: 1.1rem; color: #555; max-width: 600px; margin: 0 auto;">ส่งตรงความอร่อยถึงบ้านคุณ ด้วยเมล็ดกาแฟคั่วสดใหม่และอุปกรณ์ชงกาแฟคุณภาพ</p>
                 </div>
-                
+
                 <div class="shop-grid shop-grid-4 featured-products-loading" aria-live="polite">
                     <div class="shop-card featured-skeleton-card" aria-hidden="true">
                         <div class="featured-skeleton-media"></div>
@@ -337,7 +427,7 @@
                             d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
                     </svg>
                     <strong id="google-rating-score" style="font-size: 1.2rem; color: #FFD700;">★ 4.8</strong>
-                    <span id="google-rating-count" style="font-size: 0.95rem;">(รีวิวบน Google Maps)</span>
+                    <span id="google-rating-count" style="font-size: 0.95rem;">(Google Maps)</span>
                 </a>
                 <div class="hero-reviews" id="google-reviews-container">
                     <div class="hero-review-card">
@@ -427,9 +517,9 @@
             });
         }
     </script>
-    <script type="module" src="js/faq.js?v=1"></script>
-    <script type="module" src="js/auth.js?v=promo-popup-targeting-1"></script>
-    <script type="module" src="js/home-featured-products.js?v=shop-unified-2"></script>
+    <script type="module" src="js/faq.js?v=phase4-1"></script>
+    <script type="module" src="js/auth.js?v=phase5-1"></script>
+    <script type="module" src="js/home-featured-products.js?v=phase4-1"></script>
     <script type="module" src="js/index-settings.js?v=promo-popup-1"></script>
     <!-- Cookie Consent Banner -->
     <div id="cookie-consent"
@@ -462,14 +552,13 @@
             });
         });
     </script>
-    <script type="module" src="js/marketing-consent.js?v=mobile-ux-20260619"></script>
-<script src="js/cart.js?v=mobile-cart-20260619"></script>
+    <script type="module" src="js/marketing-consent.js?v=1"></script>
+<script src="js/cart.js?v=1"></script>
     <script type="module" src="js/footer-settings.js?v=business-1"></script>
     <script src="js/reviews.js?v=6"></script>
 <script type="module" src="js/counter.js?v=5"></script>
 </body>
 
 </html>
-
 
 
