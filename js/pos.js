@@ -6,6 +6,7 @@ import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmail
 import { collection, getDocs, doc, setDoc, addDoc, query, orderBy, onSnapshot, getDoc, serverTimestamp, runTransaction, where, limit, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
+const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net';
 const POS_QR_PLACEHOLDER_SRC = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 const ADMIN_COLLECTION = 'admin_users';
 const ADMIN_PERMISSION_LABELS = {
@@ -35,6 +36,16 @@ let posLastReceipt = null;
 let posSelectedCustomer = null;
 let posOpenBills = [];
 let posActiveBill = null;
+let posSaleAdjustmentState = {
+    promoCode: '',
+    promotion: null,
+    promoStatus: '',
+    promoStatusState: 'idle',
+    voucherCode: '',
+    voucher: null,
+    voucherStatus: '',
+    voucherStatusState: 'idle'
+};
 let posControlsBound = false;
 let posReceiptOrders = [];
 let posSelectedReceiptId = '';
@@ -1634,19 +1645,31 @@ function renderPosProducts() {
 }
 
 function currentPosOrderItems() {
-    return posCart.map(item => ({
-        productId: item.productId,
-        variantId: item.variantId,
-        name: item.name,
-        variantName: item.variantName || '',
-        sku: item.sku || '',
-        category: item.category || '',
-        price: posRound(item.price),
-        cost: posRound(item.cost),
-        quantity: safeNumber(item.quantity, 1),
-        lineTotal: posRound(safeNumber(item.price) * safeNumber(item.quantity, 1)),
-        taxEnabled: item.taxEnabled !== false
-    }));
+    return posCart.map(item => {
+        const product = productsData[item.productId] || {};
+        const categoryId = item.categoryId || product.categoryId || item.category || product.category || '';
+        const categoryName = item.categoryName || categoryNameForProduct(product) || item.category || '';
+        const quantity = safeNumber(item.quantity, 1);
+        const price = posRound(item.price);
+        return {
+            productId: item.productId,
+            variantId: item.variantId,
+            name: item.name,
+            variantName: item.variantName || '',
+            sku: item.sku || '',
+            category: item.category || categoryId,
+            categoryId,
+            categoryIds: [categoryId, categoryName].filter(Boolean),
+            categoryName,
+            price,
+            unitPrice: price,
+            cost: posRound(item.cost),
+            quantity,
+            lineDiscount: 0,
+            lineTotal: posRound(price * quantity),
+            taxEnabled: item.taxEnabled !== false
+        };
+    });
 }
 
 function currentPosCustomerPayload() {
@@ -1662,6 +1685,388 @@ function currentPosCustomerPayload() {
     };
 }
 
+function posLoyaltyIdempotencyKey(order = {}) {
+    return posLimitString(order.firestoreId || order.receiptNo || order.id || '', 120);
+}
+
+function posInitialLoyaltyFields({ isTestOrder = false, paymentStatus = 'paid', customerPayload = {}, receiptNo = '' } = {}) {
+    const customerUid = posLimitString(customerPayload.customerUid, 120);
+    const idempotencyKey = posLimitString(receiptNo, 120);
+    if (isTestOrder) {
+        return {
+            loyaltySyncStatus: 'skipped',
+            loyaltyError: 'test-order',
+            loyaltyIdempotencyKey: idempotencyKey
+        };
+    }
+    if (paymentStatus !== 'paid') {
+        return {
+            loyaltySyncStatus: 'skipped',
+            loyaltyError: 'pending-payment',
+            loyaltyIdempotencyKey: idempotencyKey
+        };
+    }
+    if (!customerUid) {
+        return {
+            loyaltySyncStatus: 'skipped',
+            loyaltyError: 'no-customer',
+            loyaltyIdempotencyKey: idempotencyKey
+        };
+    }
+    return {
+        loyaltySyncStatus: 'pending',
+        loyaltyError: '',
+        loyaltyIdempotencyKey: idempotencyKey
+    };
+}
+
+async function callPosCloudFunction(functionName, body = {}) {
+    const user = auth.currentUser;
+    if (!user || typeof user.getIdToken !== 'function') throw new Error('POS admin sign-in required');
+    const response = await fetch(`${FUNCTIONS_BASE_URL}/${functionName}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + await user.getIdToken()
+        },
+        body: JSON.stringify(body)
+    });
+    let data = {};
+    try {
+        data = await response.json();
+    } catch (_) {
+        data = {};
+    }
+    if (!response.ok) throw new Error(data.error || `${functionName} failed`);
+    return data;
+}
+
+function normalizePosCodeInput(value) {
+    return String(value ?? '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 40);
+}
+
+function setPosSaleAdjustmentStatus(type, message = '', state = 'idle') {
+    const key = type === 'voucher' ? 'voucher' : 'promo';
+    posSaleAdjustmentState[`${key}Status`] = message;
+    posSaleAdjustmentState[`${key}StatusState`] = state;
+    const statusEl = document.getElementById(key === 'voucher' ? 'pos-voucher-status' : 'pos-promo-status');
+    if (statusEl) {
+        statusEl.textContent = message;
+        statusEl.className = ['pos-code-status', state].filter(Boolean).join(' ');
+    }
+}
+
+function clearPosSaleAdjustments(options = {}) {
+    const keepInputs = options.keepInputs === true;
+    if (options.promo !== false) {
+        posSaleAdjustmentState.promoCode = keepInputs ? normalizePosCodeInput(document.getElementById('pos-promo-code')?.value || '') : '';
+        posSaleAdjustmentState.promotion = null;
+        setPosSaleAdjustmentStatus('promo', '', 'idle');
+        if (!keepInputs) {
+            const input = document.getElementById('pos-promo-code');
+            if (input) input.value = '';
+        }
+    }
+    if (options.voucher !== false) {
+        posSaleAdjustmentState.voucherCode = keepInputs ? normalizePosCodeInput(document.getElementById('pos-voucher-code')?.value || '') : '';
+        posSaleAdjustmentState.voucher = null;
+        setPosSaleAdjustmentStatus('voucher', '', 'idle');
+        if (!keepInputs) {
+            const input = document.getElementById('pos-voucher-code');
+            if (input) input.value = '';
+        }
+    }
+}
+
+function invalidatePosSaleAdjustments(reason = '') {
+    const hadPromotion = !!posSaleAdjustmentState.promotion;
+    const hadVoucher = !!posSaleAdjustmentState.voucher;
+    if (!hadPromotion && !hadVoucher) return;
+    posSaleAdjustmentState.promotion = null;
+    posSaleAdjustmentState.voucher = null;
+    const message = reason || 'ยอดเปลี่ยน กรุณาตรวจโค้ดอีกครั้ง';
+    if (hadPromotion) setPosSaleAdjustmentStatus('promo', message, 'warning');
+    if (hadVoucher) setPosSaleAdjustmentStatus('voucher', message, 'warning');
+}
+
+function posSaleAdjustmentRequestBase() {
+    const totals = posCartTotals({ includeVoucher: false });
+    return {
+        branchId: 'pos',
+        customerUid: posSelectedCustomer?.uid || '',
+        manualDiscount: totals.manualDiscount,
+        subtotal: totals.subtotal,
+        items: currentPosOrderItems()
+    };
+}
+
+function posAppliedPromotion() {
+    return posSaleAdjustmentState.promotion && posSaleAdjustmentState.promoCode
+        ? posSaleAdjustmentState.promotion
+        : null;
+}
+
+function posAppliedVoucher() {
+    return posSaleAdjustmentState.voucher && posSaleAdjustmentState.voucherCode
+        ? posSaleAdjustmentState.voucher
+        : null;
+}
+
+window.validatePosPromotionCode = async () => {
+    const input = document.getElementById('pos-promo-code');
+    const button = document.getElementById('pos-apply-promo-btn');
+    const code = normalizePosCodeInput(input?.value || posSaleAdjustmentState.promoCode);
+    if (!posCart.length) {
+        setPosSaleAdjustmentStatus('promo', 'เพิ่มสินค้าในตะกร้าก่อนใช้โค้ด', 'warning');
+        return null;
+    }
+    if (!code) {
+        clearPosSaleAdjustments({ promo: true, voucher: false, keepInputs: false });
+        renderPosCart();
+        return null;
+    }
+    const originalText = button?.textContent || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'ตรวจ...';
+        }
+        posSaleAdjustmentState.promoCode = code;
+        posSaleAdjustmentState.promotion = null;
+        posSaleAdjustmentState.voucher = null;
+        setPosSaleAdjustmentStatus('promo', 'กำลังตรวจโค้ด...', 'loading');
+        setPosSaleAdjustmentStatus('voucher', '', 'idle');
+        const result = await callPosCloudFunction('validatePosPromotion', {
+            ...posSaleAdjustmentRequestBase(),
+            promoCode: code
+        });
+        const promotion = result.promotion || {};
+        posSaleAdjustmentState.promoCode = normalizePosCodeInput(promotion.code || code);
+        posSaleAdjustmentState.promotion = promotion;
+        if (input) input.value = posSaleAdjustmentState.promoCode;
+        setPosSaleAdjustmentStatus('promo', `ใช้โค้ด ${posSaleAdjustmentState.promoCode} ลด ${posMoney(promotion.discountAmount)}`, 'success');
+        renderPosCart();
+        return promotion;
+    } catch (error) {
+        posSaleAdjustmentState.promotion = null;
+        posSaleAdjustmentState.voucher = null;
+        setPosSaleAdjustmentStatus('promo', error.message || 'โค้ดนี้ใช้ไม่ได้', 'error');
+        setPosSaleAdjustmentStatus('voucher', '', 'idle');
+        renderPosCart();
+        return null;
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText || 'ใช้';
+        }
+    }
+};
+
+window.clearPosPromotionCode = () => {
+    clearPosSaleAdjustments({ promo: true, voucher: true, keepInputs: false });
+    renderPosCart();
+};
+
+window.validatePosGiftVoucherCode = async () => {
+    const input = document.getElementById('pos-voucher-code');
+    const button = document.getElementById('pos-apply-voucher-btn');
+    const code = normalizePosCodeInput(input?.value || posSaleAdjustmentState.voucherCode);
+    if (!posCart.length) {
+        setPosSaleAdjustmentStatus('voucher', 'เพิ่มสินค้าในตะกร้าก่อนใช้ Voucher', 'warning');
+        return null;
+    }
+    if (!code) {
+        clearPosSaleAdjustments({ promo: false, voucher: true, keepInputs: false });
+        renderPosCart();
+        return null;
+    }
+    const totalsBeforeVoucher = posCartTotals({ includeVoucher: false });
+    if (totalsBeforeVoucher.saleTotal <= 0) {
+        setPosSaleAdjustmentStatus('voucher', 'ไม่มียอดคงเหลือให้ใช้ Voucher', 'warning');
+        return null;
+    }
+    const originalText = button?.textContent || '';
+    try {
+        if (button) {
+            button.disabled = true;
+            button.textContent = 'ตรวจ...';
+        }
+        posSaleAdjustmentState.voucherCode = code;
+        posSaleAdjustmentState.voucher = null;
+        setPosSaleAdjustmentStatus('voucher', 'กำลังตรวจ Voucher...', 'loading');
+        const result = await callPosCloudFunction('validatePosGiftVoucher', {
+            voucherCode: code,
+            amountDue: totalsBeforeVoucher.saleTotal
+        });
+        const voucher = result.voucher || {};
+        posSaleAdjustmentState.voucherCode = normalizePosCodeInput(voucher.code || code);
+        posSaleAdjustmentState.voucher = voucher;
+        if (input) input.value = posSaleAdjustmentState.voucherCode;
+        setPosSaleAdjustmentStatus('voucher', `ใช้ Voucher ${posSaleAdjustmentState.voucherCode} ${posMoney(voucher.amount)}`, 'success');
+        renderPosCart();
+        return voucher;
+    } catch (error) {
+        posSaleAdjustmentState.voucher = null;
+        setPosSaleAdjustmentStatus('voucher', error.message || 'Voucher นี้ใช้ไม่ได้', 'error');
+        renderPosCart();
+        return null;
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.textContent = originalText || 'ใช้';
+        }
+    }
+};
+
+window.clearPosGiftVoucherCode = () => {
+    clearPosSaleAdjustments({ promo: false, voucher: true, keepInputs: false });
+    renderPosCart();
+};
+
+async function ensurePosSaleAdjustmentsValidated() {
+    const promoCode = normalizePosCodeInput(document.getElementById('pos-promo-code')?.value || '');
+    const voucherCode = normalizePosCodeInput(document.getElementById('pos-voucher-code')?.value || '');
+    if (promoCode && (!posAppliedPromotion() || posSaleAdjustmentState.promoCode !== promoCode)) {
+        const promotion = await window.validatePosPromotionCode();
+        if (!promotion) throw new Error('กรุณาตรวจ Promo Code ให้สำเร็จก่อนชำระเงิน');
+    }
+    if (voucherCode && (!posAppliedVoucher() || posSaleAdjustmentState.voucherCode !== voucherCode)) {
+        const voucher = await window.validatePosGiftVoucherCode();
+        if (!voucher) throw new Error('กรุณาตรวจ Gift Voucher ให้สำเร็จก่อนชำระเงิน');
+    }
+}
+
+async function syncPosSaleAdjustments(order = {}) {
+    const promotion = posAppliedPromotion();
+    const voucher = posAppliedVoucher();
+    if (!promotion && !voucher) return null;
+    const totals = posCartTotals();
+    const result = await callPosCloudFunction('applyPosSaleAdjustments', {
+        orderId: order.firestoreId || order.id || '',
+        firestoreId: order.firestoreId || '',
+        receiptNo: order.receiptNo || order.id || '',
+        promoCode: promotion?.code || posSaleAdjustmentState.promoCode || '',
+        voucherCode: voucher?.code || posSaleAdjustmentState.voucherCode || '',
+        voucherAmount: totals.voucherAmount,
+        amountDue: totals.amountDue,
+        manualDiscount: totals.manualDiscount,
+        nonVoucherPaidAmount: totals.nonVoucherPaidAmount,
+        paymentMethod: totals.paymentMethod,
+        idempotencyKey: order.receiptNo || order.firestoreId || order.id || '',
+        items: Array.isArray(order.items) ? order.items : currentPosOrderItems()
+    });
+    return result;
+}
+
+function applyPosSaleAdjustmentResult(order = {}, result = {}) {
+    if (!result || !result.totals) return order;
+    const totals = result.totals || {};
+    const promotion = result.promotion || null;
+    const voucher = result.voucher || null;
+    return {
+        ...order,
+        manualDiscount: safeNumber(totals.manualDiscount),
+        promoDiscount: safeNumber(totals.promoDiscount),
+        promotionDiscount: safeNumber(totals.promoDiscount),
+        normalDiscount: safeNumber(totals.manualDiscount) + safeNumber(totals.promoDiscount),
+        orderDiscount: safeNumber(totals.manualDiscount) + safeNumber(totals.promoDiscount),
+        discount: safeNumber(totals.discount),
+        totalBeforeLoyalty: safeNumber(totals.totalBeforeLoyalty),
+        total: safeNumber(totals.totalAmount),
+        totalAmount: safeNumber(totals.totalAmount),
+        amountDue: safeNumber(totals.amountDue),
+        balanceDue: safeNumber(totals.amountDue),
+        giftVoucherAmount: safeNumber(totals.voucherAmount),
+        voucherAmount: safeNumber(totals.voucherAmount),
+        nonVoucherPaidAmount: safeNumber(totals.nonVoucherPaidAmount),
+        paidWithoutVoucher: safeNumber(totals.nonVoucherPaidAmount),
+        paidAmount: safeNumber(totals.paidAmount),
+        changeAmount: safeNumber(totals.changeAmount),
+        promoCode: promotion?.code || order.promoCode || '',
+        giftVoucherCode: posSaleAdjustmentState.voucherCode || order.giftVoucherCode || '',
+        promotionApplications: promotion ? [{
+            redemptionId: promotion.redemptionId,
+            code: promotion.code,
+            promotionId: promotion.promotionId,
+            promotionName: promotion.promotionName,
+            discountAmount: safeNumber(promotion.discountAmount),
+            eligibleSubtotal: safeNumber(promotion.eligibleSubtotal),
+            lineAllocations: Array.isArray(promotion.lineAllocations) ? promotion.lineAllocations : []
+        }] : (order.promotionApplications || []),
+        giftVoucherApplications: voucher ? [{
+            voucherId: voucher.voucherId,
+            ledgerId: voucher.ledgerId,
+            code: posSaleAdjustmentState.voucherCode,
+            amount: safeNumber(voucher.amount),
+            balanceAfter: safeNumber(voucher.balanceAfter)
+        }] : (order.giftVoucherApplications || []),
+        posSaleAdjustmentsStatus: result.status || 'synced'
+    };
+}
+
+async function updatePosOrderLoyaltyStatus(order, payload = {}) {
+    const firestoreId = posLimitString(order?.firestoreId, 180);
+    if (!firestoreId) return;
+    await updateDoc(doc(db, 'orders', firestoreId), {
+        ...payload,
+        updatedAt: serverTimestamp(),
+        updatedBy: auth.currentUser?.uid || ''
+    });
+}
+
+async function syncPosLoyaltySale(order = {}) {
+    if (!order.firestoreId) return null;
+    const customerUid = posLimitString(order.customerUid, 120);
+    const idempotencyKey = posLoyaltyIdempotencyKey(order);
+    if (order.isTestOrder === true || order.softLaunch === true) {
+        await updatePosOrderLoyaltyStatus(order, {
+            loyaltySyncStatus: 'skipped',
+            loyaltyError: 'test-order',
+            loyaltyIdempotencyKey: idempotencyKey,
+            loyaltySyncedAt: serverTimestamp()
+        }).catch(error => console.warn('Unable to mark test POS loyalty skip:', error));
+        return { status: 'skipped', reason: 'test-order' };
+    }
+    if (!customerUid) {
+        await updatePosOrderLoyaltyStatus(order, {
+            loyaltySyncStatus: 'skipped',
+            loyaltyError: 'no-customer',
+            loyaltyIdempotencyKey: idempotencyKey,
+            loyaltySyncedAt: serverTimestamp()
+        }).catch(error => console.warn('Unable to mark POS loyalty skip:', error));
+        return { status: 'skipped', reason: 'no-customer' };
+    }
+
+    try {
+        await updatePosOrderLoyaltyStatus(order, {
+            loyaltySyncStatus: 'syncing',
+            loyaltyError: '',
+            loyaltyIdempotencyKey: idempotencyKey
+        }).catch(error => console.warn('Unable to mark POS loyalty syncing:', error));
+        const result = await callPosCloudFunction('applyPosLoyaltySale', {
+            orderId: order.firestoreId,
+            receiptNo: order.receiptNo || order.id || order.firestoreId,
+            customerUid,
+            idempotencyKey,
+            netAmount: safeNumber(order.totalAmount ?? order.total),
+            normalDiscount: safeNumber(order.normalDiscount ?? order.orderDiscount ?? order.discount),
+            subtotal: safeNumber(order.subtotal),
+            redeemedPoints: safeNumber(order.redeemedPoints),
+            items: Array.isArray(order.items) ? order.items : []
+        });
+        return { status: 'synced', ...(result.loyalty || {}) };
+    } catch (error) {
+        console.warn('POS loyalty sync failed:', error);
+        await updatePosOrderLoyaltyStatus(order, {
+            loyaltySyncStatus: 'failed',
+            loyaltyError: posLimitString(error.message || 'Unable to apply loyalty sale.', 500),
+            loyaltyIdempotencyKey: idempotencyKey,
+            loyaltySyncedAt: serverTimestamp()
+        }).catch(updateError => console.warn('Unable to mark POS loyalty failure:', updateError));
+        return { status: 'failed', error: error.message || 'Unable to apply loyalty sale.' };
+    }
+}
+
 function buildPosCartItemFromOrderItem(item = {}, index = 0) {
     const productId = posLimitString(item.productId || item.id || ('open-bill-item-' + index), 120);
     const variantId = posVariantKey(item.variantId || item.variantName || 'base');
@@ -1673,6 +2078,8 @@ function buildPosCartItemFromOrderItem(item = {}, index = 0) {
         variantName: item.variantName || '',
         sku: item.sku || '',
         category: item.category || '',
+        categoryId: item.categoryId || item.category_id || item.category || '',
+        categoryIds: Array.isArray(item.categoryIds || item.category_ids) ? (item.categoryIds || item.category_ids) : [],
         categoryName: categoryNameForProduct(productsData[productId] || { category: item.category }) || item.category || '',
         imageUrl: productsData[productId]?.imageUrl || '',
         price: safeNumber(item.price),
@@ -1942,21 +2349,54 @@ async function setPosReceiptBusinessDate(value = posTodayBusinessDate(), options
     }
 }
 
-function posCartTotals() {
+function posCartTotals(options = {}) {
+    const includePromo = options.includePromo !== false;
+    const includeVoucher = options.includeVoucher !== false;
     const subtotal = posRound(posCart.reduce((sum, item) => sum + (safeNumber(item.price) * safeNumber(item.quantity, 1)), 0));
     const discountInput = document.getElementById('pos-discount');
     const paidInput = document.getElementById('pos-paid-amount');
     const paymentMethod = document.getElementById('pos-payment-method')?.value || 'cash';
-    const discount = Math.min(Math.max(safeNumber(discountInput?.value), 0), subtotal);
-    const total = posRound(Math.max(subtotal - discount, 0));
+    const manualDiscount = Math.min(Math.max(safeNumber(discountInput?.value), 0), subtotal);
+    const promotion = includePromo ? posAppliedPromotion() : null;
+    const promoDiscount = promotion
+        ? Math.min(Math.max(safeNumber(promotion.discountAmount), 0), Math.max(0, subtotal - manualDiscount))
+        : 0;
+    const discount = posRound(manualDiscount + promoDiscount);
+    const saleTotal = posRound(Math.max(subtotal - discount, 0));
+    const voucher = includeVoucher ? posAppliedVoucher() : null;
+    const voucherAmount = voucher
+        ? Math.min(Math.max(safeNumber(voucher.amount), 0), saleTotal)
+        : 0;
+    const amountDue = posRound(Math.max(saleTotal - voucherAmount, 0));
+    const total = amountDue;
     const taxableSubtotal = posCart
         .filter(item => item.taxEnabled !== false)
         .reduce((sum, item) => sum + (safeNumber(item.price) * safeNumber(item.quantity, 1)), 0);
     const taxableAfterDiscount = subtotal > 0 ? Math.max(taxableSubtotal - (discount * (taxableSubtotal / subtotal)), 0) : 0;
     const taxIncluded = posRound(taxableAfterDiscount * 7 / 107);
     const paidAmount = safeNumber(paidInput?.value);
-    const changeAmount = paymentMethod === 'cash' ? posRound(Math.max(paidAmount - total, 0)) : 0;
-    return { subtotal, discount, total, taxableSubtotal, taxIncluded, paymentMethod, paidAmount, changeAmount };
+    const nonVoucherPaidAmount = paymentMethod === 'cash'
+        ? posRound(paidAmount || amountDue)
+        : amountDue;
+    const totalTendered = posRound(nonVoucherPaidAmount + voucherAmount);
+    const changeAmount = paymentMethod === 'cash' ? posRound(Math.max(nonVoucherPaidAmount - amountDue, 0)) : 0;
+    return {
+        subtotal,
+        manualDiscount,
+        promoDiscount,
+        discount,
+        saleTotal,
+        voucherAmount,
+        amountDue,
+        total,
+        taxableSubtotal,
+        taxIncluded,
+        paymentMethod,
+        paidAmount,
+        nonVoucherPaidAmount,
+        totalTendered,
+        changeAmount
+    };
 }
 
 function renderPosPaymentUI(totals = posCartTotals()) {
@@ -2005,13 +2445,25 @@ function renderPosCart() {
 
     const totals = posCartTotals();
     renderPosPaymentUI(totals);
+    const promoRow = totals.promoDiscount > 0
+        ? `<div class="pos-summary-row"><span>Promo Code</span><strong>-${posMoney(totals.promoDiscount)}</strong></div>`
+        : '';
+    const voucherRow = totals.voucherAmount > 0
+        ? `<div class="pos-summary-row"><span>Gift Voucher</span><strong>-${posMoney(totals.voucherAmount)}</strong></div>`
+        : '';
+    const saleTotalRow = totals.voucherAmount > 0
+        ? `<div class="pos-summary-row"><span>ยอดหลังส่วนลด</span><strong>${posMoney(totals.saleTotal)}</strong></div>`
+        : '';
     summary.innerHTML = `
         <div class="pos-summary-row"><span>ยอดก่อนส่วนลด</span><strong>${posMoney(totals.subtotal)}</strong></div>
-        <div class="pos-summary-row"><span>ส่วนลด</span><strong>-${posMoney(totals.discount)}</strong></div>
+        <div class="pos-summary-row"><span>ส่วนลดมือ</span><strong>-${posMoney(totals.manualDiscount)}</strong></div>
+        ${promoRow}
         <div class="pos-summary-row"><span>VAT 7% รวมในราคา</span><strong>${posMoney(totals.taxIncluded)}</strong></div>
+        ${saleTotalRow}
+        ${voucherRow}
         <div class="pos-summary-row"><span>วิธีชำระเงิน</span><strong>${escapeHTML(posPaymentLabel(totals.paymentMethod))}</strong></div>
         <div class="pos-summary-row"><span>เงินทอน</span><strong>${posMoney(totals.changeAmount)}</strong></div>
-        <div class="pos-summary-row total"><span>ยอดสุทธิ</span><strong>${posMoney(totals.total)}</strong></div>
+        <div class="pos-summary-row total"><span>ยอดชำระ</span><strong>${posMoney(totals.amountDue)}</strong></div>
     `;
     renderPosActiveBill();
     persistPosCart();
@@ -2044,9 +2496,35 @@ function initPosModule() {
         posSelectedCategory = event.target.value || 'all';
         renderPosProducts();
     });
-    ['pos-discount', 'pos-paid-amount', 'pos-payment-method'].forEach(id => {
+    document.getElementById('pos-discount')?.addEventListener('input', () => {
+        invalidatePosSaleAdjustments('ส่วนลดมือเปลี่ยน กรุณาตรวจโค้ดอีกครั้ง');
+        renderPosCart();
+    });
+    document.getElementById('pos-discount')?.addEventListener('change', () => {
+        invalidatePosSaleAdjustments('ส่วนลดมือเปลี่ยน กรุณาตรวจโค้ดอีกครั้ง');
+        renderPosCart();
+    });
+    ['pos-paid-amount', 'pos-payment-method'].forEach(id => {
         document.getElementById(id)?.addEventListener('input', renderPosCart);
         document.getElementById(id)?.addEventListener('change', renderPosCart);
+    });
+    document.getElementById('pos-promo-code')?.addEventListener('input', () => {
+        if (posSaleAdjustmentState.promotion) invalidatePosSaleAdjustments('Promo Code เปลี่ยน กรุณาตรวจอีกครั้ง');
+    });
+    document.getElementById('pos-promo-code')?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            window.validatePosPromotionCode();
+        }
+    });
+    document.getElementById('pos-voucher-code')?.addEventListener('input', () => {
+        if (posSaleAdjustmentState.voucher) invalidatePosSaleAdjustments('Gift Voucher เปลี่ยน กรุณาตรวจอีกครั้ง');
+    });
+    document.getElementById('pos-voucher-code')?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            window.validatePosGiftVoucherCode();
+        }
     });
     document.querySelectorAll('.pos-payment-card').forEach(card => {
         card.addEventListener('click', () => {
@@ -2187,6 +2665,8 @@ window.addPosProductFromCard = (productId, cardEl = null) => {
             variantName: variant.name || '',
             sku: variant.sku || product.sku || '',
             category: product.category || '',
+            categoryId: product.categoryId || product.category || '',
+            categoryIds: [product.categoryId || product.category, categoryNameForProduct(product)].filter(Boolean),
             categoryName: categoryNameForProduct(product),
             imageUrl: product.imageUrl || '',
             price: safeNumber(variant.price, safeNumber(product.price)),
@@ -2195,6 +2675,7 @@ window.addPosProductFromCard = (productId, cardEl = null) => {
             quantity: 1
         });
     }
+    invalidatePosSaleAdjustments('ตะกร้าเปลี่ยน กรุณาตรวจโค้ดอีกครั้ง');
     renderPosCart();
 };
 
@@ -2210,11 +2691,13 @@ window.changePosCartQty = (key, delta) => {
         if (item.key !== key) return item;
         return { ...item, quantity: Math.max(1, safeNumber(item.quantity, 1) + delta) };
     });
+    invalidatePosSaleAdjustments('จำนวนสินค้าเปลี่ยน กรุณาตรวจโค้ดอีกครั้ง');
     renderPosCart();
 };
 
 window.removePosCartItem = (key) => {
     posCart = posCart.filter(item => item.key !== key);
+    invalidatePosSaleAdjustments('ตะกร้าเปลี่ยน กรุณาตรวจโค้ดอีกครั้ง');
     renderPosCart();
 };
 
@@ -2222,6 +2705,7 @@ window.clearPosCart = () => {
     if (posCart.length && !confirm('ล้างตะกร้า POS นี้หรือไม่?')) return;
     posCart = [];
     posLastReceipt = null;
+    clearPosSaleAdjustments({ keepInputs: false });
     setPosActiveBill(null);
     const receipt = document.getElementById('pos-receipt');
     const printBtn = document.getElementById('pos-print-btn');
@@ -2249,14 +2733,36 @@ function buildPosOrderFields(user, options = {}) {
     const businessDate = options.businessDate || posBusinessDateFromDate(now);
     const paymentStatus = options.paymentStatus || 'paid';
     const pendingPayment = paymentStatus === 'pending';
-    const paidAmount = pendingPayment
+    const nonVoucherPaidAmount = pendingPayment
         ? 0
-        : (totals.paymentMethod === 'cash' ? posRound(totals.paidAmount || totals.total) : totals.total);
+        : (totals.paymentMethod === 'cash' ? posRound(totals.paidAmount || totals.amountDue) : totals.amountDue);
+    const paidAmount = pendingPayment ? 0 : posRound(nonVoucherPaidAmount + totals.voucherAmount);
     const changeAmount = pendingPayment
         ? 0
-        : (totals.paymentMethod === 'cash' ? posRound(Math.max(paidAmount - totals.total, 0)) : 0);
+        : (totals.paymentMethod === 'cash' ? posRound(Math.max(nonVoucherPaidAmount - totals.amountDue, 0)) : 0);
     const isTestOrder = !!document.getElementById('pos-soft-launch-mode')?.checked;
     const customerPayload = currentPosCustomerPayload();
+    const loyaltyFields = posInitialLoyaltyFields({ isTestOrder, paymentStatus, customerPayload, receiptNo });
+    const promotion = posAppliedPromotion();
+    const voucher = posAppliedVoucher();
+    const promotionApplications = promotion ? [{
+        code: promotion.code || posSaleAdjustmentState.promoCode,
+        promotionId: promotion.promotionId || '',
+        promotionName: promotion.promotionName || '',
+        discountAmount: totals.promoDiscount,
+        eligibleSubtotal: safeNumber(promotion.eligibleSubtotal),
+        lineAllocations: Array.isArray(promotion.lineAllocations) ? promotion.lineAllocations : []
+    }] : [];
+    const giftVoucherApplications = voucher ? [{
+        code: voucher.code || posSaleAdjustmentState.voucherCode,
+        voucherId: voucher.voucherId || '',
+        amount: totals.voucherAmount,
+        balanceAfter: safeNumber(voucher.balanceAfter)
+    }] : [];
+    const paymentTenders = [
+        ...(totals.voucherAmount > 0 ? [{ type: 'gift_voucher', code: voucher?.code || posSaleAdjustmentState.voucherCode, amount: totals.voucherAmount }] : []),
+        ...(nonVoucherPaidAmount > 0 && !pendingPayment ? [{ type: totals.paymentMethod, amount: nonVoucherPaidAmount }] : [])
+    ];
 
     return {
         totals,
@@ -2282,16 +2788,38 @@ function buildPosOrderFields(user, options = {}) {
             items: orderItems,
             subtotal: totals.subtotal,
             discount: totals.discount,
+            manualDiscount: totals.manualDiscount,
+            promoDiscount: totals.promoDiscount,
+            promotionDiscount: totals.promoDiscount,
+            normalDiscount: totals.discount,
+            orderDiscount: totals.discount,
             taxIncluded: totals.taxIncluded,
-            total: totals.total,
-            totalAmount: totals.total,
+            totalBeforeLoyalty: totals.saleTotal,
+            total: totals.saleTotal,
+            totalAmount: totals.saleTotal,
+            amountDue: pendingPayment ? totals.saleTotal : totals.amountDue,
+            balanceDue: pendingPayment ? totals.saleTotal : totals.amountDue,
+            giftVoucherAmount: pendingPayment ? 0 : totals.voucherAmount,
+            voucherAmount: pendingPayment ? 0 : totals.voucherAmount,
+            giftVoucherTenderedAmount: pendingPayment ? 0 : totals.voucherAmount,
+            paidWithoutVoucher: nonVoucherPaidAmount,
+            nonVoucherPaidAmount,
             paidAmount,
             changeAmount,
+            paymentTenders,
+            promoCode: promotion?.code || posSaleAdjustmentState.promoCode || '',
+            promotionApplications,
+            promotion_applications: promotionApplications,
+            giftVoucherCode: voucher?.code || posSaleAdjustmentState.voucherCode || '',
+            giftVoucherApplications: pendingPayment ? [] : giftVoucherApplications,
+            gift_voucher_applications: pendingPayment ? [] : giftVoucherApplications,
+            posSaleAdjustmentsStatus: (promotion || voucher) ? (pendingPayment ? 'pending_payment' : 'pending') : 'none',
             cashierUid: user.uid,
             cashierName: posLimitString(user.displayName || user.email || 'Admin', 120),
             cashierEmail: posLimitString(user.email || '', 180),
             isTestOrder,
             softLaunch: isTestOrder,
+            ...loyaltyFields,
             billStatus: options.billStatus || (pendingPayment ? 'open' : 'paid'),
             isOpenBill: options.isOpenBill ?? pendingPayment,
             orderMode: options.orderMode || (pendingPayment ? 'open_bill' : 'pay_now')
@@ -2535,9 +3063,10 @@ function applyPosOpenBillToForm(order = {}) {
     if (phoneInput) phoneInput.value = order.phone || '';
     if (searchInput) searchInput.value = order.customerEmail || order.phone || order.customerName || '';
     if (noteInput) noteInput.value = order.note || '';
-    if (discountInput) discountInput.value = order.discount ? String(order.discount) : '';
+    if (discountInput) discountInput.value = order.manualDiscount ? String(order.manualDiscount) : (order.orderDiscount ? String(order.orderDiscount) : '');
     if (paidInput) paidInput.value = '';
     if (paymentSelect && order.paymentMethod) paymentSelect.value = order.paymentMethod;
+    clearPosSaleAdjustments({ keepInputs: false });
 
     posSelectedCustomer = order.customerProfileSynced || order.customerUid
         ? posCleanCustomer(order.customerUid || order.customerEmail || 'customer', {
@@ -2797,6 +3326,12 @@ async function restorePosOrderStock(orderId, reason = '') {
 
 function buildPosReceiptHTML(order = {}) {
     const items = Array.isArray(order.items) ? order.items : [];
+    const manualDiscount = safeNumber(order.manualDiscount ?? order.orderDiscount ?? 0);
+    const promoDiscount = safeNumber(order.promoDiscount ?? order.promotionDiscount ?? 0);
+    const totalDiscount = safeNumber(order.discount);
+    const fallbackDiscount = manualDiscount || promoDiscount ? 0 : totalDiscount;
+    const giftVoucherAmount = safeNumber(order.giftVoucherAmount ?? order.voucherAmount ?? 0);
+    const amountDue = safeNumber(order.amountDue ?? order.balanceDue ?? Math.max(0, safeNumber(order.totalAmount ?? order.total) - giftVoucherAmount));
     return `
         <div style="text-align:center; font-weight:900; font-size:1rem;">Eden Cafe</div>
         <div style="text-align:center;">ใบเสร็จรับเงิน${order.isTestOrder ? ' (TEST)' : ''}</div>
@@ -2813,9 +3348,13 @@ function buildPosReceiptHTML(order = {}) {
         `).join('')}
         <div style="border-top:1px dashed #9aa; margin:10px 0;"></div>
         <div style="display:flex; justify-content:space-between;"><span>Subtotal</span><strong>${posMoney(order.subtotal)}</strong></div>
-        <div style="display:flex; justify-content:space-between;"><span>Discount</span><strong>-${posMoney(order.discount)}</strong></div>
+        ${manualDiscount > 0 ? `<div style="display:flex; justify-content:space-between;"><span>Manual discount</span><strong>-${posMoney(manualDiscount)}</strong></div>` : ''}
+        ${promoDiscount > 0 ? `<div style="display:flex; justify-content:space-between;"><span>Promo Code</span><strong>-${posMoney(promoDiscount)}</strong></div>` : ''}
+        ${fallbackDiscount > 0 ? `<div style="display:flex; justify-content:space-between;"><span>Discount</span><strong>-${posMoney(fallbackDiscount)}</strong></div>` : ''}
         <div style="display:flex; justify-content:space-between;"><span>VAT included</span><strong>${posMoney(order.taxIncluded)}</strong></div>
         <div style="display:flex; justify-content:space-between; font-size:1.05rem;"><span>Total</span><strong>${posMoney(order.totalAmount)}</strong></div>
+        ${giftVoucherAmount > 0 ? `<div style="display:flex; justify-content:space-between;"><span>Gift Voucher</span><strong>-${posMoney(giftVoucherAmount)}</strong></div>` : ''}
+        ${giftVoucherAmount > 0 ? `<div style="display:flex; justify-content:space-between; font-size:1.05rem;"><span>Amount due</span><strong>${posMoney(amountDue)}</strong></div>` : ''}
         <div style="display:flex; justify-content:space-between;"><span>Payment</span><strong>${escapeHTML(order.paymentLabel || posPaymentLabel(order.paymentMethod) || '-')}</strong></div>
         <div style="display:flex; justify-content:space-between;"><span>Paid</span><strong>${posMoney(order.paidAmount)}</strong></div>
         <div style="display:flex; justify-content:space-between;"><span>Change</span><strong>${posMoney(order.changeAmount)}</strong></div>
@@ -2841,6 +3380,7 @@ window.checkoutPosOrder = async () => {
             checkoutBtn.disabled = true;
             checkoutBtn.textContent = posActiveBill ? 'กำลังปิดบิล...' : 'กำลังบันทึกออเดอร์...';
         }
+        await ensurePosSaleAdjustmentsValidated();
         const totals = posCartTotals();
         if (totals.paymentMethod === 'cash' && totals.paidAmount > 0 && totals.paidAmount < totals.total) {
             throw new Error('จำนวนเงินที่รับมาต่ำกว่ายอดสุทธิ');
@@ -2875,6 +3415,10 @@ window.checkoutPosOrder = async () => {
             : await commitPosOrderWithStock(orderData, orderItems, isTestOrder);
 
         posLastReceipt = { ...result.orderData, firestoreId: result.docRef.id, timestamp: new Date(), createdAt: new Date() };
+        const adjustmentResult = await syncPosSaleAdjustments(posLastReceipt);
+        if (adjustmentResult) {
+            posLastReceipt = applyPosSaleAdjustmentResult(posLastReceipt, adjustmentResult);
+        }
         const receipt = document.getElementById('pos-receipt');
         const printBtn = document.getElementById('pos-print-btn');
         if (receipt) {
@@ -2883,7 +3427,26 @@ window.checkoutPosOrder = async () => {
         }
         if (printBtn) printBtn.style.display = 'block';
         await autoPrintPosReceipt(posLastReceipt).catch(error => console.warn('Unable to auto print POS receipt:', error));
+        const loyaltyResult = await syncPosLoyaltySale(posLastReceipt);
+        if (loyaltyResult?.status === 'synced') {
+            posLastReceipt = {
+                ...posLastReceipt,
+                loyalty: loyaltyResult,
+                earnedPoints: safeNumber(loyaltyResult.earnedPoints),
+                redeemedPoints: safeNumber(loyaltyResult.redeemedPoints),
+                loyaltyDiscount: safeNumber(loyaltyResult.loyaltyDiscount),
+                loyaltySyncStatus: 'synced',
+                loyaltyError: ''
+            };
+        } else if (loyaltyResult?.status) {
+            posLastReceipt = {
+                ...posLastReceipt,
+                loyaltySyncStatus: loyaltyResult.status,
+                loyaltyError: loyaltyResult.reason || loyaltyResult.error || ''
+            };
+        }
         posCart = [];
+        clearPosSaleAdjustments({ keepInputs: false });
         setPosActiveBill(null);
         persistPosCart();
         renderPosCart();

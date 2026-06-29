@@ -568,6 +568,20 @@
                             <textarea id="pos-promptpay-payload" readonly aria-label="PromptPay QR payload"></textarea>
                         </div>
                         <input id="pos-discount" type="number" min="0" step="1" placeholder="ส่วนลด (บาท)">
+                        <div class="pos-code-panel">
+                            <div class="pos-code-row">
+                                <input id="pos-promo-code" type="text" inputmode="text" autocomplete="off" placeholder="Promo Code">
+                                <button id="pos-apply-promo-btn" type="button" onclick="validatePosPromotionCode()">ใช้</button>
+                                <button class="pos-code-clear" type="button" onclick="clearPosPromotionCode()" aria-label="ล้าง Promo Code">ล้าง</button>
+                            </div>
+                            <small id="pos-promo-status" class="pos-code-status"></small>
+                            <div class="pos-code-row">
+                                <input id="pos-voucher-code" type="text" inputmode="text" autocomplete="off" placeholder="Gift Voucher">
+                                <button id="pos-apply-voucher-btn" type="button" onclick="validatePosGiftVoucherCode()">ใช้</button>
+                                <button class="pos-code-clear" type="button" onclick="clearPosGiftVoucherCode()" aria-label="ล้าง Gift Voucher">ล้าง</button>
+                            </div>
+                            <small id="pos-voucher-status" class="pos-code-status"></small>
+                        </div>
                     </section>
                     <div id="pos-summary" class="pos-summary"></div>
                     <div class="pos-action-grid">

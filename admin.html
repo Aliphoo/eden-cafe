@@ -628,6 +628,7 @@
         /* POS Discount Manager */
         .discount-admin-layout { display: grid; grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.4fr); gap: 22px; align-items: start; }
         .discount-admin-card { background: #fbfff8; border: 1px solid #e0eadc; border-radius: 18px; padding: 22px; box-shadow: 0 12px 30px rgba(26, 147, 69, 0.06); }
+        .discount-admin-card.wide { grid-column: 1 / -1; }
         .discount-admin-card h3 { color: var(--primary-color); margin-bottom: 14px; }
         .discount-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
         .discount-form-grid .form-group.full { grid-column: 1 / -1; }
@@ -643,8 +644,29 @@
         .discount-actions { display: flex; gap: 8px; flex-wrap: wrap; }
         .discount-empty { border: 1px dashed #cfe3d4; border-radius: 16px; padding: 18px; text-align: center; color: #667; background: #fbfff8; }
         .discount-note { margin-top: 12px; color: #667; line-height: 1.6; font-size: 0.92rem; }
+        .discount-center-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 20px; border-bottom: 1px solid #dceee1; padding-bottom: 8px; }
+        .discount-center-tab { border: 1px solid #dceee1; background: #fff; color: #173f2a; border-radius: 8px; padding: 10px 14px; font-weight: 800; cursor: pointer; }
+        .discount-center-tab.active { background: var(--primary-color); color: #fff; border-color: var(--primary-color); box-shadow: 0 4px 12px rgba(26, 147, 69, 0.18); }
+        .discount-center-panel { display: none; }
+        .discount-center-panel.active { display: block; }
+        .discount-checkbox-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+        .discount-checkbox-grid label { display: flex; align-items: center; gap: 8px; border: 1px solid #dceee1; border-radius: 8px; padding: 9px 10px; background: #fff; font-weight: 800; color: #234; }
+        .discount-checkbox-grid input { width: 16px; height: 16px; accent-color: var(--accent-color); }
+        .discount-admin-card .compact-help { color: #667; line-height: 1.5; font-size: 0.88rem; margin: 4px 0 12px; }
+        .discount-code-cell code { display: inline-block; font-family: Consolas, "Courier New", monospace; background: #eef6ef; color: #0b7040; border-radius: 6px; padding: 4px 7px; font-weight: 900; }
+        .discount-table-secondary { color: #6b7a70; font-size: 0.84rem; margin-top: 4px; display: block; }
+        .discount-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+        .discount-card-heading h3 { margin-bottom: 0; }
+        .discount-picker-toolbar { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 8px; }
+        .discount-picker-toolbar input { min-width: 0; }
+        .discount-picker-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-height: 220px; overflow: auto; padding: 8px; border: 1px solid #dceee1; border-radius: 8px; background: #fff; margin-top: 8px; }
+        .discount-picker-grid label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: start; padding: 8px; border: 1px solid #edf3ed; border-radius: 8px; background: #fbfff8; cursor: pointer; }
+        .discount-picker-grid input { margin-top: 3px; accent-color: var(--accent-color); }
+        .discount-picker-grid strong, .discount-picker-grid span { min-width: 0; overflow-wrap: anywhere; }
+        .discount-picker-grid small { display: block; color: #6b7a70; margin-top: 2px; overflow-wrap: anywhere; }
+        .discount-picker-empty { grid-column: 1 / -1; padding: 10px; text-align: center; color: #667; border: 1px dashed #dceee1; border-radius: 8px; }
         @media (max-width: 980px) { .discount-admin-layout { grid-template-columns: 1fr; } }
-        @media (max-width: 640px) { .discount-form-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 640px) { .discount-form-grid, .discount-checkbox-grid, .discount-picker-grid, .discount-picker-toolbar { grid-template-columns: 1fr; } }
 
         /* Loyalty Manager */
         .loyalty-admin-layout { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(320px, 0.85fr); gap: 22px; align-items: start; }
@@ -1424,6 +1446,7 @@
                     </div>
                 </div>
             </div>
+
         </div>
 
         <!-- Members Section -->
@@ -1619,8 +1642,8 @@
             <div class="section-container">
                 <div class="section-header">
                     <div>
-                        <h2>จัดการส่วนลด POS</h2>
-                        <p style="color:#667; margin-top:4px;">เพิ่ม ลบ เปิด/ปิด ส่วนลด แล้วซิงค์ไปใช้ใน Eden POS APK</p>
+                        <h2>Discount / Promo / Voucher Center</h2>
+                        <p style="color:#667; margin-top:4px;">Manage POS discount presets, promo-code campaigns, gift vouchers, and Phase 2 schema readiness in one place.</p>
                     </div>
                     <div style="display:flex; gap:10px; flex-wrap:wrap;">
                         <button class="btn-action btn-view" type="button" onclick="seedDefaultDiscounts()">เติมชุดมาตรฐาน</button>
@@ -1629,10 +1652,18 @@
                 </div>
 
                 <div class="access-help">
-                    <strong>หลักการใช้งาน:</strong>
-                    ตั้งชื่อส่วนลด เลือกชนิดเป็นเปอร์เซ็นต์หรือจำนวนเงิน กำหนดมูลค่าและสถานะใช้งาน จากนั้น POS ทุกเครื่องจะดึงรายการนี้ไปใช้เป็นชุดเดียวกัน
+                    <strong>Phase 1 + 2 scope:</strong>
+                    POS presets continue to use <code>pos_discounts</code>. Promo codes, gift vouchers, and redemption history now have separate collection surfaces so Phase 3 can attach the backend validation engine without rewriting this Admin screen.
                 </div>
 
+                <div class="discount-center-tabs" role="tablist" aria-label="Discount center tabs">
+                    <button class="discount-center-tab active" type="button" onclick="switchDiscountCenterTab('pos', this)">POS presets</button>
+                    <button class="discount-center-tab" type="button" onclick="switchDiscountCenterTab('promo', this)">Promo Code</button>
+                    <button class="discount-center-tab" type="button" onclick="switchDiscountCenterTab('voucher', this)">Gift Voucher</button>
+                    <button class="discount-center-tab" type="button" onclick="switchDiscountCenterTab('history', this)">Usage History</button>
+                </div>
+
+                <div class="discount-center-panel active" id="discount-center-pos">
                 <div class="discount-admin-layout">
                     <div class="discount-admin-card">
                         <h3 id="discount-form-title">เพิ่มส่วนลดใหม่</h3>
@@ -1684,6 +1715,308 @@
                                 </thead>
                                 <tbody id="discount-table-body">
                                     <tr><td colspan="6" style="text-align:center;">กำลังโหลดรายการส่วนลด...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+                <div class="discount-center-panel" id="discount-center-promo">
+                    <div class="discount-admin-layout">
+                        <div class="discount-admin-card">
+                            <h3 id="promo-form-title">Create Promo Code</h3>
+                            <p class="compact-help">Creates a campaign in <code>promotions</code> plus one code in <code>promotion_codes</code>.</p>
+                            <form id="promo-form">
+                                <input type="hidden" id="promo-id">
+                                <input type="hidden" id="promo-code-id">
+                                <div class="discount-form-grid">
+                                    <div class="form-group full">
+                                        <label for="promo-name">Campaign name</label>
+                                        <input id="promo-name" type="text" maxlength="120" placeholder="Coffee weekday promo" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="promo-code">Code</label>
+                                        <input id="promo-code" type="text" maxlength="40" placeholder="COFFEE20" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="promo-status">Status</label>
+                                        <select id="promo-status">
+                                            <option value="active">Active</option>
+                                            <option value="paused">Paused</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group full">
+                                        <label>Channels</label>
+                                        <div class="discount-checkbox-grid">
+                                            <label><input type="checkbox" name="promo-channel" value="POS" checked> POS</label>
+                                            <label><input type="checkbox" name="promo-channel" value="SHOP" checked> Online Shop</label>
+                                            <label><input type="checkbox" name="promo-channel" value="ARCHERY" checked> Archery</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="promo-type">Discount type</label>
+                                        <select id="promo-type">
+                                            <option value="percent">Percent</option>
+                                            <option value="amount">Amount</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="promo-value">Value</label>
+                                        <input id="promo-value" type="number" min="0" step="0.01" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="promo-min-subtotal">Minimum eligible subtotal</label>
+                                        <input id="promo-min-subtotal" type="number" min="0" step="1" value="0">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="promo-max-discount">Maximum discount</label>
+                                        <input id="promo-max-discount" type="number" min="0" step="1" placeholder="Optional">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="promo-starts-at">Starts at</label>
+                                        <input id="promo-starts-at" type="datetime-local">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="promo-expires-at">Expires at</label>
+                                        <input id="promo-expires-at" type="datetime-local">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="promo-max-redemptions">Max redemptions</label>
+                                        <input id="promo-max-redemptions" type="number" min="0" step="1" placeholder="0 = no limit">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="promo-max-per-customer">Max per customer</label>
+                                        <input id="promo-max-per-customer" type="number" min="0" step="1" placeholder="0 = no limit">
+                                    </div>
+                                    <div class="form-group full">
+                                        <label for="promo-category-ids">Category IDs</label>
+                                        <textarea id="promo-category-ids" rows="2" placeholder="coffee, bakery"></textarea>
+                                        <div class="discount-picker-toolbar">
+                                            <input id="promo-category-picker-filter" type="search" placeholder="Search categories">
+                                            <button class="btn-action" type="button" onclick="refreshDiscountTargetPickers()">Refresh</button>
+                                        </div>
+                                        <div id="promo-category-picker" class="discount-picker-grid"></div>
+                                    </div>
+                                    <div class="form-group full">
+                                        <label for="promo-product-ids">Product IDs / Variant IDs</label>
+                                        <textarea id="promo-product-ids" rows="2" placeholder="lv-123, lv-123::large"></textarea>
+                                        <div class="discount-picker-toolbar">
+                                            <input id="promo-product-picker-filter" type="search" placeholder="Search products or variants">
+                                            <button class="btn-action" type="button" onclick="refreshDiscountTargetPickers()">Refresh</button>
+                                        </div>
+                                        <div id="promo-product-picker" class="discount-picker-grid"></div>
+                                    </div>
+                                    <div class="form-group full">
+                                        <label for="promo-archery-items">Archery item targets</label>
+                                        <textarea id="promo-archery-items" rows="2" placeholder="ARCHERY_PACKAGE, ARCHERY_COACH, ARCHERY_EQUIPMENT"></textarea>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="promo-stacking">Stacking policy</label>
+                                        <select id="promo-stacking">
+                                            <option value="exclusive">Exclusive</option>
+                                            <option value="stackable">Stackable</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn-submit">Save promo code</button>
+                                <button type="button" class="btn-action" style="width:100%; margin-top:10px; background:#789;" onclick="resetPromoForm()">Clear form</button>
+                            </form>
+                        </div>
+
+                        <div class="discount-admin-card">
+                            <h3>Bulk Generate Promo Codes</h3>
+                            <p class="compact-help">Creates additional codes for an existing campaign. Runtime counters stay server-owned.</p>
+                            <form id="promo-bulk-form">
+                                <div class="discount-form-grid">
+                                    <div class="form-group full">
+                                        <label for="promo-bulk-promotion-id">Campaign</label>
+                                        <select id="promo-bulk-promotion-id" required></select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="promo-bulk-prefix">Prefix</label>
+                                        <input id="promo-bulk-prefix" type="text" maxlength="24" placeholder="EDEN">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="promo-bulk-count">Quantity</label>
+                                        <input id="promo-bulk-count" type="number" min="1" max="100" step="1" value="10">
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn-submit">Generate promo codes</button>
+                            </form>
+                        </div>
+
+                        <div class="discount-admin-card wide">
+                            <div class="discount-card-heading">
+                                <h3>Promo Campaigns</h3>
+                                <button class="btn-action btn-view" type="button" onclick="exportPromoCampaignsCSV()">Export CSV</button>
+                            </div>
+                            <div class="discount-table-wrap">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Code</th>
+                                            <th>Campaign</th>
+                                            <th>Channels</th>
+                                            <th>Rules</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="promo-table-body">
+                                        <tr><td colspan="6" style="text-align:center;">Loading promo codes...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="discount-center-panel" id="discount-center-voucher">
+                    <div class="discount-admin-layout">
+                        <div class="discount-admin-card">
+                            <h3 id="voucher-form-title">Issue Gift Voucher</h3>
+                            <p class="compact-help">Gift vouchers are stored separately with a balance field and ledger-ready structure.</p>
+                            <form id="voucher-form">
+                                <input type="hidden" id="voucher-id">
+                                <div class="discount-form-grid">
+                                    <div class="form-group">
+                                        <label for="voucher-code">Voucher code</label>
+                                        <input id="voucher-code" type="text" maxlength="40" placeholder="GV500-ABCD" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="voucher-status">Status</label>
+                                        <select id="voucher-status">
+                                            <option value="active">Active</option>
+                                            <option value="redeemed">Redeemed</option>
+                                            <option value="expired">Expired</option>
+                                            <option value="voided">Voided</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="voucher-initial-amount">Initial amount</label>
+                                        <input id="voucher-initial-amount" type="number" min="1" step="1" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="voucher-balance">Current balance</label>
+                                        <input id="voucher-balance" type="number" min="0" step="1" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="voucher-expires-at">Expires at</label>
+                                        <input id="voucher-expires-at" type="datetime-local">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="voucher-issued-to">Issued to</label>
+                                        <input id="voucher-issued-to" type="text" maxlength="160" placeholder="Customer name, phone, or member id">
+                                    </div>
+                                    <div class="form-group full">
+                                        <label for="voucher-note">Internal note</label>
+                                        <textarea id="voucher-note" rows="3" maxlength="400"></textarea>
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn-submit">Save gift voucher</button>
+                                <button type="button" class="btn-action" style="width:100%; margin-top:10px; background:#789;" onclick="resetVoucherForm()">Clear form</button>
+                            </form>
+                        </div>
+
+                        <div class="discount-admin-card">
+                            <h3>Bulk Generate Gift Vouchers</h3>
+                            <p class="compact-help">Issues multiple vouchers through Functions and writes issue ledger rows automatically.</p>
+                            <form id="voucher-bulk-form">
+                                <div class="discount-form-grid">
+                                    <div class="form-group">
+                                        <label for="voucher-bulk-prefix">Prefix</label>
+                                        <input id="voucher-bulk-prefix" type="text" maxlength="24" placeholder="GV500">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="voucher-bulk-count">Quantity</label>
+                                        <input id="voucher-bulk-count" type="number" min="1" max="100" step="1" value="10">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="voucher-bulk-amount">Amount</label>
+                                        <input id="voucher-bulk-amount" type="number" min="1" step="1" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="voucher-bulk-expires-at">Expires at</label>
+                                        <input id="voucher-bulk-expires-at" type="datetime-local">
+                                    </div>
+                                    <div class="form-group full">
+                                        <label for="voucher-bulk-note">Internal note</label>
+                                        <textarea id="voucher-bulk-note" rows="2" maxlength="400"></textarea>
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn-submit">Generate vouchers</button>
+                            </form>
+                        </div>
+
+                        <div class="discount-admin-card wide">
+                            <div class="discount-card-heading">
+                                <h3>Gift Vouchers</h3>
+                                <button class="btn-action btn-view" type="button" onclick="exportGiftVouchersCSV()">Export CSV</button>
+                            </div>
+                            <div class="discount-table-wrap">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Code</th>
+                                            <th>Amount</th>
+                                            <th>Balance</th>
+                                            <th>Expires</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="voucher-table-body">
+                                        <tr><td colspan="6" style="text-align:center;">Loading gift vouchers...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="discount-center-panel" id="discount-center-history">
+                    <div class="discount-admin-card">
+                        <div class="discount-card-heading">
+                            <h3>Promo Redemption History</h3>
+                            <button class="btn-action btn-view" type="button" onclick="exportPromoRedemptionsCSV()">Export CSV</button>
+                        </div>
+                        <div class="discount-table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Code</th>
+                                        <th>Source</th>
+                                        <th>Customer</th>
+                                        <th>Discount</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="promo-history-table-body">
+                                    <tr><td colspan="6" style="text-align:center;">No promo redemptions yet.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="discount-admin-card" style="margin-top:22px;">
+                        <div class="discount-card-heading">
+                            <h3>Gift Voucher Ledger</h3>
+                            <button class="btn-action btn-view" type="button" onclick="exportGiftVoucherLedgerCSV()">Export CSV</button>
+                        </div>
+                        <div class="discount-table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Voucher</th>
+                                        <th>Type</th>
+                                        <th>Source</th>
+                                        <th>Amount</th>
+                                        <th>Balance</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="voucher-ledger-table-body">
+                                    <tr><td colspan="6" style="text-align:center;">No voucher ledger rows yet.</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -3611,7 +3944,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=promo-popup-1"></script>
+    <script type="module" src="js/admin.js?v=promo-center-phase1-2"></script>
     <script>
         (function cleanRemovedAdminHash() {
             const rawHash = String(window.location.hash || '').replace(/^#/, '');

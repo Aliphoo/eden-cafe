@@ -6,7 +6,9 @@
     "node": "22"
   },
   "scripts": {
-    "lint": "node --check index.js"
+    "lint": "node --check index.js",
+    "test:promotions": "node test-promotions-engine.js",
+    "test": "npm run lint && npm run test:promotions"
   },
   "dependencies": {
     "basic-ftp": "^5.2.1",

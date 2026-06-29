@@ -10,6 +10,8 @@ const fs = require('fs');
 const path = require('path');
 const { Readable } = require('stream');
 const { createMemberAuthHandlers } = require('./services/memberAuth');
+const loyaltyFormula = require('./loyaltyFormula');
+const promotionsEngine = require('./promotions/engine');
 
 admin.initializeApp();
 
@@ -41,8 +43,35 @@ const ADMIN_EMAILS = new Set([
 const ADMIN_PERMISSION_FALLBACKS = {
   archery: ['bookings'],
 };
-const ADMIN_ARCHERY_BRANCH_DEFAULT = 'BKK_MAIN';
-const ADMIN_ARCHERY_ROLE_VALUES = new Set(['OWNER', 'MANAGER', 'ARCHERY_STAFF', 'CASHIER']);
+const POS_APK_FILE_NAME = 'eden-pos-1.24-v25-release.apk';
+const POS_APK_VERSION_NAME = '1.24';
+const POS_APK_VERSION_CODE = '25';
+const POS_APK_SHA256 = '2CF1E0B0B4E6213A0C55D31B5C01BBB8C6270954E0F69E817681611139372C7E';
+const POS_APK_APP_ID = 'com.personal.pos';
+const POS_APK_DEFAULT_RELEASE_ID = 'eden-pos-1.24-v25';
+const POS_APK_DEFAULT_CHANNEL = 'test';
+const POS_APK_RELEASES_COLLECTION = 'pos_apk_releases';
+const POS_UPDATE_EVENTS_COLLECTION = 'pos_update_events';
+const POS_DEVICES_COLLECTION = 'pos_devices';
+const POS_RELEASE_CHANNELS = new Set(['test', 'pilot', 'production']);
+const POS_RELEASE_STATUSES = new Set(['draft', 'active', 'revoked']);
+const POS_UPDATE_EVENTS = new Set(['downloaded', 'install_started', 'installed', 'failed']);
+const POS_APK_REMOTE_ALLOWED_HOST_SUFFIXES = [
+  'edencafe.co',
+  '.edencafe.co',
+];
+const ARCHERY_SERVICE_TYPE = 'ARCHERY';
+const ARCHERY_RESOURCE_TYPE_ID = 'ARCHERY_LANE';
+const ARCHERY_LANE_COUNT = 10;
+const ARCHERY_SLOT_MINUTES = 15;
+const ARCHERY_HOLD_MINUTES = 10;
+const ARCHERY_OPEN_MINUTES = 10 * 60;
+const ARCHERY_CLOSE_MINUTES = 20 * 60;
+const ARCHERY_PACKAGE_PRICES = new Map([
+  [60, 350],
+  [120, 600],
+  [180, 800],
+]);
 const IMAGE_REMOTE_ROOT = 'Images/uploads';
 const IMAGE_PUBLIC_BASE_URL = 'https://www.edencafe.co/Images/uploads';
 const SPACESHIP_FTP_FALLBACK_HOSTS = [
@@ -56,6 +85,7 @@ const ALLOWED_ORIGINS = new Set([
   'https://edencafe-d9095.firebaseapp.com',
   'https://edencafe.co',
   'https://www.edencafe.co',
+  'https://localhost',
   'capacitor://localhost',
   'ionic://localhost',
   'http://localhost',
@@ -82,12 +112,16 @@ const ALLOWED_ORIGINS = new Set([
 
 function setCors(req, res) {
   const origin = req.get('origin') || '';
-  if (ALLOWED_ORIGINS.has(origin) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+  if (
+    ALLOWED_ORIGINS.has(origin)
+    || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+  ) {
     res.set('Access-Control-Allow-Origin', origin);
     res.set('Vary', 'Origin');
   }
   res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.set('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Request-Id,X-Eden-System-Key');
+  res.set('Access-Control-Expose-Headers', 'Content-Disposition,Content-Length,X-Eden-Release-Id,X-Eden-Apk-Version-Name,X-Eden-Apk-Version-Code,X-Eden-Apk-Sha256,X-Eden-Apk-Origin');
   res.set('Access-Control-Max-Age', '3600');
 }
 
@@ -110,22 +144,41 @@ function clientIp(req) {
 function checkRateLimit(req, bucketName, maxRequests, windowMs) {
   const now = Date.now();
   const key = `${bucketName}:${clientIp(req)}`;
-  checkRateLimitKey(key, maxRequests, windowMs, now);
+  return checkRateLimitKey(key, maxRequests, windowMs, now);
 }
 
 function checkRateLimitKey(key, maxRequests, windowMs, now = Date.now()) {
   const bucket = RATE_LIMIT_BUCKETS.get(key);
   if (!bucket || bucket.expiresAt <= now) {
-    RATE_LIMIT_BUCKETS.set(key, { count: 1, expiresAt: now + windowMs });
-    return;
+    const nextBucket = { count: 1, expiresAt: now + windowMs };
+    RATE_LIMIT_BUCKETS.set(key, nextBucket);
+    return {
+      retryAfterSeconds: Math.ceil(windowMs / 1000),
+      refund() {
+        const current = RATE_LIMIT_BUCKETS.get(key);
+        if (current !== nextBucket) return;
+        current.count = Math.max(0, current.count - 1);
+        if (current.count === 0) RATE_LIMIT_BUCKETS.delete(key);
+      },
+    };
   }
   if (bucket.count >= maxRequests) {
     const error = new Error('Too many requests');
     error.statusCode = 429;
     error.publicMessage = 'ขอ OTP บ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่อีกครั้ง';
+    error.retryAfterSeconds = Math.max(1, Math.ceil((bucket.expiresAt - now) / 1000));
     throw error;
   }
   bucket.count += 1;
+  return {
+    retryAfterSeconds: Math.max(1, Math.ceil((bucket.expiresAt - now) / 1000)),
+    refund() {
+      const current = RATE_LIMIT_BUCKETS.get(key);
+      if (current !== bucket) return;
+      current.count = Math.max(0, current.count - 1);
+      if (current.count === 0) RATE_LIMIT_BUCKETS.delete(key);
+    },
+  };
 }
 
 function publicApiError(error, fallback = 'Unable to process request') {
@@ -149,6 +202,7 @@ const PAGE_TELEMETRY_TYPES = new Set([
   'slow_ready',
   'js_error',
   'unhandled_rejection',
+  'register_otp',
   'custom',
 ]);
 
@@ -316,9 +370,29 @@ function safeTelemetrySignals(value = {}) {
   };
 }
 
+function safeTelemetryDetails(value = {}) {
+  const details = value && typeof value === 'object' ? value : {};
+  return {
+    label: cleanString(details.label || '', 120),
+    message: cleanString(details.message || '', 220),
+    source: cleanString(details.source || '', 180),
+    line: Math.max(0, Math.min(1000000, Number(details.line) || 0)),
+    column: Math.max(0, Math.min(1000000, Number(details.column) || 0)),
+    watchdogMs: Math.max(0, Math.min(120000, Number(details.watchdogMs) || 0)),
+    stage: cleanString(details.stage || '', 80),
+    errorCode: cleanString(details.errorCode || details.code || '', 80),
+    phoneLast4: cleanString(details.phoneLast4 || '', 12).replace(/\D/g, '').slice(-4),
+    hasConfirmationResult: details.hasConfirmationResult === true,
+    attemptAgeMs: Math.max(0, Math.min(30 * 60 * 1000, Number(details.attemptAgeMs) || 0)),
+    firebaseProvider: cleanString(details.firebaseProvider || '', 100),
+    authMode: cleanString(details.authMode || '', 40),
+    status: Math.max(0, Math.min(999, Number(details.status) || 0)),
+    recoverable: details.recoverable === true,
+  };
+}
+
 function normalizeTelemetryPayload(body = {}, req) {
   const viewport = body.viewport && typeof body.viewport === 'object' ? body.viewport : {};
-  const details = body.details && typeof body.details === 'object' ? body.details : {};
   return {
     type: safeTelemetryType(body.type),
     path: safeTelemetryPath(body.path),
@@ -331,14 +405,7 @@ function normalizeTelemetryPayload(body = {}, req) {
       height: Math.max(0, Math.min(10000, Number(viewport.height) || 0)),
     },
     signals: safeTelemetrySignals(body.signals),
-    details: {
-      label: cleanString(details.label || '', 120),
-      message: cleanString(details.message || '', 220),
-      source: cleanString(details.source || '', 180),
-      line: Math.max(0, Math.min(1000000, Number(details.line) || 0)),
-      column: Math.max(0, Math.min(1000000, Number(details.column) || 0)),
-      watchdogMs: Math.max(0, Math.min(120000, Number(details.watchdogMs) || 0)),
-    },
+    details: safeTelemetryDetails(body.details),
     origin: cleanString(req.get('origin') || '', 160),
     userAgentHash: sha256(req.get('user-agent') || '').slice(0, 32),
     ipHash: sha256(clientIp(req)).slice(0, 32),
@@ -372,6 +439,17 @@ exports.reportPageTelemetry = onRequest(
           adminTab: payload.signals.adminTab,
         });
       }
+      if (payload.type === 'register_otp' && /fail$/i.test(payload.details.stage || '')) {
+        logger.warn('Register OTP telemetry failure received', {
+          path: payload.path,
+          stage: payload.details.stage,
+          errorCode: payload.details.errorCode,
+          status: payload.details.status,
+          phoneLast4: payload.details.phoneLast4,
+          attemptAgeMs: payload.details.attemptAgeMs,
+          hasConfirmationResult: payload.details.hasConfirmationResult,
+        });
+      }
       res.status(204).send('');
     } catch (error) {
       const status = error.statusCode || 500;
@@ -381,8 +459,554 @@ exports.reportPageTelemetry = onRequest(
   }
 );
 
+function toSafeInt(value, fallback = 0) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.floor(parsed));
+}
+
+function normalizePosChannel(value) {
+  const channel = cleanString(value || POS_APK_DEFAULT_CHANNEL, 30).toLowerCase();
+  return POS_RELEASE_CHANNELS.has(channel) ? channel : POS_APK_DEFAULT_CHANNEL;
+}
+
+function normalizePosReleaseStatus(value, fallback = 'draft') {
+  const status = cleanString(value || fallback, 30).toLowerCase();
+  return POS_RELEASE_STATUSES.has(status) ? status : fallback;
+}
+
+function normalizeSha256(value) {
+  return cleanString(value || '', 80).replace(/[^a-fA-F0-9]/g, '').toUpperCase();
+}
+
+function posRequestPayload(req) {
+  if (req.method === 'GET') return req.query || {};
+  return req.body && typeof req.body === 'object' ? req.body : {};
+}
+
+function defaultPosApkRelease() {
+  const filePath = path.join(__dirname, 'assets', POS_APK_FILE_NAME);
+  const size = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
+  return {
+    id: POS_APK_DEFAULT_RELEASE_ID,
+    appId: POS_APK_APP_ID,
+    versionName: POS_APK_VERSION_NAME,
+    versionCode: toSafeInt(POS_APK_VERSION_CODE),
+    channel: POS_APK_DEFAULT_CHANNEL,
+    status: 'active',
+    sha256: normalizeSha256(POS_APK_SHA256),
+    size,
+    functionAsset: POS_APK_FILE_NAME,
+    storagePath: `functions/assets/${POS_APK_FILE_NAME}`,
+    releaseNotes: 'Eden POS APK 1.24 / versionCode 25 with POS history sync and WebView-safe money formatting.',
+    minSupportedVersionCode: 0,
+    forceUpdate: false,
+    createdBy: 'system',
+  };
+}
+
+function currentPosApkAssetSize() {
+  const filePath = path.join(__dirname, 'assets', POS_APK_FILE_NAME);
+  return fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
+}
+
+function normalizePosApkRelease(id, data = {}) {
+  const versionCode = toSafeInt(data.versionCode);
+  const appId = cleanString(data.appId || POS_APK_APP_ID, 120);
+  const versionName = cleanString(data.versionName || '', 40);
+  const sha256Value = normalizeSha256(data.sha256);
+
+  const release = {
+    id,
+    appId,
+    versionName,
+    versionCode,
+    channel: normalizePosChannel(data.channel),
+    status: normalizePosReleaseStatus(data.status, 'draft'),
+    sha256: sha256Value,
+    size: toSafeInt(data.size),
+    storagePath: cleanString(data.storagePath || '', 300),
+    functionAsset: cleanString(data.functionAsset || data.assetReference || '', 180),
+    releaseNotes: cleanString(data.releaseNotes || '', 4000),
+    minSupportedVersionCode: toSafeInt(data.minSupportedVersionCode),
+    forceUpdate: data.forceUpdate === true,
+    createdBy: cleanString(data.createdBy || '', 160),
+    createdAt: data.createdAt || null,
+  };
+
+  const assetRef = release.functionAsset || release.storagePath || '';
+  const assetName = path.basename(assetRef);
+  const isDefaultFunctionAsset = (
+    release.functionAsset === POS_APK_FILE_NAME
+    || release.storagePath === `functions/assets/${POS_APK_FILE_NAME}`
+  );
+  if (
+    release.appId === POS_APK_APP_ID
+    && release.channel === POS_APK_DEFAULT_CHANNEL
+    && release.versionCode === toSafeInt(POS_APK_VERSION_CODE)
+    && assetName === POS_APK_FILE_NAME
+    && isDefaultFunctionAsset
+  ) {
+    return {
+      ...release,
+      sha256: normalizeSha256(POS_APK_SHA256),
+      size: currentPosApkAssetSize(),
+    };
+  }
+
+  return release;
+}
+
+function publicPosReleasePayload(release, currentVersionCode = 0) {
+  const forceUpdate = release.forceUpdate || (
+    release.minSupportedVersionCode > 0
+    && currentVersionCode < release.minSupportedVersionCode
+  );
+  return {
+    releaseId: release.id,
+    appId: release.appId,
+    versionName: release.versionName,
+    versionCode: release.versionCode,
+    channel: release.channel,
+    sha256: release.sha256,
+    size: release.size,
+    releaseNotes: release.releaseNotes,
+    minSupportedVersionCode: release.minSupportedVersionCode,
+    forceUpdate,
+  };
+}
+
+async function loadPosApkReleases(appId, channel) {
+  const releases = [];
+  const snap = await db.collection(POS_APK_RELEASES_COLLECTION)
+    .where('appId', '==', appId)
+    .get();
+
+  snap.forEach(docSnap => {
+    releases.push(normalizePosApkRelease(docSnap.id, docSnap.data() || {}));
+  });
+
+  if (appId === POS_APK_APP_ID && channel === POS_APK_DEFAULT_CHANNEL) {
+    releases.push(defaultPosApkRelease());
+  }
+
+  const matching = releases.filter(release =>
+    release.appId === appId
+    && release.channel === channel
+    && release.status === 'active'
+    && release.versionCode > 0
+    && release.versionName
+    && release.sha256.length === 64
+  );
+
+  return matching.sort((a, b) => {
+    const versionOrder = b.versionCode - a.versionCode;
+    if (versionOrder) return versionOrder;
+    const aIsFunctionAsset = a.functionAsset === POS_APK_FILE_NAME ? 1 : 0;
+    const bIsFunctionAsset = b.functionAsset === POS_APK_FILE_NAME ? 1 : 0;
+    return bIsFunctionAsset - aIsFunctionAsset;
+  });
+}
+
+async function findPosApkRelease({ appId = POS_APK_APP_ID, channel = POS_APK_DEFAULT_CHANNEL, releaseId = '', versionCode = 0 }) {
+  const safeAppId = cleanString(appId || POS_APK_APP_ID, 120);
+  const safeChannel = normalizePosChannel(channel);
+  const safeReleaseId = cleanString(releaseId || '', 160);
+  const safeVersionCode = toSafeInt(versionCode);
+
+  if (safeReleaseId) {
+    const snap = await db.collection(POS_APK_RELEASES_COLLECTION).doc(safeReleaseId).get();
+    if (snap.exists) return normalizePosApkRelease(snap.id, snap.data() || {});
+    if (safeReleaseId === POS_APK_DEFAULT_RELEASE_ID) return defaultPosApkRelease();
+  }
+
+  const releases = await loadPosApkReleases(safeAppId, safeChannel);
+  if (safeVersionCode > 0) {
+    return releases.find(release => release.versionCode === safeVersionCode) || null;
+  }
+  return releases[0] || null;
+}
+
+function isAllowedPosApkRemoteUrl(rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(String(rawUrl || ''));
+  } catch (_) {
+    return false;
+  }
+
+  if (parsed.protocol !== 'https:') return false;
+  if (!/\.apk$/i.test(parsed.pathname)) return false;
+
+  const hostname = parsed.hostname.toLowerCase();
+  return POS_APK_REMOTE_ALLOWED_HOST_SUFFIXES.some(suffix => (
+    suffix.startsWith('.')
+      ? hostname.endsWith(suffix)
+      : hostname === suffix || hostname.endsWith(`.${suffix}`)
+  ));
+}
+
+function posReleaseRemoteUrl(release) {
+  const ref = cleanString(release.storagePath || '', 500);
+  if (!/^https:\/\//i.test(ref)) return '';
+  if (!isAllowedPosApkRemoteUrl(ref)) {
+    const error = new Error('POS APK remote URL is not an allowed Spaceship origin');
+    error.statusCode = 400;
+    throw error;
+  }
+  return ref;
+}
+
+function posApkRemoteFetchHeaders() {
+  const headers = { Accept: 'application/vnd.android.package-archive' };
+  const username = cleanString(process.env.POS_APK_ORIGIN_BASIC_USERNAME || '', 180);
+  const password = cleanString(process.env.POS_APK_ORIGIN_BASIC_PASSWORD || '', 500);
+
+  if (username && password) {
+    const basicToken = Buffer.from(`${username}:${password}`, 'utf8').toString('base64');
+    headers.Authorization = `Basic ${basicToken}`;
+  }
+
+  return headers;
+}
+
+function posReleaseAssetPath(release) {
+  const ref = release.functionAsset || release.storagePath || POS_APK_FILE_NAME;
+  if (/^https:\/\//i.test(ref)) {
+    const error = new Error('Remote POS APK assets must be streamed by URL');
+    error.statusCode = 500;
+    throw error;
+  }
+  if (/^gs:\/\//i.test(ref)) {
+    const error = new Error('Cloud Storage APK streaming is not wired for this release');
+    error.statusCode = 501;
+    throw error;
+  }
+
+  const fileName = path.basename(ref);
+  if (!fileName || !/\.apk$/i.test(fileName)) {
+    const error = new Error('Invalid APK asset reference');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return path.join(__dirname, 'assets', fileName);
+}
+
+function sha256File(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    fs.createReadStream(filePath)
+      .on('data', chunk => hash.update(chunk))
+      .on('end', () => resolve(hash.digest('hex').toUpperCase()))
+      .on('error', reject);
+  });
+}
+
+function sha256Buffer(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex').toUpperCase();
+}
+
+async function requirePosUpdateAccess(req, body = {}) {
+  const decoded = await requireAdminAccess(req, 'pos');
+  const deviceId = cleanString(body.deviceId || '', 160);
+  const appId = cleanString(body.appId || POS_APK_APP_ID, 120);
+
+  if (deviceId) {
+    const deviceSnap = await db.collection(POS_DEVICES_COLLECTION).doc(deviceId).get();
+    if (deviceSnap.exists) {
+      const device = deviceSnap.data() || {};
+      const status = cleanString(device.status || 'active', 40).toLowerCase();
+      if (['revoked', 'disabled', 'blocked'].includes(status)) {
+        const error = new Error('POS device is not allowed to update');
+        error.statusCode = 403;
+        throw error;
+      }
+      if (device.appId && device.appId !== appId) {
+        const error = new Error('POS device appId mismatch');
+        error.statusCode = 403;
+        throw error;
+      }
+    }
+  }
+
+  return { decoded, deviceId, appId };
+}
+
+async function touchPosDevice(deviceId, patch = {}) {
+  if (!deviceId) return;
+  await db.collection(POS_DEVICES_COLLECTION).doc(deviceId).set({
+    ...patch,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+}
+
+async function streamPosApkRelease(req, res, release, decoded) {
+  if (!release || release.status !== 'active') {
+    const error = new Error('POS APK release is not active');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const remoteUrl = posReleaseRemoteUrl(release);
+  let fileName = POS_APK_FILE_NAME;
+  let byteLength = 0;
+  let actualSha256 = '';
+  let apkBuffer = null;
+  let localFilePath = '';
+
+  if (remoteUrl) {
+    const response = await fetch(remoteUrl, {
+      headers: posApkRemoteFetchHeaders(),
+    });
+    if (!response.ok) {
+      const error = new Error(`POS APK remote origin returned HTTP ${response.status}`);
+      error.statusCode = response.status === 404 ? 404 : 502;
+      throw error;
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    apkBuffer = Buffer.from(arrayBuffer);
+    byteLength = apkBuffer.length;
+    actualSha256 = sha256Buffer(apkBuffer);
+    fileName = path.basename(new URL(remoteUrl).pathname) || POS_APK_FILE_NAME;
+  } else {
+    localFilePath = posReleaseAssetPath(release);
+    if (!fs.existsSync(localFilePath)) {
+      const error = new Error('POS APK file is not available');
+      error.statusCode = 404;
+      throw error;
+    }
+    byteLength = fs.statSync(localFilePath).size;
+    actualSha256 = await sha256File(localFilePath);
+    fileName = path.basename(localFilePath);
+  }
+
+  if (release.sha256 && release.sha256 !== actualSha256) {
+    const error = new Error('POS APK SHA256 does not match release manifest');
+    error.statusCode = 409;
+    throw error;
+  }
+  if (release.size > 0 && release.size !== byteLength) {
+    const error = new Error('POS APK size does not match release manifest');
+    error.statusCode = 409;
+    throw error;
+  }
+
+  res.set('Cache-Control', 'no-store, max-age=0');
+  res.set('Content-Type', 'application/vnd.android.package-archive');
+  res.set('Content-Disposition', `attachment; filename="${fileName}"`);
+  res.set('Content-Length', String(byteLength));
+  res.set('X-Eden-Release-Id', release.id);
+  res.set('X-Eden-Apk-Version-Name', release.versionName);
+  res.set('X-Eden-Apk-Version-Code', String(release.versionCode));
+  res.set('X-Eden-Apk-Sha256', actualSha256);
+  res.set('X-Eden-Apk-Origin', remoteUrl ? 'spaceship' : 'function-asset');
+  res.set('X-Content-Type-Options', 'nosniff');
+
+  logger.info('Protected POS APK release download started', {
+    uid: decoded.uid || '',
+    email: decoded.email || '',
+    releaseId: release.id,
+    versionCode: release.versionCode,
+    bytes: byteLength,
+    origin: remoteUrl ? 'spaceship' : 'function-asset',
+  });
+
+  if (apkBuffer) {
+    res.end(apkBuffer);
+    return;
+  }
+
+  fs.createReadStream(localFilePath)
+    .on('error', error => {
+      logger.error('Protected POS APK stream failed', { message: error.message, releaseId: release.id });
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Unable to stream POS APK' });
+        return;
+      }
+      res.end();
+    })
+    .pipe(res);
+}
+
+exports.checkPosApkUpdate = onRequest(
+  { region: 'asia-southeast1', timeoutSeconds: 60, memory: '512MiB' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (!['GET', 'POST'].includes(req.method)) {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const body = posRequestPayload(req);
+      const { decoded, deviceId, appId } = await requirePosUpdateAccess(req, body);
+      checkRateLimitKey(`check-pos-apk-update:${decoded.uid || clientIp(req)}:${deviceId || 'no-device'}`, 60, 15 * 60 * 1000);
+
+      const channel = normalizePosChannel(body.channel);
+      const currentVersionCode = toSafeInt(body.currentVersionCode);
+      const releases = await loadPosApkReleases(appId, channel);
+      const latest = releases.find(release => release.versionCode > currentVersionCode) || null;
+
+      await touchPosDevice(deviceId, {
+        appId,
+        channel,
+        status: 'active',
+        currentVersionCode,
+        lastSeenUid: decoded.uid || '',
+        lastSeenEmail: decoded.email || '',
+        lastUpdateCheckAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      if (!latest) {
+        res.status(200).json({
+          updateAvailable: false,
+          appId,
+          channel,
+          currentVersionCode,
+        });
+        return;
+      }
+
+      res.status(200).json({
+        updateAvailable: true,
+        currentVersionCode,
+        ...publicPosReleasePayload(latest, currentVersionCode),
+      });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('POS APK update check failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to check POS APK update');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+exports.downloadPosApkRelease = onRequest(
+  {
+    region: 'asia-southeast1',
+    timeoutSeconds: 120,
+    memory: '512MiB',
+  },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (!['GET', 'POST'].includes(req.method)) {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const body = posRequestPayload(req);
+      const { decoded, deviceId, appId } = await requirePosUpdateAccess(req, body);
+      checkRateLimitKey(`download-pos-apk-release:${decoded.uid || clientIp(req)}:${deviceId || 'no-device'}`, 20, 60 * 60 * 1000);
+
+      const release = await findPosApkRelease({
+        appId,
+        channel: body.channel,
+        releaseId: body.releaseId,
+        versionCode: body.versionCode,
+      });
+      if (!release || release.appId !== appId || release.status !== 'active') {
+        const error = new Error('POS APK release is not available');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      await touchPosDevice(deviceId, {
+        appId,
+        channel: release.channel,
+        targetVersionCode: release.versionCode,
+        lastDownloadStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      await streamPosApkRelease(req, res, release, decoded);
+    } catch (error) {
+      const isTokenError = /Firebase ID token|verify ID token|Decoding Firebase|jwt/i.test(error.message || '');
+      const status = error.statusCode || (isTokenError ? 401 : 500);
+      logger.warn('Protected POS APK release download denied', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to download POS APK release');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+exports.reportPosUpdateEvent = onRequest(
+  { region: 'asia-southeast1', timeoutSeconds: 60, memory: '256MiB' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const body = posRequestPayload(req);
+      const { decoded, deviceId, appId } = await requirePosUpdateAccess(req, body);
+      checkRateLimitKey(`report-pos-update-event:${decoded.uid || clientIp(req)}:${deviceId || 'no-device'}`, 240, 60 * 60 * 1000);
+
+      const event = cleanString(body.event || '', 40).toLowerCase();
+      if (!POS_UPDATE_EVENTS.has(event)) {
+        const error = new Error('Invalid POS update event');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const releaseId = cleanString(body.releaseId || '', 160);
+      const targetVersionCode = toSafeInt(body.targetVersionCode || body.versionCode);
+      const currentVersionCode = toSafeInt(body.currentVersionCode);
+      const channel = normalizePosChannel(body.channel);
+      const eventPayload = {
+        appId,
+        channel,
+        deviceId,
+        event,
+        releaseId,
+        currentVersionCode,
+        targetVersionCode,
+        versionName: cleanString(body.versionName || '', 40),
+        sha256: normalizeSha256(body.sha256 || ''),
+        size: toSafeInt(body.size),
+        message: cleanString(body.message || body.errorMessage || '', 800),
+        uid: decoded.uid || '',
+        email: decoded.email || '',
+        userAgentHash: sha256(req.get('user-agent') || '').slice(0, 32),
+        ipHash: sha256(clientIp(req)).slice(0, 32),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+
+      const eventRef = await db.collection(POS_UPDATE_EVENTS_COLLECTION).add(eventPayload);
+      await touchPosDevice(deviceId, {
+        appId,
+        channel,
+        currentVersionCode: event === 'installed' && targetVersionCode > 0 ? targetVersionCode : currentVersionCode,
+        targetVersionCode,
+        lastUpdateEvent: event,
+        lastUpdateEventId: eventRef.id,
+        lastUpdateReleaseId: releaseId,
+        lastUpdateEventAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      res.status(201).json({ ok: true, id: eventRef.id });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('POS update event report failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to report POS update event');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
 exports.downloadPosApk = onRequest(
-  { region: 'asia-southeast1', timeoutSeconds: 120, memory: '512MiB' },
+  {
+    region: 'asia-southeast1',
+    timeoutSeconds: 120,
+    memory: '512MiB',
+  },
   async (req, res) => {
     if (handleOptions(req, res)) return;
     setCors(req, res);
@@ -394,37 +1018,18 @@ exports.downloadPosApk = onRequest(
 
     try {
       const decoded = await requireAdminAccess(req, 'pos');
-      const fileName = 'EdenCafePOS-release.apk';
-      const filePath = path.join(__dirname, 'assets', fileName);
-
-      if (!fs.existsSync(filePath)) {
-        res.status(404).json({ error: 'POS APK file is not available' });
+      const channel = normalizePosChannel(req.query.channel);
+      const release = await findPosApkRelease({
+        appId: POS_APK_APP_ID,
+        channel,
+        releaseId: req.query.releaseId,
+        versionCode: req.query.versionCode,
+      });
+      if (!release || release.appId !== POS_APK_APP_ID || release.status !== 'active') {
+        res.status(404).json({ error: 'POS APK release is not available' });
         return;
       }
-
-      const stat = fs.statSync(filePath);
-      res.set('Cache-Control', 'no-store, max-age=0');
-      res.set('Content-Type', 'application/vnd.android.package-archive');
-      res.set('Content-Disposition', `attachment; filename="${fileName}"`);
-      res.set('Content-Length', String(stat.size));
-      res.set('X-Content-Type-Options', 'nosniff');
-
-      logger.info('Protected POS APK download started', {
-        uid: decoded.uid || '',
-        email: decoded.email || '',
-        bytes: stat.size,
-      });
-
-      fs.createReadStream(filePath)
-        .on('error', error => {
-          logger.error('Protected POS APK stream failed', { message: error.message });
-          if (!res.headersSent) {
-            res.status(500).json({ error: 'Unable to stream POS APK' });
-            return;
-          }
-          res.end();
-        })
-        .pipe(res);
+      await streamPosApkRelease(req, res, release, decoded);
     } catch (error) {
       const isTokenError = /Firebase ID token|verify ID token|Decoding Firebase|jwt/i.test(error.message || '');
       const status = error.statusCode || (isTokenError ? 401 : 500);
@@ -454,18 +1059,6 @@ async function requireAdminUid(req) {
   return decoded.uid || '';
 }
 
-function hasOwnerClaim(decoded = {}) {
-  return decoded.is_owner === true || String(decoded.role || '').toUpperCase() === 'OWNER';
-}
-
-async function hasOwnerUserProfile(uid = '') {
-  if (!uid) return false;
-  const snap = await db.collection('users').doc(uid).get();
-  if (!snap.exists) return false;
-  const profile = snap.data() || {};
-  return profile.is_owner === true || String(profile.role || '').toUpperCase() === 'OWNER';
-}
-
 async function requireAdminAccess(req, permission = '') {
   const header = req.get('authorization') || '';
   const match = header.match(/^Bearer\s+(.+)$/i);
@@ -477,9 +1070,7 @@ async function requireAdminAccess(req, permission = '') {
 
   const decoded = await admin.auth().verifyIdToken(match[1]);
   const email = String(decoded.email || '').trim().toLowerCase();
-  if (hasOwnerClaim(decoded)) return decoded;
   if (ADMIN_EMAILS.has(email)) return decoded;
-  if (await hasOwnerUserProfile(decoded.uid)) return decoded;
 
   const accessSnap = await db.collection('admin_users').doc(decoded.uid).get();
   if (!accessSnap.exists) {
@@ -517,14 +1108,12 @@ function hasAdminAccessPermission(access = {}, permission = '') {
 
 async function requireOwnerAccess(req) {
   const decoded = await requireAdminAccess(req);
-  if (hasOwnerClaim(decoded)) return decoded;
   const email = String(decoded.email || '').trim().toLowerCase();
   if (ADMIN_EMAILS.has(email)) return decoded;
-  if (await hasOwnerUserProfile(decoded.uid)) return decoded;
 
   const accessSnap = await db.collection('admin_users').doc(decoded.uid).get();
   const access = accessSnap.exists ? accessSnap.data() || {} : {};
-  if (access.status === 'active' && (access.role === 'owner' || access.permissions?.adminAccess === true)) return decoded;
+  if (access.status === 'active' && access.role === 'owner') return decoded;
 
   const error = new Error('Owner permission required');
   error.statusCode = 403;
@@ -558,8 +1147,21 @@ const memberAuthHandlers = createMemberAuthHandlers({
     apiKey: OTP_SMS_API_KEY.value() || process.env.OTP_SMS_API_KEY || '',
     sender: OTP_SMS_SENDER.value() || process.env.OTP_SMS_SENDER || 'Eden Cafe',
   }),
-  sendOtpEmail: async (email, code) => {
+  sendOtpEmail: async (email, code, options = {}) => {
     const from = safeSecretValue(SMTP_FROM, 180) || safeSecretValue(SMTP_USER, 180);
+    const isPhoneRemoval = String(options?.purpose || '') === 'phone_removal';
+    const phoneRemovalMail = isPhoneRemoval ? {
+      subject: 'Eden Cafe phone removal OTP',
+      text: `Your Eden Cafe OTP for removing your account phone number is ${code}. This code expires in 5 minutes.`,
+      html: [
+        '<div style="font-family:Arial,sans-serif;line-height:1.6;color:#123526;">',
+        '<h2 style="margin:0 0 12px;">Eden Cafe phone removal</h2>',
+        '<p>Use this OTP to remove the phone number from your Eden Cafe member account.</p>',
+        `<div style="font-size:32px;font-weight:700;letter-spacing:0.18em;background:#f2fbf3;border-radius:14px;padding:18px 22px;display:inline-block;">${code}</div>`,
+        '<p>This code expires in 5 minutes. If you did not request this, please ignore this email and keep your account password secure.</p>',
+        '</div>',
+      ].join(''),
+    } : null;
     await createMailTransporter().sendMail({
       from,
       to: email,
@@ -573,6 +1175,7 @@ const memberAuthHandlers = createMemberAuthHandlers({
         '<p>รหัสนี้หมดอายุใน 5 นาที หากคุณไม่ได้ขอรีเซ็ตรหัสผ่าน สามารถละเว้นอีเมลนี้ได้</p>',
         '</div>',
       ].join(''),
+      ...(phoneRemovalMail || {}),
     });
   },
 });
@@ -652,34 +1255,32 @@ exports.updateMyProfile = onRequest(
 
 function normalizeMyActivityLimit(value, fallback = 20, max = 50) {
   const parsed = Math.floor(Number(value));
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-  return Math.max(1, Math.min(max, parsed));
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, 1), max);
 }
 
 function encodeMyActivityCursor(timestampMs = 0) {
-  const timestamp = Math.max(0, Math.floor(Number(timestampMs) || 0));
-  if (!timestamp) return '';
-  return Buffer.from(JSON.stringify({ before: timestamp })).toString('base64url');
+  const value = Math.max(0, Math.floor(Number(timestampMs) || 0));
+  if (!value) return '';
+  return Buffer.from(JSON.stringify({ before: value }))
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
 }
 
 function decodeMyActivityCursor(value = '') {
-  const text = cleanString(value || '', 300);
+  const text = cleanString(value, 300);
   if (!text) return 0;
+  const numeric = Number(text);
+  if (Number.isFinite(numeric) && numeric > 0) return Math.floor(numeric);
   try {
-    const payload = JSON.parse(Buffer.from(text, 'base64url').toString('utf8'));
+    const normalized = text.replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(Buffer.from(normalized, 'base64').toString('utf8'));
     return Math.max(0, Math.floor(Number(payload.before || payload.timestamp || 0) || 0));
   } catch (_) {
     return 0;
   }
-}
-
-function myActivityMillis(value) {
-  if (!value) return 0;
-  if (typeof value.toMillis === 'function') return value.toMillis();
-  if (typeof value.toDate === 'function') return value.toDate().getTime();
-  if (value instanceof Date) return value.getTime();
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
 }
 
 function serializeMyActivityValue(value) {
@@ -705,7 +1306,7 @@ function serializeMyActivityDoc(docSnap) {
 }
 
 function myActivityTimestamp(record = {}) {
-  return myActivityMillis(
+  return timestampMillis(
     record.paidAt
     || record.closedAt
     || record.completedAt
@@ -715,388 +1316,6 @@ function myActivityTimestamp(record = {}) {
     || record.booking_date
     || record.date
   );
-}
-
-function myActivityDateMillis(value, endOfDay = false) {
-  const raw = cleanString(value || '', 40);
-  if (!raw) return 0;
-  let date = null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    date = new Date(`${raw}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}+07:00`);
-  } else {
-    date = new Date(raw);
-    if (endOfDay && !Number.isNaN(date.getTime())) {
-      date.setHours(23, 59, 59, 999);
-    }
-  }
-  const millis = date ? date.getTime() : 0;
-  return Number.isFinite(millis) ? millis : 0;
-}
-
-function firstNumber(...values) {
-  for (const value of values) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return 0;
-}
-
-function normalizeReceiptStatus(value = '') {
-  return cleanString(value || '', 80).toLowerCase().replace(/[\s-]+/g, '_');
-}
-
-const RECEIPT_PAID_STATUSES = new Set([
-  'paid',
-  'paid_online',
-  'paid_counter',
-  'completed',
-  'complete',
-  'success',
-  'succeeded',
-  'settled',
-  'captured',
-  'closed',
-  'synced',
-  'done',
-]);
-
-const RECEIPT_BLOCKED_STATUSES = new Set([
-  'pending',
-  'unpaid',
-  'pending_payment',
-  'paid_pending_review',
-  'review_required',
-  'cancelled',
-  'canceled',
-  'failed',
-  'payment_failed',
-  'expired',
-  'void',
-  'voided',
-  'refunded',
-]);
-
-function activityPaymentStatusCandidates(data = {}) {
-  return [
-    data.paymentStatus,
-    data.payment_status,
-    data.paymentState,
-    data.payment_state,
-    data.beamStatus,
-    data.beam_status,
-    data.billStatus,
-    data.receiptStatus,
-  ].map(normalizeReceiptStatus).filter(Boolean);
-}
-
-function activityGeneralStatusCandidates(data = {}) {
-  return [
-    data.status,
-    data.order_status,
-    data.orderStatus,
-    data.booking_status,
-    data.bookingStatus,
-    data.state,
-  ].map(normalizeReceiptStatus).filter(Boolean);
-}
-
-function activityOrderSource(data = {}) {
-  const source = cleanString(data.source || data.orderSource || data.channel || '', 40).toLowerCase();
-  if (source === 'pos' || source === 'web' || source === 'online') return source;
-  if (data.receiptNo || data.posReceiptNo || data.posTerminalId || data.terminalId) return 'pos';
-  return 'web';
-}
-
-function activityAmount(data = {}) {
-  return firstNumber(
-    data.totalAmount,
-    data.grandTotal,
-    data.netTotal,
-    data.total,
-    data.amount,
-    data.paidAmount,
-    data.subtotal,
-    data.price,
-    data.package_amount
-  );
-}
-
-function activityStatus(data = {}) {
-  return cleanString(
-    data.paymentLabel
-    || data.payment_status
-    || data.paymentStatus
-    || data.booking_status
-    || data.bookingStatus
-    || data.status
-    || data.order_status
-    || data.billStatus
-    || '',
-    80
-  );
-}
-
-function activityReceiptMetadata(data = {}, options = {}) {
-  const paymentStatuses = activityPaymentStatusCandidates(data);
-  const generalStatuses = activityGeneralStatusCandidates(data);
-  const statuses = [...paymentStatuses, ...generalStatuses];
-  const hasBlockedStatus = statuses.some(status => RECEIPT_BLOCKED_STATUSES.has(status));
-  const hasPaidStatus = paymentStatuses.some(status => RECEIPT_PAID_STATUSES.has(status))
-    || generalStatuses.some(status => RECEIPT_PAID_STATUSES.has(status))
-    || !!data.paidAt
-    || !!data.closedAt
-    || !!data.completedAt;
-  const source = cleanString(options.source || data.source || activityOrderSource(data), 40);
-  const receiptNo = cleanString(data.receiptNo || data.posReceiptNo || data.receipt_no || '', 120);
-  const receiptId = cleanString(data.receiptId || data.receipt_id || '', 180);
-  const available = !hasBlockedStatus && (hasPaidStatus || !!receiptId || (!!receiptNo && source === 'pos'));
-  if (!available) {
-    return { available: false, receipt: null, actions: [] };
-  }
-  const sourceType = cleanString(
-    options.sourceType
-    || (options.category === 'bookings' ? 'booking' : (source === 'pos' ? 'pos_order' : 'order')),
-    80
-  );
-  const sourceId = cleanString(options.sourceId || data.firestoreId || data.id || receiptId || receiptNo || '', 180);
-  const actionId = cleanString(`${sourceType}:${sourceId}`, 260);
-  const receipt = {
-    available: true,
-    source,
-    sourceType,
-    sourceId,
-    receiptNo,
-    receiptId,
-    orderId: cleanString(data.orderNumber || data.orderId || data.id || sourceId || '', 180),
-    bookingId: cleanString(data.booking_id || data.bookingId || data.id || sourceId || '', 180),
-    status: activityStatus(data),
-    amount: activityAmount(data),
-    actionId,
-  };
-  return {
-    available: true,
-    receipt,
-    actions: [{
-      type: 'download_receipt',
-      enabled: true,
-      actionId,
-      source,
-      sourceType,
-      sourceId,
-      receiptNo,
-      receiptId,
-    }],
-  };
-}
-
-function withReceiptMetadata(record = {}, options = {}) {
-  const metadata = activityReceiptMetadata(record, options);
-  return {
-    ...record,
-    receiptAvailable: metadata.available,
-    receipt: metadata.receipt,
-    actions: metadata.actions,
-  };
-}
-
-function receiptSourceTypeCollection(sourceType = '') {
-  const normalized = normalizeReceiptStatus(sourceType);
-  if (['pos_order', 'web_order', 'order', 'orders', 'shop_order'].includes(normalized)) return 'orders';
-  if (['booking', 'bookings', 'archery', 'archery_booking'].includes(normalized)) return 'bookings';
-  return '';
-}
-
-function receiptOwnerMatches(data = {}, uid = '', collectionName = '') {
-  const expectedUid = cleanString(uid, 180);
-  if (!expectedUid) return false;
-  if (collectionName === 'orders') {
-    const customerUid = cleanString(data.customerUid || '', 180);
-    if (customerUid) return customerUid === expectedUid;
-    if (activityOrderSource(data) === 'pos') return false;
-    return [
-      data.uid,
-      data.userId,
-      data.memberUid,
-      data.member_id,
-      data.memberId,
-    ].some(value => cleanString(value || '', 180) === expectedUid);
-  }
-  if (collectionName === 'bookings') {
-    return [
-      data.uid,
-      data.customerUid,
-      data.member_id,
-      data.memberId,
-      data.memberUid,
-      data.userId,
-    ].some(value => cleanString(value || '', 180) === expectedUid);
-  }
-  return false;
-}
-
-function parseReceiptRequest(rawOptions = {}) {
-  const actionId = cleanString(rawOptions.actionId || rawOptions.receiptActionId || '', 260);
-  let sourceType = cleanString(rawOptions.sourceType || rawOptions.type || '', 80);
-  let sourceId = cleanString(rawOptions.sourceId || rawOptions.id || rawOptions.firestoreId || '', 180);
-  if ((!sourceType || !sourceId) && actionId.includes(':')) {
-    const [parsedType, ...rest] = actionId.split(':');
-    sourceType = sourceType || cleanString(parsedType || '', 80);
-    sourceId = sourceId || cleanString(rest.join(':') || '', 180);
-  }
-  return {
-    actionId,
-    sourceType,
-    sourceId,
-    receiptNo: cleanString(rawOptions.receiptNo || '', 120),
-    receiptId: cleanString(rawOptions.receiptId || '', 180),
-  };
-}
-
-async function getOwnedReceiptSource(uid, rawOptions = {}) {
-  const request = parseReceiptRequest(rawOptions);
-  const collectionName = receiptSourceTypeCollection(request.sourceType);
-  if (!collectionName || !request.sourceId) {
-    const error = new Error('Missing receipt source');
-    error.statusCode = 400;
-    throw error;
-  }
-
-  let docSnap = await db.collection(collectionName).doc(request.sourceId).get();
-  if (!docSnap.exists && request.receiptId) {
-    const snap = await db.collection(collectionName).where('receiptId', '==', request.receiptId).limit(1).get();
-    docSnap = snap.docs[0] || docSnap;
-  }
-  if (!docSnap.exists && request.receiptNo) {
-    const snap = await db.collection(collectionName).where('receiptNo', '==', request.receiptNo).limit(1).get();
-    docSnap = snap.docs[0] || docSnap;
-  }
-  if (!docSnap.exists && request.receiptNo && collectionName === 'orders') {
-    const snap = await db.collection(collectionName).where('posReceiptNo', '==', request.receiptNo).limit(1).get();
-    docSnap = snap.docs[0] || docSnap;
-  }
-  if (!docSnap.exists) {
-    const error = new Error('Receipt source not found');
-    error.statusCode = 404;
-    throw error;
-  }
-
-  const data = serializeMyActivityDoc(docSnap);
-  if (!receiptOwnerMatches(data, uid, collectionName)) {
-    const error = new Error('Receipt source does not belong to this user');
-    error.statusCode = 403;
-    throw error;
-  }
-
-  const source = collectionName === 'orders' ? activityOrderSource(data) : 'booking';
-  const category = collectionName === 'bookings' ? 'bookings' : (source === 'pos' ? 'pos' : 'orders');
-  const metadata = activityReceiptMetadata(data, {
-    category,
-    source,
-    sourceType: request.sourceType,
-    sourceId: docSnap.id,
-  });
-  if (!metadata.available) {
-    const error = new Error('Receipt is not available for this activity');
-    error.statusCode = 403;
-    throw error;
-  }
-
-  return { data, collectionName, request, metadata };
-}
-
-function receiptItemName(item = {}, fallback = 'Eden Cafe item') {
-  return cleanString(
-    item.name
-    || item.productName
-    || item.title
-    || item.menuName
-    || item.label
-    || fallback,
-    160
-  );
-}
-
-function sanitizeReceiptItems(data = {}) {
-  const items = Array.isArray(data.items) ? data.items : [];
-  return items.slice(0, 60).map((item, index) => {
-    const quantity = firstNumber(item.quantity, item.qty, 1) || 1;
-    const unitPrice = firstNumber(item.unitPrice, item.price, item.amount, item.total, 0);
-    const lineTotal = firstNumber(item.lineTotal, item.total, unitPrice * quantity);
-    return {
-      name: receiptItemName(item, `Item ${index + 1}`),
-      variantName: cleanString(item.variantName || item.variant || item.option || '', 120),
-      quantity,
-      unitPrice,
-      lineTotal,
-    };
-  }).filter(item => item.name);
-}
-
-function receiptFallbackItemName(data = {}, collectionName = '') {
-  if (collectionName === 'bookings') {
-    return cleanString(data.serviceName || data.bookingType || data.type || 'Eden Cafe booking', 160);
-  }
-  return cleanString(data.title || data.orderName || 'Eden Cafe order', 160);
-}
-
-function buildCustomerReceiptPayload(uid, data = {}, collectionName = '', request = {}) {
-  const metadata = activityReceiptMetadata(data, {
-    category: collectionName === 'bookings' ? 'bookings' : (activityOrderSource(data) === 'pos' ? 'pos' : 'orders'),
-    source: collectionName === 'bookings' ? 'booking' : activityOrderSource(data),
-    sourceType: request.sourceType,
-    sourceId: data.firestoreId || data.id || request.sourceId,
-  });
-  const amount = activityAmount(data);
-  const items = sanitizeReceiptItems(data);
-  if (!items.length && amount) {
-    items.push({
-      name: receiptFallbackItemName(data, collectionName),
-      variantName: '',
-      quantity: 1,
-      unitPrice: amount,
-      lineTotal: amount,
-    });
-  }
-  const subtotal = firstNumber(data.subtotal, data.subTotal, amount);
-  const discount = firstNumber(data.discount, data.discountAmount, data.totalDiscount, 0);
-  const taxIncluded = firstNumber(data.taxIncluded, data.vatIncluded, data.vat, data.tax, 0);
-  const paidAmount = firstNumber(data.paidAmount, data.tenderedAmount, data.cashReceived, amount);
-  const changeAmount = firstNumber(data.changeAmount, data.change, 0);
-  const customerName = cleanString(
-    data.customerName
-    || data.customer_name
-    || data.name
-    || data.displayName
-    || data.fullName
-    || '',
-    180
-  );
-  return {
-    ok: true,
-    uid,
-    receipt: {
-      source: metadata.receipt?.source || '',
-      sourceType: metadata.receipt?.sourceType || request.sourceType || '',
-      sourceId: metadata.receipt?.sourceId || request.sourceId || '',
-      receiptNo: metadata.receipt?.receiptNo || data.receiptNo || data.posReceiptNo || data.orderNumber || data.id || '',
-      receiptId: metadata.receipt?.receiptId || data.receiptId || '',
-      orderId: cleanString(data.orderNumber || data.orderId || data.id || '', 180),
-      bookingId: cleanString(data.booking_id || data.bookingId || data.id || '', 180),
-      issuedAt: serializeMyActivityValue(data.paidAt || data.closedAt || data.completedAt || data.timestamp || data.createdAt || new Date()),
-      cashierName: cleanString(data.cashierName || data.cashier || data.staffName || '', 120),
-      customerName,
-      status: activityStatus(data),
-      paymentMethod: cleanString(data.paymentMethod || data.payment_method || data.paymentChannel || data.channel || '', 80),
-      currency: cleanString(data.currency || 'THB', 12) || 'THB',
-      items,
-      subtotal,
-      discount,
-      taxIncluded,
-      totalAmount: amount || subtotal,
-      paidAmount,
-      changeAmount,
-    },
-  };
 }
 
 async function queryMemberActivityCollection({ collectionName, uid, fields, orderField, beforeMs, limitCount }) {
@@ -1140,22 +1359,13 @@ async function queryMemberActivityCollection({ collectionName, uid, fields, orde
 async function getMyActivityPayload(uid, options = {}) {
   const limitCount = normalizeMyActivityLimit(options.limit, 20, 50);
   const ledgerLimit = normalizeMyActivityLimit(options.ledgerLimit, 8, 20);
-  const cursorMs = decodeMyActivityCursor(options.cursor || '');
-  const fromMs = myActivityDateMillis(options.from || options.dateFrom || options.startDate || '', false);
-  const toMs = myActivityDateMillis(options.to || options.dateTo || options.endDate || '', true);
-  const beforeMs = cursorMs || (toMs ? toMs + 1 : 0);
-  const inRequestedRange = record => {
-    const timestamp = myActivityTimestamp(record);
-    if (fromMs && timestamp < fromMs) return false;
-    if (toMs && timestamp > toMs) return false;
-    return true;
-  };
+  const beforeMs = decodeMyActivityCursor(options.cursor || '');
 
   const [orders, bookings, configSnap, summarySnap, ledgerRows] = await Promise.all([
     queryMemberActivityCollection({
       collectionName: 'orders',
       uid,
-      fields: ['customerUid', 'uid', 'userId', 'memberUid'],
+      fields: ['customerUid', 'uid'],
       orderField: 'timestamp',
       beforeMs,
       limitCount,
@@ -1163,7 +1373,7 @@ async function getMyActivityPayload(uid, options = {}) {
     queryMemberActivityCollection({
       collectionName: 'bookings',
       uid,
-      fields: ['uid', 'customerUid', 'member_id', 'memberUid', 'userId'],
+      fields: ['uid', 'customerUid', 'member_id'],
       orderField: 'timestamp',
       beforeMs,
       limitCount,
@@ -1184,30 +1394,12 @@ async function getMyActivityPayload(uid, options = {}) {
     .filter(order => {
       if (order.isTestOrder === true) return false;
       const customerUid = cleanString(order.customerUid || '', 160);
-      const orderUid = cleanString(order.uid || order.userId || order.memberUid || '', 160);
-      const source = activityOrderSource(order);
+      const orderUid = cleanString(order.uid || '', 160);
+      const source = cleanString(order.source || '', 30).toLowerCase();
       return customerUid ? customerUid === uid : (orderUid === uid && source !== 'pos');
     })
-    .filter(inRequestedRange)
-    .map(order => {
-      const source = activityOrderSource(order);
-      return withReceiptMetadata(order, {
-        category: source === 'pos' ? 'pos' : 'orders',
-        source,
-        sourceType: source === 'pos' ? 'pos_order' : 'order',
-        sourceId: order.firestoreId || order.id,
-      });
-    })
     .slice(0, limitCount);
-  const filteredBookings = bookings
-    .filter(inRequestedRange)
-    .map(booking => withReceiptMetadata(booking, {
-      category: 'bookings',
-      source: 'booking',
-      sourceType: 'booking',
-      sourceId: booking.firestoreId || booking.id,
-    }))
-    .slice(0, limitCount);
+  const filteredBookings = bookings.slice(0, limitCount);
   const activity = [
     ...filteredOrders.map(item => ({ kind: 'order', timestamp: myActivityTimestamp(item), item })),
     ...filteredBookings.map(item => ({ kind: 'booking', timestamp: myActivityTimestamp(item), item })),
@@ -1260,39 +1452,6 @@ exports.getMyActivity = onRequest(
   }
 );
 
-exports.getMyReceipt = onRequest(
-  { region: 'asia-southeast1', timeoutSeconds: 30, memory: '256MiB' },
-  async (req, res) => {
-    if (handleOptions(req, res)) return;
-    setCors(req, res);
-    res.set('Cache-Control', 'no-store, max-age=0');
-    res.set('X-Content-Type-Options', 'nosniff');
-
-    if (req.method !== 'GET' && req.method !== 'POST') {
-      res.status(405).json({ error: 'Method not allowed' });
-      return;
-    }
-
-    try {
-      const decoded = await requireSignedInUser(req);
-      checkRateLimitKey(`get-my-receipt:${decoded.uid}`, 120, 15 * 60 * 1000);
-      const input = req.method === 'GET' ? (req.query || {}) : (req.body || {});
-      const { data, collectionName, request } = await getOwnedReceiptSource(decoded.uid, input);
-      const payload = buildCustomerReceiptPayload(decoded.uid, data, collectionName, request);
-      res.status(200).json(payload);
-    } catch (error) {
-      const status = error.statusCode || 500;
-      logger.warn('Member receipt fetch failed', {
-        message: error.message,
-        status,
-        code: error.code || '',
-      });
-      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to load receipt right now.');
-      res.status(status).json({ ok: false, error: publicError.message });
-    }
-  }
-);
-
 exports.checkPhoneChange = onRequest(
   { region: 'asia-southeast1' },
   memberAuthHandlers.checkPhoneChange
@@ -1312,6 +1471,32 @@ exports.verifyPhoneChangeOtp = onRequest(
     secrets: [AUTH_OTP_PEPPER],
   },
   memberAuthHandlers.verifyPhoneChangeOtp
+);
+
+exports.requestPhoneRemovalOtp = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [
+      AUTH_OTP_PEPPER,
+      OTP_SMS_API_URL,
+      OTP_SMS_API_KEY,
+      OTP_SMS_SENDER,
+      SMTP_HOST,
+      SMTP_PORT,
+      SMTP_USER,
+      SMTP_PASS,
+      SMTP_FROM,
+    ],
+  },
+  memberAuthHandlers.requestPhoneRemovalOtp
+);
+
+exports.verifyPhoneRemovalOtp = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [AUTH_OTP_PEPPER],
+  },
+  memberAuthHandlers.verifyPhoneRemovalOtp
 );
 
 function normalizeAdminRole(role) {
@@ -1341,72 +1526,11 @@ function normalizeAdminPermissions(role, raw = {}) {
     'marketing',
     'business',
     'index',
-    'promotions',
     'footer',
   ];
   const all = Object.fromEntries(allowed.map(key => [key, true]));
   if (role === 'owner' || role === 'head_manager') return all;
   return Object.fromEntries(allowed.map(key => [key, raw && raw[key] === true]));
-}
-
-function hasAdminArcheryPermission(role, permissions = {}) {
-  return role === 'owner' || role === 'head_manager' || permissions?.archery === true;
-}
-
-function normalizeBranchIds(value) {
-  const rawValues = Array.isArray(value)
-    ? value
-    : String(value || '').split(',');
-  const seen = new Set();
-  const branchIds = [];
-  rawValues.forEach(item => {
-    const branchId = cleanString(item, 40);
-    if (!branchId || seen.has(branchId)) return;
-    seen.add(branchId);
-    branchIds.push(branchId);
-  });
-  return branchIds.slice(0, 20);
-}
-
-function normalizeAdminArcheryRole(role, value) {
-  if (role === 'owner') return 'OWNER';
-  const archeryRole = cleanString(value || '', 40).toUpperCase();
-  if (ADMIN_ARCHERY_ROLE_VALUES.has(archeryRole) && archeryRole !== 'OWNER') return archeryRole;
-  return 'MANAGER';
-}
-
-function normalizeAdminArcheryAccess(role, permissions, body = {}, existing = {}) {
-  if (!hasAdminArcheryPermission(role, permissions)) return {};
-
-  const requestedPrimary = cleanString(
-    body.primary_branch_id
-      || body.primaryBranchId
-      || body.branch_id
-      || body.branchId
-      || body.archeryBranchId
-      || '',
-    40
-  );
-  const existingPrimary = cleanString(existing.primary_branch_id || existing.branch_id || '', 40);
-  const requestedBranchIds = normalizeBranchIds(
-    body.branch_ids
-      || body.branchIds
-      || body.archery_branch_ids
-      || body.archeryBranchIds
-      || []
-  );
-  const existingBranchIds = normalizeBranchIds(existing.branch_ids || []);
-  const primaryBranchId = requestedPrimary
-    || requestedBranchIds[0]
-    || existingPrimary
-    || existingBranchIds[0]
-    || ADMIN_ARCHERY_BRANCH_DEFAULT;
-  const branchIds = normalizeBranchIds([primaryBranchId, ...requestedBranchIds, ...existingBranchIds]);
-  return {
-    primary_branch_id: primaryBranchId,
-    branch_ids: branchIds.length ? branchIds : [ADMIN_ARCHERY_BRANCH_DEFAULT],
-    archery_role: normalizeAdminArcheryRole(role, body.archery_role || body.archeryRole || existing.archery_role || existing.archeryRole),
-  };
 }
 
 function hasPasswordProvider(userRecord) {
@@ -1580,12 +1704,14 @@ async function findMemberUidsByPhone(phoneNumber) {
     usersByPhoneNumber,
     usersByPhoneE164,
     usersByPhoneDisplay,
+    usersByLoginUsername,
     credentialsByPhone,
   ] = await Promise.all([
     db.collection('phone_number_index').doc(phoneKey).get(),
     db.collection('users').where('phone_number', '==', normalizedPhone).limit(10).get(),
     db.collection('users').where('phoneE164', '==', normalizedPhone).limit(10).get(),
     db.collection('users').where('phone', '==', phoneDisplay).limit(10).get(),
+    db.collection('users').where('loginUsername', '==', phoneDisplay).limit(10).get(),
     db.collection('user_credentials').where('phone_number', '==', normalizedPhone).limit(10).get(),
   ]);
 
@@ -1594,6 +1720,7 @@ async function findMemberUidsByPhone(phoneNumber) {
     ...usersByPhoneNumber.docs.map(doc => doc.id),
     ...usersByPhoneE164.docs.map(doc => doc.id),
     ...usersByPhoneDisplay.docs.map(doc => doc.id),
+    ...usersByLoginUsername.docs.map(doc => doc.id),
     ...credentialsByPhone.docs.map(doc => cleanString(doc.data()?.uid || doc.id, 160)),
   ]);
 }
@@ -1638,6 +1765,327 @@ async function summarizeMemberAuthUid(uid, email = '', phoneNumber = '') {
       email: userEmail || credentialEmail || normalizedEmail || null,
       phoneLast4: (userPhone || credentialPhone || normalizedPhone || '').slice(-4) || null,
     },
+  };
+}
+
+function memberMergeBalance(row = {}) {
+  const summary = row.summary || {};
+  const user = row.user || {};
+  if (summary.pointsBalance !== undefined) return safeMergeInteger(summary.pointsBalance);
+  return safeMergeInteger(user.points);
+}
+
+function memberMergeSnapshot(row = {}) {
+  const user = row.user || {};
+  const summary = row.summary || {};
+  const credential = row.credential || {};
+  return {
+    uid: row.uid,
+    userExists: row.userExists === true,
+    credentialExists: row.credentialExists === true,
+    summaryExists: row.summaryExists === true,
+    email: memberEmailFromData(user) || normalizePublicEmail(credential.email_lower || ''),
+    phoneLast4: (memberPhoneFromData(user) || normalizeThaiPhoneForMemberIndex(credential.phone_number || '') || '').slice(-4) || null,
+    pointsBalance: memberMergeBalance(row),
+    totalSpent: mergeAccountMetric(row, 'totalSpent'),
+    visitCount: mergeAccountIntegerMetric(row, 'visitCount'),
+    orderCount: mergeAccountIntegerMetric(row, 'orderCount'),
+    bookingCount: mergeAccountIntegerMetric(row, 'bookingCount'),
+    hasPasswordHash: credentialHasPassword(credential),
+  };
+}
+
+async function loadMergeMemberRow(uid) {
+  const safeUid = cleanString(uid, 160);
+  const [userSnap, credentialSnap, summarySnap] = await Promise.all([
+    db.collection('users').doc(safeUid).get(),
+    db.collection('user_credentials').doc(safeUid).get(),
+    db.collection('member_summaries').doc(safeUid).get(),
+  ]);
+  return {
+    uid: safeUid,
+    userExists: userSnap.exists,
+    credentialExists: credentialSnap.exists,
+    summaryExists: summarySnap.exists,
+    user: userSnap.exists ? userSnap.data() || {} : {},
+    credential: credentialSnap.exists ? credentialSnap.data() || {} : {},
+    summary: summarySnap.exists ? summarySnap.data() || {} : {},
+  };
+}
+
+function mergeMemberField(rows = [], fieldNames = [], maxLength = 180) {
+  const values = [];
+  for (const row of rows) {
+    for (const fieldName of fieldNames) {
+      values.push(row.user?.[fieldName], row.summary?.[fieldName], row.credential?.[fieldName]);
+    }
+  }
+  return firstCleanString(values, maxLength);
+}
+
+function mergeMemberEmail(rows = [], requestedEmail = '') {
+  return normalizePublicEmail(requestedEmail)
+    || normalizePublicEmail(mergeMemberField(rows, ['email', 'email_lower', 'memberEmail'], 180));
+}
+
+function mergeMemberPhone(rows = [], requestedPhone = '') {
+  const candidates = [requestedPhone];
+  for (const row of rows) {
+    candidates.push(
+      row.user?.phone_number,
+      row.user?.phoneE164,
+      row.user?.phone,
+      row.user?.loginUsername,
+      row.credential?.phone_number
+    );
+  }
+  for (const value of candidates) {
+    const phone = normalizeThaiPhoneForMemberIndex(value);
+    if (phone) return phone;
+  }
+  return '';
+}
+
+function buildMergedMemberPayload(primaryUid, rows = [], email = '', phoneNumber = '', auditId = '') {
+  const primaryRow = rows.find(row => row.uid === primaryUid) || rows[0] || {};
+  const primaryUser = primaryRow.user || {};
+  const primarySummary = primaryRow.summary || {};
+  const displayName = mergeMemberField(rows, ['displayName', 'display_name', 'name', 'customerName', 'memberName'], 120)
+    || (email ? email.split('@')[0] : 'Eden Member');
+  const avatarUrl = mergeMemberField(rows, ['photoURL', 'avatar_url', 'avatar'], 500);
+  const mergedPoints = rows.reduce((sum, row) => sum + memberMergeBalance(row), 0);
+  const totalSpent = rows.reduce((sum, row) => sum + Math.max(0, mergeAccountMetric(row, 'totalSpent')), 0);
+  const visitCount = rows.reduce((sum, row) => sum + mergeAccountIntegerMetric(row, 'visitCount'), 0);
+  const orderCount = rows.reduce((sum, row) => sum + mergeAccountIntegerMetric(row, 'orderCount'), 0);
+  const bookingCount = rows.reduce((sum, row) => sum + mergeAccountIntegerMetric(row, 'bookingCount'), 0);
+  const lifetimePoints = rows.reduce((sum, row) => sum + Math.max(0, mergeAccountMetric(row, 'lifetimePoints')), 0);
+  const totalRedeemed = rows.reduce((sum, row) => sum + Math.max(0, mergeAccountMetric(row, 'totalRedeemed')), 0);
+  const totalManualDeducted = rows.reduce((sum, row) => sum + Math.max(0, mergeAccountMetric(row, 'totalManualDeducted')), 0);
+  const tier = memberTierFromMetrics(mergedPoints, totalSpent, visitCount);
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const authProviderIds = uniqueArray(rows.flatMap(row => row.user?.authProviderIds || []), 80);
+  const mergedFromUids = uniqueArray([
+    ...(Array.isArray(primaryUser.mergedFromUids) ? primaryUser.mergedFromUids : []),
+    ...rows.filter(row => row.uid !== primaryUid).map(row => row.uid),
+  ]);
+  const mergeAuditIds = uniqueArray([
+    ...(Array.isArray(primaryUser.mergeAuditIds) ? primaryUser.mergeAuditIds : []),
+    auditId,
+  ], 180);
+  const createdAt = earliestTimestamp(rows.flatMap(row => [
+    row.user?.createdAt,
+    row.user?.created_at,
+    row.user?.authCreatedAt,
+    row.credential?.created_at,
+  ]));
+  const lastLoginAt = latestTimestamp(rows.flatMap(row => [
+    row.user?.lastLoginAt,
+    row.user?.last_login_at,
+    row.credential?.last_login_at,
+  ]));
+  const phoneDisplay = phoneNumber ? displayThaiPhone(phoneNumber) : '';
+
+  const userPayload = {
+    uid: primaryUid,
+    id: cleanString(primaryUser.id || primaryUid, 160),
+    displayName,
+    display_name: displayName,
+    name: displayName,
+    email,
+    email_lower: email,
+    photoURL: avatarUrl,
+    avatar_url: avatarUrl,
+    memberCode: cleanString(primaryUser.memberCode || authMemberCode(primaryUid), 80),
+    member_level: tier,
+    tier,
+    points: mergedPoints,
+    totalSpent,
+    visitCount,
+    orderCount,
+    bookingCount,
+    status: cleanString(primaryUser.status || 'active', 40) || 'active',
+    adminNote: mergeMemberField(rows, ['adminNote'], 500),
+    adminTags: uniqueArray(rows.flatMap(row => row.user?.adminTags || []), 80).slice(0, 30),
+    authProviderIds,
+    mergedFromUids,
+    mergeAuditIds,
+    lastMergedAt: now,
+    loyaltyUpdatedAt: now,
+    updatedAt: now,
+    updated_at: now,
+  };
+
+  if (phoneNumber) {
+    userPayload.phone_number = phoneNumber;
+    userPayload.phone_display = phoneDisplay;
+    userPayload.phone = phoneDisplay;
+    userPayload.phoneE164 = phoneNumber;
+    userPayload.loginUsername = phoneDisplay;
+  }
+  if (createdAt) {
+    userPayload.createdAt = createdAt;
+    userPayload.created_at = createdAt;
+  }
+  if (lastLoginAt) {
+    userPayload.lastLoginAt = lastLoginAt;
+    userPayload.last_login_at = lastLoginAt;
+  }
+  [
+    ['firstName', ['firstName'], 80],
+    ['lastName', ['lastName'], 80],
+    ['shippingAddress', ['shippingAddress'], 500],
+    ['birthDate', ['birthDate'], 20],
+    ['allergies', ['allergies'], 200],
+    ['healthNote', ['healthNote'], 500],
+    ['lineId', ['lineId'], 80],
+    ['registrationSource', ['registrationSource'], 80],
+    ['googleAuthUid', ['googleAuthUid'], 160],
+    ['phoneAuthEmail', ['phoneAuthEmail'], 180],
+  ].forEach(([target, fields, maxLength]) => {
+    const value = mergeMemberField(rows, fields, maxLength);
+    if (value) userPayload[target] = value;
+  });
+  if (rows.some(row => row.user?.passwordLoginEnabled === true || row.user?.password_login_enabled === true || credentialHasPassword(row.credential))) {
+    userPayload.passwordLoginEnabled = true;
+    userPayload.password_login_enabled = true;
+  }
+
+  Object.keys(userPayload).forEach(key => {
+    if (userPayload[key] === '' || userPayload[key] === undefined || userPayload[key] === null) delete userPayload[key];
+  });
+
+  const summaryPayload = {
+    userId: primaryUid,
+    memberCode: userPayload.memberCode,
+    memberName: displayName,
+    memberEmail: email,
+    pointsBalance: mergedPoints,
+    tier,
+    lifetimePoints,
+    totalRedeemed,
+    totalManualDeducted,
+    totalSpent,
+    visitCount,
+    orderCount,
+    bookingCount,
+    mergedFromUids,
+    lastMergeAuditId: auditId,
+    lastLedgerId: mergeMemberField(rows, ['lastLedgerId'], 180) || cleanString(primarySummary.lastLedgerId || '', 180),
+    updatedAt: now,
+  };
+  Object.keys(summaryPayload).forEach(key => {
+    if (summaryPayload[key] === '' || summaryPayload[key] === undefined || summaryPayload[key] === null) delete summaryPayload[key];
+  });
+
+  return { userPayload, summaryPayload, mergedPoints, totalSpent, visitCount, orderCount, bookingCount, tier };
+}
+
+function buildMergedCredentialPayload(primaryUid, rows = [], email = '', phoneNumber = '') {
+  const primaryRow = rows.find(row => row.uid === primaryUid) || rows[0] || {};
+  const primaryCredential = primaryRow.credential || {};
+  const credentialRows = [primaryRow, ...rows.filter(row => row.uid !== primaryUid)];
+  const passwordSource = credentialRows.find(row => credentialHasPassword(row.credential))?.credential || {};
+  const phoneKey = phoneNumber ? memberPhoneIndexKey(phoneNumber) : '';
+  const payload = {
+    uid: primaryUid,
+    email_lower: email,
+    phone_number: phoneNumber,
+    phone_index_key: phoneKey,
+    updated_at: admin.firestore.FieldValue.serverTimestamp(),
+  };
+  if (passwordSource.password_hash) {
+    payload.password_hash = cleanString(passwordSource.password_hash, 2000);
+    payload.password_algorithm = cleanString(passwordSource.password_algorithm || primaryCredential.password_algorithm || 'scrypt', 80);
+    if (passwordSource.created_at || primaryCredential.created_at) payload.created_at = passwordSource.created_at || primaryCredential.created_at;
+  } else if (primaryCredential.created_at) {
+    payload.created_at = primaryCredential.created_at;
+  }
+  Object.keys(payload).forEach(key => {
+    if (payload[key] === '' || payload[key] === undefined || payload[key] === null) delete payload[key];
+  });
+  return payload;
+}
+
+async function commitMergeOperations(operations = []) {
+  let batch = db.batch();
+  let count = 0;
+  let committed = 0;
+  for (const operation of operations) {
+    if (operation.type === 'delete') {
+      batch.delete(operation.ref);
+    } else if (operation.type === 'update') {
+      batch.update(operation.ref, operation.data);
+    } else {
+      batch.set(operation.ref, operation.data, operation.options || { merge: true });
+    }
+    count += 1;
+    if (count >= 450) {
+      await batch.commit();
+      committed += count;
+      batch = db.batch();
+      count = 0;
+    }
+  }
+  if (count) {
+    await batch.commit();
+    committed += count;
+  }
+  return committed;
+}
+
+async function findMergeDocsByFields(collectionName, fields = [], duplicateUids = []) {
+  const docsByPath = new Map();
+  for (const uid of duplicateUids) {
+    for (const field of fields) {
+      const snap = await db.collection(collectionName).where(field, '==', uid).get();
+      snap.docs.forEach(docSnap => docsByPath.set(docSnap.ref.path, docSnap));
+    }
+  }
+  return Array.from(docsByPath.values());
+}
+
+function updateOrderMemberUidPayload(order = {}, duplicateUids = [], primaryUid = '', now, auditId = '') {
+  const duplicateSet = new Set(duplicateUids);
+  const source = cleanString(order.source || '', 40).toLowerCase();
+  const update = {};
+  if (duplicateSet.has(cleanString(order.customerUid || '', 160))) update.customerUid = primaryUid;
+  if (duplicateSet.has(cleanString(order.userId || '', 160))) update.userId = primaryUid;
+  if (duplicateSet.has(cleanString(order.memberUid || '', 160))) update.memberUid = primaryUid;
+  if (duplicateSet.has(cleanString(order.uid || '', 160)) && source !== 'pos') update.uid = primaryUid;
+  if (order.loyalty && typeof order.loyalty === 'object' && duplicateSet.has(cleanString(order.loyalty.customerUid || '', 160))) {
+    update['loyalty.customerUid'] = primaryUid;
+  }
+  if (Object.keys(update).length) {
+    update.memberMergedAt = now;
+    update.memberMergeAuditId = auditId;
+    update.updatedAt = now;
+  }
+  return update;
+}
+
+function updateBookingMemberUidPayload(booking = {}, duplicateUids = [], primaryUid = '', now, auditId = '') {
+  const duplicateSet = new Set(duplicateUids);
+  const update = {};
+  ['uid', 'customerUid', 'userId', 'memberUid'].forEach(field => {
+    if (duplicateSet.has(cleanString(booking[field] || '', 160))) update[field] = primaryUid;
+  });
+  if (Object.keys(update).length) {
+    update.memberMergedAt = now;
+    update.memberMergeAuditId = auditId;
+    update.updatedAt = now;
+  }
+  return update;
+}
+
+function updatePointLedgerMemberPayload(ledger = {}, primaryUid = '', memberPayload = {}, now, auditId = '') {
+  return {
+    userId: primaryUid,
+    memberCode: cleanString(memberPayload.memberCode || '', 80),
+    memberName: cleanString(memberPayload.displayName || memberPayload.display_name || 'Eden Member', 160),
+    memberEmail: cleanString(memberPayload.email || '', 180),
+    mergedAt: now,
+    memberMergeAuditId: auditId,
+    mergedFromUid: cleanString(ledger.userId || '', 160),
   };
 }
 
@@ -1690,10 +2138,66 @@ function cleanString(value, maxLength) {
   return String(value ?? '').trim().slice(0, maxLength);
 }
 
+function firstCleanString(values = [], maxLength = 180) {
+  for (const value of values) {
+    const text = cleanString(value, maxLength);
+    if (text) return text;
+  }
+  return '';
+}
+
+function uniqueArray(values = [], maxLength = 160) {
+  return Array.from(new Set(
+    values
+      .flatMap(value => Array.isArray(value) ? value : [value])
+      .map(value => cleanString(value, maxLength))
+      .filter(Boolean)
+  ));
+}
+
+function safeMergeNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function safeMergeInteger(value, fallback = 0) {
+  return Math.max(0, Math.floor(safeMergeNumber(value, fallback)));
+}
+
+function mergeAccountMetric(row = {}, summaryField, userField = summaryField) {
+  const summary = row.summary || {};
+  const user = row.user || {};
+  if (summary[summaryField] !== undefined) return safeMergeNumber(summary[summaryField], 0);
+  return safeMergeNumber(user[userField], 0);
+}
+
+function mergeAccountIntegerMetric(row = {}, summaryField, userField = summaryField) {
+  return Math.max(0, Math.floor(mergeAccountMetric(row, summaryField, userField)));
+}
+
+function timestampMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function earliestTimestamp(values = []) {
+  return values
+    .filter(Boolean)
+    .sort((a, b) => timestampMillis(a) - timestampMillis(b))[0] || null;
+}
+
+function latestTimestamp(values = []) {
+  return values
+    .filter(Boolean)
+    .sort((a, b) => timestampMillis(b) - timestampMillis(a))[0] || null;
+}
+
 function permissionFromImageFolder(folder) {
   const value = cleanString(folder, 40).toLowerCase().replace(/[^a-z0-9_-]/g, '_');
   if (value === 'index' || value === 'index_popup') return 'index';
-  if (value === 'promo-popup' || value === 'promo_popup' || value === 'promotional_popup') return 'promotions';
   if (value === 'shop_products') return 'products';
   if (value === 'blogs') return 'blogs';
   if (value === 'rooms') return 'rooms';
@@ -1804,6 +2308,385 @@ async function uidFromAuthHeader(req) {
     const authError = new Error('Invalid Authorization token');
     authError.statusCode = 401;
     throw authError;
+  }
+}
+
+function archeryLaneId(number) {
+  return `LANE_${String(number).padStart(2, '0')}`;
+}
+
+function archeryLaneIds() {
+  return Array.from({ length: ARCHERY_LANE_COUNT }, (_, index) => archeryLaneId(index + 1));
+}
+
+function normalizeArcheryLaneId(value = '') {
+  const raw = cleanString(value, 20).toUpperCase();
+  const match = raw.match(/^LANE_?(\d{1,2})$/);
+  if (!match) return '';
+  const laneNumber = Number(match[1]);
+  if (!Number.isInteger(laneNumber) || laneNumber < 1 || laneNumber > ARCHERY_LANE_COUNT) return '';
+  return archeryLaneId(laneNumber);
+}
+
+function archeryLaneNumber(laneId = '') {
+  const match = String(laneId || '').match(/(\d{2})$/);
+  return match ? Number(match[1]) : 0;
+}
+
+function minutesFromTime(value = '') {
+  if (!isTime(value)) return null;
+  const [hours, minutes] = String(value).split(':').map(Number);
+  return (hours * 60) + minutes;
+}
+
+function timeFromMinutes(value) {
+  const minutes = Math.max(0, Math.floor(Number(value) || 0));
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+}
+
+function archeryTimestamp(date, time) {
+  return admin.firestore.Timestamp.fromDate(new Date(`${date}T${time}:00+07:00`));
+}
+
+function archeryDateFromTimestamp(value) {
+  if (!value) return null;
+  if (typeof value.toDate === 'function') return value.toDate();
+  if (value instanceof Date) return value;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function normalizeArcheryPackageMinutes(value) {
+  const minutes = Math.floor(Number(value) || 0);
+  if (!ARCHERY_PACKAGE_PRICES.has(minutes)) {
+    const error = new Error('Invalid archery package');
+    error.statusCode = 400;
+    throw error;
+  }
+  return minutes;
+}
+
+function normalizeArcheryTimePayload(raw = {}) {
+  const date = cleanString(raw.date, 20);
+  const startTime = cleanString(raw.start_time || raw.startTime || raw.time, 10);
+  const packageMinutes = normalizeArcheryPackageMinutes(
+    raw.package_minutes || raw.packageMinutes || raw.duration_minutes || raw.durationMinutes || raw.minutes
+  );
+  if (!isISODate(date) || !isTime(startTime)) {
+    const error = new Error('Invalid archery date or time');
+    error.statusCode = 400;
+    throw error;
+  }
+  const startMinutes = minutesFromTime(startTime);
+  const endMinutes = startMinutes + packageMinutes;
+  if (
+    startMinutes < ARCHERY_OPEN_MINUTES
+    || endMinutes > ARCHERY_CLOSE_MINUTES
+    || startMinutes % ARCHERY_SLOT_MINUTES !== 0
+  ) {
+    const error = new Error('Archery booking is outside operating hours');
+    error.statusCode = 400;
+    throw error;
+  }
+  return {
+    date,
+    startTime,
+    endTime: timeFromMinutes(endMinutes),
+    startMinutes,
+    endMinutes,
+    packageMinutes,
+    amount: ARCHERY_PACKAGE_PRICES.get(packageMinutes) || 0,
+  };
+}
+
+function archerySlotId(laneId, date, slotMinutes) {
+  return `${laneId}_${date.replace(/-/g, '')}_${timeFromMinutes(slotMinutes).replace(':', '')}`;
+}
+
+function archerySlots(laneId, date, startMinutes, endMinutes) {
+  const slots = [];
+  for (let minute = startMinutes; minute < endMinutes; minute += ARCHERY_SLOT_MINUTES) {
+    slots.push({
+      id: archerySlotId(laneId, date, minute),
+      startTime: timeFromMinutes(minute),
+      endTime: timeFromMinutes(minute + ARCHERY_SLOT_MINUTES),
+      startMinutes: minute,
+      endMinutes: minute + ARCHERY_SLOT_MINUTES,
+    });
+  }
+  return slots;
+}
+
+function isActiveArcheryLock(lock = {}, now = new Date()) {
+  const status = cleanString(lock.status, 30).toUpperCase();
+  if (status === 'HELD') {
+    const expiresAt = archeryDateFromTimestamp(lock.hold_expires_at || lock.holdExpiresAt || lock.expiresAt);
+    return !expiresAt || expiresAt.getTime() > now.getTime();
+  }
+  return ['CONFIRMED', 'CHECKED_IN'].includes(status);
+}
+
+function archeryPublicStatus(booking = {}) {
+  const status = cleanString(booking.status || 'PENDING', 40).toUpperCase();
+  const paymentStatus = cleanString(booking.payment_status || booking.paymentStatus || 'PENDING', 40).toUpperCase();
+  if (status === 'CHECKED_IN') return 'Checked-in';
+  if (status === 'COMPLETED') return 'Completed';
+  if (status === 'CANCELLED') return 'Cancelled';
+  if (status === 'NO_SHOW') return 'No Show';
+  if (paymentStatus === 'PAID_ONLINE') return 'Paid Online';
+  if (paymentStatus === 'PAID_COUNTER') return 'Paid Counter';
+  return 'Pending';
+}
+
+function archeryLockRefs(laneId, date, startMinutes, endMinutes) {
+  return archerySlots(laneId, date, startMinutes, endMinutes)
+    .map(slot => ({
+      ...slot,
+      ref: db.collection('resource_locks').doc(slot.id),
+    }));
+}
+
+async function findAvailableArcheryLane(transaction, timing, preferredLaneId = '') {
+  const now = new Date();
+  const candidates = preferredLaneId ? [preferredLaneId] : archeryLaneIds();
+  for (const laneId of candidates) {
+    const slots = archeryLockRefs(laneId, timing.date, timing.startMinutes, timing.endMinutes);
+    const snaps = await Promise.all(slots.map(slot => transaction.get(slot.ref)));
+    const conflict = snaps.find(snap => snap.exists && isActiveArcheryLock(snap.data() || {}, now));
+    if (!conflict) return { laneId, slots };
+  }
+  const error = new Error('Selected archery lane is not available');
+  error.statusCode = 409;
+  throw error;
+}
+
+function writeArcheryResourceSeeds(transaction) {
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  transaction.set(db.collection('resource_types').doc(ARCHERY_RESOURCE_TYPE_ID), {
+    id: ARCHERY_RESOURCE_TYPE_ID,
+    service_type: ARCHERY_SERVICE_TYPE,
+    name: 'Archery Lane',
+    slot_minutes: ARCHERY_SLOT_MINUTES,
+    updatedAt: now,
+  }, { merge: true });
+  archeryLaneIds().forEach(laneId => {
+    transaction.set(db.collection('resources').doc(laneId), {
+      id: laneId,
+      service_type: ARCHERY_SERVICE_TYPE,
+      resource_type_id: ARCHERY_RESOURCE_TYPE_ID,
+      name: `Lane ${archeryLaneNumber(laneId)}`,
+      lane_number: archeryLaneNumber(laneId),
+      status: 'ACTIVE',
+      updatedAt: now,
+    }, { merge: true });
+  });
+}
+
+function normalizeArcheryCustomer(raw = {}, decoded = {}) {
+  return {
+    name: cleanString(raw.customerName || raw.name || decoded.name || decoded.email || 'Eden Member', 120),
+    phone: cleanString(raw.customerPhone || raw.phone || decoded.phone_number || '', 40),
+    email: cleanString(raw.customerEmail || raw.email || decoded.email || '', 180).toLowerCase(),
+    note: cleanString(raw.note || raw.customerNote || '', 500),
+  };
+}
+
+async function loadArcheryMemberForAdmin(transaction, memberUid) {
+  const userRef = db.collection('users').doc(memberUid);
+  const summaryRef = db.collection('member_summaries').doc(memberUid);
+  const [userSnap, summarySnap] = await Promise.all([
+    transaction.get(userRef),
+    transaction.get(summaryRef),
+  ]);
+  if (!userSnap.exists && !summarySnap.exists) {
+    const error = new Error('Member does not exist');
+    error.statusCode = 404;
+    throw error;
+  }
+  return {
+    user: userSnap.exists ? userSnap.data() || {} : {},
+    summary: summarySnap.exists ? summarySnap.data() || {} : {},
+  };
+}
+
+function archeryBookingPayload({
+  bookingId,
+  memberUid,
+  timing,
+  laneId,
+  source,
+  status,
+  paymentStatus = 'PENDING',
+  paymentMethod = '',
+  customer = {},
+  createdBy = '',
+  holdExpiresAt = null,
+}) {
+  const laneNumber = archeryLaneNumber(laneId);
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const payload = {
+    id: bookingId,
+    booking_id: bookingId,
+    bookingType: 'archery',
+    service_type: ARCHERY_SERVICE_TYPE,
+    service_name: 'Eden Archery',
+    source,
+    uid: memberUid,
+    member_id: memberUid,
+    memberUid,
+    userId: memberUid,
+    customerUid: memberUid,
+    name: customer.name || 'Eden Member',
+    customerName: customer.name || 'Eden Member',
+    phone: customer.phone || '',
+    customerPhone: customer.phone || '',
+    customerEmail: customer.email || '',
+    date: timing.date,
+    startTime: timing.startTime,
+    endTime: timing.endTime,
+    start_time: timing.startTime,
+    end_time: timing.endTime,
+    start_at: archeryTimestamp(timing.date, timing.startTime),
+    end_at: archeryTimestamp(timing.date, timing.endTime),
+    duration_minutes: timing.packageMinutes,
+    package_minutes: timing.packageMinutes,
+    package_label: `${timing.packageMinutes} minutes`,
+    resource_type_id: ARCHERY_RESOURCE_TYPE_ID,
+    resource_ids: [laneId],
+    lane_id: laneId,
+    laneId,
+    lane_number: laneNumber,
+    laneLabel: `Lane ${laneNumber}`,
+    guests: 1,
+    status,
+    status_label: archeryPublicStatus({ status, payment_status: paymentStatus }),
+    payment_status: paymentStatus,
+    paymentStatus: paymentStatus === 'PAID_ONLINE' || paymentStatus === 'PAID_COUNTER' ? 'paid' : 'pending',
+    payment_method: paymentMethod,
+    paymentMethod: paymentMethod ? paymentMethod.toLowerCase() : '',
+    paymentLabel: archeryPublicStatus({ status, payment_status: paymentStatus }),
+    amount_total: timing.amount,
+    totalAmount: timing.amount,
+    currency: 'THB',
+    note: customer.note || '',
+    createdAt: now,
+    updatedAt: now,
+    timestamp: now,
+  };
+  if (createdBy) payload.createdBy = createdBy;
+  if (holdExpiresAt) {
+    payload.hold_expires_at = holdExpiresAt;
+    payload.holdExpiresAt = holdExpiresAt;
+  }
+  return payload;
+}
+
+function archeryBookingItemPayload({ bookingId, memberUid, timing, laneId }) {
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  return {
+    id: `${bookingId}_ARCHERY`,
+    booking_id: bookingId,
+    service_type: ARCHERY_SERVICE_TYPE,
+    member_id: memberUid,
+    item_type: 'PACKAGE',
+    package_minutes: timing.packageMinutes,
+    package_label: `${timing.packageMinutes} minutes`,
+    resource_id: laneId,
+    quantity: 1,
+    unit_price: timing.amount,
+    amount: timing.amount,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function archeryLockPayload({ bookingId, memberUid, laneId, date, slot, status, holdExpiresAt = null }) {
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const payload = {
+    id: slot.id,
+    booking_id: bookingId,
+    service_type: ARCHERY_SERVICE_TYPE,
+    resource_type_id: ARCHERY_RESOURCE_TYPE_ID,
+    resource_id: laneId,
+    lane_id: laneId,
+    member_id: memberUid,
+    date,
+    slot_start: slot.startTime,
+    slot_end: slot.endTime,
+    slot_start_at: archeryTimestamp(date, slot.startTime),
+    slot_end_at: archeryTimestamp(date, slot.endTime),
+    status,
+    updatedAt: now,
+  };
+  if (holdExpiresAt) payload.hold_expires_at = holdExpiresAt;
+  return payload;
+}
+
+function paymentDocId(prefix, value) {
+  return `${prefix}_${sha256(value).slice(0, 32)}`;
+}
+
+function updateArcheryBookingStatusPayload(status, extra = {}) {
+  const paymentStatus = extra.payment_status || extra.paymentStatus || '';
+  const payload = {
+    status,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    ...extra,
+  };
+  payload.status_label = archeryPublicStatus({
+    status,
+    payment_status: paymentStatus || extra.previousPaymentStatus || 'PENDING',
+  });
+  return payload;
+}
+
+async function readArcheryBookingForAdmin(transaction, bookingId) {
+  const bookingRef = db.collection('bookings').doc(bookingId);
+  const bookingSnap = await transaction.get(bookingRef);
+  if (!bookingSnap.exists) {
+    const error = new Error('Booking not found');
+    error.statusCode = 404;
+    throw error;
+  }
+  const booking = bookingSnap.data() || {};
+  if (booking.service_type !== ARCHERY_SERVICE_TYPE) {
+    const error = new Error('Booking is not an archery booking');
+    error.statusCode = 400;
+    throw error;
+  }
+  return { bookingRef, booking };
+}
+
+function archeryTimingFromBooking(booking = {}) {
+  const date = cleanString(booking.date, 20);
+  const startTime = cleanString(booking.start_time || booking.startTime, 10);
+  const endTime = cleanString(booking.end_time || booking.endTime, 10);
+  const startMinutes = minutesFromTime(startTime);
+  const endMinutes = minutesFromTime(endTime);
+  if (!isISODate(date) || startMinutes == null || endMinutes == null || endMinutes <= startMinutes) {
+    const error = new Error('Booking time is invalid');
+    error.statusCode = 400;
+    throw error;
+  }
+  return {
+    date,
+    startTime,
+    endTime,
+    startMinutes,
+    endMinutes,
+    packageMinutes: endMinutes - startMinutes,
+    amount: Number(booking.amount_total || booking.totalAmount || 0) || 0,
+  };
+}
+
+function assertArcheryBookingActive(booking = {}) {
+  const status = cleanString(booking.status, 40).toUpperCase();
+  if (['CANCELLED', 'COMPLETED', 'NO_SHOW'].includes(status)) {
+    const error = new Error('Booking is already closed');
+    error.statusCode = 409;
+    throw error;
   }
 }
 
@@ -2067,6 +2950,829 @@ exports.createBooking = onRequest(
   }
 );
 
+exports.getArcheryAvailability = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (!['GET', 'POST'].includes(req.method)) {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'archeryAvailability', 240, 10 * 60 * 1000);
+      const raw = req.method === 'GET' ? req.query : (req.body || {});
+      const date = cleanString(raw.date, 20);
+      if (!isISODate(date)) {
+        res.status(400).json({ error: 'Invalid date' });
+        return;
+      }
+      const packageMinutes = normalizeArcheryPackageMinutes(raw.package_minutes || raw.packageMinutes || raw.duration_minutes || raw.durationMinutes || 60);
+      const requestedStart = cleanString(raw.start_time || raw.startTime || raw.time, 10);
+      const starts = [];
+      if (requestedStart) {
+        const timing = normalizeArcheryTimePayload({ date, startTime: requestedStart, packageMinutes });
+        starts.push(timing.startMinutes);
+      } else {
+        for (let minute = ARCHERY_OPEN_MINUTES; minute + packageMinutes <= ARCHERY_CLOSE_MINUTES; minute += ARCHERY_SLOT_MINUTES) {
+          starts.push(minute);
+        }
+      }
+
+      const locksSnap = await db.collection('resource_locks')
+        .where('service_type', '==', ARCHERY_SERVICE_TYPE)
+        .where('date', '==', date)
+        .get();
+      const now = new Date();
+      const occupied = new Set();
+      locksSnap.forEach(docSnap => {
+        const data = docSnap.data() || {};
+        if (isActiveArcheryLock(data, now)) occupied.add(data.id || docSnap.id);
+      });
+
+      const lanes = archeryLaneIds().map(laneId => ({
+        id: laneId,
+        lane_id: laneId,
+        lane_number: archeryLaneNumber(laneId),
+        name: `Lane ${archeryLaneNumber(laneId)}`,
+      }));
+      const slots = starts.map(startMinute => {
+        const endMinute = startMinute + packageMinutes;
+        const availableLaneIds = lanes
+          .map(lane => lane.id)
+          .filter(laneId => archerySlots(laneId, date, startMinute, endMinute)
+            .every(slot => !occupied.has(slot.id)));
+        return {
+          date,
+          startTime: timeFromMinutes(startMinute),
+          endTime: timeFromMinutes(endMinute),
+          package_minutes: packageMinutes,
+          availableLaneIds,
+          available_lanes: availableLaneIds.length,
+        };
+      });
+
+      res.set('Cache-Control', 'no-store');
+      res.json({
+        ok: true,
+        service_type: ARCHERY_SERVICE_TYPE,
+        date,
+        package_minutes: packageMinutes,
+        slot_minutes: ARCHERY_SLOT_MINUTES,
+        open_time: timeFromMinutes(ARCHERY_OPEN_MINUTES),
+        close_time: timeFromMinutes(ARCHERY_CLOSE_MINUTES),
+        lanes,
+        slots,
+      });
+    } catch (error) {
+      const status = error.statusCode || (/Invalid|outside/.test(error.message) ? 400 : 500);
+      logger.warn('Archery availability failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to read archery availability');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+exports.createBookingHold = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'createArcheryHold', 18, 10 * 60 * 1000);
+      const decoded = await requireSignedInUser(req);
+      const raw = req.body || {};
+      const timing = normalizeArcheryTimePayload(raw);
+      const requestedLane = cleanString(raw.lane_id || raw.laneId || '', 20);
+      const preferredLaneId = requestedLane ? normalizeArcheryLaneId(requestedLane) : '';
+      if (requestedLane && !preferredLaneId) {
+        res.status(400).json({ error: 'Invalid lane' });
+        return;
+      }
+      const memberUid = decoded.uid || '';
+      const customer = normalizeArcheryCustomer(raw, decoded);
+      let result = null;
+
+      await db.runTransaction(async transaction => {
+        const selected = await findAvailableArcheryLane(transaction, timing, preferredLaneId);
+        const bookingRef = db.collection('bookings').doc();
+        const holdExpiresAt = admin.firestore.Timestamp.fromDate(new Date(Date.now() + ARCHERY_HOLD_MINUTES * 60 * 1000));
+        writeArcheryResourceSeeds(transaction);
+        transaction.set(bookingRef, archeryBookingPayload({
+          bookingId: bookingRef.id,
+          memberUid,
+          timing,
+          laneId: selected.laneId,
+          source: 'online',
+          status: 'HELD',
+          paymentStatus: 'PENDING',
+          paymentMethod: 'ONLINE',
+          customer,
+          createdBy: memberUid,
+          holdExpiresAt,
+        }));
+        transaction.set(db.collection('booking_items').doc(`${bookingRef.id}_ARCHERY`), archeryBookingItemPayload({
+          bookingId: bookingRef.id,
+          memberUid,
+          timing,
+          laneId: selected.laneId,
+        }));
+        selected.slots.forEach(slot => {
+          transaction.set(slot.ref, archeryLockPayload({
+            bookingId: bookingRef.id,
+            memberUid,
+            laneId: selected.laneId,
+            date: timing.date,
+            slot,
+            status: 'HELD',
+            holdExpiresAt,
+          }));
+        });
+        result = {
+          booking_id: bookingRef.id,
+          lane_id: selected.laneId,
+          lane_number: archeryLaneNumber(selected.laneId),
+          hold_expires_at: holdExpiresAt.toDate().toISOString(),
+        };
+      });
+
+      res.status(201).json({
+        ok: true,
+        ...result,
+        service_type: ARCHERY_SERVICE_TYPE,
+        date: timing.date,
+        startTime: timing.startTime,
+        endTime: timing.endTime,
+        package_minutes: timing.packageMinutes,
+        amount_total: timing.amount,
+        payment_status: 'PENDING',
+      });
+    } catch (error) {
+      const status = error.statusCode || (/Invalid|outside|Missing/.test(error.message) ? 400 : 500);
+      logger.warn('Archery hold failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to hold archery lane');
+      res.status(status).json({ error: status === 409 ? 'Selected lane/time is already held or booked.' : publicError.message });
+    }
+  }
+);
+
+exports.confirmArcheryBooking = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'confirmArcheryBooking', 18, 10 * 60 * 1000);
+      const decoded = await requireSignedInUser(req);
+      const raw = req.body || {};
+      const bookingId = cleanString(raw.booking_id || raw.bookingId || raw.id, 80);
+      if (!bookingId) {
+        res.status(400).json({ error: 'Missing booking id' });
+        return;
+      }
+      const providerRef = cleanString(raw.provider_ref || raw.providerRef || raw.payment_provider_ref || '', 160);
+      let responsePayload = null;
+
+      await db.runTransaction(async transaction => {
+        const bookingRef = db.collection('bookings').doc(bookingId);
+        const bookingSnap = await transaction.get(bookingRef);
+        if (!bookingSnap.exists) {
+          const error = new Error('Booking not found');
+          error.statusCode = 404;
+          throw error;
+        }
+        const booking = bookingSnap.data() || {};
+        if (booking.service_type !== ARCHERY_SERVICE_TYPE) {
+          const error = new Error('Booking is not an archery booking');
+          error.statusCode = 400;
+          throw error;
+        }
+        const memberUid = cleanString(booking.member_id || booking.uid || booking.customerUid, 160);
+        if (memberUid !== decoded.uid) {
+          const error = new Error('Booking belongs to another member');
+          error.statusCode = 403;
+          throw error;
+        }
+        const status = cleanString(booking.status, 40).toUpperCase();
+        if (!['HELD', 'CONFIRMED'].includes(status)) {
+          const error = new Error('Booking hold cannot be confirmed');
+          error.statusCode = 409;
+          throw error;
+        }
+        const holdExpiresAt = archeryDateFromTimestamp(booking.hold_expires_at || booking.holdExpiresAt);
+        if (status === 'HELD' && holdExpiresAt && holdExpiresAt.getTime() <= Date.now()) {
+          const error = new Error('Booking hold expired');
+          error.statusCode = 409;
+          throw error;
+        }
+
+        const timing = archeryTimingFromBooking(booking);
+        const laneId = normalizeArcheryLaneId(booking.lane_id || booking.laneId);
+        const lockSlots = archeryLockRefs(laneId, timing.date, timing.startMinutes, timing.endMinutes);
+        const paymentRef = providerRef ? db.collection('payments').doc(paymentDocId('online', providerRef)) : null;
+        const reads = [
+          ...lockSlots.map(slot => transaction.get(slot.ref)),
+          paymentRef ? transaction.get(paymentRef) : Promise.resolve(null),
+        ];
+        const readSnaps = await Promise.all(reads);
+        const lockSnaps = readSnaps.slice(0, lockSlots.length);
+        const paymentSnap = paymentRef ? readSnaps[readSnaps.length - 1] : null;
+
+        lockSnaps.forEach(lockSnap => {
+          const lock = lockSnap.exists ? lockSnap.data() || {} : {};
+          if (!lockSnap.exists || lock.booking_id !== bookingId) {
+            const error = new Error('Booking lock is no longer available');
+            error.statusCode = 409;
+            throw error;
+          }
+          if (lock.status === 'HELD' && !isActiveArcheryLock(lock, new Date())) {
+            const error = new Error('Booking hold expired');
+            error.statusCode = 409;
+            throw error;
+          }
+        });
+
+        let paymentStatus = cleanString(booking.payment_status || 'PENDING', 40).toUpperCase();
+        let paymentMethod = cleanString(booking.payment_method || 'ONLINE', 40).toUpperCase();
+        if (providerRef) {
+          if (paymentSnap && paymentSnap.exists && (paymentSnap.data() || {}).booking_id !== bookingId) {
+            const error = new Error('Payment reference has already been used');
+            error.statusCode = 409;
+            throw error;
+          }
+          paymentStatus = 'PAID_ONLINE';
+          paymentMethod = 'ONLINE';
+          transaction.set(paymentRef, {
+            id: paymentRef.id,
+            booking_id: bookingId,
+            service_type: ARCHERY_SERVICE_TYPE,
+            member_id: memberUid,
+            method: 'ONLINE',
+            status: 'PAID',
+            amount: Number(booking.amount_total || booking.totalAmount || 0) || 0,
+            currency: booking.currency || 'THB',
+            provider_ref: providerRef,
+            idempotency_key: providerRef,
+            paidAt: admin.firestore.FieldValue.serverTimestamp(),
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+        }
+
+        lockSlots.forEach(slot => {
+          transaction.update(slot.ref, {
+            status: 'CONFIRMED',
+            hold_expires_at: admin.firestore.FieldValue.delete(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        });
+        transaction.update(bookingRef, updateArcheryBookingStatusPayload('CONFIRMED', {
+          payment_status: paymentStatus,
+          paymentStatus: paymentStatus === 'PAID_ONLINE' ? 'paid' : 'pending',
+          payment_method: paymentMethod,
+          paymentMethod: paymentMethod.toLowerCase(),
+          paymentLabel: archeryPublicStatus({ status: 'CONFIRMED', payment_status: paymentStatus }),
+          confirmedAt: admin.firestore.FieldValue.serverTimestamp(),
+          previousPaymentStatus: paymentStatus,
+        }));
+        responsePayload = {
+          booking_id: bookingId,
+          status: 'CONFIRMED',
+          payment_status: paymentStatus,
+          payment_label: archeryPublicStatus({ status: 'CONFIRMED', payment_status: paymentStatus }),
+        };
+      });
+
+      res.json({ ok: true, ...responsePayload });
+    } catch (error) {
+      const status = error.statusCode || (/Invalid|Missing/.test(error.message) ? 400 : 500);
+      logger.warn('Archery confirm failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to confirm archery booking');
+      res.status(status).json({ error: status === 409 ? 'This hold is no longer available.' : publicError.message });
+    }
+  }
+);
+
+exports.createWalkInBooking = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const decoded = await requireAdminAccess(req, 'archery');
+      const raw = req.body || {};
+      const timing = normalizeArcheryTimePayload(raw);
+      const memberUid = cleanString(raw.member_id || raw.memberUid || raw.customerUid || raw.uid, 160);
+      if (!memberUid) {
+        res.status(400).json({ error: 'Missing Eden member id' });
+        return;
+      }
+      const requestedLane = cleanString(raw.lane_id || raw.laneId || '', 20);
+      const preferredLaneId = requestedLane ? normalizeArcheryLaneId(requestedLane) : '';
+      if (requestedLane && !preferredLaneId) {
+        res.status(400).json({ error: 'Invalid lane' });
+        return;
+      }
+      let result = null;
+
+      await db.runTransaction(async transaction => {
+        const member = await loadArcheryMemberForAdmin(transaction, memberUid);
+        const selected = await findAvailableArcheryLane(transaction, timing, preferredLaneId);
+        const user = member.user || {};
+        const summary = member.summary || {};
+        const customer = normalizeArcheryCustomer({
+          ...raw,
+          customerName: raw.customerName || user.displayName || user.display_name || summary.displayName || summary.name,
+          customerPhone: raw.customerPhone || user.phone || user.phone_display || summary.phone,
+          customerEmail: raw.customerEmail || user.email || summary.email,
+        }, {});
+        const bookingRef = db.collection('bookings').doc();
+        writeArcheryResourceSeeds(transaction);
+        transaction.set(bookingRef, archeryBookingPayload({
+          bookingId: bookingRef.id,
+          memberUid,
+          timing,
+          laneId: selected.laneId,
+          source: 'walk_in',
+          status: 'CONFIRMED',
+          paymentStatus: 'PENDING',
+          paymentMethod: 'COUNTER',
+          customer,
+          createdBy: decoded.uid || '',
+        }));
+        transaction.set(db.collection('booking_items').doc(`${bookingRef.id}_ARCHERY`), archeryBookingItemPayload({
+          bookingId: bookingRef.id,
+          memberUid,
+          timing,
+          laneId: selected.laneId,
+        }));
+        selected.slots.forEach(slot => {
+          transaction.set(slot.ref, archeryLockPayload({
+            bookingId: bookingRef.id,
+            memberUid,
+            laneId: selected.laneId,
+            date: timing.date,
+            slot,
+            status: 'CONFIRMED',
+          }));
+        });
+        result = {
+          booking_id: bookingRef.id,
+          lane_id: selected.laneId,
+          lane_number: archeryLaneNumber(selected.laneId),
+        };
+      });
+
+      res.status(201).json({
+        ok: true,
+        ...result,
+        service_type: ARCHERY_SERVICE_TYPE,
+        date: timing.date,
+        startTime: timing.startTime,
+        endTime: timing.endTime,
+        package_minutes: timing.packageMinutes,
+        payment_status: 'PENDING',
+      });
+    } catch (error) {
+      const status = error.statusCode || (/Invalid|Missing|outside/.test(error.message) ? 400 : 500);
+      logger.warn('Archery walk-in failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to create walk-in booking');
+      res.status(status).json({ error: status === 409 ? 'Selected lane/time is already held or booked.' : publicError.message });
+    }
+  }
+);
+
+exports.adminCheckInBooking = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+    try {
+      const decoded = await requireAdminAccess(req, 'archery');
+      const bookingId = cleanString(req.body?.booking_id || req.body?.bookingId || req.body?.id, 80);
+      await db.runTransaction(async transaction => {
+        const { bookingRef, booking } = await readArcheryBookingForAdmin(transaction, bookingId);
+        assertArcheryBookingActive(booking);
+        const timing = archeryTimingFromBooking(booking);
+        const laneId = normalizeArcheryLaneId(booking.lane_id || booking.laneId);
+        const slots = archeryLockRefs(laneId, timing.date, timing.startMinutes, timing.endMinutes);
+        await Promise.all(slots.map(slot => transaction.get(slot.ref)));
+        slots.forEach(slot => transaction.update(slot.ref, {
+          status: 'CHECKED_IN',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }));
+        transaction.update(bookingRef, updateArcheryBookingStatusPayload('CHECKED_IN', {
+          checked_in_at: admin.firestore.FieldValue.serverTimestamp(),
+          checkedInBy: decoded.uid || '',
+          previousPaymentStatus: booking.payment_status || 'PENDING',
+        }));
+        transaction.set(db.collection('lane_sessions').doc(bookingId), {
+          id: bookingId,
+          booking_id: bookingId,
+          service_type: ARCHERY_SERVICE_TYPE,
+          member_id: booking.member_id || booking.uid || '',
+          lane_id: laneId,
+          date: timing.date,
+          start_time: timing.startTime,
+          planned_end_time: timing.endTime,
+          status: 'CHECKED_IN',
+          checked_in_at: admin.firestore.FieldValue.serverTimestamp(),
+          checkedInBy: decoded.uid || '',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      });
+      res.json({ ok: true, booking_id: bookingId, status: 'CHECKED_IN' });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to check in booking');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+exports.adminExtendBooking = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+    try {
+      const decoded = await requireAdminAccess(req, 'archery');
+      const raw = req.body || {};
+      const bookingId = cleanString(raw.booking_id || raw.bookingId || raw.id, 80);
+      const requestedEnd = cleanString(raw.new_end_time || raw.newEndTime || '', 10);
+      const extraMinutes = Math.max(0, Math.floor(Number(raw.extra_minutes || raw.extraMinutes || 0) || 0));
+      let responsePayload = null;
+      await db.runTransaction(async transaction => {
+        const { bookingRef, booking } = await readArcheryBookingForAdmin(transaction, bookingId);
+        assertArcheryBookingActive(booking);
+        const timing = archeryTimingFromBooking(booking);
+        const newEndMinutes = requestedEnd ? minutesFromTime(requestedEnd) : timing.endMinutes + extraMinutes;
+        if (
+          newEndMinutes == null
+          || newEndMinutes <= timing.endMinutes
+          || newEndMinutes > ARCHERY_CLOSE_MINUTES
+          || newEndMinutes % ARCHERY_SLOT_MINUTES !== 0
+        ) {
+          const error = new Error('Invalid extension time');
+          error.statusCode = 400;
+          throw error;
+        }
+        const laneId = normalizeArcheryLaneId(booking.lane_id || booking.laneId);
+        const extraSlots = archeryLockRefs(laneId, timing.date, timing.endMinutes, newEndMinutes);
+        const extraSnaps = await Promise.all(extraSlots.map(slot => transaction.get(slot.ref)));
+        extraSnaps.forEach(snap => {
+          const lock = snap.exists ? snap.data() || {} : {};
+          if (snap.exists && isActiveArcheryLock(lock, new Date()) && lock.booking_id !== bookingId) {
+            const error = new Error('Extension conflicts with another booking');
+            error.statusCode = 409;
+            throw error;
+          }
+        });
+        extraSlots.forEach(slot => transaction.set(slot.ref, archeryLockPayload({
+          bookingId,
+          memberUid: booking.member_id || booking.uid || '',
+          laneId,
+          date: timing.date,
+          slot,
+          status: 'CONFIRMED',
+        })));
+        const newEndTime = timeFromMinutes(newEndMinutes);
+        transaction.update(bookingRef, {
+          endTime: newEndTime,
+          end_time: newEndTime,
+          end_at: archeryTimestamp(timing.date, newEndTime),
+          duration_minutes: newEndMinutes - timing.startMinutes,
+          package_minutes: newEndMinutes - timing.startMinutes,
+          extended_minutes: (Number(booking.extended_minutes || 0) || 0) + (newEndMinutes - timing.endMinutes),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedBy: decoded.uid || '',
+        });
+        transaction.set(db.collection('booking_items').doc(`${bookingId}_ARCHERY`), {
+          package_minutes: newEndMinutes - timing.startMinutes,
+          package_label: `${newEndMinutes - timing.startMinutes} minutes`,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        transaction.set(db.collection('lane_sessions').doc(bookingId), {
+          planned_end_time: newEndTime,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        responsePayload = { booking_id: bookingId, endTime: newEndTime };
+      });
+      res.json({ ok: true, ...responsePayload });
+    } catch (error) {
+      const status = error.statusCode || (/Invalid/.test(error.message) ? 400 : 500);
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to extend booking');
+      res.status(status).json({ error: status === 409 ? 'Extension conflicts with another booking.' : publicError.message });
+    }
+  }
+);
+
+exports.adminMoveBookingLane = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+    try {
+      const decoded = await requireAdminAccess(req, 'archery');
+      const raw = req.body || {};
+      const bookingId = cleanString(raw.booking_id || raw.bookingId || raw.id, 80);
+      const newLaneId = normalizeArcheryLaneId(raw.new_lane_id || raw.newLaneId || raw.lane_id || raw.laneId);
+      if (!newLaneId) {
+        res.status(400).json({ error: 'Invalid lane' });
+        return;
+      }
+      await db.runTransaction(async transaction => {
+        const { bookingRef, booking } = await readArcheryBookingForAdmin(transaction, bookingId);
+        assertArcheryBookingActive(booking);
+        const timing = archeryTimingFromBooking(booking);
+        const oldLaneId = normalizeArcheryLaneId(booking.lane_id || booking.laneId);
+        if (oldLaneId === newLaneId) return;
+        const oldSlots = archeryLockRefs(oldLaneId, timing.date, timing.startMinutes, timing.endMinutes);
+        const newSlots = archeryLockRefs(newLaneId, timing.date, timing.startMinutes, timing.endMinutes);
+        const snaps = await Promise.all([
+          ...oldSlots.map(slot => transaction.get(slot.ref)),
+          ...newSlots.map(slot => transaction.get(slot.ref)),
+        ]);
+        const newSnaps = snaps.slice(oldSlots.length);
+        newSnaps.forEach(snap => {
+          const lock = snap.exists ? snap.data() || {} : {};
+          if (snap.exists && isActiveArcheryLock(lock, new Date()) && lock.booking_id !== bookingId) {
+            const error = new Error('Target lane conflicts with another booking');
+            error.statusCode = 409;
+            throw error;
+          }
+        });
+        oldSlots.forEach(slot => transaction.set(slot.ref, {
+          status: 'RELEASED',
+          releasedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true }));
+        newSlots.forEach(slot => transaction.set(slot.ref, archeryLockPayload({
+          bookingId,
+          memberUid: booking.member_id || booking.uid || '',
+          laneId: newLaneId,
+          date: timing.date,
+          slot,
+          status: cleanString(booking.status, 40).toUpperCase() === 'CHECKED_IN' ? 'CHECKED_IN' : 'CONFIRMED',
+        })));
+        transaction.update(bookingRef, {
+          lane_id: newLaneId,
+          laneId: newLaneId,
+          lane_number: archeryLaneNumber(newLaneId),
+          laneLabel: `Lane ${archeryLaneNumber(newLaneId)}`,
+          resource_ids: [newLaneId],
+          movedAt: admin.firestore.FieldValue.serverTimestamp(),
+          movedBy: decoded.uid || '',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        transaction.set(db.collection('lane_sessions').doc(bookingId), {
+          lane_id: newLaneId,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      });
+      res.json({ ok: true, booking_id: bookingId, lane_id: newLaneId });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to move booking lane');
+      res.status(status).json({ error: status === 409 ? 'Target lane conflicts with another booking.' : publicError.message });
+    }
+  }
+);
+
+exports.adminCancelBooking = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+    try {
+      const decoded = await requireAdminAccess(req, 'archery');
+      const bookingId = cleanString(req.body?.booking_id || req.body?.bookingId || req.body?.id, 80);
+      const reason = cleanString(req.body?.reason || '', 300);
+      await db.runTransaction(async transaction => {
+        const { bookingRef, booking } = await readArcheryBookingForAdmin(transaction, bookingId);
+        const timing = archeryTimingFromBooking(booking);
+        const laneId = normalizeArcheryLaneId(booking.lane_id || booking.laneId);
+        const slots = archeryLockRefs(laneId, timing.date, timing.startMinutes, timing.endMinutes);
+        await Promise.all(slots.map(slot => transaction.get(slot.ref)));
+        slots.forEach(slot => transaction.set(slot.ref, {
+          status: 'CANCELLED',
+          releasedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true }));
+        transaction.update(bookingRef, updateArcheryBookingStatusPayload('CANCELLED', {
+          cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+          cancelledBy: decoded.uid || '',
+          cancelReason: reason,
+          previousPaymentStatus: booking.payment_status || 'PENDING',
+        }));
+        transaction.set(db.collection('lane_sessions').doc(bookingId), {
+          status: 'CANCELLED',
+          closedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      });
+      res.json({ ok: true, booking_id: bookingId, status: 'CANCELLED' });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to cancel booking');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+exports.adminCompleteBooking = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+    try {
+      const decoded = await requireAdminAccess(req, 'archery');
+      const bookingId = cleanString(req.body?.booking_id || req.body?.bookingId || req.body?.id, 80);
+      await db.runTransaction(async transaction => {
+        const { bookingRef, booking } = await readArcheryBookingForAdmin(transaction, bookingId);
+        const timing = archeryTimingFromBooking(booking);
+        const laneId = normalizeArcheryLaneId(booking.lane_id || booking.laneId);
+        const slots = archeryLockRefs(laneId, timing.date, timing.startMinutes, timing.endMinutes);
+        await Promise.all(slots.map(slot => transaction.get(slot.ref)));
+        slots.forEach(slot => transaction.set(slot.ref, {
+          status: 'COMPLETED',
+          releasedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true }));
+        transaction.update(bookingRef, updateArcheryBookingStatusPayload('COMPLETED', {
+          completedAt: admin.firestore.FieldValue.serverTimestamp(),
+          completedBy: decoded.uid || '',
+          previousPaymentStatus: booking.payment_status || 'PENDING',
+        }));
+        transaction.set(db.collection('lane_sessions').doc(bookingId), {
+          status: 'COMPLETED',
+          completedAt: admin.firestore.FieldValue.serverTimestamp(),
+          closedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      });
+      res.json({ ok: true, booking_id: bookingId, status: 'COMPLETED' });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to complete booking');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+exports.adminMarkNoShow = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+    try {
+      const decoded = await requireAdminAccess(req, 'archery');
+      const bookingId = cleanString(req.body?.booking_id || req.body?.bookingId || req.body?.id, 80);
+      await db.runTransaction(async transaction => {
+        const { bookingRef, booking } = await readArcheryBookingForAdmin(transaction, bookingId);
+        const timing = archeryTimingFromBooking(booking);
+        const laneId = normalizeArcheryLaneId(booking.lane_id || booking.laneId);
+        const slots = archeryLockRefs(laneId, timing.date, timing.startMinutes, timing.endMinutes);
+        await Promise.all(slots.map(slot => transaction.get(slot.ref)));
+        slots.forEach(slot => transaction.set(slot.ref, {
+          status: 'NO_SHOW',
+          releasedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true }));
+        transaction.update(bookingRef, updateArcheryBookingStatusPayload('NO_SHOW', {
+          noShowAt: admin.firestore.FieldValue.serverTimestamp(),
+          noShowBy: decoded.uid || '',
+          previousPaymentStatus: booking.payment_status || 'PENDING',
+        }));
+        transaction.set(db.collection('lane_sessions').doc(bookingId), {
+          status: 'NO_SHOW',
+          closedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      });
+      res.json({ ok: true, booking_id: bookingId, status: 'NO_SHOW' });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to mark no-show');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+exports.recordCounterPayment = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+    try {
+      const decoded = await requireAdminAccess(req, 'archery');
+      const raw = req.body || {};
+      const bookingId = cleanString(raw.booking_id || raw.bookingId || raw.id, 80);
+      const idempotencyKey = cleanString(raw.idempotency_key || raw.idempotencyKey || `${bookingId}_counter`, 160);
+      if (!bookingId || !idempotencyKey) {
+        res.status(400).json({ error: 'Missing booking or idempotency key' });
+        return;
+      }
+      let responsePayload = null;
+      await db.runTransaction(async transaction => {
+        const { bookingRef, booking } = await readArcheryBookingForAdmin(transaction, bookingId);
+        const paymentRef = db.collection('payments').doc(paymentDocId('counter', `${bookingId}:${idempotencyKey}`));
+        const paymentSnap = await transaction.get(paymentRef);
+        if (paymentSnap.exists) {
+          responsePayload = { booking_id: bookingId, payment_id: paymentRef.id, duplicate: true };
+          return;
+        }
+        const currentPaymentStatus = cleanString(booking.payment_status || booking.paymentStatus || 'PENDING', 40).toUpperCase();
+        if (currentPaymentStatus === 'PAID_ONLINE' || currentPaymentStatus === 'PAID_COUNTER') {
+          const error = new Error('Booking has already been paid');
+          error.statusCode = 409;
+          throw error;
+        }
+        const amount = Number(raw.amount || booking.amount_total || booking.totalAmount || 0) || 0;
+        transaction.set(paymentRef, {
+          id: paymentRef.id,
+          booking_id: bookingId,
+          service_type: ARCHERY_SERVICE_TYPE,
+          member_id: booking.member_id || booking.uid || '',
+          method: 'COUNTER',
+          status: 'PAID',
+          amount,
+          currency: booking.currency || 'THB',
+          idempotency_key: idempotencyKey,
+          cashier_uid: decoded.uid || '',
+          paidAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        transaction.update(bookingRef, updateArcheryBookingStatusPayload(cleanString(booking.status || 'CONFIRMED', 40).toUpperCase(), {
+          payment_status: 'PAID_COUNTER',
+          paymentStatus: 'paid',
+          payment_method: 'COUNTER',
+          paymentMethod: 'cash',
+          paymentLabel: 'Paid Counter',
+          paidAt: admin.firestore.FieldValue.serverTimestamp(),
+          paidBy: decoded.uid || '',
+          previousPaymentStatus: 'PAID_COUNTER',
+        }));
+        responsePayload = { booking_id: bookingId, payment_id: paymentRef.id, duplicate: false };
+      });
+      res.json({ ok: true, ...responsePayload, payment_status: 'PAID_COUNTER' });
+    } catch (error) {
+      const status = error.statusCode || (/Missing/.test(error.message) ? 400 : 500);
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to record counter payment');
+      res.status(status).json({ error: status === 409 ? 'This booking is already paid.' : publicError.message });
+    }
+  }
+);
+
 exports.uploadSpaceshipImage = onRequest(
   {
     region: 'asia-southeast1',
@@ -2203,7 +3909,6 @@ exports.upsertAdminAccessUser = onRequest(
       const now = admin.firestore.FieldValue.serverTimestamp();
       const accessRef = db.collection('admin_users').doc(userRecord.uid);
       const accessSnap = await accessRef.get();
-      const existingAccess = accessSnap.exists ? accessSnap.data() || {} : {};
       const accessPayload = {
         uid: userRecord.uid,
         email,
@@ -2216,7 +3921,6 @@ exports.upsertAdminAccessUser = onRequest(
         authManagedBy: owner.uid || '',
         updatedAt: now,
         updatedBy: owner.uid || '',
-        ...normalizeAdminArcheryAccess(role, permissions, body, existingAccess),
       };
       if (passwordUpdated) accessPayload.passwordUpdatedAt = now;
       if (!accessSnap.exists) {
@@ -2250,19 +3954,12 @@ exports.upsertAdminAccessUser = onRequest(
         createdAuthUser,
         passwordUpdated,
         passwordLoginEnabled: accessPayload.passwordLoginEnabled,
-        primary_branch_id: accessPayload.primary_branch_id || '',
-        branch_ids: Array.isArray(accessPayload.branch_ids) ? accessPayload.branch_ids : [],
-        archery_role: accessPayload.archery_role || '',
       });
     } catch (error) {
       const status = error.statusCode || (/required|valid|password|uid|email/i.test(error.message) ? 400 : 500);
       logger.warn('Admin access user upsert failed', { message: error.message, status });
       const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to save admin access user. Please check the required fields.');
-      res.status(status).json({
-        error: error.message || publicError.message,
-        code: String(error.message || 'ADMIN_ACCESS_SAVE_FAILED').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, ''),
-        status,
-      });
+      res.status(status).json({ error: publicError.message });
     }
   }
 );
@@ -2426,11 +4123,34 @@ exports.sendEmailVerificationCode = onRequest(
         throw publicClientError('Please enter a valid email address.', 400);
       }
       await assertEmailAvailableForUid(email, decoded.uid);
+      const userSnap = await db.collection('users').doc(decoded.uid).get();
+      const userData = userSnap.exists ? userSnap.data() || {} : {};
+      const existingEmail = normalizePublicEmail(userData.email || userData.email_lower || '');
+      if (existingEmail === email && userData.emailVerified === true) {
+        res.json({ ok: true, alreadyVerified: true, email });
+        return;
+      }
+
+      const codeRef = db.collection('email_verification_codes').doc(decoded.uid);
+      const existingCodeSnap = await codeRef.get();
+      const existingCode = existingCodeSnap.exists ? existingCodeSnap.data() || {} : {};
+      const existingExpiresAt = existingCode.expiresAt?.toDate ? existingCode.expiresAt.toDate().getTime() : 0;
+      if (existingCode.email === email && existingExpiresAt > Date.now()) {
+        const resendAfterSeconds = Math.max(1, Math.ceil((existingExpiresAt - Date.now()) / 1000));
+        res.json({
+          ok: true,
+          reused: true,
+          email,
+          expiresInMinutes: Math.max(1, Math.ceil(resendAfterSeconds / 60)),
+          resendAfterSeconds,
+        });
+        return;
+      }
 
       const code = String(Math.floor(100000 + Math.random() * 900000));
       const now = admin.firestore.Timestamp.now();
       const expiresAt = admin.firestore.Timestamp.fromDate(new Date(Date.now() + 10 * 60 * 1000));
-      await db.collection('email_verification_codes').doc(decoded.uid).set({
+      await codeRef.set({
         uid: decoded.uid,
         email,
         codeHash: emailVerificationHash(decoded.uid, email, code),
@@ -2754,6 +4474,231 @@ exports.diagnoseMemberAuthLink = onRequest(
   }
 );
 
+exports.mergeDuplicateMemberAccounts = onRequest(
+  { region: 'asia-southeast1', timeoutSeconds: 120, memory: '512MiB' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'mergeDuplicateMemberAccounts', 20, 15 * 60 * 1000);
+      const decoded = await requireAdminAccess(req, 'members');
+      const body = req.body || {};
+      const email = normalizePublicEmail(body.email || body.emailLower || '');
+      const phoneNumber = normalizeThaiPhoneForMemberIndex(body.phoneNumber || body.phone || '');
+      const primaryUid = cleanString(body.primaryUid || body.uid || body.userId || '', 160);
+      const requestedDuplicateUids = uniqueCleanStrings(Array.isArray(body.duplicateUids) ? body.duplicateUids : [], 160);
+
+      if (!primaryUid) throw publicClientError('Primary UID is required.', 400);
+      if (!email && !phoneNumber && requestedDuplicateUids.length < 1) {
+        throw publicClientError('Email, phone number, or duplicate UID is required.', 400);
+      }
+
+      const [emailUids, phoneUids] = await Promise.all([
+        email ? findMemberUidsByEmail(email) : Promise.resolve([]),
+        phoneNumber ? findMemberUidsByPhone(phoneNumber) : Promise.resolve([]),
+      ]);
+      const candidateUids = uniqueCleanStrings([
+        primaryUid,
+        ...requestedDuplicateUids,
+        ...emailUids,
+        ...phoneUids,
+      ], 160);
+      const duplicateUids = uniqueCleanStrings(candidateUids.filter(uid => uid !== primaryUid), 160);
+
+      if (!candidateUids.includes(primaryUid)) throw publicClientError('Primary UID must be one of the matched member UIDs.', 400);
+      if (duplicateUids.length < 1) throw publicClientError('No duplicate member UID was found to merge.', 400);
+      if (candidateUids.length > 8) throw publicClientError('Too many candidate UIDs. Please merge a smaller set first.', 400);
+
+      const rows = await Promise.all(candidateUids.map(loadMergeMemberRow));
+      const primaryRow = rows.find(row => row.uid === primaryUid);
+      if (!primaryRow?.userExists && !primaryRow?.credentialExists) {
+        throw publicClientError('Primary member profile was not found.', 404);
+      }
+      const mergeableDuplicates = rows.filter(row => row.uid !== primaryUid && (row.userExists || row.credentialExists || row.summaryExists));
+      if (!mergeableDuplicates.length) throw publicClientError('No existing duplicate member data was found.', 404);
+
+      const auditRef = db.collection('member_merge_audits').doc();
+      const auditId = auditRef.id;
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      const mergedEmail = mergeMemberEmail(rows, email);
+      const mergedPhone = mergeMemberPhone(rows, phoneNumber);
+      const phoneIndexKey = mergedPhone ? memberPhoneIndexKey(mergedPhone) : '';
+      const {
+        userPayload,
+        summaryPayload,
+        mergedPoints,
+        totalSpent,
+        visitCount,
+        orderCount,
+        bookingCount,
+        tier,
+      } = buildMergedMemberPayload(primaryUid, rows, mergedEmail, mergedPhone, auditId);
+      const credentialPayload = buildMergedCredentialPayload(primaryUid, rows, mergedEmail, mergedPhone);
+
+      const [orderDocs, bookingDocs, ledgerDocs] = await Promise.all([
+        findMergeDocsByFields('orders', ['customerUid', 'uid', 'userId', 'memberUid'], duplicateUids),
+        findMergeDocsByFields('bookings', ['uid', 'customerUid', 'userId', 'memberUid'], duplicateUids),
+        findMergeDocsByFields('point_ledger', ['userId'], duplicateUids),
+      ]);
+
+      const operations = [];
+      operations.push({
+        type: 'set',
+        ref: auditRef,
+        data: {
+          primaryUid,
+          duplicateUids,
+          candidateUids,
+          email: mergedEmail || null,
+          phoneLast4: mergedPhone ? mergedPhone.slice(-4) : null,
+          snapshots: rows.map(memberMergeSnapshot),
+          counts: {
+            ordersMatched: orderDocs.length,
+            bookingsMatched: bookingDocs.length,
+            pointLedgerMatched: ledgerDocs.length,
+          },
+          mergedTotals: {
+            pointsBalance: mergedPoints,
+            totalSpent,
+            visitCount,
+            orderCount,
+            bookingCount,
+            tier,
+          },
+          createdAt: now,
+          createdBy: decoded.uid || '',
+          createdByEmail: cleanString(decoded.email || '', 180),
+          source: 'admin_member_auth_merge',
+        },
+        options: { merge: false },
+      });
+      operations.push({ type: 'set', ref: db.collection('users').doc(primaryUid), data: userPayload, options: { merge: true } });
+      operations.push({ type: 'set', ref: db.collection('member_summaries').doc(primaryUid), data: summaryPayload, options: { merge: true } });
+      operations.push({ type: 'set', ref: db.collection('user_credentials').doc(primaryUid), data: credentialPayload, options: { merge: true } });
+      if (mergedPhone && phoneIndexKey) {
+        operations.push({
+          type: 'set',
+          ref: db.collection('phone_number_index').doc(phoneIndexKey),
+          data: {
+            uid: primaryUid,
+            phone_number: mergedPhone,
+            updated_at: now,
+            memberMergeAuditId: auditId,
+          },
+          options: { merge: true },
+        });
+      }
+
+      let ordersUpdated = 0;
+      orderDocs.forEach(docSnap => {
+        const update = updateOrderMemberUidPayload(docSnap.data() || {}, duplicateUids, primaryUid, now, auditId);
+        if (Object.keys(update).length) {
+          ordersUpdated += 1;
+          operations.push({ type: 'update', ref: docSnap.ref, data: update });
+        }
+      });
+      let bookingsUpdated = 0;
+      bookingDocs.forEach(docSnap => {
+        const update = updateBookingMemberUidPayload(docSnap.data() || {}, duplicateUids, primaryUid, now, auditId);
+        if (Object.keys(update).length) {
+          bookingsUpdated += 1;
+          operations.push({ type: 'update', ref: docSnap.ref, data: update });
+        }
+      });
+      let pointLedgerUpdated = 0;
+      ledgerDocs.forEach(docSnap => {
+        pointLedgerUpdated += 1;
+        operations.push({
+          type: 'update',
+          ref: docSnap.ref,
+          data: updatePointLedgerMemberPayload(docSnap.data() || {}, primaryUid, userPayload, now, auditId),
+        });
+      });
+
+      duplicateUids.forEach(uid => {
+        operations.push({
+          type: 'set',
+          ref: db.collection('member_merge_redirects').doc(uid),
+          data: {
+            uid,
+            primaryUid,
+            mergedInto: primaryUid,
+            auditId,
+            email: mergedEmail || null,
+            phoneLast4: mergedPhone ? mergedPhone.slice(-4) : null,
+            mergedAt: now,
+            mergedBy: decoded.uid || '',
+            mergedByEmail: cleanString(decoded.email || '', 180),
+          },
+          options: { merge: false },
+        });
+        operations.push({ type: 'delete', ref: db.collection('users').doc(uid) });
+        operations.push({ type: 'delete', ref: db.collection('member_summaries').doc(uid) });
+        operations.push({ type: 'delete', ref: db.collection('user_credentials').doc(uid) });
+      });
+
+      const writesCommitted = await commitMergeOperations(operations);
+      const repairStats = {};
+      await repairMemberAuthLink(primaryUid, {
+        ...userPayload,
+        uid: primaryUid,
+        email: mergedEmail,
+        email_lower: mergedEmail,
+        phone_number: mergedPhone,
+        phoneE164: mergedPhone,
+      }, repairStats);
+
+      const after = await summarizeMemberAuthUid(primaryUid, mergedEmail, mergedPhone);
+      logger.info('Duplicate member accounts merged', {
+        auditId,
+        primaryUid,
+        duplicateUids,
+        ordersUpdated,
+        bookingsUpdated,
+        pointLedgerUpdated,
+        writesCommitted,
+      });
+
+      res.json({
+        ok: true,
+        auditId,
+        primaryUid,
+        mergedUids: duplicateUids,
+        counts: {
+          ordersUpdated,
+          bookingsUpdated,
+          pointLedgerUpdated,
+          writesCommitted,
+          credentialLinksRepaired: repairStats.credentialLinksRepaired || 0,
+          phoneIndexesRepaired: repairStats.phoneIndexesRepaired || 0,
+          phoneIndexConflicts: repairStats.phoneIndexConflicts || 0,
+        },
+        totals: {
+          pointsBalance: mergedPoints,
+          totalSpent,
+          visitCount,
+          orderCount,
+          bookingCount,
+          tier,
+        },
+        selected: after,
+        recommendation: after?.hasPasswordHash ? 'READY_FOR_EMAIL_PHONE_PASSWORD_LOGIN' : 'SAFE_PASSWORD_SETUP_REQUIRED',
+      });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('Duplicate member merge failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to merge duplicate member accounts.');
+      res.status(status).json({ error: error.publicMessage || publicError.message });
+    }
+  }
+);
+
 exports.adjustMemberPoints = onRequest(
   { region: 'asia-southeast1' },
   async (req, res) => {
@@ -2917,29 +4862,11 @@ function safeLedgerKey(value) {
 }
 
 function normalizePosSaleItems(items) {
-  return Array.isArray(items)
-    ? items.map(item => ({
-      productId: cleanString(item.productId || '', 120),
-      variantId: cleanString(item.variantId || 'base', 80),
-      sku: cleanString(item.sku || '', 80),
-      name: cleanString(item.name || 'POS item', 180),
-      variantName: cleanString(item.variantName || '', 120),
-      category: cleanString(item.category || '', 160),
-      quantity: Math.max(0, Number(item.quantity || 0)),
-      unitPrice: Math.max(0, Number(item.unitPrice || 0)),
-      lineDiscount: Math.max(0, Number(item.lineDiscount || 0)),
-      taxEnabled: item.taxEnabled !== false,
-    })).filter(item => item.quantity > 0)
-    : [];
+  return loyaltyFormula.normalizePosSaleItems(items);
 }
 
 function eligibleSubtotalForPosSale(items, excludedCategories) {
-  const excluded = new Set(excludedCategories);
-  return items.reduce((sum, item) => {
-    const category = cleanString(item.category, 160).toLowerCase();
-    if (category && excluded.has(category)) return sum;
-    return sum + Math.max(0, item.unitPrice * item.quantity - item.lineDiscount);
-  }, 0);
+  return loyaltyFormula.eligibleSubtotalForPosSale(items, excludedCategories);
 }
 
 function expiryTimestamp(months) {
@@ -2947,6 +4874,1163 @@ function expiryTimestamp(months) {
   const date = new Date();
   date.setMonth(date.getMonth() + months);
   return admin.firestore.Timestamp.fromDate(date);
+}
+
+async function resolvePosOrderRef(orderId, firestoreId, receiptNo) {
+  const candidates = Array.from(new Set(
+    [firestoreId, orderId]
+      .map(value => cleanString(value || '', 180))
+      .filter(Boolean)
+  ));
+
+  for (const candidate of candidates) {
+    const ref = db.collection('orders').doc(candidate);
+    const snap = await ref.get();
+    if (snap.exists) {
+      return { ref, source: 'document_id', requestedOrderId: candidate };
+    }
+  }
+
+  const safeReceiptNo = cleanString(receiptNo || '', 120);
+  if (safeReceiptNo) {
+    for (const field of ['receiptNo', 'number']) {
+      const snap = await db.collection('orders')
+        .where(field, '==', safeReceiptNo)
+        .limit(2)
+        .get();
+      if (snap.size > 1) {
+        const error = new Error(`Multiple POS orders found for ${field} ${safeReceiptNo}`);
+        error.statusCode = 409;
+        throw error;
+      }
+      if (!snap.empty) {
+        return { ref: snap.docs[0].ref, source: field, requestedOrderId: candidates[0] || '' };
+      }
+    }
+  }
+
+  return { ref: null, source: 'not_found', requestedOrderId: candidates[0] || '' };
+}
+
+async function markPosLoyaltyFailed(orderRef, error, idempotencyKey) {
+  if (!orderRef) return false;
+  const message = cleanString(error?.publicMessage || error?.message || 'POS loyalty sync failed', 500);
+  try {
+    await orderRef.update({
+      loyaltySyncStatus: 'failed',
+      loyaltyError: message,
+      loyaltyIdempotencyKey: idempotencyKey || '',
+      loyaltyFailedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return true;
+  } catch (updateError) {
+    logger.warn('POS loyalty failure status update failed', {
+      orderPath: orderRef.path,
+      message: updateError.message,
+    });
+    return false;
+  }
+}
+
+const POS_LOYALTY_SKIP_REASONS = new Set([
+  'no-customer',
+  'unsynced-customer',
+  'test-order',
+  'soft-launch',
+]);
+
+function normalizePosLoyaltySkipReason(value) {
+  const reason = cleanString(value || '', 80).toLowerCase().replace(/_/g, '-');
+  return POS_LOYALTY_SKIP_REASONS.has(reason) ? reason : '';
+}
+
+function posLoyaltySkipReasonFor({ customerProfileSynced, customerUid, isTestOrder, softLaunch } = {}) {
+  if (isTestOrder === true) return 'test-order';
+  if (softLaunch === true) return 'soft-launch';
+  if (!cleanString(customerUid || '', 180)) return 'no-customer';
+  if (customerProfileSynced === false) return 'unsynced-customer';
+  return '';
+}
+
+function posLoyaltySkippedPayload({ customerUid = '', idempotencyKey = '', reason = '' } = {}) {
+  const skipReason = normalizePosLoyaltySkipReason(reason) || 'no-customer';
+  return {
+    customerUid: cleanString(customerUid || '', 180),
+    earnedPoints: 0,
+    redeemedPoints: 0,
+    loyaltyDiscount: 0,
+    idempotencyKey,
+    skipped: true,
+    reason: skipReason,
+    syncedAt: new Date().toISOString(),
+  };
+}
+
+function posLoyaltySkippedOrderPatch(payload, idempotencyKey) {
+  return {
+    loyalty: payload,
+    earnedPoints: 0,
+    redeemedPoints: 0,
+    loyaltyDiscount: 0,
+    loyaltySyncStatus: 'skipped',
+    loyaltyError: payload.reason,
+    loyaltySkipReason: payload.reason,
+    loyaltyIdempotencyKey: idempotencyKey || payload.idempotencyKey || '',
+    loyaltySkippedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+}
+
+function firstFiniteNumber(values, fallback = 0) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return fallback;
+}
+
+function sumPosItemsSubtotal(items) {
+  return loyaltyFormula.sumPosItemsSubtotal(items);
+}
+
+function sumPosItemsLineDiscount(items) {
+  return loyaltyFormula.sumPosItemsLineDiscount(items);
+}
+
+function finiteNumberOrNull(value) {
+  return loyaltyFormula.finiteNumberOrNull(value);
+}
+
+function resolvePosOrderDiscount({ orderDiscount, normalDiscount, discount, subtotal, netAmount, items }) {
+  return loyaltyFormula.resolvePosOrderDiscount({
+    orderDiscount,
+    normalDiscount,
+    discount,
+    subtotal,
+    netAmount,
+    items,
+  });
+}
+
+function roundPosMoney(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function cleanPosCode(value) {
+  return promotionsEngine.normalizeCode(value || '');
+}
+
+function posPromotionActor(decoded = {}) {
+  return {
+    uid: cleanString(decoded.uid || '', 180),
+    email: cleanString(decoded.email || '', 180),
+    role: 'CASHIER',
+  };
+}
+
+function posPromotionContext(decoded = {}, req) {
+  return {
+    actor: posPromotionActor(decoded),
+    requestId: cleanString(req.get('x-request-id') || req.get('x-cloud-trace-context') || '', 180),
+  };
+}
+
+function normalizePosPromotionItems(items = [], manualDiscount = 0) {
+  const rawItems = Array.isArray(items) ? items : [];
+  const lines = rawItems.map((item, index) => {
+    const quantity = Math.max(0, Number(item.quantity ?? item.qty ?? 0) || 0);
+    const unitPrice = Math.max(0, Number(item.unitPrice ?? item.price ?? item.basePrice ?? 0) || 0);
+    const grossAmount = roundPosMoney(unitPrice * quantity);
+    const lineDiscount = Math.min(
+      Math.max(0, Number(item.lineDiscount ?? item.line_discount ?? 0) || 0),
+      grossAmount
+    );
+    const amountBeforeManual = roundPosMoney(Math.max(0, grossAmount - lineDiscount));
+    const categoryId = cleanString(
+      item.categoryId || item.category_id || item.category || item.categoryName || item.category_name || '',
+      160
+    );
+    const categoryIds = Array.from(new Set([
+      ...(Array.isArray(item.categoryIds || item.category_ids)
+        ? (item.categoryIds || item.category_ids)
+        : []),
+      categoryId,
+    ].map(value => cleanString(value, 160).toLowerCase()).filter(Boolean)));
+    return {
+      index,
+      productId: cleanString(item.productId || item.product_id || item.id || item.menuItemId || '', 160),
+      variantId: cleanString(item.variantId || item.variant_id || item.variant || item.optionId || item.variantName || '', 160),
+      sku: cleanString(item.sku || item.variantSku || '', 80),
+      name: cleanString(item.name || item.productName || 'POS item', 180),
+      categoryId,
+      categoryIds,
+      categoryName: cleanString(item.categoryName || item.category_name || item.category || categoryId, 180),
+      quantity,
+      unitPrice,
+      grossAmount,
+      lineDiscount,
+      amountBeforeManual,
+      taxEnabled: item.taxEnabled !== false,
+    };
+  }).filter(item => item.quantity > 0 && item.amountBeforeManual > 0);
+
+  const baseSubtotal = roundPosMoney(lines.reduce((sum, item) => sum + item.amountBeforeManual, 0));
+  const orderManualDiscount = Math.min(Math.max(0, Number(manualDiscount) || 0), baseSubtotal);
+  let allocatedManualDiscount = 0;
+  return lines.map((item, index) => {
+    const isLast = index === lines.length - 1;
+    const manualShare = isLast
+      ? roundPosMoney(orderManualDiscount - allocatedManualDiscount)
+      : roundPosMoney(orderManualDiscount * (item.amountBeforeManual / baseSubtotal));
+    allocatedManualDiscount = roundPosMoney(allocatedManualDiscount + manualShare);
+    const amount = roundPosMoney(Math.max(0, item.amountBeforeManual - manualShare));
+    return {
+      ...item,
+      manualDiscountShare: manualShare,
+      amount,
+      lineTotal: amount,
+      total: amount,
+    };
+  }).filter(item => item.amount > 0);
+}
+
+function posPromotionSubtotal(items = []) {
+  return roundPosMoney(items.reduce((sum, item) => sum + Math.max(0, Number(item.amount || item.lineTotal || 0)), 0));
+}
+
+function posOrderFinancials(order = {}, promoDiscount = 0, body = {}) {
+  const items = normalizePosSaleItems(order.items || []);
+  const itemSubtotal = sumPosItemsSubtotal(items);
+  const lineDiscount = sumPosItemsLineDiscount(items);
+  const subtotal = Math.max(0, firstFiniteNumber([
+    order.subtotal,
+    order.subTotal,
+    order.grossSubtotal,
+    itemSubtotal,
+  ], itemSubtotal));
+  const subtotalAfterLineDiscount = roundPosMoney(Math.max(0, subtotal - lineDiscount));
+  const existingPromoDiscount = Math.max(0, firstFiniteNumber([
+    order.promoDiscount,
+    order.promotionDiscount,
+  ], 0));
+  const manualFallback = Math.max(0, firstFiniteNumber([
+    order.orderDiscount,
+    order.normalDiscount,
+    order.manualDiscount,
+    body.manualDiscount,
+    body.manual_discount,
+    Math.max(0, firstFiniteNumber([order.discount, body.discount], 0) - lineDiscount - existingPromoDiscount),
+  ], 0));
+  const manualDiscount = Math.min(manualFallback, subtotalAfterLineDiscount);
+  const promotionDiscount = Math.min(Math.max(0, Number(promoDiscount) || 0), Math.max(0, subtotalAfterLineDiscount - manualDiscount));
+  const orderDiscount = roundPosMoney(manualDiscount + promotionDiscount);
+  const totalDiscount = roundPosMoney(lineDiscount + orderDiscount);
+  const totalBeforeLoyalty = roundPosMoney(Math.max(0, subtotalAfterLineDiscount - orderDiscount));
+  const loyaltyDiscount = Math.min(
+    Math.max(0, firstFiniteNumber([order.loyaltyDiscount, body.loyaltyDiscount], 0)),
+    totalBeforeLoyalty
+  );
+  const totalAfterLoyalty = roundPosMoney(Math.max(0, totalBeforeLoyalty - loyaltyDiscount));
+  return {
+    subtotal,
+    lineDiscount: roundPosMoney(lineDiscount),
+    manualDiscount: roundPosMoney(manualDiscount),
+    promoDiscount: roundPosMoney(promotionDiscount),
+    orderDiscount,
+    totalDiscount,
+    totalBeforeLoyalty,
+    loyaltyDiscount: roundPosMoney(loyaltyDiscount),
+    totalAfterLoyalty,
+  };
+}
+
+function publicPosPromotionError(error, fallback) {
+  const status = error.statusCode || 500;
+  const publicError = publicApiError({ ...error, statusCode: status }, fallback);
+  return {
+    status,
+    body: {
+      error: publicError.message,
+      code: cleanString(error.code || error.errorCode || '', 80),
+    },
+  };
+}
+
+function buildTrustedPosLoyaltyPayload(orderRef, order = {}) {
+  const receiptNo = cleanString(order.receiptNo || order.number || order.orderNumber || orderRef.id, 120);
+  const items = normalizePosSaleItems(order.items || []);
+  const itemSubtotal = sumPosItemsSubtotal(items);
+  const subtotal = Math.max(0, firstFiniteNumber([
+    order.subtotal,
+    order.subTotal,
+    order.grossSubtotal,
+    order.totalBeforeDiscount,
+    itemSubtotal,
+  ], itemSubtotal));
+  const preliminaryOrderDiscount = resolvePosOrderDiscount({
+    orderDiscount: order.orderDiscount,
+    normalDiscount: order.normalDiscount,
+    discount: firstFiniteNumber([order.discountAmount, order.discount, order.manualDiscount], null),
+    subtotal,
+    items,
+  });
+  const netAmount = Math.max(0, firstFiniteNumber([
+    order.totalBeforeLoyalty,
+    order.netAmount,
+    order.netTotal,
+    order.totalAmount,
+    order.total,
+    Math.max(0, subtotal - sumPosItemsLineDiscount(items) - preliminaryOrderDiscount),
+  ], 0));
+  const orderDiscount = resolvePosOrderDiscount({
+    orderDiscount: order.orderDiscount,
+    normalDiscount: order.normalDiscount,
+    discount: firstFiniteNumber([order.discountAmount, order.discount, order.manualDiscount], null),
+    subtotal,
+    netAmount,
+    items,
+  });
+  const redeemedPoints = Math.max(0, Math.trunc(firstFiniteNumber([
+    order.redeemedPoints,
+    order.loyaltyRedeemedPoints,
+    order.pointsRedeemed,
+  ], 0)));
+  const idempotencyKey = safeLedgerKey(
+    order.loyaltyIdempotencyKey
+    || order.idempotencyKey
+    || receiptNo
+    || orderRef.id
+  );
+
+  return {
+    orderId: orderRef.id,
+    firestoreId: orderRef.id,
+    receiptNo,
+    customerUid: cleanString(order.customerUid || '', 180),
+    customerEmail: cleanString(order.customerEmail || '', 180),
+    customerMemberCode: cleanString(order.customerMemberCode || '', 80),
+    customerProfileSynced: order.customerProfileSynced === true,
+    loyaltySkipReason: normalizePosLoyaltySkipReason(order.loyaltySkipReason || order.loyalty?.reason || ''),
+    netAmount,
+    subtotal,
+    normalDiscount: orderDiscount,
+    orderDiscount,
+    loyaltyDiscount: Math.max(0, Number(order.loyaltyDiscount || 0)),
+    redeemedPoints,
+    isTestOrder: order.isTestOrder === true,
+    softLaunch: order.softLaunch === true,
+    items,
+    idempotencyKey,
+  };
+}
+
+exports.validatePosPromotion = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      await requireAdminAccess(req, 'pos');
+      const body = req.body || {};
+      const manualDiscount = Math.max(0, firstFiniteNumber([
+        body.manualDiscount,
+        body.manual_discount,
+        body.orderDiscount,
+        body.discount,
+      ], 0));
+      const items = normalizePosPromotionItems(body.items || [], manualDiscount);
+      const subtotal = posPromotionSubtotal(items);
+      if (subtotal <= 0) {
+        const error = new Error('POS promotion subtotal must be greater than zero');
+        error.statusCode = 400;
+        throw error;
+      }
+      const promotion = await promotionsEngine.validatePromotion(db, {
+        ...(body || {}),
+        promo_code: body.promo_code || body.promoCode || body.code,
+        source_type: 'POS_RECEIPT',
+        channel: 'POS',
+        customer_uid: body.customer_uid || body.customerUid || body.member_id || body.memberId || '',
+        subtotal,
+        items,
+      });
+      res.status(200).json({
+        ok: true,
+        promotion,
+        totals: {
+          subtotal,
+          manualDiscount: roundPosMoney(manualDiscount),
+          promoDiscount: roundPosMoney(promotion.discountAmount),
+          totalAfterPromo: roundPosMoney(Math.max(0, subtotal - promotion.discountAmount)),
+        },
+      });
+    } catch (error) {
+      const result = publicPosPromotionError(error, 'Unable to validate POS promo code.');
+      logger.warn('POS promo validation failed', { message: error.message, status: result.status });
+      res.status(result.status).json(result.body);
+    }
+  }
+);
+
+exports.validatePosGiftVoucher = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      await requireAdminAccess(req, 'pos');
+      const body = req.body || {};
+      const amountDue = Math.max(0, firstFiniteNumber([
+        body.amount_due,
+        body.amountDue,
+        body.amount,
+        body.totalAfterPromo,
+        body.totalAmount,
+        body.total,
+      ], 0));
+      const voucher = await promotionsEngine.validateGiftVoucher(db, {
+        ...(body || {}),
+        voucher_code: body.voucher_code || body.voucherCode || body.code,
+        amount_due: amountDue,
+        require_full_coverage: body.require_full_coverage === true || body.requireFullCoverage === true,
+      });
+      res.status(200).json({ ok: true, voucher });
+    } catch (error) {
+      const result = publicPosPromotionError(error, 'Unable to validate POS gift voucher.');
+      logger.warn('POS gift voucher validation failed', { message: error.message, status: result.status });
+      res.status(result.status).json(result.body);
+    }
+  }
+);
+
+exports.applyPosSaleAdjustments = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    let orderRef = null;
+    try {
+      const decoded = await requireAdminAccess(req, 'pos');
+      const body = req.body || {};
+      const orderLookup = await resolvePosOrderRef(
+        cleanString(body.orderId || body.order_id || '', 180),
+        cleanString(body.firestoreId || body.firestore_id || '', 180),
+        cleanString(body.receiptNo || body.receipt_no || '', 120)
+      );
+      orderRef = orderLookup.ref;
+      if (!orderRef) {
+        const error = new Error('Synced POS order was not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      const promoCode = cleanPosCode(body.promo_code || body.promoCode || body.code);
+      const voucherCode = cleanPosCode(body.voucher_code || body.voucherCode || body.giftVoucherCode);
+      if (!promoCode && !voucherCode) {
+        res.status(200).json({ ok: true, status: 'skipped', orderId: orderRef.id });
+        return;
+      }
+
+      const context = posPromotionContext(decoded, req);
+      const result = await db.runTransaction(async transaction => {
+        const orderSnap = await transaction.get(orderRef);
+        if (!orderSnap.exists) {
+          const error = new Error('Synced POS order was not found');
+          error.statusCode = 404;
+          throw error;
+        }
+        const order = orderSnap.data() || {};
+        if (cleanString(order.source || '', 40) && cleanString(order.source || '', 40) !== 'pos') {
+          const error = new Error('This function only applies to POS orders');
+          error.statusCode = 400;
+          throw error;
+        }
+        if (cleanString(order.paymentStatus || '', 40) !== 'paid') {
+          const error = new Error('POS promo/voucher can only be applied to paid receipts');
+          error.statusCode = 409;
+          throw error;
+        }
+
+        const receiptNo = cleanString(order.receiptNo || order.number || body.receiptNo || body.receipt_no || orderRef.id, 120);
+        const branchId = cleanString(body.branch_id || body.branchId || order.branch_id || order.branchId || 'pos', 80);
+        const preliminaryFinancials = posOrderFinancials(order, 0, body);
+        let promotion = null;
+        let promoDiscount = Math.max(0, firstFiniteNumber([
+          order.promoDiscount,
+          order.promotionDiscount,
+        ], 0));
+
+        if (promoCode) {
+          const promoItems = normalizePosPromotionItems(order.items || body.items || [], preliminaryFinancials.manualDiscount);
+          const promoSubtotal = posPromotionSubtotal(promoItems);
+          if (promoSubtotal <= 0) {
+            const error = new Error('POS promotion subtotal must be greater than zero');
+            error.statusCode = 400;
+            throw error;
+          }
+          promotion = await promotionsEngine.redeemPromotionRedemptionInTransaction(transaction, db, {
+            promo_code: promoCode,
+            source_type: 'POS_RECEIPT',
+            source_id: receiptNo,
+            receipt_id: receiptNo,
+            payment_id: orderRef.id,
+            branch_id: branchId,
+            customer_uid: order.customerUid || body.customerUid || body.customer_uid || '',
+            cashier_uid: decoded.uid || '',
+            subtotal: promoSubtotal,
+            items: promoItems,
+          }, context);
+          promoDiscount = roundPosMoney(promotion.discountAmount);
+        }
+
+        const financials = posOrderFinancials(order, promoDiscount, body);
+        let voucher = null;
+        let voucherAmount = Math.max(0, firstFiniteNumber([
+          order.giftVoucherAmount,
+          order.voucherAmount,
+        ], 0));
+        if (voucherCode && !promoCode) {
+          const requestedVoucherAmount = Math.min(
+            Math.max(0, firstFiniteNumber([
+              body.voucherAmount,
+              body.giftVoucherAmount,
+              body.amount,
+              body.amountDue,
+              body.amount_due,
+              financials.totalAfterLoyalty,
+            ], financials.totalAfterLoyalty)),
+            financials.totalAfterLoyalty
+          );
+          if (requestedVoucherAmount > 0) {
+            voucher = await promotionsEngine.redeemGiftVoucherInTransaction(transaction, db, {
+              voucher_code: voucherCode,
+              source_type: 'POS_RECEIPT',
+              source_id: receiptNo,
+              order_id: orderRef.id,
+              receipt_no: receiptNo,
+              amount: requestedVoucherAmount,
+              idempotency_key: safeLedgerKey(body.idempotencyKey || body.idempotency_key || `${receiptNo}-voucher`),
+              branch_id: branchId,
+              actor_uid: decoded.uid || '',
+            }, context);
+            voucherAmount = roundPosMoney(voucher.amount);
+          }
+        }
+
+        const amountDue = roundPosMoney(Math.max(0, financials.totalAfterLoyalty - voucherAmount));
+        const paymentMethod = cleanString(order.paymentMethod || body.paymentMethod || '', 40);
+        const nonVoucherPaidAmount = roundPosMoney(Math.max(0, firstFiniteNumber([
+          body.nonVoucherPaidAmount,
+          body.paidWithoutVoucher,
+          order.nonVoucherPaidAmount,
+          order.paidWithoutVoucher,
+          order.cashPaidAmount,
+          amountDue,
+        ], amountDue)));
+        const paidAmount = roundPosMoney(Math.max(financials.totalAfterLoyalty, nonVoucherPaidAmount + voucherAmount));
+        const changeAmount = paymentMethod === 'cash'
+          ? roundPosMoney(Math.max(0, nonVoucherPaidAmount - amountDue))
+          : 0;
+        const promotionApplications = promotion
+          ? [{
+            redemptionId: promotion.redemptionId,
+            code: promotion.code,
+            promotionId: promotion.promotionId,
+            promotionName: promotion.promotionName,
+            discountAmount: roundPosMoney(promotion.discountAmount),
+            eligibleSubtotal: roundPosMoney(promotion.eligibleSubtotal),
+            lineAllocations: Array.isArray(promotion.lineAllocations) ? promotion.lineAllocations : [],
+          }]
+          : (Array.isArray(order.promotionApplications) ? order.promotionApplications : []);
+        const giftVoucherApplications = voucher
+          ? [{
+            voucherId: voucher.voucherId,
+            ledgerId: voucher.ledgerId,
+            code: voucherCode,
+            amount: roundPosMoney(voucher.amount),
+            balanceAfter: roundPosMoney(voucher.balanceAfter),
+          }]
+          : (Array.isArray(order.giftVoucherApplications) ? order.giftVoucherApplications : []);
+        const paymentTenders = [
+          ...(voucherAmount > 0 ? [{
+            type: 'gift_voucher',
+            code: voucherCode || cleanPosCode(order.giftVoucherCode || ''),
+            amount: voucherAmount,
+            ledgerId: voucher?.ledgerId || '',
+          }] : []),
+          ...(nonVoucherPaidAmount > 0 ? [{
+            type: paymentMethod || 'cash',
+            amount: nonVoucherPaidAmount,
+          }] : []),
+        ];
+        const now = admin.firestore.FieldValue.serverTimestamp();
+        const update = {
+          manualDiscount: financials.manualDiscount,
+          promoDiscount: financials.promoDiscount,
+          promotionDiscount: financials.promoDiscount,
+          normalDiscount: financials.orderDiscount,
+          orderDiscount: financials.orderDiscount,
+          discount: financials.totalDiscount,
+          totalBeforeLoyalty: financials.totalBeforeLoyalty,
+          loyaltyDiscount: financials.loyaltyDiscount,
+          total: financials.totalAfterLoyalty,
+          totalAmount: financials.totalAfterLoyalty,
+          amountDue,
+          balanceDue: amountDue,
+          giftVoucherAmount: voucherAmount,
+          voucherAmount,
+          giftVoucherTenderedAmount: voucherAmount,
+          paidWithoutVoucher: nonVoucherPaidAmount,
+          nonVoucherPaidAmount,
+          paidAmount,
+          paid: paidAmount,
+          changeAmount,
+          change: changeAmount,
+          paymentTenders,
+          promotionApplications,
+          promotion_applications: promotionApplications,
+          promotionRedemptionIds: promotionApplications.map(item => item.redemptionId).filter(Boolean),
+          giftVoucherApplications,
+          gift_voucher_applications: giftVoucherApplications,
+          giftVoucherLedgerIds: giftVoucherApplications.map(item => item.ledgerId).filter(Boolean),
+          promoCode: promotion?.code || cleanPosCode(order.promoCode || ''),
+          giftVoucherCode: voucherCode || cleanPosCode(order.giftVoucherCode || ''),
+          posSaleAdjustments: {
+            idempotencyKey: cleanString(body.idempotencyKey || body.idempotency_key || receiptNo, 180),
+            promotionApplied: Boolean(promotion),
+            giftVoucherApplied: Boolean(voucher),
+            updatedBy: decoded.uid || '',
+          },
+          posSaleAdjustmentsStatus: 'synced',
+          updatedAt: now,
+          updatedBy: decoded.uid || '',
+        };
+        transaction.set(orderRef, update, { merge: true });
+        return {
+          orderId: orderRef.id,
+          receiptNo,
+          promotion,
+          voucher,
+          totals: {
+            subtotal: financials.subtotal,
+            lineDiscount: financials.lineDiscount,
+            manualDiscount: financials.manualDiscount,
+            promoDiscount: financials.promoDiscount,
+            discount: financials.totalDiscount,
+            totalBeforeLoyalty: financials.totalBeforeLoyalty,
+            loyaltyDiscount: financials.loyaltyDiscount,
+            totalAmount: financials.totalAfterLoyalty,
+            voucherAmount,
+            amountDue,
+            paidAmount,
+            nonVoucherPaidAmount,
+            changeAmount,
+          },
+        };
+      });
+
+      let finalResult = result;
+      if (voucherCode && promoCode) {
+        const requestedVoucherAmount = Math.min(
+          Math.max(0, firstFiniteNumber([
+            body.voucherAmount,
+            body.giftVoucherAmount,
+            body.amount,
+            body.amountDue,
+            body.amount_due,
+            result.totals?.totalAmount,
+          ], result.totals?.totalAmount || 0)),
+          result.totals?.totalAmount || 0
+        );
+        if (requestedVoucherAmount > 0) {
+          const voucher = await promotionsEngine.redeemGiftVoucher(db, {
+            voucher_code: voucherCode,
+            source_type: 'POS_RECEIPT',
+            source_id: result.receiptNo,
+            order_id: orderRef.id,
+            receipt_no: result.receiptNo,
+            amount: requestedVoucherAmount,
+            idempotency_key: safeLedgerKey(body.idempotencyKey || body.idempotency_key || `${result.receiptNo}-voucher`),
+            branch_id: cleanString(body.branch_id || body.branchId || 'pos', 80),
+            actor_uid: decoded.uid || '',
+          }, context);
+          const voucherAmount = roundPosMoney(voucher.amount);
+          const amountDue = roundPosMoney(Math.max(0, (result.totals?.totalAmount || 0) - voucherAmount));
+          const paymentMethod = cleanString(body.paymentMethod || 'cash', 40);
+          const nonVoucherPaidAmount = roundPosMoney(Math.max(0, firstFiniteNumber([
+            body.nonVoucherPaidAmount,
+            body.paidWithoutVoucher,
+            amountDue,
+          ], amountDue)));
+          const paidAmount = roundPosMoney(Math.max(result.totals?.totalAmount || 0, nonVoucherPaidAmount + voucherAmount));
+          const changeAmount = paymentMethod === 'cash'
+            ? roundPosMoney(Math.max(0, nonVoucherPaidAmount - amountDue))
+            : 0;
+          const giftVoucherApplications = [{
+            voucherId: voucher.voucherId,
+            ledgerId: voucher.ledgerId,
+            code: voucherCode,
+            amount: voucherAmount,
+            balanceAfter: roundPosMoney(voucher.balanceAfter),
+          }];
+          const paymentTenders = [
+            {
+              type: 'gift_voucher',
+              code: voucherCode,
+              amount: voucherAmount,
+              ledgerId: voucher.ledgerId || '',
+            },
+            ...(nonVoucherPaidAmount > 0 ? [{
+              type: paymentMethod || 'cash',
+              amount: nonVoucherPaidAmount,
+            }] : []),
+          ];
+          await orderRef.set({
+            amountDue,
+            balanceDue: amountDue,
+            giftVoucherAmount: voucherAmount,
+            voucherAmount,
+            giftVoucherTenderedAmount: voucherAmount,
+            paidWithoutVoucher: nonVoucherPaidAmount,
+            nonVoucherPaidAmount,
+            paidAmount,
+            paid: paidAmount,
+            changeAmount,
+            change: changeAmount,
+            paymentTenders,
+            giftVoucherCode: voucherCode,
+            giftVoucherApplications,
+            gift_voucher_applications: giftVoucherApplications,
+            giftVoucherLedgerIds: [voucher.ledgerId].filter(Boolean),
+            posSaleAdjustments: {
+              idempotencyKey: cleanString(body.idempotencyKey || body.idempotency_key || result.receiptNo, 180),
+              promotionApplied: Boolean(result.promotion),
+              giftVoucherApplied: true,
+              updatedBy: decoded.uid || '',
+            },
+            posSaleAdjustmentsStatus: 'synced',
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedBy: decoded.uid || '',
+          }, { merge: true });
+          finalResult = {
+            ...result,
+            voucher,
+            totals: {
+              ...(result.totals || {}),
+              voucherAmount,
+              amountDue,
+              paidAmount,
+              nonVoucherPaidAmount,
+              changeAmount,
+            },
+          };
+        }
+      }
+
+      logger.info('POS sale adjustments applied', {
+        orderId: finalResult.orderId,
+        receiptNo: finalResult.receiptNo,
+        promoApplied: Boolean(finalResult.promotion),
+        voucherApplied: Boolean(finalResult.voucher),
+      });
+      res.status(200).json({ ok: true, status: 'synced', ...finalResult });
+    } catch (error) {
+      const result = publicPosPromotionError(error, 'Unable to apply POS promo or gift voucher.');
+      logger.warn('POS sale adjustment failed', {
+        orderPath: orderRef?.path || '',
+        message: error.message,
+        status: result.status,
+      });
+      res.status(result.status).json(result.body);
+    }
+  }
+);
+
+function normalizePosMemberPhone(value) {
+  const raw = cleanString(value || '', 40);
+  const digits = raw.replace(/\D/g, '');
+  let local = digits;
+  if (local.startsWith('66') && local.length >= 11) local = '0' + local.slice(2);
+  if (!local && raw.startsWith('+66')) local = '0' + raw.replace(/\D/g, '').slice(2);
+  const e164 = normalizeThaiPhoneForMemberIndex(raw || local);
+  return {
+    raw,
+    local,
+    e164,
+    display: local || raw || (e164 ? displayThaiPhone(e164) : ''),
+  };
+}
+
+function posMemberPayloadFromBody(body = {}, existing = {}, decoded = {}, uid = '') {
+  const phone = normalizePosMemberPhone(body.phone || existing.phone || existing.phone_display || existing.phone_number || '');
+  const displayName = firstCleanString([
+    body.displayName,
+    body.name,
+    existing.displayName,
+    existing.name,
+    phone.display ? `ลูกค้า ${phone.display}` : '',
+  ], 120);
+  const email = normalizePublicEmail(body.email || existing.email || '');
+  const memberCode = firstCleanString([
+    existing.memberCode,
+    authMemberCode(uid),
+  ], 40);
+  const now = admin.firestore.FieldValue.serverTimestamp();
+
+  const payload = {
+    displayName,
+    name: displayName,
+    display_name: displayName,
+    email,
+    email_lower: email,
+    phone: phone.display,
+    phoneNormalized: phone.local,
+    phone_display: phone.display,
+    lineId: cleanString(body.lineId || existing.lineId || '', 80),
+    updatedAt: now,
+    updated_at: now,
+    updatedBy: decoded.uid || '',
+    updatedByEmail: cleanString(decoded.email || '', 180),
+    source: cleanString(existing.source || body.source || 'pos', 40),
+    registrationSource: cleanString(existing.registrationSource || 'pos', 40),
+  };
+
+  if (phone.e164) {
+    payload.phoneE164 = phone.e164;
+    payload.phone_number = phone.e164;
+    payload.loginUsername = phone.e164;
+  }
+  if (memberCode) payload.memberCode = memberCode;
+  if (!existing.tier) payload.tier = 'Silver';
+  if (!existing.status) payload.status = 'active';
+  if (existing.points === undefined) payload.points = 0;
+  if (existing.totalSpent === undefined) payload.totalSpent = 0;
+  if (existing.visitCount === undefined) payload.visitCount = 0;
+
+  return payload;
+}
+
+function publicPosMemberProfile(uid, data = {}) {
+  const phone = normalizePosMemberPhone(data.phone || data.phone_display || data.phone_number || data.phoneE164 || '');
+  return {
+    uid,
+    displayName: cleanString(data.displayName || data.name || data.display_name || data.email || 'Eden Member', 120),
+    email: cleanString(data.email || '', 180),
+    phone: phone.display,
+    phoneNormalized: phone.local,
+    lineId: cleanString(data.lineId || '', 80),
+    tier: cleanString(data.tier || 'Silver', 30),
+    memberCode: cleanString(data.memberCode || uid.slice(0, 12), 40),
+    points: Number(data.points || 0),
+    totalSpent: Number(data.totalSpent || 0),
+    visitCount: Number(data.visitCount || 0),
+    profileSynced: true,
+    source: 'eden',
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function publicPosMemberSummary(uid, userData = {}, summaryData = {}) {
+  const profile = publicPosMemberProfile(uid, userData);
+  const points = summaryData.pointsBalance !== undefined
+    ? Number(summaryData.pointsBalance || 0)
+    : profile.points;
+  return {
+    ...profile,
+    points,
+    totalSpent: Number(summaryData.totalSpent ?? profile.totalSpent ?? 0),
+    visitCount: Number(summaryData.visitCount ?? profile.visitCount ?? 0),
+    tier: cleanString(summaryData.tier || profile.tier || 'Silver', 30),
+  };
+}
+
+async function enrichPosMemberProfiles(memberDocs = []) {
+  const summarySnaps = await Promise.all(
+    memberDocs.map(memberDoc =>
+      db.collection('member_summaries').doc(memberDoc.id).get().catch(() => null)
+    )
+  );
+
+  return memberDocs.map((memberDoc, index) => {
+    const userData = memberDoc.data() || {};
+    const summarySnap = summarySnaps[index];
+    const summaryData = summarySnap && summarySnap.exists ? summarySnap.data() || {} : {};
+    return publicPosMemberSummary(memberDoc.id, userData, summaryData);
+  });
+}
+
+function posMemberSearchScore(member = {}, query = '', digits = '') {
+  if (!query && !digits) return 1;
+  const haystack = [
+    member.uid,
+    member.displayName,
+    member.email,
+    member.phone,
+    member.phoneNormalized,
+    member.lineId,
+    member.memberCode,
+    member.tier,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  let score = haystack.includes(query) ? 80 : 0;
+  if (digits && String(member.phoneNormalized || '').includes(digits)) score += 140;
+  if (digits && String(member.phone || '').replace(/\D/g, '').includes(digits)) score += 120;
+  if (query && String(member.memberCode || '').toLowerCase() === query) score += 180;
+  if (query && String(member.email || '').toLowerCase() === query) score += 160;
+  if (query && String(member.displayName || '').toLowerCase().includes(query)) score += 100;
+  if ((member.points || 0) > 0) score += 12;
+  if ((member.totalSpent || 0) > 0) score += 8;
+  return score;
+}
+
+exports.searchPosMembers = onRequest(
+  { region: 'asia-southeast1', timeoutSeconds: 60, memory: '256MiB' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const decoded = await requireAdminAccess(req, 'pos');
+      const body = req.body || {};
+      const search = cleanString(body.search || body.query || '', 160).toLowerCase();
+      const phone = normalizePosMemberPhone(body.phone || search);
+      const digits = phone.local || String(search || '').replace(/\D/g, '');
+      const limitCount = Math.min(Math.max(Number(body.limitCount || 250), 1), 500);
+      checkRateLimitKey(`search-pos-members:${decoded.uid || clientIp(req)}`, 240, 60 * 60 * 1000);
+
+      const queryPromises = [];
+      const addQuery = (field, value, size = limitCount) => {
+        const cleanValue = cleanString(value || '', 180);
+        if (!cleanValue) return;
+        queryPromises.push(db.collection('users').where(field, '==', cleanValue).limit(Math.min(size, limitCount)).get());
+      };
+
+      if (digits) {
+        addQuery('phoneNormalized', digits);
+        addQuery('phone', phone.display || digits);
+      }
+      if (phone.e164) {
+        addQuery('phone_number', phone.e164);
+        addQuery('phoneE164', phone.e164);
+        addQuery('loginUsername', phone.e164);
+      }
+      if (search && search.includes('@')) {
+        addQuery('email_lower', normalizePublicEmail(search));
+        addQuery('email', normalizePublicEmail(search));
+      }
+      if (/^ed-/i.test(search)) {
+        addQuery('memberCode', search.toUpperCase());
+      }
+
+      queryPromises.push(db.collection('users').limit(limitCount).get());
+
+      const querySnaps = await Promise.all(queryPromises.map(promise => promise.catch(() => null)));
+      const byId = new Map();
+      querySnaps.forEach(snap => {
+        if (!snap) return;
+        snap.docs.forEach(memberDoc => {
+          const data = memberDoc.data() || {};
+          const status = String(data.status || 'active').toLowerCase();
+          if (['deleted', 'disabled', 'blocked'].includes(status)) return;
+          byId.set(memberDoc.id, memberDoc);
+        });
+      });
+
+      const members = await enrichPosMemberProfiles(Array.from(byId.values()));
+      const filtered = members
+        .map(member => ({
+          member,
+          score: posMemberSearchScore(member, search, digits),
+        }))
+        .filter(row => !search && !digits ? true : row.score > 0)
+        .sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          const codeA = a.member.memberCode || '';
+          const codeB = b.member.memberCode || '';
+          return codeA && codeB && codeA !== codeB
+            ? codeA.localeCompare(codeB, 'th')
+            : String(a.member.displayName || '').localeCompare(String(b.member.displayName || ''), 'th');
+        })
+        .slice(0, limitCount)
+        .map(row => row.member);
+
+      res.status(200).json({ ok: true, members: filtered });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('POS member search failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to search POS members');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+exports.getPosMemberLoyaltySummary = onRequest(
+  { region: 'asia-southeast1', timeoutSeconds: 30, memory: '256MiB' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const decoded = await requireAdminAccess(req, 'pos');
+      const uid = cleanString((req.body || {}).uid || (req.body || {}).customerUid || '', 180);
+      if (!uid) {
+        const error = new Error('Member UID is required');
+        error.statusCode = 400;
+        throw error;
+      }
+      checkRateLimitKey(`get-pos-member-summary:${decoded.uid || clientIp(req)}`, 240, 60 * 60 * 1000);
+
+      const [memberSnap, summarySnap] = await Promise.all([
+        db.collection('users').doc(uid).get(),
+        db.collection('member_summaries').doc(uid).get(),
+      ]);
+      const member = memberSnap.exists ? memberSnap.data() || {} : {};
+      const summary = summarySnap.exists ? summarySnap.data() || {} : {};
+      const publicMember = publicPosMemberSummary(uid, member, summary);
+
+      res.status(200).json({
+        ok: true,
+        summary: {
+          customerUid: uid,
+          pointsBalance: publicMember.points,
+          tier: publicMember.tier,
+          totalSpent: publicMember.totalSpent,
+          visitCount: publicMember.visitCount,
+        },
+      });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('POS member loyalty summary failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to load POS member loyalty summary');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+async function resolvePosMemberUid(body = {}) {
+  const requestedUid = cleanString(body.uid || '', 180);
+  if (requestedUid) return requestedUid;
+
+  const phone = normalizePosMemberPhone(body.phone || '');
+  const email = normalizePublicEmail(body.email || '');
+  const candidates = [];
+
+  if (phone.local) {
+    candidates.push(db.collection('users').where('phoneNormalized', '==', phone.local).limit(1).get());
+    candidates.push(db.collection('users').where('phone', '==', phone.display).limit(1).get());
+  }
+  if (phone.e164) {
+    candidates.push(db.collection('users').where('phone_number', '==', phone.e164).limit(1).get());
+    candidates.push(db.collection('users').where('phoneE164', '==', phone.e164).limit(1).get());
+  }
+  if (email) {
+    candidates.push(db.collection('users').where('email_lower', '==', email).limit(1).get());
+  }
+
+  const results = await Promise.all(candidates.map(queryPromise => queryPromise.catch(() => null)));
+  for (const snap of results) {
+    if (snap && !snap.empty) return snap.docs[0].id;
+  }
+
+  if (phone.local) return `pos-phone-${phone.local}`;
+  if (email) return `pos-email-${sha256(email).slice(0, 16)}`;
+  return `pos-member-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+}
+
+exports.upsertPosMemberProfile = onRequest(
+  { region: 'asia-southeast1', timeoutSeconds: 60, memory: '256MiB' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const decoded = await requireAdminAccess(req, 'pos');
+      const body = req.body || {};
+      const uid = await resolvePosMemberUid(body);
+      const phone = normalizePosMemberPhone(body.phone || '');
+      const displayName = firstCleanString([body.displayName, body.name], 120);
+
+      if (!uid) {
+        const error = new Error('Member UID is required');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (!displayName && !phone.local && !normalizePublicEmail(body.email || '')) {
+        const error = new Error('Member name, phone, or email is required');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      checkRateLimitKey(`upsert-pos-member:${decoded.uid || clientIp(req)}`, 120, 60 * 60 * 1000);
+
+      const memberRef = db.collection('users').doc(uid);
+      const memberSnap = await memberRef.get();
+      const existing = memberSnap.exists ? memberSnap.data() || {} : {};
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      const payload = posMemberPayloadFromBody(body, existing, decoded, uid);
+
+      await memberRef.set({
+        uid,
+        ...payload,
+        ...(memberSnap.exists ? {} : {
+          createdAt: now,
+          created_at: now,
+          createdBy: decoded.uid || '',
+          createdByEmail: cleanString(decoded.email || '', 180),
+        }),
+      }, { merge: true });
+
+      const savedSnap = await memberRef.get();
+      res.status(200).json({
+        ok: true,
+        member: publicPosMemberProfile(uid, savedSnap.data() || {}),
+      });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      logger.warn('POS member profile upsert failed', { message: error.message, status });
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to save POS member profile');
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+function cloudFunctionUrl(functionName) {
+  const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || 'edencafe-d9095';
+  return `https://asia-southeast1-${projectId}.cloudfunctions.net/${functionName}`;
 }
 
 exports.applyPosLoyaltySale = onRequest(
@@ -2960,20 +6044,54 @@ exports.applyPosLoyaltySale = onRequest(
       return;
     }
 
+    let orderRef = null;
+    let idempotencyKey = '';
+    let receiptNo = '';
+    let orderId = '';
+
     try {
       const decoded = await requireAdminAccess(req, 'pos');
       const body = req.body || {};
-      const orderId = cleanString(body.orderId || body.firestoreId || '', 180);
-      const receiptNo = cleanString(body.receiptNo || orderId, 120);
+      const requestedOrderId = cleanString(body.orderId || '', 180);
+      const firestoreId = cleanString(body.firestoreId || '', 180);
+      orderId = cleanString(requestedOrderId || firestoreId || '', 180);
+      receiptNo = cleanString(body.receiptNo || orderId, 120);
       const customerUid = cleanString(body.customerUid || '', 180);
-      const idempotencyKey = safeLedgerKey(body.idempotencyKey || receiptNo || orderId);
+      idempotencyKey = safeLedgerKey(body.idempotencyKey || receiptNo || orderId);
       const netAmount = Math.max(0, Number(body.netAmount || 0));
-      const normalDiscount = Math.max(0, Number(body.normalDiscount || 0));
       const subtotal = Math.max(0, Number(body.subtotal || 0));
       const requestedRedeemedPoints = Math.max(0, Math.trunc(Number(body.redeemedPoints || 0)));
       const items = normalizePosSaleItems(body.items || []);
+      const orderDiscount = resolvePosOrderDiscount({
+        orderDiscount: body.orderDiscount,
+        normalDiscount: body.normalDiscount,
+        discount: body.discount,
+        subtotal,
+        netAmount,
+        items,
+      });
+      const requestSkipReason =
+        normalizePosLoyaltySkipReason(body.loyaltySkipReason) ||
+        posLoyaltySkipReasonFor({
+          customerUid,
+          customerProfileSynced: body.customerProfileSynced,
+          isTestOrder: body.isTestOrder,
+          softLaunch: body.softLaunch,
+        });
+      const orderLookup = await resolvePosOrderRef(requestedOrderId || orderId, firestoreId, receiptNo);
+      orderRef = orderLookup.ref;
 
-      if (!orderId) {
+      logger.info('POS loyalty sale start', {
+        requestedOrderId,
+        firestoreId,
+        resolvedOrderId: orderRef?.id || '',
+        receiptNo,
+        customerUid,
+        idempotencyKey,
+        orderLookupSource: orderLookup.source,
+      });
+
+      if (!orderId && !orderRef) {
         const error = new Error('Order ID is required');
         error.statusCode = 400;
         throw error;
@@ -2983,10 +6101,33 @@ exports.applyPosLoyaltySale = onRequest(
         error.statusCode = 400;
         throw error;
       }
-      if (!customerUid) {
-        const error = new Error('Customer UID is required');
-        error.statusCode = 400;
+      if (!orderRef) {
+        const error = new Error('Synced order was not found');
+        error.statusCode = 404;
         throw error;
+      }
+      orderId = orderRef.id;
+
+      if (requestSkipReason) {
+        const resultPayload = posLoyaltySkippedPayload({
+          customerUid,
+          idempotencyKey,
+          reason: requestSkipReason,
+        });
+        await orderRef.set(posLoyaltySkippedOrderPatch(resultPayload, idempotencyKey), { merge: true });
+        logger.info('POS loyalty sale skipped before ledger apply', {
+          orderId,
+          receiptNo,
+          customerUid,
+          idempotencyKey,
+          reason: requestSkipReason,
+        });
+        res.status(200).json({
+          ok: true,
+          status: 'skipped',
+          loyalty: resultPayload,
+        });
+        return;
       }
       if (netAmount <= 0) {
         const error = new Error('Net amount must be greater than zero');
@@ -2994,13 +6135,13 @@ exports.applyPosLoyaltySale = onRequest(
         throw error;
       }
 
-      const orderRef = db.collection('orders').doc(orderId);
       const userRef = db.collection('users').doc(customerUid);
       const summaryRef = db.collection('member_summaries').doc(customerUid);
       const loyaltyRef = db.collection('site_settings').doc('loyalty');
       const earnLedgerRef = db.collection('point_ledger').doc(`pos-earn-${idempotencyKey}`);
       const redeemLedgerRef = db.collection('point_ledger').doc(`pos-redeem-${idempotencyKey}`);
       let resultPayload = null;
+      let resultStatus = 'synced';
 
       await db.runTransaction(async transaction => {
         const [
@@ -3024,19 +6165,53 @@ exports.applyPosLoyaltySale = onRequest(
           error.statusCode = 404;
           throw error;
         }
+        const order = orderSnap.data() || {};
+        if (cleanString(order.customerUid || '', 180) && cleanString(order.customerUid || '', 180) !== customerUid) {
+          const error = new Error('Customer UID does not match synced order');
+          error.statusCode = 400;
+          throw error;
+        }
+        const orderSkipReason = posLoyaltySkipReasonFor({
+          customerUid,
+          customerProfileSynced: order.customerProfileSynced,
+          isTestOrder: order.isTestOrder === true || body.isTestOrder === true,
+          softLaunch: order.softLaunch === true || body.softLaunch === true,
+        });
+        if (orderSkipReason) {
+          resultPayload = posLoyaltySkippedPayload({
+            customerUid,
+            idempotencyKey,
+            reason: orderSkipReason,
+          });
+          resultStatus = 'skipped';
+          transaction.set(orderRef, posLoyaltySkippedOrderPatch(resultPayload, idempotencyKey), { merge: true });
+          logger.info('POS loyalty sale skipped', {
+            orderId,
+            receiptNo,
+            customerUid,
+            idempotencyKey,
+            reason: orderSkipReason,
+          });
+          return;
+        }
         if (!userSnap.exists) {
           const error = new Error('Member profile was not found');
           error.statusCode = 404;
           throw error;
         }
-
-        const order = orderSnap.data() || {};
         if (
           order.loyaltySyncStatus === 'synced' &&
           order.loyaltyIdempotencyKey === idempotencyKey &&
           order.loyalty
         ) {
           resultPayload = order.loyalty;
+          resultStatus = 'already_applied';
+          logger.info('POS loyalty sale already applied', {
+            orderId,
+            receiptNo,
+            customerUid,
+            idempotencyKey,
+          });
           return;
         }
         if (earnLedgerSnap.exists || redeemLedgerSnap.exists) {
@@ -3052,6 +6227,7 @@ exports.applyPosLoyaltySale = onRequest(
             },
             syncedAt: new Date().toISOString(),
           };
+          resultStatus = 'already_applied';
           transaction.set(orderRef, {
             loyalty: resultPayload,
             loyaltySyncStatus: 'synced',
@@ -3060,6 +6236,14 @@ exports.applyPosLoyaltySale = onRequest(
             loyaltySyncedAt: admin.firestore.FieldValue.serverTimestamp(),
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           }, { merge: true });
+          logger.info('POS loyalty sale ledger already exists', {
+            orderId,
+            receiptNo,
+            customerUid,
+            idempotencyKey,
+            earnLedgerExists: earnLedgerSnap.exists,
+            redeemLedgerExists: redeemLedgerSnap.exists,
+          });
           return;
         }
 
@@ -3074,72 +6258,33 @@ exports.applyPosLoyaltySale = onRequest(
 
         const member = userSnap.data() || {};
         const summary = summarySnap.exists ? summarySnap.data() || {} : {};
-        const memberTotalSpent = Math.max(0, Number(member.totalSpent || 0));
-        const memberVisitCount = Math.max(0, Math.floor(Number(member.visitCount || 0)));
-        const summaryTotalSpent = Math.max(0, Number(summary.totalSpent ?? memberTotalSpent));
-        const summaryVisitCount = Math.max(0, Math.floor(Number(summary.visitCount ?? memberVisitCount)));
-        const summaryLifetimePoints = Math.max(0, Number(summary.lifetimePoints || 0));
-        const summaryTotalRedeemed = Math.max(0, Number(summary.totalRedeemed || 0));
-        const memberPoints = Math.max(0, Math.floor(Number(member.points || 0)));
-        const estimatedLegacyPoints = config.spendPerPoint > 0
-          ? Math.floor(memberTotalSpent / config.spendPerPoint)
-          : 0;
-        const pointsBefore = summarySnap.exists && summary.pointsBalance !== undefined
-          ? Math.max(0, Math.floor(Number(summary.pointsBalance || 0)))
-          : Math.max(memberPoints, estimatedLegacyPoints);
-        const summaryLifetimeBase = Math.max(summaryLifetimePoints, pointsBefore);
-
-        if (requestedRedeemedPoints > pointsBefore) {
-          const error = new Error('Redeemed points exceed member balance');
-          error.statusCode = 400;
-          throw error;
-        }
-        if (
-          requestedRedeemedPoints > 0 &&
-          config.minRedeemPoints > 0 &&
-          requestedRedeemedPoints < config.minRedeemPoints
-        ) {
-          const error = new Error(`Minimum redeem points is ${config.minRedeemPoints}`);
-          error.statusCode = 400;
-          throw error;
-        }
-
-        const requestedDiscount = requestedRedeemedPoints * config.pointValue;
-        const maxRedeemDiscount = (netAmount * config.maxRedeemPercent) / 100;
-        if (requestedDiscount > maxRedeemDiscount + 0.0001) {
-          const error = new Error('Redeemed points exceed max redeem percent');
-          error.statusCode = 400;
-          throw error;
-        }
-        if (requestedDiscount > netAmount + 0.0001) {
-          const error = new Error('Redeemed points exceed sale amount');
-          error.statusCode = 400;
-          throw error;
-        }
-
-        const loyaltyDiscount = Math.min(netAmount, requestedDiscount);
-        const payableAmount = Math.max(0, netAmount - loyaltyDiscount);
-        const eligibleSubtotal = eligibleSubtotalForPosSale(items, config.excludedCategories);
-        const subtotalBase = subtotal > 0
-          ? subtotal
-          : items.reduce((sum, item) => sum + Math.max(0, item.unitPrice * item.quantity), 0);
-        const eligibleRatio = subtotalBase > 0 ? Math.min(1, eligibleSubtotal / subtotalBase) : 0;
-        const normalDiscountShare = config.earnAfterDiscount
-          ? normalDiscount * eligibleRatio
-          : 0;
-        const redeemedDiscountShare = config.earnOnRedeemedAmount
-          ? 0
-          : loyaltyDiscount * eligibleRatio;
-        const earnBase = Math.max(0, eligibleSubtotal - normalDiscountShare - redeemedDiscountShare);
-        const currentTier = cleanString(member.tier || summary.tier || 'Silver', 40);
-        const multiplier = Number(config.tierMultipliers[currentTier] || 1);
-        const earnedPoints = config.spendPerPoint > 0
-          ? Math.floor((earnBase / config.spendPerPoint) * multiplier)
-          : 0;
-        const pointsAfter = Math.max(0, pointsBefore - requestedRedeemedPoints + earnedPoints);
-        const totalSpentAfter = memberTotalSpent + payableAmount;
-        const visitCountAfter = memberVisitCount + 1;
-        const tier = memberTierFromMetrics(pointsAfter, totalSpentAfter, visitCountAfter);
+        const saleCalc = loyaltyFormula.calculatePosLoyaltySale({
+          config,
+          member,
+          summary: summarySnap.exists ? summary : {},
+          items,
+          subtotal,
+          netAmount,
+          orderDiscount,
+          requestedRedeemedPoints,
+        });
+        const {
+          earnedPoints,
+          redeemedPoints,
+          loyaltyDiscount,
+          payableAmount,
+          pointsBefore,
+          pointsAfter,
+          tier,
+          eligibleAmount: eligibleSubtotal,
+          earnBase,
+          totalSpentAfter,
+          visitCountAfter,
+          summaryTotalSpent,
+          summaryVisitCount,
+          summaryLifetimeBase,
+          summaryTotalRedeemed,
+        } = saleCalc;
         const now = admin.firestore.FieldValue.serverTimestamp();
         const syncedAt = new Date().toISOString();
         const memberCode = cleanString(member.memberCode || '', 80);
@@ -3149,7 +6294,7 @@ exports.applyPosLoyaltySale = onRequest(
         resultPayload = {
           customerUid,
           earnedPoints,
-          redeemedPoints: requestedRedeemedPoints,
+          redeemedPoints,
           loyaltyDiscount,
           pointsBefore,
           pointsAfter,
@@ -3159,21 +6304,21 @@ exports.applyPosLoyaltySale = onRequest(
           idempotencyKey,
           ledgerIds: {
             earn: earnedPoints > 0 ? earnLedgerRef.id : '',
-            redeem: requestedRedeemedPoints > 0 ? redeemLedgerRef.id : '',
+            redeem: redeemedPoints > 0 ? redeemLedgerRef.id : '',
           },
           syncedAt,
         };
 
-        if (requestedRedeemedPoints > 0) {
+        if (redeemedPoints > 0) {
           transaction.set(redeemLedgerRef, {
             userId: customerUid,
             memberCode,
             memberName,
             memberEmail,
             type: 'pos_redeem',
-            pointsDelta: -requestedRedeemedPoints,
+            pointsDelta: -redeemedPoints,
             pointsBefore,
-            pointsAfter: pointsBefore - requestedRedeemedPoints,
+            pointsAfter: pointsBefore - redeemedPoints,
             amount: loyaltyDiscount,
             receiptNo,
             orderId,
@@ -3192,7 +6337,7 @@ exports.applyPosLoyaltySale = onRequest(
             memberEmail,
             type: 'pos_earn',
             pointsDelta: earnedPoints,
-            pointsBefore: pointsBefore - requestedRedeemedPoints,
+            pointsBefore: pointsBefore - redeemedPoints,
             pointsAfter,
             amount: earnBase,
             receiptNo,
@@ -3225,13 +6370,13 @@ exports.applyPosLoyaltySale = onRequest(
           pointsBalance: pointsAfter,
           tier,
           lifetimePoints: summaryLifetimeBase + earnedPoints,
-          totalRedeemed: summaryTotalRedeemed + requestedRedeemedPoints,
+          totalRedeemed: summaryTotalRedeemed + redeemedPoints,
           totalSpent: summaryTotalSpent + payableAmount,
           visitCount: summaryVisitCount + 1,
           lastLedgerId:
             earnedPoints > 0
               ? earnLedgerRef.id
-              : requestedRedeemedPoints > 0
+              : redeemedPoints > 0
                 ? redeemLedgerRef.id
                 : cleanString(summary.lastLedgerId || '', 180),
           updatedAt: now,
@@ -3240,8 +6385,9 @@ exports.applyPosLoyaltySale = onRequest(
         transaction.set(orderRef, {
           loyalty: resultPayload,
           earnedPoints,
-          redeemedPoints: requestedRedeemedPoints,
+          redeemedPoints,
           loyaltyDiscount,
+          normalDiscount: orderDiscount,
           totalBeforeLoyalty: netAmount,
           totalAmount: payableAmount,
           total: payableAmount,
@@ -3261,12 +6407,239 @@ exports.applyPosLoyaltySale = onRequest(
         earnedPoints: resultPayload?.earnedPoints,
         redeemedPoints: resultPayload?.redeemedPoints,
       });
-      res.status(201).json({ ok: true, loyalty: resultPayload });
+      res.status(resultStatus === 'synced' ? 201 : 200).json({
+        ok: true,
+        status: resultStatus,
+        loyalty: resultPayload,
+      });
     } catch (error) {
       const status = error.statusCode || 500;
-      logger.warn('POS loyalty sale failed', { message: error.message, status });
+      const statusUpdated = await markPosLoyaltyFailed(orderRef, error, idempotencyKey);
+      logger.warn('POS loyalty sale failed', {
+        orderId,
+        receiptNo,
+        idempotencyKey,
+        message: error.message,
+        status,
+        statusUpdated,
+      });
       const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to apply loyalty sale.');
       res.status(status).json({ error: publicError.message });
     }
   }
 );
+
+exports.adminRetryPosLoyaltySale = onRequest(
+  { region: 'asia-southeast1' },
+  async (req, res) => {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    let orderRef = null;
+    let idempotencyKey = '';
+    let receiptNo = '';
+
+    try {
+      await requireAdminAccess(req, 'pos');
+      const body = req.body || {};
+      const requestedOrderId = cleanString(body.orderId || body.firestoreId || '', 180);
+      receiptNo = cleanString(body.receiptNo || '', 120);
+
+      if (!requestedOrderId && !receiptNo) {
+        const error = new Error('Order ID or receipt number is required');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const orderLookup = await resolvePosOrderRef(requestedOrderId, requestedOrderId, receiptNo);
+      orderRef = orderLookup.ref;
+      if (!orderRef) {
+        const error = new Error('POS order was not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      const orderSnap = await orderRef.get();
+      if (!orderSnap.exists) {
+        const error = new Error('POS order was not found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      const order = orderSnap.data() || {};
+      receiptNo = cleanString(order.receiptNo || order.number || order.orderNumber || receiptNo || orderRef.id, 120);
+      idempotencyKey = safeLedgerKey(order.loyaltyIdempotencyKey || order.idempotencyKey || receiptNo || orderRef.id);
+      const source = cleanString(order.source || '', 40).toLowerCase();
+
+      logger.info('Admin POS loyalty retry start', {
+        requestedOrderId,
+        resolvedOrderId: orderRef.id,
+        receiptNo,
+        idempotencyKey,
+        lookupSource: orderLookup.source,
+        source,
+        loyaltySyncStatus: cleanString(order.loyaltySyncStatus || '', 40),
+      });
+
+      if (source !== 'pos') {
+        const error = new Error('Only POS orders can be retried');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const retrySkipReason =
+        normalizePosLoyaltySkipReason(order.loyaltySkipReason || order.loyalty?.reason || order.loyaltyError) ||
+        posLoyaltySkipReasonFor({
+          customerUid: order.customerUid,
+          customerProfileSynced: order.customerProfileSynced,
+          isTestOrder: order.isTestOrder === true,
+          softLaunch: order.softLaunch === true,
+        });
+
+      if (retrySkipReason) {
+        const resultPayload = posLoyaltySkippedPayload({
+          customerUid: order.customerUid,
+          idempotencyKey,
+          reason: retrySkipReason,
+        });
+        await orderRef.set(posLoyaltySkippedOrderPatch(resultPayload, idempotencyKey), { merge: true });
+        logger.info('Admin POS loyalty retry skipped non-retryable order', {
+          orderId: orderRef.id,
+          receiptNo,
+          idempotencyKey,
+          reason: retrySkipReason,
+        });
+        res.status(200).json({
+          ok: true,
+          status: 'skipped',
+          orderId: orderRef.id,
+          receiptNo,
+          idempotencyKey,
+          loyalty: resultPayload,
+        });
+        return;
+      }
+
+      const payload = buildTrustedPosLoyaltyPayload(orderRef, order);
+      const header = req.get('authorization') || '';
+      const response = await fetch(cloudFunctionUrl('applyPosLoyaltySale'), {
+        method: 'POST',
+        headers: {
+          Authorization: header,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        logger.warn('Admin POS loyalty retry failed through applyPosLoyaltySale', {
+          orderId: orderRef.id,
+          receiptNo,
+          idempotencyKey,
+          status: response.status,
+          message: result.error || '',
+        });
+        res.status(response.status).json({
+          ok: false,
+          error: result.error || 'POS loyalty retry failed',
+          orderId: orderRef.id,
+          receiptNo,
+          idempotencyKey,
+        });
+        return;
+      }
+
+      logger.info('Admin POS loyalty retry completed', {
+        orderId: orderRef.id,
+        receiptNo,
+        idempotencyKey,
+        status: result.status || 'synced',
+      });
+      res.status(200).json({
+        ok: true,
+        status: result.status || 'synced',
+        orderId: orderRef.id,
+        receiptNo,
+        idempotencyKey,
+        loyalty: result.loyalty || null,
+      });
+    } catch (error) {
+      const status = error.statusCode || 500;
+      const publicError = publicApiError({ ...error, statusCode: status }, 'Unable to retry POS loyalty sale.');
+      logger.warn('Admin POS loyalty retry request failed', {
+        orderPath: orderRef?.path || '',
+        receiptNo,
+        idempotencyKey,
+        message: error.message,
+        status,
+      });
+      res.status(status).json({ error: publicError.message });
+    }
+  }
+);
+
+// Eden Archery Booking V1 backend implementation.
+// These exports intentionally override older monolithic archery handlers above.
+const archeryAvailabilityV1 = require('./archery/availability');
+const archeryBookingHoldV1 = require('./archery/bookingHold');
+const archeryConfirmV1 = require('./archery/confirmBooking');
+const archeryWalkinV1 = require('./archery/walkin');
+const archeryCancelV1 = require('./archery/cancel');
+const archeryAdminActionsV1 = require('./archery/adminActions');
+const archeryStaffSessionV1 = require('./archery/staffSession');
+const archeryPaymentsV1 = require('./payments');
+const archeryScheduledV1 = require('./scheduled');
+const promotionsV1 = require('./promotions');
+
+exports.getArcheryAvailability = archeryAvailabilityV1.getArcheryAvailability;
+exports.createArcheryHold = archeryBookingHoldV1.createArcheryHold;
+exports.createBookingHold = archeryBookingHoldV1.createArcheryHold;
+exports.confirmArcheryBooking = archeryConfirmV1.confirmArcheryBooking;
+exports.startArcheryStaffSession = archeryStaffSessionV1.startArcheryStaffSession;
+exports.createWalkInArcheryBooking = archeryWalkinV1.createWalkInArcheryBooking;
+exports.createWalkInBooking = archeryWalkinV1.createWalkInArcheryBooking;
+exports.requestCancelBooking = archeryCancelV1.requestCancelBooking;
+exports.approveCancelBooking = archeryCancelV1.approveCancelBooking;
+exports.adminCancelBooking = archeryCancelV1.requestCancelBooking;
+exports.adminCheckInBooking = archeryAdminActionsV1.adminCheckInBooking;
+exports.adminCompleteBooking = archeryAdminActionsV1.adminCompleteBooking;
+exports.adminMoveBookingLane = archeryAdminActionsV1.adminMoveBookingLane;
+exports.adminExtendBooking = archeryAdminActionsV1.adminExtendBooking;
+exports.adminMarkNoShow = archeryAdminActionsV1.adminMarkNoShow;
+exports.recordCounterPayment = archeryPaymentsV1.recordCounterPayment;
+exports.refundPayment = archeryPaymentsV1.refundPayment;
+exports.createBeamArcheryPayment = archeryPaymentsV1.createBeamArcheryPayment;
+exports.beamArcheryPaymentWebhook = archeryPaymentsV1.beamArcheryPaymentWebhook;
+exports.getArcheryPaymentStatus = archeryPaymentsV1.getArcheryPaymentStatus;
+exports.reconcileBeamLatePayment = archeryPaymentsV1.reconcileBeamLatePayment;
+exports.createShopOrderDraft = archeryPaymentsV1.createShopOrderDraft;
+exports.createPaymentIntent = archeryPaymentsV1.createPaymentIntent;
+exports.getPaymentStatus = archeryPaymentsV1.getPaymentStatus;
+exports.listPaymentsForSource = archeryPaymentsV1.listPaymentsForSource;
+exports.cancelPendingPayment = archeryPaymentsV1.cancelPendingPayment;
+exports.requestRefund = archeryPaymentsV1.requestRefund;
+exports.approveRefund = archeryPaymentsV1.approveRefund;
+exports.reconcileLatePayment = archeryPaymentsV1.reconcileLatePayment;
+exports.issueWebReceipt = archeryPaymentsV1.issueWebReceipt;
+exports.paymentWebhook = archeryPaymentsV1.paymentWebhook;
+exports.expireOldHolds = archeryScheduledV1.expireOldHolds;
+exports.adminUpsertPromotion = promotionsV1.adminUpsertPromotion;
+exports.adminDeletePromotion = promotionsV1.adminDeletePromotion;
+exports.adminBulkGeneratePromotionCodes = promotionsV1.adminBulkGeneratePromotionCodes;
+exports.adminUpsertGiftVoucher = promotionsV1.adminUpsertGiftVoucher;
+exports.adminVoidGiftVoucher = promotionsV1.adminVoidGiftVoucher;
+exports.adminBulkGenerateGiftVouchers = promotionsV1.adminBulkGenerateGiftVouchers;
+exports.validatePromotion = promotionsV1.validatePromotion;
+exports.reservePromotionRedemption = promotionsV1.reservePromotionRedemption;
+exports.commitPromotionRedemption = promotionsV1.commitPromotionRedemption;
+exports.redeemPromotionRedemption = promotionsV1.redeemPromotionRedemption;
+exports.releasePromotionRedemption = promotionsV1.releasePromotionRedemption;
+exports.validateGiftVoucher = promotionsV1.validateGiftVoucher;
+exports.redeemGiftVoucher = promotionsV1.redeemGiftVoucher;
+exports.refundGiftVoucher = promotionsV1.refundGiftVoucher;

@@ -7,9 +7,8 @@
     <link rel="icon" type="image/webp" href="/Images/Logo.webp">
     <meta name="description" content="เลือกวัน เวลา และแพ็กเกจสำหรับการจอง Eden Archery">
     <link rel="canonical" href="https://edencafe.co/archery/booking">
-
-    <link rel="stylesheet" href="/style.css?v=promo-popup-targeting-1">
-    <link rel="stylesheet" href="/archery.css?v=participant-staff-20260626-1">
+    <link rel="stylesheet" href="/style.css?v=mobile-ux-20260619">
+    <link rel="stylesheet" href="/archery.css?v=availability-progress-2">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -122,9 +121,8 @@
                                 <small>1 คนใช้ 1 เลน</small>
                             </label>
                             <div class="archery-field full">
-                                <span>ผู้เล่นและ Staff</span>
-                                <small>มือใหม่ต้องมี Staff ดูแลเท่านั้น ราคาดึงจากหลังบ้าน</small>
-                                <div class="archery-participant-list" id="archery-participant-options"></div>
+                                <span>ระดับประสบการณ์</span>
+                                <div class="archery-choice-grid" id="archery-ability-options"></div>
                             </div>
                             <div class="archery-field full">
                                 <span>อุปกรณ์</span>
@@ -141,6 +139,13 @@
                         <ul class="archery-summary-list" id="archery-hold-summary">
                             <li><span>สถานะ</span><strong>ยังไม่ได้เลือกเวลา</strong></li>
                         </ul>
+                        <div class="archery-promo-code" style="margin:16px 0; padding:12px 0; border-top:1px dashed #ddd; border-bottom:1px dashed #ddd;">
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <input type="text" id="archery-promo-code-input" placeholder="Promo code" autocomplete="off" style="flex:1; min-width:0;">
+                                <button type="button" class="btn btn-outline" id="archery-promo-apply-btn">Apply</button>
+                            </div>
+                            <p class="archery-status" id="archery-promo-message" aria-live="polite" style="margin-top:6px;"></p>
+                        </div>
                         <p class="archery-status" id="archery-countdown" aria-live="polite"></p>
                         <p class="archery-status" id="archery-confirm-status" aria-live="polite"></p>
                         <div class="archery-summary-actions">
@@ -155,6 +160,38 @@
 
     <footer id="contact">
         <div class="container">
+
+            <div class="footer-reviews"
+                style="text-align: center; margin-bottom: 50px; overflow: hidden; padding-bottom: 10px;">
+                <h3 style="color: white; margin-bottom: 20px;">รีวิวจากลูกค้าจริงบน Google Maps</h3>
+                <a href="https://maps.app.goo.gl/BYJNa4mXjVNaLDPy5" target="_blank" rel="noopener noreferrer" class="review-stat"
+                    style="display: inline-flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.2); padding: 12px 25px; border-radius: 50px; color: white; text-decoration: none; backdrop-filter: blur(5px); transition: background 0.3s; border: 1px solid rgba(255,255,255,0.3);">
+                    <svg viewBox="0 0 48 48" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+                        <path fill="#EA4335"
+                            d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                        <path fill="#4285F4"
+                            d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                        <path fill="#FBBC05"
+                            d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                        <path fill="#34A853"
+                            d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                    </svg>
+                    <strong id="google-rating-score" style="font-size: 1.2rem; color: #FFD700;">★ 4.8</strong>
+                    <span id="google-rating-count" style="font-size: 0.95rem;">(รีวิวบน Google Maps)</span>
+                </a>
+                <div class="hero-reviews" id="google-reviews-container">
+                    <div class="hero-review-card">
+                        <div style="display: flex; gap: 10px; margin-bottom: 8px; align-items: center;">
+                            <div style="width: 32px; height: 32px; background: rgba(255,255,255,0.3); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.9rem;">G</div>
+                            <div>
+                                <div style="font-size: 0.85rem; font-weight: bold; line-height: 1;">Google Maps Reviews</div>
+                                <div style="color: #FFD700; font-size: 0.75rem; margin-top: 3px;">รีวิวจาก Google Maps</div>
+                            </div>
+                        </div>
+                        <p style="font-size: 0.9rem; margin: 0; font-style: italic; opacity: 0.9;">"รีวิวจากลูกค้าจริงบน Google Maps ของ Eden Cafe"</p>
+                    </div>
+                </div>
+            </div>
             <div class="footer-grid">
                 <div>
                     <h4>Eden Cafe.</h4>
@@ -165,17 +202,44 @@
                     <p>306 หมู่ 7 ตำบลนางแล อำเภอเมืองเชียงราย จังหวัดเชียงราย 57100</p>
                     <p>อีเมล: edencafe.2565@gmail.com</p>
                     <p>โทร: 098-008-0383</p>
-                    <p>เปิดทุกวัน 09:00-18:00 น.</p>
                 </div>
                 <div>
-                    <h4>ลิงก์สำคัญ</h4>
-                    <p><a href="/menu">ดูเมนู</a></p>
-                    <p><a href="/booking">จองโต๊ะหรือห้องรับรอง</a></p>
-                    <p><a href="https://maps.app.goo.gl/BYJNa4mXjVNaLDPy5" target="_blank" rel="noopener noreferrer">เปิด Google Maps</a></p>
+                    <h4>ติดตามเรา</h4>
+                    <div class="social-icons-premium">
+                        <a href="https://www.instagram.com/edencafe_2565?igsh=MTUzdHdnOWQxaG4zaw==" target="_blank" aria-label="Instagram">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
+                                <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
+                                <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
+                            </svg>
+                        </a>
+                        <a href="https://www.facebook.com/EdenCafeChaingrai" target="_blank" aria-label="Facebook">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path>
+                            </svg>
+                        </a>
+                        <a href="https://page.line.me/811ojjgi?openQrModal=true" target="_blank" aria-label="LINE">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path
+                                    d="M21.5 10.5C21.5 5.8 17.2 2 12 2S2.5 5.8 2.5 10.5c0 4.2 3.5 7.8 8.1 8.4.3.1.8.3.9.7l.2 1.9c0 .1 0 .2.1.2.1 0 .2-.1.3-.2l2.6-3.1c.3-.4.8-.6 1.3-.6 3.1 0 5.6-3.3 5.6-7.3z">
+                                </path>
+                            </svg>
+                        </a>
+                    </div>
                 </div>
             </div>
-            <div class="footer-bottom">
-                <p class="copyright">© 2026 Eden Cafe Thailand. สงวนลิขสิทธิ์ | Optimized for SEO, AEO & GEO</p>
+            <div class="footer-bottom"
+                style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 20px;">
+                <p class="copyright">© 2026 Eden Cafe Thailand. สงวนลิขสิทธิ์ | Optimized for AEO & GEO</p>
+                <div class="visitor-stats-mini"
+                    style="display: flex; gap: 20px; font-size: 0.85rem; color: rgba(255,255,255,0.9); background: rgba(255, 255, 255, 0.1); padding: 10px 20px; border-radius: 50px; border: 1px solid rgba(255, 255, 255, 0.2); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1); backdrop-filter: blur(5px);">
+                    <span>👁️ เข้าชมวันนี้: <strong id="daily-views" style="color: #fff;">--</strong></span>
+                    <span>|</span>
+                    <span>📈 เข้าชมสะสม: <strong id="total-views" style="color: #fff;">--</strong></span>
+                </div>
             </div>
         </div>
     </footer>
@@ -193,8 +257,8 @@
         }
     </script>
     <script type="module" src="/js/footer-settings.js?v=business-1"></script>
-    <script type="module" src="/js/auth.js?v=promo-popup-targeting-1"></script>
-    <script type="module" src="/js/archery.js?v=participant-staff-20260626-1"></script>
+    <script type="module" src="/js/auth.js?v=promo-archery-phase5-7"></script>
+    <script type="module" src="/js/archery.js?v=promo-archery-phase5-7"></script>
     <script src="/js/cart.js?v=mobile-cart-20260619"></script>
 </body>
 </html>

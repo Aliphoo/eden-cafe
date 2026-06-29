@@ -6,6 +6,8 @@
     const PENDING_ORDER_KEY = 'eden_pending_order';
     const BRANCH_ID = 'BKK_MAIN';
     let discount = 0;
+    let appliedPromo = null;
+    let promoValidationToken = 0;
     let latestTotal = 0;
 
     function isEnglishPage() {
@@ -297,6 +299,108 @@
         return cart.reduce((sum, item) => sum + ((Number(item.price) || 0) * (Number(item.quantity) || 0)), 0);
     }
 
+    function roundMoney(value) {
+        return Math.round((Number(value) || 0) * 100) / 100;
+    }
+
+    function normalizePromoCode(value) {
+        return String(value ?? '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 40);
+    }
+
+    function checkoutPromoCode() {
+        return normalizePromoCode(document.getElementById('promo-code-input')?.value);
+    }
+
+    function cartPromoItems(cart = readCart()) {
+        return cart
+            .map(item => {
+                const rawId = cleanString(item.id, 180);
+                const [baseRawId, variantRawId = ''] = rawId.split('::');
+                const productId = cleanString(
+                    item.productId
+                    || item.product_id
+                    || (baseRawId.startsWith('menu-') ? baseRawId.slice(5) : baseRawId),
+                    160
+                );
+                const variantId = cleanString(item.variantId || item.variant_id || variantRawId, 120);
+                const categoryId = cleanString(item.categoryId || item.category_id || item.category, 160);
+                const categoryIds = Array.isArray(item.categoryIds)
+                    ? item.categoryIds.map(value => cleanString(value, 160)).filter(Boolean)
+                    : (categoryId ? [categoryId] : []);
+                const quantity = Math.max(0, Math.floor(Number(item.quantity) || 0));
+                const price = Number(item.price) || 0;
+                return {
+                    id: rawId,
+                    productId,
+                    variantId,
+                    categoryId,
+                    categoryIds,
+                    categoryName: cleanString(item.categoryName || item.category_name, 180),
+                    name: cleanString(item.name, 180),
+                    quantity,
+                    price,
+                    unitPrice: price,
+                    lineTotal: roundMoney(price * quantity)
+                };
+            })
+            .filter(item => item.quantity > 0 && item.lineTotal > 0);
+    }
+
+    function promoPayloadFromResponse(result = {}) {
+        return result.promotion || result.redemption || result;
+    }
+
+    function promoErrorMessage(error = {}) {
+        const code = String(error.code || error.error || '').toUpperCase();
+        if (code.includes('EXPIRED')) return t('รหัสส่วนลดหมดอายุแล้ว', 'Promo code has expired.');
+        if (code.includes('MIN_SUBTOTAL')) return t('ยอดสินค้าไม่ถึงขั้นต่ำของรหัสส่วนลดนี้', 'Cart subtotal does not meet this promo minimum.');
+        if (code.includes('NOT_APPLICABLE')) return t('รหัสส่วนลดนี้ใช้กับสินค้าในตะกร้านี้ไม่ได้', 'Promo code does not apply to these items.');
+        if (code.includes('LIMIT')) return t('รหัสส่วนลดนี้ถูกใช้ครบจำนวนแล้ว', 'Promo code redemption limit has been reached.');
+        if (code.includes('CHANNEL')) return t('รหัสส่วนลดนี้ไม่เปิดใช้สำหรับร้านค้าออนไลน์', 'Promo code is not available for online shop.');
+        if (code.includes('PROMO')) return t('รหัสส่วนลดไม่ถูกต้องหรือไม่พร้อมใช้งาน', 'Promo code is invalid or unavailable.');
+        return t('ไม่สามารถตรวจสอบรหัสส่วนลดได้ กรุณาลองใหม่', 'Could not validate promo code. Please try again.');
+    }
+
+    function setPromoMessage(text, color = '#e53935') {
+        const message = document.getElementById('promo-message');
+        if (!message) return;
+        message.style.display = text ? 'block' : 'none';
+        message.style.color = color;
+        message.textContent = text || '';
+    }
+
+    function syncPromoDiscountLine() {
+        const discountLine = document.getElementById('discount-line');
+        const discountAmount = document.getElementById('discount-amount');
+        const appliedName = document.getElementById('applied-promo-name');
+        if (!discountLine || !discountAmount || !appliedName) return;
+        if (discount > 0 && appliedPromo?.code) {
+            discountLine.style.display = 'flex';
+            discountAmount.textContent = '-' + money(discount);
+            appliedName.textContent = appliedPromo.code;
+        } else {
+            discountLine.style.display = 'none';
+            discountAmount.textContent = '-' + money(0);
+            appliedName.textContent = '';
+        }
+    }
+
+    function clearAppliedPromo({ message = '', color = '#e53935' } = {}) {
+        discount = 0;
+        appliedPromo = null;
+        syncPromoDiscountLine();
+        setPromoMessage(message, message ? color : '#e53935');
+    }
+
+    function clearPromoAfterCartChange() {
+        if (!appliedPromo && discount <= 0) return;
+        promoValidationToken += 1;
+        clearAppliedPromo({
+            message: t('ตะกร้ามีการเปลี่ยนแปลง กรุณาใช้รหัสส่วนลดอีกครั้ง', 'Cart changed. Please apply the promo code again.'),
+            color: '#8a5a00'
+        });
+    }
+
     function getFulfillmentMethod() {
         const checked = document.querySelector('input[name="fulfillment-method"]:checked');
         if (checked) return checked.value;
@@ -325,6 +429,7 @@
             .map(item => item.id === itemId ? { ...item, quantity: Math.max(0, (Number(item.quantity) || 0) + delta) } : item)
             .filter(item => (Number(item.quantity) || 0) > 0);
         saveCart(next);
+        clearPromoAfterCartChange();
         renderCheckout();
         if (typeof window.updateGlobalCartBadge === 'function') window.updateGlobalCartBadge();
     }
@@ -332,6 +437,7 @@
     function removeItem(itemId) {
         const next = readCart().filter(item => item.id !== itemId);
         saveCart(next);
+        clearPromoAfterCartChange();
         renderCheckout();
         if (typeof window.updateGlobalCartBadge === 'function') window.updateGlobalCartBadge();
     }
@@ -431,40 +537,69 @@
 
         if (subtotalEl) subtotalEl.textContent = money(sub);
         if (totalEl) totalEl.textContent = money(latestTotal);
+        syncPromoDiscountLine();
         updateShippingLineUI();
     }
 
-    function applyPromoCode() {
+    async function applyPromoCode() {
         const input = document.getElementById('promo-code-input');
-        const message = document.getElementById('promo-message');
-        const discountLine = document.getElementById('discount-line');
-        const discountAmount = document.getElementById('discount-amount');
-        const appliedName = document.getElementById('applied-promo-name');
-        if (!input || !message || !discountLine || !discountAmount || !appliedName) return;
-        const code = String(input.value || '').trim().toUpperCase();
-        const sub = subtotal(readCart());
+        if (!input) return;
+        const code = normalizePromoCode(input.value);
+        input.value = code;
+        const cart = readCart();
+        const sub = subtotal(cart);
+        promoValidationToken += 1;
+        const token = promoValidationToken;
 
-        if (code === 'EDEN10' && sub > 0) {
-            discount = Math.round(sub * 0.1);
-            message.style.display = 'block';
-            message.style.color = '#1A9345';
-            message.textContent = t('ใช้โค้ดสำเร็จ: ลด 10%', 'Promo applied: 10% off');
-            discountLine.style.display = 'flex';
-            discountAmount.textContent = '-' + money(discount);
-            appliedName.textContent = 'EDEN10';
-        } else {
-            discount = 0;
-            message.style.display = 'block';
-            message.style.color = '#e53935';
-            message.textContent = t('รหัสส่วนลดไม่ถูกต้อง', 'Invalid promo code');
-            discountLine.style.display = 'none';
+        if (!code) {
+            clearAppliedPromo({ message: t('กรุณากรอกรหัสส่วนลด', 'Enter a promo code.') });
+            renderCheckout();
+            return;
         }
-        renderCheckout();
+        if (sub <= 0) {
+            clearAppliedPromo({ message: t('ตะกร้าของคุณยังว่างอยู่', 'Your cart is empty.') });
+            renderCheckout();
+            return;
+        }
+
+        clearAppliedPromo();
+        setPromoMessage(t('กำลังตรวจสอบรหัสส่วนลด...', 'Checking promo code...'), '#6b4f00');
+
+        try {
+            const api = await waitForPaymentApi();
+            if (!api?.validatePromotion) throw new Error('Promo service is not ready');
+            const result = await api.validatePromotion({
+                branch_id: BRANCH_ID,
+                promo_code: code,
+                source_type: 'SHOP_ORDER',
+                channel: 'SHOP',
+                subtotal: sub,
+                items: cartPromoItems(cart)
+            });
+            if (token !== promoValidationToken) return;
+            const promo = promoPayloadFromResponse(result);
+            const discountAmount = roundMoney(promo.discountAmount ?? promo.discount_amount);
+            if (discountAmount <= 0) throw new Error('Promo discount is zero');
+            discount = Math.min(sub, discountAmount);
+            appliedPromo = {
+                code: promo.code || code,
+                promotionId: promo.promotionId || promo.promotion_id || '',
+                promotionName: promo.promotionName || promo.promotion_name || '',
+                discountAmount: discount,
+                lineAllocations: Array.isArray(promo.lineAllocations) ? promo.lineAllocations : []
+            };
+            setPromoMessage(t('ใช้รหัสส่วนลดสำเร็จ', 'Promo code applied.'), '#1A9345');
+            renderCheckout();
+        } catch (error) {
+            if (token !== promoValidationToken) return;
+            console.warn('Promo validation failed:', error);
+            clearAppliedPromo({ message: promoErrorMessage(error), color: '#e53935' });
+            renderCheckout();
+        }
     }
 
     function appliedPromoCode() {
-        const code = String(document.getElementById('promo-code-input')?.value || '').trim().toUpperCase();
-        return discount > 0 && code === 'EDEN10' ? code : '';
+        return checkoutPromoCode();
     }
 
     function currentReturnUrl() {
@@ -617,7 +752,7 @@
             const promoCode = appliedPromoCode();
             const draftPayload = {
                 branch_id: BRANCH_ID,
-                items: cart.map(item => ({ id: item.id, name: item.name, quantity: Number(item.quantity) || 0 })),
+                items: cartPromoItems(cart),
                 customer_name: name,
                 phone,
                 address: addressText,
@@ -652,6 +787,8 @@
                 paymentStatus: payment.payment_status || payment.status || 'PENDING',
                 status: 'pending',
                 totalAmount: draft.amount,
+                totals: draft.totals || null,
+                promoApplications: draft.promo_applications || [],
                 fulfillmentMethod,
                 source: 'online',
                 orderType: 'shop',
@@ -661,7 +798,15 @@
             location.href = payment.payment_link_url;
         } catch (error) {
             console.error('Order create failed:', error);
-            alert(t('ไม่สามารถสร้างคำสั่งซื้อได้ กรุณาลองใหม่', 'Could not create order. Please try again.'));
+            const isPromoError = String(error.code || error.error || '').toUpperCase().includes('PROMO');
+            if (isPromoError) {
+                const message = promoErrorMessage(error);
+                clearAppliedPromo({ message, color: '#e53935' });
+                renderCheckout();
+                alert(message);
+            } else {
+                alert(t('ไม่สามารถสร้างคำสั่งซื้อได้ กรุณาลองใหม่', 'Could not create order. Please try again.'));
+            }
             if (button) {
                 button.disabled = false;
                 button.textContent = originalText;

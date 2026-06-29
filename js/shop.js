@@ -266,6 +266,10 @@ function syncProductDetailVariant() {
         addButton.dataset.id = getProductCartId(activeProductDetail, variant);
         addButton.dataset.name = getProductCartName(activeProductDetail, variant);
         addButton.dataset.price = String(price);
+        addButton.dataset.productId = activeProductDetail.id;
+        addButton.dataset.variantId = variant ? variant.id : '';
+        addButton.dataset.categoryId = activeProductDetail.category || '';
+        addButton.dataset.categoryName = activeProductDetail.categoryName || '';
         addButton.disabled = !canAdd;
         addButton.textContent = canAdd
             ? t('\u0e40\u0e1e\u0e34\u0e48\u0e21\u0e25\u0e07\u0e15\u0e30\u0e01\u0e23\u0e49\u0e32', 'Add to Cart')
@@ -372,7 +376,7 @@ function renderProducts(container, products, note = '') {
                     <p class="shop-stock" style="color:${soldOut ? '#b91c1c' : '#0f7a3d'};">${soldOut ? (en ? 'Sold out' : 'สินค้าหมด') : (en ? `In stock: ${product.stock}` : `เหลือ ${product.stock} ชิ้น`)}</p>
                     <div class="shop-action">
                         <span class="shop-price">${formatShopPrice(displayPrice)}</span>
-                        <button class="btn btn-add-cart" ${soldOut ? 'disabled style="background:#ccc;"' : ''} data-id="${escapeHTML(cartId)}" data-name="${escapeHTML(cartName)}" data-price="${displayPrice}">
+                        <button class="btn btn-add-cart" ${soldOut ? 'disabled style="background:#ccc;"' : ''} data-id="${escapeHTML(cartId)}" data-name="${escapeHTML(cartName)}" data-price="${displayPrice}" data-product-id="${escapeHTML(product.id)}" data-variant-id="${escapeHTML(defaultVariant?.id || '')}" data-category-id="${escapeHTML(product.category || '')}" data-category-name="${escapeHTML(product.categoryName || '')}">
                             ${fallbackMode ? (en ? 'Unavailable' : 'ยังไม่พร้อมขาย') : (soldOut ? (en ? 'Sold out' : 'สินค้าหมด') : (en ? 'Add to Cart' : 'เพิ่มลงตะกร้า'))}
                         </button>
                     </div>

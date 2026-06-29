@@ -6,28 +6,23 @@ import qrcodeFactory from './qrcode-generator.esm.js';
 import { clearSkeleton, renderSkeleton } from './ui-skeleton.js';
 
 const BRANCH_ID = 'BKK_MAIN';
+const PACKAGE_PRICES = { 60: 350, 120: 600, 180: 800 };
 const DEFAULT_PRICING_CONFIG = {
-    version: '',
+    version: '2026-06-default',
     packages: [
-        { durationMinutes: 60, price: 0, title: '60 min', active: true },
-        { durationMinutes: 120, price: 0, title: '120 min', active: true },
-        { durationMinutes: 180, price: 0, title: '180 min', active: true }
+        { durationMinutes: 60, price: 350, title: '60 min', active: true },
+        { durationMinutes: 120, price: 600, title: '120 min', active: true },
+        { durationMinutes: 180, price: 800, title: '180 min', active: true }
     ],
     abilityOptions: [
-        { id: 'first_time_with_coach', label: 'ครั้งแรก ต้องการโค้ช', ratePerHour: 0, coachRequired: true, active: true },
-        { id: 'experienced_with_coach', label: 'เคยยิงแล้ว ต้องการโค้ช', ratePerHour: 0, coachRequired: true, active: true },
+        { id: 'first_time_with_coach', label: 'ครั้งแรก ต้องการโค้ช', ratePerHour: 50, coachRequired: true, active: true },
+        { id: 'experienced_with_coach', label: 'เคยยิงแล้ว ต้องการโค้ช', ratePerHour: 50, coachRequired: true, active: true },
         { id: 'experienced_no_coach', label: 'เคยยิงแล้ว ไม่ต้องการโค้ช', ratePerHour: 0, coachRequired: false, active: true }
     ],
     equipmentOptions: [
-        { id: 'rent_full_set', label: 'เช่าอุปกรณ์ครบเซ็ต', ratePerHour: 0, active: true },
+        { id: 'rent_full_set', label: 'เช่าอุปกรณ์ครบเซ็ต', ratePerHour: 100, active: true },
         { id: 'bring_own', label: 'นำอุปกรณ์มาเอง', ratePerHour: 0, active: true }
     ]
-};
-const EMPTY_PRICING_CONFIG = {
-    version: '',
-    packages: [],
-    abilityOptions: [],
-    equipmentOptions: []
 };
 const OPTION_LABELS_TH = {
     first_time_with_coach: 'ครั้งแรก ต้องการโค้ช',
@@ -40,10 +35,6 @@ const STORAGE_KEY = 'eden_archery_last_booking';
 const HOLD_STORAGE_KEY = 'eden_archery_active_hold';
 const HOLD_MINUTES = 10;
 const VALID_DURATIONS = new Set([60, 120, 180]);
-const EXPERIENCE_FIRST_TIME = 'first_time';
-const EXPERIENCE_EXPERIENCED = 'experienced';
-const STAFF_REQUIRED = 'staff_required';
-const STAFF_NOT_REQUIRED = 'staff_not_required';
 
 let currentUser = null;
 let currentHold = null;
@@ -56,10 +47,9 @@ let busyAction = '';
 let isCheckingAvailability = false;
 let holdIdempotencyKey = '';
 let beamPaymentIdempotencyKey = '';
-let archeryPricingConfig = EMPTY_PRICING_CONFIG;
-let pricingSettingsReady = false;
-let pricingSettingsError = '';
-let participantSelections = [];
+let archeryPricingConfig = DEFAULT_PRICING_CONFIG;
+let appliedArcheryPromo = null;
+let archeryPromoValidationToken = 0;
 
 const AUTO_AVAILABILITY_DELAY_MS = 350;
 
@@ -135,8 +125,16 @@ function money(value) {
     return Math.round(Number(value) || 0).toLocaleString('th-TH') + ' THB';
 }
 
-function bookingText(th, en) {
-    return location.pathname.includes('-en') ? en : th;
+function roundMoney(value) {
+    return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function firstFiniteNumber(...values) {
+    for (const value of values) {
+        const number = Number(value);
+        if (Number.isFinite(number)) return number;
+    }
+    return 0;
 }
 
 function activeItems(items = []) {
@@ -145,40 +143,32 @@ function activeItems(items = []) {
 
 function normalizePricingConfig(data = {}) {
     const source = data.pricing || data.bookingOptions || data.booking_options || data || {};
-    const fallback = EMPTY_PRICING_CONFIG;
-    const packages = Array.isArray(source.packages) && source.packages.length ? source.packages : fallback.packages;
+    const packages = Array.isArray(source.packages) && source.packages.length ? source.packages : DEFAULT_PRICING_CONFIG.packages;
     const abilityOptions = Array.isArray(source.abilityOptions || source.ability_options) && (source.abilityOptions || source.ability_options).length
         ? (source.abilityOptions || source.ability_options)
-        : fallback.abilityOptions;
+        : DEFAULT_PRICING_CONFIG.abilityOptions;
     const equipmentOptions = Array.isArray(source.equipmentOptions || source.equipment_options) && (source.equipmentOptions || source.equipment_options).length
         ? (source.equipmentOptions || source.equipment_options)
-        : fallback.equipmentOptions;
+        : DEFAULT_PRICING_CONFIG.equipmentOptions;
     return {
-        version: source.version || source.pricingVersion || source.pricing_version || fallback.version || '',
+        version: source.version || source.pricingVersion || source.pricing_version || DEFAULT_PRICING_CONFIG.version,
         packages: packages.map((item, index) => ({
-            durationMinutes: Number(item.durationMinutes ?? item.duration_minutes ?? item.duration ?? fallback.packages[index]?.durationMinutes ?? 0) || 0,
-            price: Number(item.price ?? item.amount ?? item.amountTotal ?? item.amount_total ?? fallback.packages[index]?.price ?? 0) || 0,
+            durationMinutes: Number(item.durationMinutes || item.duration_minutes || item.duration || DEFAULT_PRICING_CONFIG.packages[index]?.durationMinutes || 60) || 60,
+            price: Number(item.price || item.amount || item.amountTotal || item.amount_total || DEFAULT_PRICING_CONFIG.packages[index]?.price || 0) || 0,
             title: String(item.title || '').trim(),
             active: item.active !== false
-        })).filter(item => item.durationMinutes > 0),
-        abilityOptions: abilityOptions.map((item, index) => {
-            const fallbackOption = fallback.abilityOptions[index] || {};
-            return {
-                id: String(item.id || item.option_id || fallbackOption.id || '').trim(),
-                label: String(item.label || fallbackOption.label || '').trim(),
-                ratePerHour: Number(item.ratePerHour ?? item.rate_per_hour ?? item.rate ?? fallbackOption.ratePerHour ?? 0) || 0,
-                coachRequired: item.coachRequired != null
-                    ? item.coachRequired === true
-                    : item.coach_required != null
-                        ? item.coach_required === true
-                        : fallbackOption.coachRequired === true,
-                active: item.active !== false
-            };
-        }).filter(item => item.id),
+        })),
+        abilityOptions: abilityOptions.map((item, index) => ({
+            id: String(item.id || item.option_id || DEFAULT_PRICING_CONFIG.abilityOptions[index]?.id || '').trim(),
+            label: String(item.label || DEFAULT_PRICING_CONFIG.abilityOptions[index]?.label || '').trim(),
+            ratePerHour: Number(item.ratePerHour || item.rate_per_hour || item.rate || 0) || 0,
+            coachRequired: item.coachRequired === true || item.coach_required === true,
+            active: item.active !== false
+        })).filter(item => item.id),
         equipmentOptions: equipmentOptions.map((item, index) => ({
-            id: String(item.id || item.option_id || fallback.equipmentOptions[index]?.id || '').trim(),
-            label: String(item.label || fallback.equipmentOptions[index]?.label || '').trim(),
-            ratePerHour: Number(item.ratePerHour ?? item.rate_per_hour ?? item.rate ?? fallback.equipmentOptions[index]?.ratePerHour ?? 0) || 0,
+            id: String(item.id || item.option_id || DEFAULT_PRICING_CONFIG.equipmentOptions[index]?.id || '').trim(),
+            label: String(item.label || DEFAULT_PRICING_CONFIG.equipmentOptions[index]?.label || '').trim(),
+            ratePerHour: Number(item.ratePerHour || item.rate_per_hour || item.rate || 0) || 0,
             active: item.active !== false
         })).filter(item => item.id)
     };
@@ -186,7 +176,7 @@ function normalizePricingConfig(data = {}) {
 
 function packagePrice(duration = packageMinutes()) {
     const item = activeItems(archeryPricingConfig.packages).find(row => row.durationMinutes === normalizeDuration(duration));
-    return Number(item?.price || 0) || 0;
+    return Number(item?.price || PACKAGE_PRICES[normalizeDuration(duration)] || 0) || 0;
 }
 
 function selectedOption(group) {
@@ -195,150 +185,198 @@ function selectedOption(group) {
     return activeItems(options).find(item => item.id === checked?.value) || activeItems(options)[0] || null;
 }
 
-function abilityOptions() {
-    return activeItems(archeryPricingConfig.abilityOptions);
-}
-
-function findAbilityOption(predicate, fallbackPredicate = () => true) {
-    const options = abilityOptions();
-    return options.find(predicate) || options.find(fallbackPredicate) || options[0] || null;
-}
-
-function firstTimeStaffOption() {
-    return findAbilityOption(
-        option => option.coachRequired && String(option.id || '').includes('first_time'),
-        option => option.coachRequired
-    );
-}
-
-function experiencedStaffOption() {
-    return findAbilityOption(
-        option => option.coachRequired && String(option.id || '').includes('experienced'),
-        option => option.coachRequired
-    );
-}
-
-function experiencedNoStaffOption() {
-    return findAbilityOption(
-        option => !option.coachRequired && String(option.id || '').includes('no_coach'),
-        option => !option.coachRequired
-    );
-}
-
-function hasRequiredPricingConfig(config = archeryPricingConfig) {
-    const packages = activeItems(config.packages).filter(item => item.durationMinutes > 0 && Number.isFinite(Number(item.price)));
-    const abilities = activeItems(config.abilityOptions);
-    const equipment = activeItems(config.equipmentOptions);
-    return Boolean(
-        packages.length
-        && equipment.length
-        && abilities.some(option => option.coachRequired && String(option.id || '').includes('first_time'))
-        && abilities.some(option => option.coachRequired && String(option.id || '').includes('experienced'))
-        && abilities.some(option => !option.coachRequired && String(option.id || '').includes('no_coach'))
-    );
-}
-
-function pricingUnavailableText() {
-    return bookingText(
-        'ไม่สามารถโหลดราคาจากหลังบ้านได้ กรุณารีเฟรชหน้า หรือติดต่อพนักงาน',
-        'Unable to load admin pricing. Please refresh or contact staff.'
-    );
-}
-
-function normalizeParticipantSelections() {
-    const people = partySize();
-    const next = [];
-    for (let index = 0; index < people; index += 1) {
-        const current = participantSelections[index] || {};
-        const experience = current.experience === EXPERIENCE_EXPERIENCED ? EXPERIENCE_EXPERIENCED : EXPERIENCE_FIRST_TIME;
-        let staffChoice = current.staffChoice === STAFF_NOT_REQUIRED ? STAFF_NOT_REQUIRED : STAFF_REQUIRED;
-        if (experience === EXPERIENCE_FIRST_TIME || !experiencedNoStaffOption()) staffChoice = STAFF_REQUIRED;
-        next.push({ participantIndex: index + 1, experience, staffChoice });
-    }
-    participantSelections = next;
-    return next;
-}
-
-function resolveParticipantAbility(selection = {}) {
-    if (selection.experience === EXPERIENCE_FIRST_TIME) return firstTimeStaffOption();
-    if (selection.staffChoice === STAFF_NOT_REQUIRED) return experiencedNoStaffOption() || experiencedStaffOption();
-    return experiencedStaffOption();
-}
-
-function participantPricingRows(hours) {
-    return normalizeParticipantSelections().map(selection => {
-        const ability = resolveParticipantAbility(selection);
-        const coachAmount = Math.round(Number(ability?.ratePerHour || 0) * hours);
-        return {
-            participantIndex: selection.participantIndex,
-            experience: selection.experience,
-            staffChoice: ability?.coachRequired ? STAFF_REQUIRED : STAFF_NOT_REQUIRED,
-            ability,
-            abilityOptionId: ability?.id || '',
-            abilityLabel: optionDisplayLabel(ability),
-            coachRequired: ability?.coachRequired === true,
-            coachRatePerHour: Number(ability?.ratePerHour || 0) || 0,
-            coachAmount
-        };
-    });
-}
-
-function participantPayloadRows(participants = []) {
-    return participants.map(item => ({
-        participant_index: item.participantIndex,
-        experience: item.experience,
-        staff_choice: item.staffChoice,
-        ability_option_id: item.abilityOptionId
-    }));
-}
-
-function staffSummaryText(pricing = calculateDraftPricing()) {
-    if (!pricing.staffCount) return '0 people / ' + money(0);
-    const groups = new Map();
-    pricing.participants
-        .filter(item => item.coachRequired)
-        .forEach(item => {
-            const key = String(item.coachAmount);
-            const current = groups.get(key) || { count: 0, amount: 0, unit: item.coachAmount };
-            current.count += 1;
-            current.amount += item.coachAmount;
-            groups.set(key, current);
-        });
-    return Array.from(groups.values())
-        .map(group => `${group.count} x ${money(group.unit)} = ${money(group.amount)}`)
-        .join(', ');
-}
-
 function calculateDraftPricing() {
     const duration = packageMinutes();
     const hours = duration / 60;
+    const ability = selectedOption('archery-ability');
     const equipment = selectedOption('archery-equipment');
     const packageAmount = packagePrice(duration);
+    const coachAmount = Math.round(Number(ability?.ratePerHour || 0) * hours);
     const equipmentAmount = Math.round(Number(equipment?.ratePerHour || 0) * hours);
     const people = partySize();
-    const participants = participantPricingRows(hours);
-    const coachTotal = participants.reduce((sum, item) => sum + item.coachAmount, 0);
-    const staffCount = participants.filter(item => item.coachRequired).length;
-    const distinctAbilityIds = [...new Set(participants.map(item => item.abilityOptionId).filter(Boolean))];
-    const primaryAbility = distinctAbilityIds.length === 1 ? participants[0]?.ability : null;
-    const perPersonTotal = packageAmount + equipmentAmount + (people ? Math.round(coachTotal / people) : 0);
+    const perPersonTotal = packageAmount + coachAmount + equipmentAmount;
     return {
         packageAmount,
-        coachAmount: people ? Math.round(coachTotal / people) : 0,
+        coachAmount,
         equipmentAmount,
         partySize: people,
         requiredLaneCount: people,
         packageTotal: packageAmount * people,
-        coachTotal,
+        coachTotal: coachAmount * people,
         equipmentTotal: equipmentAmount * people,
         perPersonTotal,
-        amountTotal: (packageAmount * people) + coachTotal + (equipmentAmount * people),
-        staffCount,
-        participants,
-        participantOptions: participantPayloadRows(participants),
-        ability: primaryAbility || participants[0]?.ability || null,
+        amountTotal: perPersonTotal * people,
+        ability,
         equipment
     };
+}
+
+function normalizePromoCode(value) {
+    return String(value ?? '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 40);
+}
+
+function currentArcheryPromoInputCode() {
+    return normalizePromoCode($('archery-promo-code-input')?.value);
+}
+
+function appliedArcheryPromoCode() {
+    return normalizePromoCode(appliedArcheryPromo?.code || appliedArcheryPromo?.promoCode);
+}
+
+function currentArcheryPromoDiscount(pricing = calculateDraftPricing()) {
+    const code = currentArcheryPromoInputCode();
+    if (!appliedArcheryPromo || !appliedArcheryPromoCode() || appliedArcheryPromoCode() !== code) return 0;
+    return roundMoney(Math.min(pricing.amountTotal, appliedArcheryPromo.discountAmount || 0));
+}
+
+function archeryPromoItems(pricing = calculateDraftPricing()) {
+    const duration = packageMinutes();
+    return [
+        {
+            id: `${packageCode(duration)}_PACKAGE`,
+            productId: 'ARCHERY_PACKAGE',
+            archeryItem: 'ARCHERY_PACKAGE',
+            itemType: 'ARCHERY_PACKAGE',
+            item_type: 'ARCHERY_PACKAGE',
+            label: 'Archery package',
+            quantity: pricing.partySize,
+            unitPrice: pricing.packageAmount,
+            lineTotal: pricing.packageTotal,
+            amount: pricing.packageTotal
+        },
+        {
+            id: `${packageCode(duration)}_COACH`,
+            productId: 'ARCHERY_COACH',
+            archeryItem: 'ARCHERY_COACH',
+            itemType: 'ARCHERY_COACH',
+            item_type: 'ARCHERY_COACH',
+            label: 'Coach',
+            quantity: pricing.partySize,
+            unitPrice: pricing.coachAmount,
+            lineTotal: pricing.coachTotal,
+            amount: pricing.coachTotal
+        },
+        {
+            id: `${packageCode(duration)}_EQUIPMENT`,
+            productId: 'ARCHERY_EQUIPMENT',
+            archeryItem: 'ARCHERY_EQUIPMENT',
+            itemType: 'ARCHERY_EQUIPMENT',
+            item_type: 'ARCHERY_EQUIPMENT',
+            label: 'Equipment',
+            quantity: pricing.partySize,
+            unitPrice: pricing.equipmentAmount,
+            lineTotal: pricing.equipmentTotal,
+            amount: pricing.equipmentTotal
+        }
+    ].filter(item => item.amount > 0);
+}
+
+function promoPayloadFromResponse(result = {}) {
+    return result.promotion || result.redemption || result;
+}
+
+function promoErrorMessage(error = {}) {
+    const code = String(error.code || error.error || error.message || '').toUpperCase();
+    if (code.includes('EXPIRED')) return 'Promo code has expired.';
+    if (code.includes('MIN_SUBTOTAL')) return 'Booking total does not meet this promo minimum.';
+    if (code.includes('NOT_APPLICABLE')) return 'Promo code does not apply to this archery selection.';
+    if (code.includes('LIMIT')) return 'Promo code redemption limit has been reached.';
+    if (code.includes('CHANNEL')) return 'Promo code is not available for archery bookings.';
+    if (code.includes('PROMO')) return 'Promo code is invalid or unavailable.';
+    return 'Could not validate promo code. Please try again.';
+}
+
+function setArcheryPromoMessage(message = '', type = '') {
+    setStatus('archery-promo-message', message, type);
+}
+
+function clearArcheryPromo({ message = '', type = '' } = {}) {
+    appliedArcheryPromo = null;
+    setArcheryPromoMessage(message, type);
+}
+
+function clearArcheryPromoAfterSelectionChange() {
+    if (!appliedArcheryPromo && !currentArcheryPromoInputCode()) return;
+    archeryPromoValidationToken += 1;
+    holdIdempotencyKey = '';
+    clearArcheryPromo({
+        message: currentArcheryPromoInputCode() ? 'Booking details changed. Apply the promo code again.' : '',
+        type: currentArcheryPromoInputCode() ? 'loading' : ''
+    });
+}
+
+async function applyArcheryPromoCode(event) {
+    if (event) event.preventDefault();
+    if (currentHold) {
+        setArcheryPromoMessage('Promo code is locked after booking hold is created.', 'error');
+        return false;
+    }
+    const input = $('archery-promo-code-input');
+    const button = $('archery-promo-apply-btn');
+    const code = normalizePromoCode(input?.value);
+    if (input) input.value = code;
+    archeryPromoValidationToken += 1;
+    const token = archeryPromoValidationToken;
+
+    if (!code) {
+        holdIdempotencyKey = '';
+        clearArcheryPromo({ message: 'Enter a promo code.', type: 'error' });
+        renderDraftSummary();
+        return false;
+    }
+    if (!currentUser) {
+        clearArcheryPromo({ message: 'Please sign in before applying a promo code.', type: 'error' });
+        renderDraftSummary();
+        return false;
+    }
+
+    const pricing = calculateDraftPricing();
+    if (pricing.amountTotal <= 0) {
+        clearArcheryPromo({ message: 'Booking total must be greater than zero.', type: 'error' });
+        renderDraftSummary();
+        return false;
+    }
+
+    clearArcheryPromo();
+    setArcheryPromoMessage('Checking promo code...', 'loading');
+    if (button) button.disabled = true;
+
+    try {
+        const api = await waitForApi();
+        if (!api?.validatePromotion) throw new Error('Promo service is not ready');
+        const result = await api.validatePromotion({
+            branch_id: BRANCH_ID,
+            promo_code: code,
+            source_type: 'ARCHERY_BOOKING',
+            channel: 'ARCHERY',
+            subtotal: pricing.amountTotal,
+            items: archeryPromoItems(pricing)
+        });
+        if (token !== archeryPromoValidationToken) return false;
+        const promo = promoPayloadFromResponse(result);
+        const discountAmount = roundMoney(promo.discountAmount ?? promo.discount_amount);
+        if (discountAmount <= 0) throw new Error('Promo discount is zero');
+        appliedArcheryPromo = {
+            code: normalizePromoCode(promo.code || code),
+            promotionId: promo.promotionId || promo.promotion_id || '',
+            promotionName: promo.promotionName || promo.promotion_name || '',
+            discountAmount: roundMoney(Math.min(pricing.amountTotal, discountAmount)),
+            lineAllocations: Array.isArray(promo.lineAllocations) ? promo.lineAllocations : []
+        };
+        holdIdempotencyKey = '';
+        setArcheryPromoMessage('Promo code applied.', 'success');
+        renderDraftSummary();
+        return true;
+    } catch (error) {
+        if (token !== archeryPromoValidationToken) return false;
+        console.warn('Archery promo validation failed:', error);
+        holdIdempotencyKey = '';
+        clearArcheryPromo({ message: promoErrorMessage(error), type: 'error' });
+        renderDraftSummary();
+        return false;
+    } finally {
+        if (button) button.disabled = !!currentHold;
+    }
 }
 
 function optionDisplayLabel(option = {}) {
@@ -436,12 +474,14 @@ function setAvailabilityControlsChecking(isChecking) {
 function restoreButtonStates() {
     const holdBtn = $('archery-hold-btn');
     const confirmBtn = $('archery-confirm-btn');
+    const promoInput = $('archery-promo-code-input');
+    const promoButton = $('archery-promo-apply-btn');
+    if (promoInput) promoInput.disabled = !!currentHold;
+    if (promoButton) promoButton.disabled = !!currentHold;
     if (holdBtn) {
-        holdBtn.disabled = !pricingSettingsReady || isCheckingAvailability || !currentUser || !latestAvailability?.available || !!currentHold;
+        holdBtn.disabled = isCheckingAvailability || !currentUser || !latestAvailability?.available || !!currentHold;
         holdBtn.setAttribute('aria-disabled', holdBtn.disabled ? 'true' : 'false');
-        holdBtn.title = !pricingSettingsReady
-            ? pricingUnavailableText()
-            : !currentUser
+        holdBtn.title = !currentUser
             ? 'กรุณาเข้าสู่ระบบสมาชิกก่อนยืนยันการจอง'
             : isCheckingAvailability
                 ? 'ระบบกำลังตรวจสอบเลนว่าง'
@@ -475,8 +515,9 @@ function idempotencyKey(action, keyParts = []) {
         selectedStartTime(),
         packageMinutes(),
         partySize(),
-        pricing.participantOptions.map(item => item.ability_option_id).join(','),
+        pricing.ability?.id || '',
         pricing.equipment?.id || '',
+        appliedArcheryPromoCode(),
         ...keyParts
     ].join(':');
     const browserCrypto = globalThis.crypto;
@@ -512,7 +553,6 @@ function shouldAutoCheckAvailability() {
     if (currentHold) return false;
     return Boolean(
         $('archery-booking-form')
-        && pricingSettingsReady
         && selectedDate()
         && selectedStartTime()
         && packageMinutes()
@@ -566,22 +606,12 @@ function selectionPayload() {
         package_code: packageCode(duration),
         party_size: pricing.partySize,
         ability_option_id: pricing.ability?.id || '',
-        participant_options: pricing.participantOptions,
         equipment_option_id: pricing.equipment?.id || ''
     };
 }
 
 function summaryRows(rows) {
     return rows.map(([label, value]) => `<li><span>${escapeHTML(label)}</span><strong>${escapeHTML(value || '-')}</strong></li>`).join('');
-}
-
-function renderPricingUnavailableSummary() {
-    const el = $('archery-hold-summary');
-    if (!el || currentHold) return;
-    clearSummaryListSkeleton('archery-hold-summary');
-    el.innerHTML = summaryRows([
-        ['Pricing', pricingSettingsError || pricingUnavailableText()]
-    ]);
 }
 
 function renderDraftSummaryLegacy() {
@@ -592,30 +622,36 @@ function renderDraftSummaryLegacy() {
         ['วันที่', selectedDate()],
         ['เวลา', displayTimeRange(selectedStartTime(), selectedEndTime())],
         ['แพ็กเกจ', duration + ' นาที'],
-        ['ยอดรวม', money(packagePrice(duration) * partySize())]
+        ['ยอดรวม', money(PACKAGE_PRICES[duration])]
     ]);
 }
 
 function renderDraftSummary() {
     const el = $('archery-hold-summary');
     if (!el || currentHold) return;
-    if (!pricingSettingsReady) {
-        renderPricingUnavailableSummary();
-        return;
-    }
     const duration = packageMinutes();
     const pricing = calculateDraftPricing();
-    el.innerHTML = summaryRows([
+    const discount = currentArcheryPromoDiscount(pricing);
+    const rows = [
         ['Date', selectedDate()],
         ['Time', displayTimeRange(selectedStartTime(), selectedEndTime())],
         ['Package', duration + ' min'],
         ['People', String(pricing.partySize)],
         ['Lanes needed', String(pricing.requiredLaneCount)],
         ['Package / person', money(pricing.packageAmount)],
-        ['Staff', staffSummaryText(pricing)],
-        ['Equipment / person', `${optionDisplayLabel(pricing.equipment)} / ${money(pricing.equipmentAmount)}`],
-        ['Total', money(pricing.amountTotal)]
-    ]);
+        ['Coach / person', `${optionDisplayLabel(pricing.ability)} / ${money(pricing.coachAmount)}`],
+        ['Equipment / person', `${optionDisplayLabel(pricing.equipment)} / ${money(pricing.equipmentAmount)}`]
+    ];
+    if (discount > 0) {
+        rows.push(
+            ['Subtotal', money(pricing.amountTotal)],
+            [`Promo ${appliedArcheryPromoCode()}`, '-' + money(discount)],
+            ['Total', money(roundMoney(pricing.amountTotal - discount))]
+        );
+    } else {
+        rows.push(['Total', money(pricing.amountTotal)]);
+    }
+    el.innerHTML = summaryRows(rows);
 }
 
 function renderSuggestions(times = []) {
@@ -685,17 +721,17 @@ function renderOptionCards(containerId, inputName, options = [], formatter = () 
 }
 
 function renderChoiceGridSkeleton() {
-    renderSkeleton($('archery-participant-options'), 'stats', { count: Math.max(1, partySize()) });
+    renderSkeleton($('archery-ability-options'), 'stats', { count: 3 });
     renderSkeleton($('archery-equipment-options'), 'stats', { count: 3 });
 }
 
 function renderSummaryListSkeleton(id, rows = 6) {
-    const list = $(id);
-    if (!list) return;
-    list.dataset.edenSkeleton = 'summary-list';
-    list.setAttribute('aria-busy', 'true');
-    list.innerHTML = Array.from({ length: rows }, () => `
-        <li class="archery-summary-row">
+    const el = $(id);
+    if (!el) return;
+    el.dataset.edenSkeleton = 'summary-list';
+    el.setAttribute('aria-busy', 'true');
+    el.innerHTML = Array.from({ length: rows }, () => `
+        <li class="archery-summary-row" aria-hidden="true">
             <span class="eden-skeleton-line short"></span>
             <span class="eden-skeleton-line medium"></span>
         </li>
@@ -703,106 +739,25 @@ function renderSummaryListSkeleton(id, rows = 6) {
 }
 
 function clearSummaryListSkeleton(id) {
-    const list = $(id);
-    if (!list) return;
-    delete list.dataset.edenSkeleton;
-    list.removeAttribute('aria-busy');
-}
-
-function participantStaffOptionHTML(selection = {}) {
-    const staffOption = selection.experience === EXPERIENCE_FIRST_TIME ? firstTimeStaffOption() : experiencedStaffOption();
-    const noStaffOption = experiencedNoStaffOption();
-    const staffRate = staffOption ? `${optionDisplayLabel(staffOption)} - ${money(staffOption.ratePerHour)} / ${bookingText('ชม.', 'hr')}` : 'Staff';
-    const noStaffLabel = noStaffOption ? optionDisplayLabel(noStaffOption) : bookingText('ไม่ต้องการ Staff', 'No Staff');
-    return `
-        <option value="${STAFF_REQUIRED}" ${selection.staffChoice !== STAFF_NOT_REQUIRED ? 'selected' : ''}>${escapeHTML(staffRate)}</option>
-        ${selection.experience === EXPERIENCE_EXPERIENCED && noStaffOption ? `<option value="${STAFF_NOT_REQUIRED}" ${selection.staffChoice === STAFF_NOT_REQUIRED ? 'selected' : ''}>${escapeHTML(noStaffLabel)} - ${bookingText('ไม่มีค่าใช้จ่ายเพิ่ม', 'No extra charge')}</option>` : ''}
-    `;
-}
-
-function renderParticipantOptions() {
-    const el = $('archery-participant-options');
+    const el = $(id);
     if (!el) return;
-    clearSkeleton(el);
-    const selections = normalizeParticipantSelections();
-    el.innerHTML = selections.map(selection => `
-        <div class="archery-participant-row" data-participant-index="${selection.participantIndex}">
-            <strong>${bookingText('ผู้เล่น', 'Player')} ${selection.participantIndex}</strong>
-            <label>
-                <span>${bookingText('ระดับ', 'Level')}</span>
-                <select data-participant-field="experience">
-                    <option value="${EXPERIENCE_FIRST_TIME}" ${selection.experience === EXPERIENCE_FIRST_TIME ? 'selected' : ''}>${bookingText('มือใหม่', 'First-time')}</option>
-                    <option value="${EXPERIENCE_EXPERIENCED}" ${selection.experience === EXPERIENCE_EXPERIENCED ? 'selected' : ''}>${bookingText('เคยยิงแล้ว', 'Experienced')}</option>
-                </select>
-            </label>
-            <label>
-                <span>Staff</span>
-                <select data-participant-field="staff" ${selection.experience === EXPERIENCE_FIRST_TIME ? 'disabled' : ''}>
-                    ${participantStaffOptionHTML(selection)}
-                </select>
-            </label>
-            ${selection.experience === EXPERIENCE_FIRST_TIME ? `<small>${bookingText('มือใหม่ต้องมี Staff ดูแลเท่านั้น', 'First-time players must have Staff supervision')}</small>` : ''}
-        </div>
-    `).join('');
-
-    el.querySelectorAll('select').forEach(select => {
-        select.addEventListener('change', () => {
-            const row = select.closest('[data-participant-index]');
-            const index = Math.max(0, Number(row?.dataset.participantIndex || 1) - 1);
-            const current = participantSelections[index] || { participantIndex: index + 1 };
-            if (select.dataset.participantField === 'experience') {
-                current.experience = select.value === EXPERIENCE_EXPERIENCED ? EXPERIENCE_EXPERIENCED : EXPERIENCE_FIRST_TIME;
-                if (current.experience === EXPERIENCE_FIRST_TIME) current.staffChoice = STAFF_REQUIRED;
-            } else if (select.dataset.participantField === 'staff') {
-                current.staffChoice = select.value === STAFF_NOT_REQUIRED ? STAFF_NOT_REQUIRED : STAFF_REQUIRED;
-            }
-            participantSelections[index] = current;
-            renderParticipantOptions();
-            resetAvailabilityState();
-            resetHoldState();
-            renderDraftSummary();
-            scheduleAvailabilityRefresh();
-        });
-    });
-}
-
-function renderPricingUnavailable() {
-    const packageSelect = $('archery-package');
-    const participantList = $('archery-participant-options');
-    const equipmentList = $('archery-equipment-options');
-    const message = pricingSettingsError || pricingUnavailableText();
-    if (packageSelect) {
-        packageSelect.innerHTML = `<option value="">${escapeHTML(bookingText('ไม่พร้อมใช้งาน', 'Unavailable'))}</option>`;
-        packageSelect.disabled = true;
-    }
-    if (participantList) {
-        clearSkeleton(participantList);
-        participantList.innerHTML = `<p class="archery-pricing-warning">${escapeHTML(message)}</p>`;
-    }
-    if (equipmentList) {
-        clearSkeleton(equipmentList);
-        equipmentList.innerHTML = `<p class="archery-pricing-warning">${escapeHTML(message)}</p>`;
-    }
-    renderPricingUnavailableSummary();
-    setStatus('archery-status', message, 'error');
-    restoreButtonStates();
+    delete el.dataset.edenSkeleton;
+    el.removeAttribute('aria-busy');
 }
 
 function renderPricingOptions() {
-    if (!pricingSettingsReady) {
-        renderPricingUnavailable();
-        return;
-    }
     const packageSelect = $('archery-package');
     if (packageSelect) {
-        packageSelect.disabled = false;
         const selected = packageSelect.value;
         packageSelect.innerHTML = activeItems(archeryPricingConfig.packages).map(item => (
             `<option value="${escapeHTML(item.durationMinutes)}">${escapeHTML(item.title || item.durationMinutes + ' min')} - ${escapeHTML(money(item.price))}</option>`
         )).join('');
         if (selected && Array.from(packageSelect.options).some(option => option.value === selected)) packageSelect.value = selected;
     }
-    renderParticipantOptions();
+    renderOptionCards('archery-ability-options', 'archery-ability', archeryPricingConfig.abilityOptions, option => {
+        const suffix = option.ratePerHour ? `${money(option.ratePerHour)} / ชม.` : 'ไม่มีค่าใช้จ่ายเพิ่ม';
+        return option.coachRequired ? `มีโค้ชดูแล · ${suffix}` : suffix;
+    });
     renderOptionCards('archery-equipment-options', 'archery-equipment', archeryPricingConfig.equipmentOptions, option => (
         option.ratePerHour ? `${money(option.ratePerHour)} / ชม.` : 'ไม่มีค่าใช้จ่ายเพิ่ม'
     ));
@@ -812,20 +767,12 @@ function renderPricingOptions() {
 
 async function loadPricingOptions() {
     renderChoiceGridSkeleton();
-    pricingSettingsReady = false;
-    pricingSettingsError = '';
     try {
         const snap = db ? await getDoc(doc(db, 'site_settings', 'archery')) : null;
-        if (!snap?.exists()) throw new Error('ARCHERY_PRICING_CONFIG_MISSING');
-        const nextConfig = normalizePricingConfig(snap.data());
-        if (!hasRequiredPricingConfig(nextConfig)) throw new Error('ARCHERY_PRICING_CONFIG_INCOMPLETE');
-        archeryPricingConfig = nextConfig;
-        pricingSettingsReady = true;
+        archeryPricingConfig = normalizePricingConfig(snap?.exists() ? snap.data() : DEFAULT_PRICING_CONFIG);
     } catch (error) {
         console.warn('Unable to load archery pricing settings:', error);
-        archeryPricingConfig = EMPTY_PRICING_CONFIG;
-        pricingSettingsReady = false;
-        pricingSettingsError = pricingUnavailableText();
+        archeryPricingConfig = normalizePricingConfig(DEFAULT_PRICING_CONFIG);
     }
     renderPricingOptions();
 }
@@ -843,10 +790,27 @@ function resetAvailabilityState() {
 }
 
 function sanitizeHoldResponse(hold = {}) {
-    const draft = calculateDraftPricing();
-    const participantOptions = Array.isArray(hold.participant_options)
-        ? hold.participant_options
-        : (Array.isArray(hold.participantOptions) ? hold.participantOptions : draft.participantOptions);
+    const pricing = calculateDraftPricing();
+    const breakdown = hold.amount_breakdown || {};
+    const amountTotal = firstFiniteNumber(hold.amount_total, hold.totalAmount, breakdown.total, pricing.amountTotal);
+    const discount = firstFiniteNumber(hold.discount_total, hold.discount, breakdown.discount, 0);
+    const subtotal = firstFiniteNumber(
+        hold.total_before_discount,
+        hold.subtotal_amount,
+        hold.amount_before_discount,
+        breakdown.subtotal,
+        amountTotal + discount
+    );
+    const promoApplications = Array.isArray(hold.promoApplications)
+        ? hold.promoApplications
+        : Array.isArray(hold.promo_applications)
+            ? hold.promo_applications
+            : [];
+    const promotionLineAllocations = Array.isArray(hold.promotionLineAllocations)
+        ? hold.promotionLineAllocations
+        : Array.isArray(hold.promotion_line_allocations)
+            ? hold.promotion_line_allocations
+            : [];
     return {
         booking_id: hold.booking_id || hold.id || '',
         branch_id: hold.branch_id || BRANCH_ID,
@@ -863,35 +827,47 @@ function sanitizeHoldResponse(hold = {}) {
         provider_ref: hold.provider_ref || hold.payment?.provider_ref || '',
         beam_payment_link_id: hold.beam_payment_link_id || hold.payment?.beam_payment_link_id || '',
         payment_environment: hold.payment_environment || hold.payment?.payment_environment || 'sandbox',
-        amount_total: hold.amount_total || draft.amountTotal,
-        party_size: hold.party_size || hold.partySize || draft.partySize,
-        required_lane_count: hold.required_lane_count || hold.requiredLaneCount || draft.requiredLaneCount,
+        amount_total: amountTotal,
+        totalAmount: amountTotal,
+        amount_before_discount: subtotal,
+        total_before_discount: subtotal,
+        subtotal_amount: subtotal,
+        discount,
+        discount_total: discount,
+        promo_code: hold.promo_code || hold.promoCode || '',
+        promoCode: hold.promoCode || hold.promo_code || '',
+        promoApplications,
+        promo_applications: promoApplications,
+        promotionLineAllocations,
+        promotion_line_allocations: promotionLineAllocations,
+        party_size: hold.party_size || hold.partySize || pricing.partySize,
+        required_lane_count: hold.required_lane_count || hold.requiredLaneCount || pricing.requiredLaneCount,
         assigned_resource_ids: Array.isArray(hold.assigned_resource_ids) ? hold.assigned_resource_ids : [],
         assigned_lane_numbers: Array.isArray(hold.assigned_lane_numbers) ? hold.assigned_lane_numbers : [],
-        package_amount: hold.package_amount || hold.amount_breakdown?.package || draft.packageTotal,
-        ability_option_id: hold.ability_option_id || draft.ability?.id || '',
-        ability_label: hold.ability_label || optionDisplayLabel(draft.ability),
-        participant_options: participantOptions,
-        staff_count: Number(hold.staff_count ?? hold.staffCount ?? hold.amount_breakdown?.staff_count ?? draft.staffCount) || 0,
-        coach_required: hold.coach_required === true || draft.staffCount > 0,
-        coach_rate_per_hour: hold.coach_rate_per_hour || draft.ability?.ratePerHour || 0,
-        coach_amount: hold.coach_amount || hold.amount_breakdown?.coach || draft.coachTotal,
-        equipment_option_id: hold.equipment_option_id || draft.equipment?.id || '',
-        equipment_label: hold.equipment_label || optionDisplayLabel(draft.equipment),
-        equipment_rate_per_hour: hold.equipment_rate_per_hour || draft.equipment?.ratePerHour || 0,
-        equipment_amount: hold.equipment_amount || hold.amount_breakdown?.equipment || draft.equipmentTotal,
-        amount_breakdown: hold.amount_breakdown || {
-            package_per_person: draft.packageAmount,
-            coach_per_person: draft.coachAmount,
-            equipment_per_person: draft.equipmentAmount,
-            per_person_total: draft.perPersonTotal,
-            party_size: draft.partySize,
-            required_lane_count: draft.requiredLaneCount,
-            staff_count: draft.staffCount,
-            package: draft.packageTotal,
-            coach: draft.coachTotal,
-            equipment: draft.equipmentTotal,
-            total: draft.amountTotal
+        package_amount: firstFiniteNumber(hold.package_amount, breakdown.package, pricing.packageTotal),
+        ability_option_id: hold.ability_option_id || pricing.ability?.id || '',
+        ability_label: hold.ability_label || optionDisplayLabel(pricing.ability),
+        coach_required: hold.coach_required === true || pricing.ability?.coachRequired === true,
+        coach_rate_per_hour: firstFiniteNumber(hold.coach_rate_per_hour, pricing.ability?.ratePerHour, 0),
+        coach_amount: firstFiniteNumber(hold.coach_amount, breakdown.coach, pricing.coachTotal),
+        equipment_option_id: hold.equipment_option_id || pricing.equipment?.id || '',
+        equipment_label: hold.equipment_label || optionDisplayLabel(pricing.equipment),
+        equipment_rate_per_hour: firstFiniteNumber(hold.equipment_rate_per_hour, pricing.equipment?.ratePerHour, 0),
+        equipment_amount: firstFiniteNumber(hold.equipment_amount, breakdown.equipment, pricing.equipmentTotal),
+        amount_breakdown: {
+            ...breakdown,
+            package_per_person: firstFiniteNumber(breakdown.package_per_person, pricing.packageAmount),
+            coach_per_person: firstFiniteNumber(breakdown.coach_per_person, pricing.coachAmount),
+            equipment_per_person: firstFiniteNumber(breakdown.equipment_per_person, pricing.equipmentAmount),
+            per_person_total: firstFiniteNumber(breakdown.per_person_total, pricing.perPersonTotal),
+            party_size: firstFiniteNumber(breakdown.party_size, pricing.partySize),
+            required_lane_count: firstFiniteNumber(breakdown.required_lane_count, pricing.requiredLaneCount),
+            package: firstFiniteNumber(breakdown.package, pricing.packageTotal),
+            coach: firstFiniteNumber(breakdown.coach, pricing.coachTotal),
+            equipment: firstFiniteNumber(breakdown.equipment, pricing.equipmentTotal),
+            subtotal,
+            discount,
+            total: amountTotal
         },
         pricing_version: hold.pricing_version || archeryPricingConfig.version || '',
         expires_at: hold.expires_at || new Date(Date.now() + HOLD_MINUTES * 60 * 1000).toISOString(),
@@ -917,6 +893,7 @@ function resetHoldState() {
     currentHold = null;
     holdIdempotencyKey = '';
     beamPaymentIdempotencyKey = '';
+    clearArcheryPromoAfterSelectionChange();
     localStorage.removeItem(HOLD_STORAGE_KEY);
     window.clearInterval(holdTimer);
     holdTimer = null;
@@ -1069,7 +1046,7 @@ function renderHoldSummaryLegacy(hold) {
         ['วันที่', hold.booking_date],
         ['เวลา', displayTimeRange(hold.start_time, hold.end_time || timeLabel(minutesFromTime(hold.start_time) + duration))],
         ['แพ็กเกจ', duration + ' นาที'],
-        ['ยอดรวม', money(hold.amount_total || packagePrice(duration) * (hold.party_size || 1))],
+        ['ยอดรวม', money(hold.amount_total || PACKAGE_PRICES[duration])],
         ['Payment', hold.payment_status || 'UNPAID']
     ]);
     startCountdown();
@@ -1080,13 +1057,22 @@ function renderHoldSummary(hold) {
     if (!el || !hold) return;
     const duration = normalizeDuration(hold.duration_minutes);
     const breakdown = hold.amount_breakdown || {};
-    const staffCount = Number(hold.staff_count ?? hold.staffCount ?? breakdown.staff_count ?? 0) || 0;
+    const total = firstFiniteNumber(hold.amount_total, hold.totalAmount, breakdown.total, packagePrice(duration));
+    const discount = firstFiniteNumber(hold.discount_total, hold.discount, breakdown.discount, 0);
+    const subtotal = firstFiniteNumber(
+        hold.total_before_discount,
+        hold.subtotal_amount,
+        hold.amount_before_discount,
+        breakdown.subtotal,
+        total + discount
+    );
+    const promoCode = normalizePromoCode(hold.promo_code || hold.promoCode);
     const laneNumbers = Array.isArray(hold.assigned_lane_numbers) && hold.assigned_lane_numbers.length
         ? hold.assigned_lane_numbers.map(number => `Lane ${number}`).join(', ')
         : (Array.isArray(hold.assigned_resource_ids) && hold.assigned_resource_ids.length
             ? hold.assigned_resource_ids.map(id => String(id || '').match(/(\d{2})$/)?.[1]).filter(Boolean).map(number => `Lane ${Number(number)}`).join(', ')
             : '');
-    el.innerHTML = summaryRows([
+    const rows = [
         ['Booking ID', hold.booking_id],
         ['Date', hold.booking_date],
         ['Time', displayTimeRange(hold.start_time, hold.end_time || timeLabel(minutesFromTime(hold.start_time) + duration))],
@@ -1095,11 +1081,22 @@ function renderHoldSummary(hold) {
         ['Lanes needed', String(hold.required_lane_count || hold.party_size || 1)],
         ['Assigned lanes', laneNumbers || '-'],
         ['Package / person', money(breakdown.package_per_person || packagePrice(duration))],
-        ['Staff', `${staffCount} people / ${money(hold.coach_amount || breakdown.coach || 0)}`],
-        ['Equipment / person', `${optionDisplayLabel({ id: hold.equipment_option_id, label: hold.equipment_label })} / ${money(breakdown.equipment_per_person || 0)}`],
-        ['Total', money(hold.amount_total || breakdown.total || packagePrice(duration))],
-        ['Payment', hold.payment_status || 'UNPAID']
-    ]);
+        ['Coach / person', `${optionDisplayLabel({ id: hold.ability_option_id, label: hold.ability_label })} / ${money(breakdown.coach_per_person || 0)}`],
+        ['Equipment / person', `${optionDisplayLabel({ id: hold.equipment_option_id, label: hold.equipment_label })} / ${money(breakdown.equipment_per_person || 0)}`]
+    ];
+    if (discount > 0) {
+        rows.push(
+            ['Subtotal', money(subtotal)],
+            [`Promo ${promoCode || ''}`.trim(), '-' + money(discount)],
+            ['Total', money(total)]
+        );
+    } else {
+        rows.push(['Total', money(total)]);
+    }
+    rows.push(['Payment', hold.payment_status || 'UNPAID']);
+    el.innerHTML = summaryRows(rows);
+    const promoInput = $('archery-promo-code-input');
+    if (promoInput && promoCode) promoInput.value = promoCode;
     startCountdown();
 }
 
@@ -1173,16 +1170,19 @@ async function createHold(event) {
         window.location.href = '/login?next=' + encodeURIComponent('/archery/booking');
         return;
     }
-    if (!pricingSettingsReady) {
-        setStatus('archery-status', pricingSettingsError || pricingUnavailableText(), 'error');
-        restoreButtonStates();
-        return;
-    }
     if (!latestAvailability?.available) {
         scheduleAvailabilityRefresh({ immediate: true });
         setStatus('archery-status', 'กรุณารอให้ระบบตรวจสอบเลนว่างก่อนยืนยันการจอง', 'error');
         restoreButtonStates();
         return;
+    }
+    const promoCodeInput = currentArcheryPromoInputCode();
+    if (promoCodeInput && appliedArcheryPromoCode() !== promoCodeInput) {
+        const applied = await applyArcheryPromoCode();
+        if (!applied) {
+            restoreButtonStates();
+            return;
+        }
     }
     setLoading('hold', true);
     const api = await waitForApi();
@@ -1194,11 +1194,13 @@ async function createHold(event) {
     }
     try {
         setStatus('archery-status', 'กำลังล็อกเวลาจองชั่วคราว...');
-        const duration = packageMinutes();
         holdIdempotencyKey = holdIdempotencyKey || idempotencyKey('createArcheryHold');
+        const promoCode = appliedArcheryPromoCode();
         const hold = await api.createArcheryHold({
             ...selectionPayload(),
             member_id: currentUser.uid,
+            promo_code: promoCode,
+            promoCode,
             idempotency_key: holdIdempotencyKey
         });
         currentHold = sanitizeHoldResponse(hold);
@@ -1211,6 +1213,9 @@ async function createHold(event) {
         latestAvailability = null;
         localStorage.removeItem(HOLD_STORAGE_KEY);
         renderSuggestions([]);
+        if (String(error?.code || error?.error || '').toUpperCase().match(/PROMO|ARCHERY_TOTAL_INVALID/)) {
+            clearArcheryPromo({ message: promoErrorMessage(error), type: 'error' });
+        }
         setStatus('archery-status', userMessage(error), 'error');
     } finally {
         setLoading('hold', false);
@@ -1295,7 +1300,6 @@ function initBookingPage() {
         if (!el) return;
         el.addEventListener('change', () => {
             if (id === 'archery-package') fillTimeOptions();
-            if (id === 'archery-party-size') renderParticipantOptions();
             resetAvailabilityState();
             resetHoldState();
             renderDraftSummary();
@@ -1304,6 +1308,25 @@ function initBookingPage() {
     });
     form.addEventListener('submit', createHold);
     $('archery-confirm-btn')?.addEventListener('click', startBeamPayment);
+    $('archery-promo-apply-btn')?.addEventListener('click', applyArcheryPromoCode);
+    const promoInput = $('archery-promo-code-input');
+    if (promoInput) {
+        promoInput.addEventListener('keydown', event => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                applyArcheryPromoCode(event);
+            }
+        });
+        promoInput.addEventListener('input', () => {
+            if (appliedArcheryPromo && currentArcheryPromoInputCode() !== appliedArcheryPromoCode()) {
+                archeryPromoValidationToken += 1;
+                holdIdempotencyKey = '';
+                appliedArcheryPromo = null;
+                setArcheryPromoMessage('');
+                renderDraftSummary();
+            }
+        });
+    }
     const stored = readStoredHold();
     if (stored && !isHoldExpired(stored)) {
         currentHold = stored;

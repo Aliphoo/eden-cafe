@@ -21,6 +21,10 @@ const ADMIN_TABLE_SKELETONS = {
     'members-table-body': { cols: 10, rows: 6 },
     'admin-access-table-body': { cols: 7, rows: 5 },
     'discount-table-body': { cols: 6, rows: 5 },
+    'promo-table-body': { cols: 6, rows: 5 },
+    'voucher-table-body': { cols: 6, rows: 5 },
+    'promo-history-table-body': { cols: 6, rows: 5 },
+    'voucher-ledger-table-body': { cols: 6, rows: 5 },
     'loyalty-ledger-body': { cols: 7, rows: 5 },
     'orders-table-body': { cols: 9, rows: 6 },
     'bookings-table-body': { cols: 8, rows: 6 },
@@ -361,6 +365,21 @@ let adminAccessFormBound = false;
 let discountsData = {};
 let discountsUnsubscribe = null;
 let discountFormBound = false;
+let promoCampaignsData = {};
+let promoCodesData = {};
+let promoRedemptionsData = [];
+let giftVouchersData = {};
+let giftVoucherLedgerData = [];
+let promoCampaignsUnsubscribe = null;
+let promoCodesUnsubscribe = null;
+let promoRedemptionsUnsubscribe = null;
+let giftVouchersUnsubscribe = null;
+let giftVoucherLedgerUnsubscribe = null;
+let promoFormBound = false;
+let voucherFormBound = false;
+let discountAdvancedControlsBound = false;
+let discountPickerCatalogLoaded = false;
+let discountPickerCatalog = { categories: [], products: [] };
 let loyaltyConfig = {};
 let loyaltyLedgerData = [];
 let loyaltyConfigUnsubscribe = null;
@@ -1621,18 +1640,632 @@ function discountBadgeHTML(discount = {}) {
     return `<span class="discount-badge ${isAmount ? 'amount' : ''}">${isAmount ? '฿' : '%'} ${escapeHTML(isAmount ? 'จำนวนเงิน' : 'เปอร์เซ็นต์')}</span>`;
 }
 
+const PROMO_CHANNELS = Object.freeze(['POS', 'SHOP', 'ARCHERY']);
+const VOUCHER_STATUSES = new Set(['active', 'redeemed', 'expired', 'voided']);
+
+function normalizePromoCodeValue(value) {
+    return String(value || '')
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9_-]/g, '')
+        .slice(0, 40);
+}
+
+function splitDiscountList(value) {
+    return String(value || '')
+        .split(/[\n,]+/)
+        .map(item => item.trim())
+        .filter(Boolean)
+        .slice(0, 100);
+}
+
+function joinDiscountList(value = []) {
+    return Array.isArray(value) ? value.join(', ') : '';
+}
+
+function normalizePromoChannels(value = []) {
+    const source = Array.isArray(value) ? value : [];
+    const channels = source
+        .map(item => String(item || '').trim().toUpperCase())
+        .filter(item => PROMO_CHANNELS.includes(item));
+    return channels.length ? Array.from(new Set(channels)) : ['POS'];
+}
+
+function selectedPromoChannels() {
+    return normalizePromoChannels(Array.from(document.querySelectorAll('input[name="promo-channel"]:checked')).map(input => input.value));
+}
+
+function setPromoChannelInputs(channels = []) {
+    const selected = new Set(normalizePromoChannels(channels));
+    document.querySelectorAll('input[name="promo-channel"]').forEach(input => {
+        input.checked = selected.has(String(input.value || '').toUpperCase());
+    });
+}
+
+function dateInputToISO(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const date = new Date(text);
+    return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+}
+
+function isoToDateInput(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) return '';
+    const pad = item => String(item).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function discountTimestampMillis(value) {
+    if (!value) return 0;
+    if (typeof value.toMillis === 'function') return value.toMillis();
+    if (typeof value.toDate === 'function') return value.toDate().getTime();
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function discountDateText(value) {
+    if (!value) return '-';
+    const date = typeof value.toDate === 'function' ? value.toDate() : new Date(value);
+    if (Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function discountExportDateText(value) {
+    if (!value) return '';
+    const date = typeof value.toDate === 'function' ? value.toDate() : new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value || '') : date.toISOString();
+}
+
+function csvCell(value) {
+    const text = value == null ? '' : String(value);
+    return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function downloadDiscountCSV(filename, headers, rows) {
+    const csv = [headers, ...rows]
+        .map(row => row.map(csvCell).join(','))
+        .join('\r\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function discountExportStamp() {
+    const date = new Date();
+    const pad = value => String(value).padStart(2, '0');
+    return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
+}
+
+function discountCatalogName(data = {}, id = '') {
+    return String(data.name || data.nameTh || data.nameEn || data.label || data.title || data.handle || id || '').trim();
+}
+
+function discountCatalogCategory(data = {}) {
+    return String(data.category || data.categoryId || data.category_id || data.legacyShopCategory || '').trim();
+}
+
+function addDiscountCatalogEntry(map, entry) {
+    if (!entry?.id || map.has(entry.id)) return;
+    map.set(entry.id, entry);
+}
+
+function buildDiscountProductEntries(id, data = {}, source = 'products') {
+    const name = discountCatalogName(data, id);
+    const category = discountCatalogCategory(data);
+    const entries = [{
+        id,
+        label: name || id,
+        meta: [source, category].filter(Boolean).join(' | ')
+    }];
+    const variants = Array.isArray(data.variants) ? data.variants : [];
+    variants.forEach((variant, index) => {
+        const variantId = String(variant.id || variant.variantId || variant.sku || variant.name || variant.label || `variant-${index + 1}`).trim();
+        if (!variantId) return;
+        entries.push({
+            id: `${id}::${variantId}`,
+            label: `${name || id} / ${variant.name || variant.label || variantId}`,
+            meta: [source, 'variant', category].filter(Boolean).join(' | ')
+        });
+    });
+    return entries;
+}
+
+async function ensureDiscountPickerCatalog(force = false) {
+    if (discountPickerCatalogLoaded && !force) return discountPickerCatalog;
+    discountPickerCatalogLoaded = true;
+    const categoryMap = new Map();
+    const productMap = new Map();
+    Object.entries(categoriesData || {}).forEach(([id, data]) => {
+        addDiscountCatalogEntry(categoryMap, {
+            id,
+            label: discountCatalogName(data, id),
+            meta: 'categories'
+        });
+    });
+    Object.entries(productsData || {}).forEach(([id, data]) => {
+        buildDiscountProductEntries(id, data, 'products').forEach(entry => addDiscountCatalogEntry(productMap, entry));
+    });
+    const specs = [
+        { collectionName: 'categories', type: 'category' },
+        { collectionName: 'shop_categories', type: 'category' },
+        { collectionName: 'products', type: 'product' },
+        { collectionName: 'shop_products', type: 'product' }
+    ];
+    const results = await Promise.allSettled(specs.map(spec => getDocs(query(collection(db, spec.collectionName)))));
+    results.forEach((result, index) => {
+        if (result.status !== 'fulfilled') return;
+        const spec = specs[index];
+        result.value.forEach(docSnap => {
+            const data = docSnap.data() || {};
+            if (spec.type === 'category') {
+                addDiscountCatalogEntry(categoryMap, {
+                    id: docSnap.id,
+                    label: discountCatalogName(data, docSnap.id),
+                    meta: spec.collectionName
+                });
+            } else {
+                buildDiscountProductEntries(docSnap.id, data, spec.collectionName)
+                    .forEach(entry => addDiscountCatalogEntry(productMap, entry));
+            }
+        });
+    });
+    discountPickerCatalog = {
+        categories: Array.from(categoryMap.values()).sort((a, b) => a.label.localeCompare(b.label, 'th')),
+        products: Array.from(productMap.values()).sort((a, b) => a.label.localeCompare(b.label, 'th'))
+    };
+    return discountPickerCatalog;
+}
+
+function toggleDiscountPickerValue(textareaId, value, checked) {
+    const textarea = document.getElementById(textareaId);
+    if (!textarea) return;
+    const selected = new Set(splitDiscountList(textarea.value));
+    if (checked) selected.add(value);
+    else selected.delete(value);
+    textarea.value = Array.from(selected).join(', ');
+    renderDiscountTargetPickers();
+}
+
+window.toggleDiscountPickerValue = toggleDiscountPickerValue;
+
+function renderDiscountPicker(containerId, textareaId, entries = [], filterValue = '') {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const selected = new Set(splitDiscountList(document.getElementById(textareaId)?.value));
+    const filter = String(filterValue || '').trim().toLowerCase();
+    const rows = entries
+        .filter(entry => !filter || `${entry.id} ${entry.label} ${entry.meta}`.toLowerCase().includes(filter))
+        .slice(0, 80);
+    if (!rows.length) {
+        container.innerHTML = '<div class="discount-picker-empty">No matching items.</div>';
+        return;
+    }
+    container.innerHTML = rows.map(entry => `
+        <label>
+            <input type="checkbox" ${selected.has(entry.id) ? 'checked' : ''} onchange="toggleDiscountPickerValue('${textareaId}', '${escapeJSString(entry.id)}', this.checked)">
+            <span>
+                <strong>${escapeHTML(entry.label || entry.id)}</strong>
+                <small>${escapeHTML(entry.id)}${entry.meta ? ` | ${escapeHTML(entry.meta)}` : ''}</small>
+            </span>
+        </label>
+    `).join('');
+}
+
+function renderDiscountTargetPickers() {
+    renderDiscountPicker(
+        'promo-category-picker',
+        'promo-category-ids',
+        discountPickerCatalog.categories,
+        document.getElementById('promo-category-picker-filter')?.value
+    );
+    renderDiscountPicker(
+        'promo-product-picker',
+        'promo-product-ids',
+        discountPickerCatalog.products,
+        document.getElementById('promo-product-picker-filter')?.value
+    );
+}
+
+window.refreshDiscountTargetPickers = async function refreshDiscountTargetPickers() {
+    const categoryContainer = document.getElementById('promo-category-picker');
+    const productContainer = document.getElementById('promo-product-picker');
+    if (categoryContainer) categoryContainer.innerHTML = '<div class="discount-picker-empty">Loading categories...</div>';
+    if (productContainer) productContainer.innerHTML = '<div class="discount-picker-empty">Loading products...</div>';
+    try {
+        await ensureDiscountPickerCatalog(true);
+        renderDiscountTargetPickers();
+    } catch (error) {
+        console.error('Unable to load discount picker catalog:', error);
+        if (categoryContainer) categoryContainer.innerHTML = '<div class="discount-picker-empty">Unable to load picker.</div>';
+        if (productContainer) productContainer.innerHTML = '<div class="discount-picker-empty">Unable to load picker.</div>';
+    }
+};
+
+function renderPromoBulkCampaignOptions() {
+    const select = document.getElementById('promo-bulk-promotion-id');
+    if (!select) return;
+    const current = select.value;
+    const rows = Object.values(promoCampaignsData).sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), 'th'));
+    select.innerHTML = rows.length
+        ? rows.map(promo => `<option value="${escapeHTML(promo.id)}">${escapeHTML(promo.name || promo.id)} (${escapeHTML(promo.primaryCode || promo.id)})</option>`).join('')
+        : '<option value="">No campaigns available</option>';
+    if (current && rows.some(row => row.id === current)) select.value = current;
+}
+
+function discountRowsFilename(prefix) {
+    return `${prefix}-${discountExportStamp()}.csv`;
+}
+
+async function exportDiscountCollectionCSV(collectionName, filenamePrefix, headers, mapRow) {
+    try {
+        let snapshot;
+        try {
+            snapshot = await getDocs(query(collection(db, collectionName), orderBy('createdAt', 'desc'), limit(5000)));
+        } catch (error) {
+            snapshot = await getDocs(query(collection(db, collectionName), limit(5000)));
+        }
+        const rows = [];
+        snapshot.forEach(docSnap => rows.push(mapRow(docSnap.id, docSnap.data() || {})));
+        downloadDiscountCSV(discountRowsFilename(filenamePrefix), headers, rows);
+    } catch (error) {
+        console.error(`Unable to export ${collectionName}:`, error);
+        alert(safeAdminError(`Export ${collectionName} failed`));
+    }
+}
+
+window.exportPromoCampaignsCSV = function exportPromoCampaignsCSV() {
+    const headers = ['promotion_id', 'primary_code', 'name', 'channels', 'type', 'value', 'min_subtotal', 'max_discount', 'max_redemptions', 'max_per_customer', 'starts_at', 'expires_at', 'targets', 'status', 'used_count'];
+    const rows = Object.values(promoCampaignsData).map(promo => [
+        promo.id,
+        promo.primaryCode,
+        promo.name,
+        promo.channels.join('|'),
+        promo.type,
+        promo.value,
+        promo.minSubtotal,
+        promo.maxDiscount,
+        promo.maxRedemptions,
+        promo.maxPerCustomer,
+        promo.startsAt,
+        promo.expiresAt,
+        promoTargetSummary(promo),
+        promo.status,
+        promo.usedCount
+    ]);
+    downloadDiscountCSV(discountRowsFilename('promo-campaigns'), headers, rows);
+};
+
+window.exportGiftVouchersCSV = function exportGiftVouchersCSV() {
+    const headers = ['voucher_id', 'code', 'initial_amount', 'balance', 'status', 'expires_at', 'issued_to', 'note', 'created_at', 'updated_at'];
+    const rows = Object.values(giftVouchersData).map(voucher => [
+        voucher.id,
+        voucher.code,
+        voucher.initialAmount,
+        voucher.balance,
+        voucher.status,
+        voucher.expiresAt,
+        voucher.issuedTo,
+        voucher.note,
+        discountExportDateText(voucher.createdAt),
+        discountExportDateText(voucher.updatedAt)
+    ]);
+    downloadDiscountCSV(discountRowsFilename('gift-vouchers'), headers, rows);
+};
+
+window.exportPromoRedemptionsCSV = function exportPromoRedemptionsCSV() {
+    return exportDiscountCollectionCSV('promotion_redemptions', 'promo-redemptions', [
+        'redemption_id', 'code', 'promotion_id', 'source_type', 'source_id', 'customer_uid', 'cashier_uid', 'discount_amount', 'status', 'created_at'
+    ], (id, data) => {
+        const row = normalizePromoRedemption(id, data);
+        return [row.id, row.code, row.promotionId, row.sourceType, row.sourceId, row.customerUid, row.cashierUid, row.discountAmount, row.status, discountExportDateText(row.createdAt)];
+    });
+};
+
+window.exportGiftVoucherLedgerCSV = function exportGiftVoucherLedgerCSV() {
+    return exportDiscountCollectionCSV('gift_voucher_ledger', 'gift-voucher-ledger', [
+        'ledger_id', 'voucher_id', 'code', 'type', 'source_type', 'source_id', 'amount', 'balance_before', 'balance_after', 'created_at'
+    ], (id, data) => {
+        const row = normalizeVoucherLedger(id, data);
+        return [row.id, row.voucherId, row.code, row.type, row.sourceType, row.sourceId, row.amount, row.balanceBefore, row.balanceAfter, discountExportDateText(row.createdAt)];
+    });
+};
+
+function discountStatusHTML(active, status = '') {
+    const normalized = String(status || (active ? 'active' : 'paused')).toLowerCase();
+    const ok = active !== false && normalized === 'active';
+    return ok
+        ? '<span class="status-badge status-completed">Active</span>'
+        : `<span class="status-badge status-cancelled">${escapeHTML(normalized || 'paused')}</span>`;
+}
+
+function normalizePromotion(id, data = {}) {
+    const type = normalizeDiscountType(data.type);
+    const rawValue = Math.max(0, safeNumber(data.value));
+    const categoryIds = Array.isArray(data.categoryIds) ? data.categoryIds : [];
+    const productIds = Array.isArray(data.productIds) ? data.productIds : [];
+    const variantIds = Array.isArray(data.variantIds) ? data.variantIds : [];
+    const archeryItems = Array.isArray(data.archeryItems) ? data.archeryItems : [];
+    return {
+        id: String(id || data.id || '').trim(),
+        name: String(data.name || data.label || '').trim(),
+        type,
+        value: type === 'percent' ? Math.min(rawValue, 100) : Math.min(rawValue, 100000),
+        active: data.active !== false && String(data.status || 'active').toLowerCase() !== 'paused',
+        status: String(data.status || (data.active === false ? 'paused' : 'active')).toLowerCase(),
+        channels: normalizePromoChannels(data.channels),
+        targetType: String(data.targetType || data.target_type || 'all').trim() || 'all',
+        categoryIds,
+        productIds,
+        variantIds,
+        archeryItems,
+        minSubtotal: Math.max(0, safeNumber(data.minSubtotal ?? data.min_subtotal)),
+        maxDiscount: Math.max(0, safeNumber(data.maxDiscount ?? data.max_discount)),
+        maxRedemptions: Math.max(0, Math.floor(safeNumber(data.maxRedemptions ?? data.max_redemptions))),
+        maxPerCustomer: Math.max(0, Math.floor(safeNumber(data.maxPerCustomer ?? data.max_per_customer))),
+        startsAt: data.startsAt || data.starts_at || '',
+        expiresAt: data.expiresAt || data.expires_at || '',
+        stackingPolicy: String(data.stackingPolicy || data.stacking_policy || 'exclusive').toLowerCase() === 'stackable' ? 'stackable' : 'exclusive',
+        primaryCode: normalizePromoCodeValue(data.primaryCode || data.code || ''),
+        usedCount: Math.max(0, Math.floor(safeNumber(data.usedCount ?? data.used_count))),
+        createdAt: data.createdAt || data.created_at || null,
+        updatedAt: data.updatedAt || data.updated_at || null
+    };
+}
+
+function normalizePromotionCode(id, data = {}) {
+    const code = normalizePromoCodeValue(data.code || id);
+    return {
+        id: code,
+        code,
+        promotionId: String(data.promotionId || data.promotion_id || '').trim(),
+        active: data.active !== false && String(data.status || 'active').toLowerCase() !== 'paused',
+        status: String(data.status || (data.active === false ? 'paused' : 'active')).toLowerCase(),
+        usedCount: Math.max(0, Math.floor(safeNumber(data.usedCount ?? data.used_count))),
+        maxRedemptions: Math.max(0, Math.floor(safeNumber(data.maxRedemptions ?? data.max_redemptions))),
+        expiresAt: data.expiresAt || data.expires_at || '',
+        channels: normalizePromoChannels(data.channels),
+        createdAt: data.createdAt || null,
+        updatedAt: data.updatedAt || null
+    };
+}
+
+function promoCodeForPromotion(promotion = {}) {
+    if (promotion.primaryCode) return promoCodesData[promotion.primaryCode] || { code: promotion.primaryCode };
+    return Object.values(promoCodesData).find(code => code.promotionId === promotion.id) || null;
+}
+
+function promoRuleSummary(promo = {}) {
+    const parts = [discountValueText(promo)];
+    if (promo.minSubtotal > 0) parts.push(`min ${adminMoney(promo.minSubtotal)}`);
+    if (promo.maxDiscount > 0) parts.push(`cap ${adminMoney(promo.maxDiscount)}`);
+    if (promo.maxRedemptions > 0) parts.push(`limit ${promo.maxRedemptions}`);
+    if (promo.expiresAt) parts.push(`expires ${discountDateText(promo.expiresAt)}`);
+    return parts.join(' / ');
+}
+
+function promoTargetSummary(promo = {}) {
+    const parts = [];
+    if (promo.categoryIds?.length) parts.push(`cat: ${promo.categoryIds.slice(0, 3).join(', ')}`);
+    if (promo.productIds?.length) parts.push(`product: ${promo.productIds.slice(0, 3).join(', ')}`);
+    if (promo.variantIds?.length) parts.push(`variant: ${promo.variantIds.slice(0, 3).join(', ')}`);
+    if (promo.archeryItems?.length) parts.push(`archery: ${promo.archeryItems.slice(0, 3).join(', ')}`);
+    return parts.length ? parts.join(' | ') : 'all targets';
+}
+
+function renderPromoTable() {
+    const body = document.getElementById('promo-table-body');
+    if (!body) return;
+    const rows = Object.values(promoCampaignsData).sort((a, b) => {
+        const activeDiff = Number(b.active === true) - Number(a.active === true);
+        if (activeDiff) return activeDiff;
+        return String(a.name || a.id).localeCompare(String(b.name || b.id), 'th');
+    });
+    renderPromoBulkCampaignOptions();
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="6"><div class="discount-empty">No promo campaigns yet.</div></td></tr>';
+        return;
+    }
+    body.innerHTML = rows.map(promo => {
+        const code = promoCodeForPromotion(promo);
+        const codeText = code?.code || promo.primaryCode || '-';
+        return `
+            <tr class="${promo.active ? '' : 'discount-row-muted'}">
+                <td class="discount-code-cell"><code>${escapeHTML(codeText)}</code><span class="discount-table-secondary">${escapeHTML(code?.id || '')}</span></td>
+                <td><strong>${escapeHTML(promo.name || promo.id)}</strong><span class="discount-table-secondary">${escapeHTML(promo.id)}</span></td>
+                <td>${escapeHTML(promo.channels.join(', '))}</td>
+                <td>${escapeHTML(promoRuleSummary(promo))}<span class="discount-table-secondary">${escapeHTML(promoTargetSummary(promo))}</span></td>
+                <td>${discountStatusHTML(promo.active, promo.status)}</td>
+                <td><div class="discount-actions">
+                    <button class="btn-action btn-edit" type="button" onclick="editPromo('${escapeJSString(promo.id)}')">Edit</button>
+                    <button class="btn-action btn-delete" type="button" onclick="deletePromo('${escapeJSString(promo.id)}')">Delete</button>
+                </div></td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function normalizeVoucher(id, data = {}) {
+    const code = normalizePromoCodeValue(data.code || id);
+    const initialAmount = Math.max(0, safeNumber(data.initialAmount ?? data.initial_amount));
+    const balance = Math.max(0, safeNumber(data.balance));
+    const status = VOUCHER_STATUSES.has(String(data.status || '').toLowerCase())
+        ? String(data.status).toLowerCase()
+        : (balance <= 0 && initialAmount > 0 ? 'redeemed' : 'active');
+    return {
+        id: String(id || code).trim(),
+        code,
+        initialAmount,
+        balance,
+        currency: String(data.currency || 'THB').toUpperCase(),
+        status,
+        active: status === 'active',
+        expiresAt: data.expiresAt || data.expires_at || '',
+        issuedTo: String(data.issuedTo || data.issued_to || '').trim(),
+        note: String(data.note || '').trim(),
+        createdAt: data.createdAt || data.created_at || null,
+        updatedAt: data.updatedAt || data.updated_at || null
+    };
+}
+
+function renderVoucherTable() {
+    const body = document.getElementById('voucher-table-body');
+    if (!body) return;
+    const rows = Object.values(giftVouchersData).sort((a, b) => {
+        const activeDiff = Number(b.status === 'active') - Number(a.status === 'active');
+        if (activeDiff) return activeDiff;
+        return String(a.code || a.id).localeCompare(String(b.code || b.id), 'th');
+    });
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="6"><div class="discount-empty">No gift vouchers yet.</div></td></tr>';
+        return;
+    }
+    body.innerHTML = rows.map(voucher => `
+        <tr class="${voucher.status === 'active' ? '' : 'discount-row-muted'}">
+            <td class="discount-code-cell"><code>${escapeHTML(voucher.code)}</code><span class="discount-table-secondary">${escapeHTML(voucher.issuedTo || voucher.id)}</span></td>
+            <td>${escapeHTML(adminMoney(voucher.initialAmount))}</td>
+            <td><strong>${escapeHTML(adminMoney(voucher.balance))}</strong></td>
+            <td>${escapeHTML(discountDateText(voucher.expiresAt))}</td>
+            <td>${discountStatusHTML(voucher.status === 'active', voucher.status)}</td>
+            <td><div class="discount-actions">
+                <button class="btn-action btn-edit" type="button" onclick="editVoucher('${escapeJSString(voucher.id)}')">Edit</button>
+                <button class="btn-action btn-delete" type="button" onclick="voidVoucher('${escapeJSString(voucher.id)}')">Void</button>
+            </div></td>
+        </tr>
+    `).join('');
+}
+
+function normalizePromoRedemption(id, data = {}) {
+    return {
+        id,
+        code: normalizePromoCodeValue(data.code || data.promoCode || data.promo_code),
+        promotionId: String(data.promotionId || data.promotion_id || '').trim(),
+        sourceType: String(data.sourceType || data.source_type || '').trim(),
+        sourceId: String(data.sourceId || data.source_id || data.orderId || data.bookingId || data.receiptNo || '').trim(),
+        customerUid: String(data.customerUid || data.customer_uid || '').trim(),
+        cashierUid: String(data.cashierUid || data.cashier_uid || '').trim(),
+        discountAmount: Math.max(0, safeNumber(data.discountAmount ?? data.discount_amount)),
+        status: String(data.status || 'reserved').toLowerCase(),
+        createdAt: data.createdAt || data.created_at || null
+    };
+}
+
+function normalizeVoucherLedger(id, data = {}) {
+    return {
+        id,
+        voucherId: String(data.voucherId || data.voucher_id || '').trim(),
+        code: normalizePromoCodeValue(data.code || data.voucherCode || data.voucher_code),
+        type: String(data.type || '').toLowerCase(),
+        sourceType: String(data.sourceType || data.source_type || '').trim(),
+        sourceId: String(data.sourceId || data.source_id || '').trim(),
+        amount: safeNumber(data.amount),
+        balanceBefore: safeNumber(data.balanceBefore ?? data.balance_before),
+        balanceAfter: safeNumber(data.balanceAfter ?? data.balance_after),
+        createdAt: data.createdAt || data.created_at || null
+    };
+}
+
+function renderPromoHistoryTable() {
+    const body = document.getElementById('promo-history-table-body');
+    if (!body) return;
+    const rows = promoRedemptionsData.slice().sort((a, b) => discountTimestampMillis(b.createdAt) - discountTimestampMillis(a.createdAt)).slice(0, 100);
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="6"><div class="discount-empty">No promo redemptions yet.</div></td></tr>';
+        return;
+    }
+    body.innerHTML = rows.map(row => `
+        <tr>
+            <td>${escapeHTML(discountDateText(row.createdAt))}</td>
+            <td class="discount-code-cell"><code>${escapeHTML(row.code || '-')}</code></td>
+            <td>${escapeHTML(row.sourceType || '-')}<span class="discount-table-secondary">${escapeHTML(row.sourceId || '')}</span></td>
+            <td>${escapeHTML(row.customerUid || row.cashierUid || '-')}</td>
+            <td>${escapeHTML(adminMoney(row.discountAmount))}</td>
+            <td>${discountStatusHTML(row.status === 'redeemed', row.status)}</td>
+        </tr>
+    `).join('');
+}
+
+function renderVoucherLedgerTable() {
+    const body = document.getElementById('voucher-ledger-table-body');
+    if (!body) return;
+    const rows = giftVoucherLedgerData.slice().sort((a, b) => discountTimestampMillis(b.createdAt) - discountTimestampMillis(a.createdAt)).slice(0, 100);
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="6"><div class="discount-empty">No voucher ledger rows yet.</div></td></tr>';
+        return;
+    }
+    body.innerHTML = rows.map(row => `
+        <tr>
+            <td>${escapeHTML(discountDateText(row.createdAt))}</td>
+            <td class="discount-code-cell"><code>${escapeHTML(row.code || row.voucherId || '-')}</code></td>
+            <td>${escapeHTML(row.type || '-')}</td>
+            <td>${escapeHTML(row.sourceType || '-')}<span class="discount-table-secondary">${escapeHTML(row.sourceId || '')}</span></td>
+            <td>${escapeHTML(adminMoney(row.amount))}</td>
+            <td>${escapeHTML(adminMoney(row.balanceAfter))}<span class="discount-table-secondary">before ${escapeHTML(adminMoney(row.balanceBefore))}</span></td>
+        </tr>
+    `).join('');
+}
+
 async function refreshDiscountsOnce() {
-    const snapshot = await getDocs(query(collection(db, 'pos_discounts')));
+    const [
+        snapshot,
+        promoSnapshot,
+        promoCodeSnapshot,
+        voucherSnapshot,
+        redemptionSnapshot,
+        voucherLedgerSnapshot
+    ] = await Promise.all([
+        getDocs(query(collection(db, 'pos_discounts'))),
+        getDocs(query(collection(db, 'promotions'))),
+        getDocs(query(collection(db, 'promotion_codes'))),
+        getDocs(query(collection(db, 'gift_vouchers'))),
+        getDocs(query(collection(db, 'promotion_redemptions'), limit(100))),
+        getDocs(query(collection(db, 'gift_voucher_ledger'), limit(100)))
+    ]);
     discountsData = {};
     snapshot.forEach(docSnap => {
         discountsData[docSnap.id] = normalizeDiscountOption(docSnap.id, docSnap.data() || {});
     });
+    promoCampaignsData = {};
+    promoSnapshot.forEach(docSnap => {
+        promoCampaignsData[docSnap.id] = normalizePromotion(docSnap.id, docSnap.data() || {});
+    });
+    promoCodesData = {};
+    promoCodeSnapshot.forEach(docSnap => {
+        const code = normalizePromotionCode(docSnap.id, docSnap.data() || {});
+        if (code.code) promoCodesData[code.code] = code;
+    });
+    giftVouchersData = {};
+    voucherSnapshot.forEach(docSnap => {
+        giftVouchersData[docSnap.id] = normalizeVoucher(docSnap.id, docSnap.data() || {});
+    });
+    promoRedemptionsData = [];
+    redemptionSnapshot.forEach(docSnap => {
+        promoRedemptionsData.push(normalizePromoRedemption(docSnap.id, docSnap.data() || {}));
+    });
+    giftVoucherLedgerData = [];
+    voucherLedgerSnapshot.forEach(docSnap => {
+        giftVoucherLedgerData.push(normalizeVoucherLedger(docSnap.id, docSnap.data() || {}));
+    });
     renderDiscountsTable();
+    renderPromoTable();
+    renderVoucherTable();
+    renderPromoHistoryTable();
+    renderVoucherLedgerTable();
     scheduleDashboardRender();
 }
 
 function setupRealtimeDiscounts() {
     setupDiscountForm();
+    setupPromoForm();
+    setupVoucherForm();
+    setupDiscountAdvancedControls();
     if (discountsUnsubscribe) discountsUnsubscribe();
     discountsUnsubscribe = onSnapshot(query(collection(db, 'pos_discounts')), snapshot => {
         discountsData = {};
@@ -1645,6 +2278,61 @@ function setupRealtimeDiscounts() {
         console.error('Error listening to POS discounts:', error);
         const body = document.getElementById('discount-table-body');
         if (body) body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#c62828;">โหลดส่วนลดไม่สำเร็จ: ${escapeHTML(error.message)}</td></tr>`;
+    });
+    if (promoCampaignsUnsubscribe) promoCampaignsUnsubscribe();
+    promoCampaignsUnsubscribe = onSnapshot(query(collection(db, 'promotions')), snapshot => {
+        promoCampaignsData = {};
+        snapshot.forEach(docSnap => {
+            promoCampaignsData[docSnap.id] = normalizePromotion(docSnap.id, docSnap.data() || {});
+        });
+        renderPromoTable();
+    }, error => {
+        console.error('Error listening to promotions:', error);
+        const body = document.getElementById('promo-table-body');
+        if (body) body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#c62828;">Unable to load promos: ${escapeHTML(error.message)}</td></tr>`;
+    });
+    if (promoCodesUnsubscribe) promoCodesUnsubscribe();
+    promoCodesUnsubscribe = onSnapshot(query(collection(db, 'promotion_codes')), snapshot => {
+        promoCodesData = {};
+        snapshot.forEach(docSnap => {
+            const code = normalizePromotionCode(docSnap.id, docSnap.data() || {});
+            if (code.code) promoCodesData[code.code] = code;
+        });
+        renderPromoTable();
+    }, error => {
+        console.error('Error listening to promotion codes:', error);
+    });
+    if (giftVouchersUnsubscribe) giftVouchersUnsubscribe();
+    giftVouchersUnsubscribe = onSnapshot(query(collection(db, 'gift_vouchers')), snapshot => {
+        giftVouchersData = {};
+        snapshot.forEach(docSnap => {
+            giftVouchersData[docSnap.id] = normalizeVoucher(docSnap.id, docSnap.data() || {});
+        });
+        renderVoucherTable();
+    }, error => {
+        console.error('Error listening to gift vouchers:', error);
+        const body = document.getElementById('voucher-table-body');
+        if (body) body.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#c62828;">Unable to load vouchers: ${escapeHTML(error.message)}</td></tr>`;
+    });
+    if (promoRedemptionsUnsubscribe) promoRedemptionsUnsubscribe();
+    promoRedemptionsUnsubscribe = onSnapshot(query(collection(db, 'promotion_redemptions'), limit(100)), snapshot => {
+        promoRedemptionsData = [];
+        snapshot.forEach(docSnap => {
+            promoRedemptionsData.push(normalizePromoRedemption(docSnap.id, docSnap.data() || {}));
+        });
+        renderPromoHistoryTable();
+    }, error => {
+        console.error('Error listening to promo redemptions:', error);
+    });
+    if (giftVoucherLedgerUnsubscribe) giftVoucherLedgerUnsubscribe();
+    giftVoucherLedgerUnsubscribe = onSnapshot(query(collection(db, 'gift_voucher_ledger'), limit(100)), snapshot => {
+        giftVoucherLedgerData = [];
+        snapshot.forEach(docSnap => {
+            giftVoucherLedgerData.push(normalizeVoucherLedger(docSnap.id, docSnap.data() || {}));
+        });
+        renderVoucherLedgerTable();
+    }, error => {
+        console.error('Error listening to gift voucher ledger:', error);
     });
 }
 
@@ -1713,6 +2401,219 @@ function setupDiscountForm() {
     discountFormBound = true;
 }
 
+function setupPromoForm() {
+    if (promoFormBound) return;
+    const form = document.getElementById('promo-form');
+    if (!form) return;
+    form.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (!canAdmin('discounts')) {
+            alert('This account cannot manage promo codes.');
+            return;
+        }
+        const idInput = document.getElementById('promo-id');
+        const codeIdInput = document.getElementById('promo-code-id');
+        const nameInput = document.getElementById('promo-name');
+        const codeInput = document.getElementById('promo-code');
+        const typeInput = document.getElementById('promo-type');
+        const valueInput = document.getElementById('promo-value');
+        const statusInput = document.getElementById('promo-status');
+        const code = normalizePromoCodeValue(codeInput?.value);
+        const name = String(nameInput?.value || '').trim();
+        const type = normalizeDiscountType(typeInput?.value);
+        const value = safeNumber(valueInput?.value);
+        const channels = selectedPromoChannels();
+        if (!name) {
+            alert('Please enter a campaign name.');
+            nameInput?.focus();
+            return;
+        }
+        if (!code) {
+            alert('Please enter a promo code using letters, numbers, dash, or underscore.');
+            codeInput?.focus();
+            return;
+        }
+        if (value <= 0 || (type === 'percent' && value > 100)) {
+            alert('Promo value must be greater than 0. Percent promos cannot exceed 100%.');
+            valueInput?.focus();
+            return;
+        }
+        const categoryIds = splitDiscountList(document.getElementById('promo-category-ids')?.value);
+        const productAndVariantIds = splitDiscountList(document.getElementById('promo-product-ids')?.value);
+        const productIds = productAndVariantIds.filter(item => !item.includes('::'));
+        const variantIds = productAndVariantIds.filter(item => item.includes('::'));
+        const archeryItems = splitDiscountList(document.getElementById('promo-archery-items')?.value)
+            .map(item => item.toUpperCase())
+            .filter(Boolean);
+        const hasTargets = categoryIds.length || productIds.length || variantIds.length || archeryItems.length;
+        const status = String(statusInput?.value || 'active').toLowerCase() === 'paused' ? 'paused' : 'active';
+        const existingId = String(idInput?.value || '').trim();
+        const promotionId = existingId || `promo-${code.toLowerCase()}`;
+        const previousCodeId = normalizePromoCodeValue(codeIdInput?.value);
+        const maxRedemptions = Math.max(0, Math.floor(safeNumber(document.getElementById('promo-max-redemptions')?.value)));
+        const expiresAt = dateInputToISO(document.getElementById('promo-expires-at')?.value);
+        const payload = {
+            id: promotionId,
+            previousCode: previousCodeId,
+            code,
+            name,
+            type,
+            value: type === 'percent' ? Math.min(value, 100) : Math.min(value, 100000),
+            status,
+            channels,
+            categoryIds,
+            productIds,
+            variantIds,
+            archeryItems,
+            minSubtotal: Math.max(0, safeNumber(document.getElementById('promo-min-subtotal')?.value)),
+            maxDiscount: Math.max(0, safeNumber(document.getElementById('promo-max-discount')?.value)),
+            maxRedemptions,
+            maxPerCustomer: Math.max(0, Math.floor(safeNumber(document.getElementById('promo-max-per-customer')?.value))),
+            startsAt: dateInputToISO(document.getElementById('promo-starts-at')?.value),
+            expiresAt,
+            stackingPolicy: String(document.getElementById('promo-stacking')?.value || 'exclusive') === 'stackable' ? 'stackable' : 'exclusive'
+        };
+        try {
+            await callAdminFunction('adminUpsertPromotion', payload);
+            resetPromoForm();
+        } catch (error) {
+            console.error('Unable to save promo code:', error);
+            alert(safeAdminError('Save promo code failed'));
+        }
+    });
+    promoFormBound = true;
+}
+
+function setupVoucherForm() {
+    if (voucherFormBound) return;
+    const form = document.getElementById('voucher-form');
+    if (!form) return;
+    form.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (!canAdmin('discounts')) {
+            alert('This account cannot manage gift vouchers.');
+            return;
+        }
+        const idInput = document.getElementById('voucher-id');
+        const codeInput = document.getElementById('voucher-code');
+        const code = normalizePromoCodeValue(codeInput?.value);
+        const existingId = String(idInput?.value || '').trim();
+        const initialAmount = Math.max(0, safeNumber(document.getElementById('voucher-initial-amount')?.value));
+        const balance = Math.max(0, safeNumber(document.getElementById('voucher-balance')?.value));
+        const requestedStatus = String(document.getElementById('voucher-status')?.value || 'active').toLowerCase();
+        const status = VOUCHER_STATUSES.has(requestedStatus) ? requestedStatus : 'active';
+        if (!code) {
+            alert('Please enter a voucher code using letters, numbers, dash, or underscore.');
+            codeInput?.focus();
+            return;
+        }
+        if (initialAmount <= 0) {
+            alert('Initial amount must be greater than 0.');
+            document.getElementById('voucher-initial-amount')?.focus();
+            return;
+        }
+        if (balance > initialAmount) {
+            alert('Voucher balance cannot exceed the initial amount.');
+            document.getElementById('voucher-balance')?.focus();
+            return;
+        }
+        const payload = {
+            id: existingId || code,
+            code,
+            initialAmount,
+            balance,
+            status,
+            expiresAt: dateInputToISO(document.getElementById('voucher-expires-at')?.value),
+            issuedTo: String(document.getElementById('voucher-issued-to')?.value || '').trim().slice(0, 160),
+            note: String(document.getElementById('voucher-note')?.value || '').trim().slice(0, 400)
+        };
+        try {
+            await callAdminFunction('adminUpsertGiftVoucher', payload);
+            resetVoucherForm();
+        } catch (error) {
+            console.error('Unable to save gift voucher:', error);
+            alert(safeAdminError('Save gift voucher failed'));
+        }
+    });
+    voucherFormBound = true;
+}
+
+function setupDiscountAdvancedControls() {
+    if (discountAdvancedControlsBound) return;
+    discountAdvancedControlsBound = true;
+
+    const categoryFilter = document.getElementById('promo-category-picker-filter');
+    const productFilter = document.getElementById('promo-product-picker-filter');
+    const categoryText = document.getElementById('promo-category-ids');
+    const productText = document.getElementById('promo-product-ids');
+    [categoryFilter, productFilter, categoryText, productText].forEach(input => {
+        if (input) input.addEventListener('input', renderDiscountTargetPickers);
+    });
+
+    const promoBulkForm = document.getElementById('promo-bulk-form');
+    if (promoBulkForm) {
+        promoBulkForm.addEventListener('submit', async event => {
+            event.preventDefault();
+            if (!canAdmin('discounts')) {
+                alert('This account cannot manage promo codes.');
+                return;
+            }
+            const promotionId = String(document.getElementById('promo-bulk-promotion-id')?.value || '').trim();
+            const count = Math.max(1, Math.min(100, Math.floor(safeNumber(document.getElementById('promo-bulk-count')?.value, 10))));
+            const prefix = normalizePromoCodeValue(document.getElementById('promo-bulk-prefix')?.value || promotionId || 'PROMO');
+            if (!promotionId) {
+                alert('Please select a campaign first.');
+                return;
+            }
+            try {
+                const result = await callAdminFunction('adminBulkGeneratePromotionCodes', { promotionId, count, prefix });
+                alert(`Generated ${result.count || result.codes?.length || count} promo codes.`);
+                promoBulkForm.reset();
+                renderPromoBulkCampaignOptions();
+            } catch (error) {
+                console.error('Unable to bulk generate promo codes:', error);
+                alert(safeAdminError('Bulk generate promo codes failed'));
+            }
+        });
+    }
+
+    const voucherBulkForm = document.getElementById('voucher-bulk-form');
+    if (voucherBulkForm) {
+        voucherBulkForm.addEventListener('submit', async event => {
+            event.preventDefault();
+            if (!canAdmin('discounts')) {
+                alert('This account cannot manage gift vouchers.');
+                return;
+            }
+            const amount = Math.max(0, safeNumber(document.getElementById('voucher-bulk-amount')?.value));
+            const count = Math.max(1, Math.min(100, Math.floor(safeNumber(document.getElementById('voucher-bulk-count')?.value, 10))));
+            const prefix = normalizePromoCodeValue(document.getElementById('voucher-bulk-prefix')?.value || `GV${Math.floor(amount)}`);
+            if (amount <= 0) {
+                alert('Voucher amount must be greater than 0.');
+                document.getElementById('voucher-bulk-amount')?.focus();
+                return;
+            }
+            try {
+                const result = await callAdminFunction('adminBulkGenerateGiftVouchers', {
+                    prefix,
+                    count,
+                    initialAmount: amount,
+                    expiresAt: dateInputToISO(document.getElementById('voucher-bulk-expires-at')?.value),
+                    note: String(document.getElementById('voucher-bulk-note')?.value || '').trim().slice(0, 400)
+                });
+                alert(`Generated ${result.count || result.vouchers?.length || count} gift vouchers.`);
+                voucherBulkForm.reset();
+            } catch (error) {
+                console.error('Unable to bulk generate gift vouchers:', error);
+                alert(safeAdminError('Bulk generate gift vouchers failed'));
+            }
+        });
+    }
+
+    renderPromoBulkCampaignOptions();
+    window.refreshDiscountTargetPickers();
+}
+
 function renderDiscountsTable() {
     const body = document.getElementById('discount-table-body');
     if (!body) return;
@@ -1772,6 +2673,111 @@ window.deleteDiscount = async function deleteDiscount(id) {
     } catch (error) {
         console.error('Unable to delete POS discount:', error);
         alert(safeAdminError("ลบส่วนลดไม่สำเร็จ"));
+    }
+};
+
+window.switchDiscountCenterTab = function switchDiscountCenterTab(tabId, button = null) {
+    const target = document.getElementById(`discount-center-${tabId}`);
+    if (!target) return;
+    document.querySelectorAll('.discount-center-panel').forEach(panel => panel.classList.remove('active'));
+    document.querySelectorAll('.discount-center-tab').forEach(tab => tab.classList.remove('active'));
+    target.classList.add('active');
+    if (button) button.classList.add('active');
+};
+
+window.resetPromoForm = function resetPromoForm() {
+    const form = document.getElementById('promo-form');
+    if (form) form.reset();
+    document.getElementById('promo-id').value = '';
+    document.getElementById('promo-code-id').value = '';
+    const title = document.getElementById('promo-form-title');
+    if (title) title.textContent = 'Create Promo Code';
+    setPromoChannelInputs(['POS', 'SHOP', 'ARCHERY']);
+    renderDiscountTargetPickers();
+};
+
+window.editPromo = function editPromo(id) {
+    const promo = promoCampaignsData[id];
+    if (!promo) return;
+    const code = promoCodeForPromotion(promo);
+    document.getElementById('promo-id').value = promo.id;
+    document.getElementById('promo-code-id').value = code?.code || promo.primaryCode || '';
+    document.getElementById('promo-name').value = promo.name || '';
+    document.getElementById('promo-code').value = code?.code || promo.primaryCode || '';
+    document.getElementById('promo-status').value = promo.active ? 'active' : 'paused';
+    document.getElementById('promo-type').value = promo.type;
+    document.getElementById('promo-value').value = String(promo.value || '');
+    document.getElementById('promo-min-subtotal').value = String(promo.minSubtotal || 0);
+    document.getElementById('promo-max-discount').value = promo.maxDiscount ? String(promo.maxDiscount) : '';
+    document.getElementById('promo-starts-at').value = isoToDateInput(promo.startsAt);
+    document.getElementById('promo-expires-at').value = isoToDateInput(promo.expiresAt || code?.expiresAt);
+    document.getElementById('promo-max-redemptions').value = promo.maxRedemptions ? String(promo.maxRedemptions) : '';
+    document.getElementById('promo-max-per-customer').value = promo.maxPerCustomer ? String(promo.maxPerCustomer) : '';
+    document.getElementById('promo-category-ids').value = joinDiscountList(promo.categoryIds);
+    document.getElementById('promo-product-ids').value = joinDiscountList([...(promo.productIds || []), ...(promo.variantIds || [])]);
+    document.getElementById('promo-archery-items').value = joinDiscountList(promo.archeryItems);
+    document.getElementById('promo-stacking').value = promo.stackingPolicy || 'exclusive';
+    setPromoChannelInputs(promo.channels);
+    renderDiscountTargetPickers();
+    const title = document.getElementById('promo-form-title');
+    if (title) title.textContent = 'Edit Promo Code';
+    window.switchDiscountCenterTab('promo', document.querySelector('.discount-center-tab:nth-child(2)'));
+    document.getElementById('promo-name')?.focus();
+};
+
+window.deletePromo = async function deletePromo(id) {
+    const promo = promoCampaignsData[id];
+    if (!promo) return;
+    if (!confirm(`Delete promo campaign "${promo.name || promo.id}"?`)) return;
+    try {
+        await callAdminFunction('adminDeletePromotion', { promotionId: id });
+        resetPromoForm();
+    } catch (error) {
+        console.error('Unable to delete promo:', error);
+        alert(safeAdminError('Delete promo failed'));
+    }
+};
+
+window.resetVoucherForm = function resetVoucherForm() {
+    const form = document.getElementById('voucher-form');
+    if (form) form.reset();
+    document.getElementById('voucher-id').value = '';
+    document.getElementById('voucher-status').value = 'active';
+    const codeInput = document.getElementById('voucher-code');
+    if (codeInput) codeInput.readOnly = false;
+    const title = document.getElementById('voucher-form-title');
+    if (title) title.textContent = 'Issue Gift Voucher';
+};
+
+window.editVoucher = function editVoucher(id) {
+    const voucher = giftVouchersData[id];
+    if (!voucher) return;
+    document.getElementById('voucher-id').value = voucher.id;
+    document.getElementById('voucher-code').value = voucher.code;
+    document.getElementById('voucher-code').readOnly = true;
+    document.getElementById('voucher-status').value = voucher.status;
+    document.getElementById('voucher-initial-amount').value = String(voucher.initialAmount || '');
+    document.getElementById('voucher-balance').value = String(voucher.balance || 0);
+    document.getElementById('voucher-expires-at').value = isoToDateInput(voucher.expiresAt);
+    document.getElementById('voucher-issued-to').value = voucher.issuedTo || '';
+    document.getElementById('voucher-note').value = voucher.note || '';
+    const title = document.getElementById('voucher-form-title');
+    if (title) title.textContent = 'Edit Gift Voucher';
+    window.switchDiscountCenterTab('voucher', document.querySelector('.discount-center-tab:nth-child(3)'));
+    document.getElementById('voucher-code')?.focus();
+};
+
+window.voidVoucher = async function voidVoucher(id) {
+    const voucher = giftVouchersData[id];
+    if (!voucher) return;
+    if (voucher.status === 'voided') return;
+    if (!confirm(`Void gift voucher "${voucher.code}"?`)) return;
+    try {
+        await callAdminFunction('adminVoidGiftVoucher', { voucherId: id });
+        resetVoucherForm();
+    } catch (error) {
+        console.error('Unable to void gift voucher:', error);
+        alert(safeAdminError('Void gift voucher failed'));
     }
 };
 

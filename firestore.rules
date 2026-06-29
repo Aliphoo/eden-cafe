@@ -710,7 +710,6 @@ service cloud.firestore {
       allow write: if (docId == 'footer' && hasAdminPermission('footer'))
         || (docId == 'business' && hasAdminPermission('business'))
         || (docId == 'index' && hasAdminPermission('index'))
-        || (docId == 'promo_popup' && hasAdminPermission('promotions'))
         || (docId == 'promptpay' && hasAdminPermission('promptpay'))
         || (docId == 'marketing' && hasAdminPermission('marketing'))
         || (docId == 'loyalty' && hasAdminPermission('loyalty'))
@@ -747,6 +746,174 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['createdBy']) || request.resource.data.createdBy == request.auth.uid)
         && (!request.resource.data.keys().hasAny(['updatedBy']) || request.resource.data.updatedBy == request.auth.uid);
       allow delete: if hasAdminPermission('discounts');
+    }
+    match /promotions/{docId} {
+      allow read: if hasAdminPermission('discounts');
+      allow create, update: if denyWrite()
+        && request.resource.data.keys().hasOnly([
+          'id', 'name', 'label', 'type', 'value', 'active', 'status',
+          'channels', 'targetType', 'categoryIds', 'productIds', 'variantIds',
+          'archeryItems', 'minSubtotal', 'maxDiscount', 'maxRedemptions',
+          'maxPerCustomer', 'startsAt', 'expiresAt', 'stackingPolicy',
+          'primaryCode', 'usedCount', 'reservedCount', 'createdAt', 'updatedAt',
+          'createdBy', 'updatedBy'
+        ])
+        && request.resource.data.id is string
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 120
+        && request.resource.data.type in ['percent', 'amount']
+        && request.resource.data.value is number
+        && request.resource.data.value > 0
+        && request.resource.data.value <= 100000
+        && request.resource.data.active is bool
+        && request.resource.data.status in ['active', 'paused']
+        && request.resource.data.channels is list
+        && request.resource.data.channels.size() > 0
+        && request.resource.data.channels.size() <= 3
+        && request.resource.data.targetType in ['all', 'limited']
+        && request.resource.data.categoryIds is list
+        && request.resource.data.categoryIds.size() <= 100
+        && request.resource.data.productIds is list
+        && request.resource.data.productIds.size() <= 100
+        && request.resource.data.variantIds is list
+        && request.resource.data.variantIds.size() <= 100
+        && request.resource.data.archeryItems is list
+        && request.resource.data.archeryItems.size() <= 20
+        && request.resource.data.minSubtotal is number
+        && request.resource.data.minSubtotal >= 0
+        && request.resource.data.maxDiscount is number
+        && request.resource.data.maxDiscount >= 0
+        && request.resource.data.maxRedemptions is number
+        && request.resource.data.maxRedemptions >= 0
+        && request.resource.data.maxPerCustomer is number
+        && request.resource.data.maxPerCustomer >= 0
+        && request.resource.data.startsAt is string
+        && request.resource.data.startsAt.size() <= 40
+        && request.resource.data.expiresAt is string
+        && request.resource.data.expiresAt.size() <= 40
+        && request.resource.data.stackingPolicy in ['exclusive', 'stackable']
+        && request.resource.data.primaryCode is string
+        && request.resource.data.primaryCode.size() > 0
+        && request.resource.data.primaryCode.size() <= 40
+        && request.resource.data.usedCount is number
+        && request.resource.data.usedCount >= 0
+        && (!request.resource.data.keys().hasAny(['reservedCount']) || request.resource.data.reservedCount is number)
+        && (!request.resource.data.keys().hasAny(['reservedCount']) || request.resource.data.reservedCount >= 0)
+        && (!request.resource.data.keys().hasAny(['createdAt']) || request.resource.data.createdAt is timestamp)
+        && (!request.resource.data.keys().hasAny(['updatedAt']) || request.resource.data.updatedAt is timestamp)
+        && (!request.resource.data.keys().hasAny(['createdBy']) || request.resource.data.createdBy == request.auth.uid)
+        && (!request.resource.data.keys().hasAny(['updatedBy']) || request.resource.data.updatedBy == request.auth.uid);
+      allow delete: if denyWrite();
+    }
+    match /promotion_codes/{docId} {
+      allow read: if hasAdminPermission('discounts');
+      allow create, update: if denyWrite()
+        && request.resource.data.keys().hasOnly([
+          'id', 'code', 'promotionId', 'active', 'status', 'channels',
+          'usedCount', 'reservedCount', 'maxRedemptions', 'expiresAt', 'replacedBy',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
+        ])
+        && request.resource.data.id is string
+        && request.resource.data.id.size() > 0
+        && request.resource.data.id.size() <= 40
+        && request.resource.data.code is string
+        && request.resource.data.code.size() > 0
+        && request.resource.data.code.size() <= 40
+        && request.resource.data.promotionId is string
+        && request.resource.data.promotionId.size() > 0
+        && request.resource.data.promotionId.size() <= 120
+        && request.resource.data.active is bool
+        && request.resource.data.status in ['active', 'paused', 'replaced']
+        && request.resource.data.channels is list
+        && request.resource.data.channels.size() > 0
+        && request.resource.data.channels.size() <= 3
+        && request.resource.data.usedCount is number
+        && request.resource.data.usedCount >= 0
+        && (!request.resource.data.keys().hasAny(['reservedCount']) || request.resource.data.reservedCount is number)
+        && (!request.resource.data.keys().hasAny(['reservedCount']) || request.resource.data.reservedCount >= 0)
+        && request.resource.data.maxRedemptions is number
+        && request.resource.data.maxRedemptions >= 0
+        && request.resource.data.expiresAt is string
+        && request.resource.data.expiresAt.size() <= 40
+        && (!request.resource.data.keys().hasAny(['replacedBy']) || request.resource.data.replacedBy is string)
+        && (!request.resource.data.keys().hasAny(['createdAt']) || request.resource.data.createdAt is timestamp)
+        && (!request.resource.data.keys().hasAny(['updatedAt']) || request.resource.data.updatedAt is timestamp)
+        && (!request.resource.data.keys().hasAny(['createdBy']) || request.resource.data.createdBy == request.auth.uid)
+        && (!request.resource.data.keys().hasAny(['updatedBy']) || request.resource.data.updatedBy == request.auth.uid);
+      allow delete: if denyWrite();
+    }
+    match /promotion_redemptions/{docId} {
+      allow read: if hasAdminPermission('discounts')
+        || hasAdminPermission('orders')
+        || hasAdminPermission('pos')
+        || hasArcheryPermission();
+      allow create, update, delete: if denyWrite();
+    }
+    match /gift_vouchers/{docId} {
+      allow read: if hasAdminPermission('discounts');
+      allow create, update: if denyWrite()
+        && request.resource.data.keys().hasOnly([
+          'id', 'code', 'initialAmount', 'balance', 'currency', 'status',
+          'active', 'expiresAt', 'issuedTo', 'note', 'createdAt', 'updatedAt',
+          'createdBy', 'updatedBy'
+        ])
+        && request.resource.data.id is string
+        && request.resource.data.id.size() > 0
+        && request.resource.data.id.size() <= 80
+        && request.resource.data.code is string
+        && request.resource.data.code.size() > 0
+        && request.resource.data.code.size() <= 40
+        && request.resource.data.initialAmount is number
+        && request.resource.data.initialAmount > 0
+        && request.resource.data.initialAmount <= 1000000
+        && request.resource.data.balance is number
+        && request.resource.data.balance >= 0
+        && request.resource.data.balance <= request.resource.data.initialAmount
+        && request.resource.data.currency == 'THB'
+        && request.resource.data.status in ['active', 'redeemed', 'expired', 'voided']
+        && request.resource.data.active is bool
+        && request.resource.data.expiresAt is string
+        && request.resource.data.expiresAt.size() <= 40
+        && request.resource.data.issuedTo is string
+        && request.resource.data.issuedTo.size() <= 160
+        && request.resource.data.note is string
+        && request.resource.data.note.size() <= 400
+        && (!request.resource.data.keys().hasAny(['createdAt']) || request.resource.data.createdAt is timestamp)
+        && (!request.resource.data.keys().hasAny(['updatedAt']) || request.resource.data.updatedAt is timestamp)
+        && (!request.resource.data.keys().hasAny(['createdBy']) || request.resource.data.createdBy == request.auth.uid)
+        && (!request.resource.data.keys().hasAny(['updatedBy']) || request.resource.data.updatedBy == request.auth.uid);
+      allow delete: if denyWrite();
+    }
+    match /gift_voucher_ledger/{docId} {
+      allow read: if hasAdminPermission('discounts')
+        || hasAdminPermission('orders')
+        || hasAdminPermission('pos');
+      allow create: if denyWrite()
+        && request.resource.data.keys().hasOnly([
+          'id', 'voucherId', 'code', 'type', 'amount', 'balanceBefore',
+          'balanceAfter', 'sourceType', 'sourceId', 'actorUid', 'createdAt'
+        ])
+        && request.resource.data.id is string
+        && request.resource.data.voucherId is string
+        && request.resource.data.code is string
+        && request.resource.data.code.size() > 0
+        && request.resource.data.code.size() <= 40
+        && request.resource.data.type in ['issue', 'adjust', 'redeem', 'refund', 'void', 'expire']
+        && request.resource.data.amount is number
+        && request.resource.data.amount >= -1000000
+        && request.resource.data.amount <= 1000000
+        && request.resource.data.balanceBefore is number
+        && request.resource.data.balanceBefore >= 0
+        && request.resource.data.balanceAfter is number
+        && request.resource.data.balanceAfter >= 0
+        && request.resource.data.sourceType is string
+        && request.resource.data.sourceType.size() <= 40
+        && request.resource.data.sourceId is string
+        && request.resource.data.sourceId.size() <= 160
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.createdAt is timestamp;
+      allow update, delete: if denyWrite();
     }
     match /point_ledger/{docId} {
       allow read: if hasAdminPermission('loyalty')

@@ -36,6 +36,24 @@
         return cart.reduce((sum, item) => sum + ((Number(item.price) || 0) * (Number(item.quantity) || 0)), 0);
     }
 
+    function cleanCartText(value, maxLength = 180) {
+        return String(value ?? '').trim().slice(0, maxLength);
+    }
+
+    function normalizeCartMetadata(metadata = {}) {
+        const productId = cleanCartText(metadata.productId || metadata.product_id, 160);
+        const variantId = cleanCartText(metadata.variantId || metadata.variant_id, 120);
+        const categoryId = cleanCartText(metadata.categoryId || metadata.category_id || metadata.category, 160);
+        const categoryName = cleanCartText(metadata.categoryName || metadata.category_name, 180);
+        return {
+            productId,
+            variantId,
+            categoryId,
+            categoryIds: categoryId ? [categoryId] : [],
+            categoryName
+        };
+    }
+
     function updateGlobalCartBadge() {
         const cart = readCart();
         const totalItems = cart.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
@@ -73,15 +91,20 @@
         updateGlobalCartBadge();
     }
 
-    function addToCart(idOrName, nameOrPrice, maybePrice) {
+    function addToCart(idOrName, nameOrPrice, maybePrice, metadata = {}) {
         const legacyCall = typeof maybePrice === 'undefined';
         const id = legacyCall ? String(idOrName || Date.now()) : String(idOrName || nameOrPrice || Date.now());
         const name = legacyCall ? String(idOrName || '') : String(nameOrPrice || '');
         const price = legacyCall ? Number(nameOrPrice) || 0 : Number(maybePrice) || 0;
+        const normalizedMetadata = normalizeCartMetadata(metadata);
         const cart = readCart();
         const existing = cart.find(item => item.id === id);
-        if (existing) existing.quantity += 1;
-        else cart.push({ id, name, price, quantity: 1 });
+        if (existing) {
+            existing.quantity += 1;
+            Object.assign(existing, normalizedMetadata);
+        } else {
+            cart.push({ id, name, price, quantity: 1, ...normalizedMetadata });
+        }
         saveCart(cart);
         renderCart();
     }
@@ -139,7 +162,12 @@
                 alert(menuOrderDeniedMessage());
                 return;
             }
-            addToCart(addButton.dataset.id || addButton.dataset.name, addButton.dataset.name, addButton.dataset.price);
+            addToCart(addButton.dataset.id || addButton.dataset.name, addButton.dataset.name, addButton.dataset.price, {
+                productId: addButton.dataset.productId,
+                variantId: addButton.dataset.variantId,
+                categoryId: addButton.dataset.categoryId,
+                categoryName: addButton.dataset.categoryName
+            });
             openCart();
             const original = addButton.textContent;
             addButton.textContent = isEnglishPage() ? 'Added ✓' : 'เพิ่มแล้ว ✓';
