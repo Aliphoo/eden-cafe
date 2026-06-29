@@ -1983,31 +1983,56 @@ function createMemberAuthHandlers({
       return;
     }
 
+    const startedAt = Date.now();
+    const timings = {};
+    async function timedStep(name, action) {
+      const stepStartedAt = Date.now();
+      try {
+        return await action();
+      } finally {
+        timings[name] = Date.now() - stepStartedAt;
+      }
+    }
+
     try {
-      const decoded = await requireSignedInUser(req);
-      let member = await loadMemberByUid(decoded.uid);
-      let credential = member ? await getCredential(member.uid) : {};
+      const decoded = await timedStep('verifyIdToken', () => requireSignedInUser(req));
+      let member = await timedStep('loadMemberByUid', () => loadMemberByUid(decoded.uid));
       let customToken = '';
 
-      const canonicalMember = await findCanonicalMemberForGoogle(decoded).catch(error => {
+      const canonicalLookup = () => findCanonicalMemberForGoogle(decoded).catch(error => {
         if (error.publicMessage) throw error;
         logger.warn('Google canonical member lookup failed', {
-          uid: decoded.uid,
+          uidHash: sha256(decoded.uid).slice(0, 16),
           message: error.message,
         });
         return null;
       });
+      const [initialCredential, canonicalMember] = await Promise.all([
+        member ? timedStep('getCredential', () => getCredential(member.uid)) : Promise.resolve({}),
+        timedStep('findCanonicalMemberForGoogle', canonicalLookup),
+      ]);
+      let credential = initialCredential || {};
 
       if (canonicalMember && canonicalMember.uid !== decoded.uid) {
         member = canonicalMember;
-        credential = await getCredential(member.uid);
-        customToken = await admin.auth().createCustomToken(member.uid, {
+        credential = await timedStep('getCanonicalCredential', () => getCredential(member.uid));
+        customToken = await timedStep('createCustomToken', () => admin.auth().createCustomToken(member.uid, {
           edenMember: true,
           googleAuthUid: decoded.uid,
-        });
+        }));
       }
 
       if (!member) throw createPublicError('ไม่พบข้อมูลสมาชิก', 404);
+      const totalMs = Date.now() - startedAt;
+      res.set('X-Eden-Profile-Time-Ms', String(totalMs));
+      if (totalMs >= 1000) {
+        logger.info('Member profile fetch timing', {
+          uidHash: sha256(member.uid || decoded.uid).slice(0, 16),
+          totalMs,
+          timings,
+          canonical: Boolean(canonicalMember),
+        });
+      }
       res.json({
         ok: true,
         customToken,

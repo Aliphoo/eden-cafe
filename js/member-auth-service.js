@@ -11,6 +11,15 @@ function wait(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function createTimeoutError(timeoutMs) {
+    const error = new Error('Request timed out. Please try again.');
+    error.status = 408;
+    error.code = 'timeout';
+    error.timeoutMs = timeoutMs;
+    error.userMessage = true;
+    return error;
+}
+
 function createAuthRequiredError() {
     const error = new Error('กรุณาเข้าสู่ระบบอีกครั้งเพื่อดำเนินการต่อ');
     error.status = 401;
@@ -143,13 +152,28 @@ async function authHeaders({ requireAuth = false } = {}) {
     return headers;
 }
 
-async function edenAuthRequest(path, { method = 'POST', body = null, authenticated = false } = {}) {
+async function edenAuthRequest(path, { method = 'POST', body = null, authenticated = false, timeoutMs = 15000 } = {}) {
     const headers = authenticated ? await authHeaders({ requireAuth: true }) : { 'Content-Type': 'application/json' };
-    const response = await fetch(FUNCTIONS_BASE_URL + path, {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : undefined
-    });
+    const controller = typeof AbortController === 'function' && timeoutMs > 0 ? new AbortController() : null;
+    const timeoutId = controller
+        ? window.setTimeout(() => controller.abort(createTimeoutError(timeoutMs)), timeoutMs)
+        : null;
+    let response;
+    try {
+        response = await fetch(FUNCTIONS_BASE_URL + path, {
+            method,
+            headers,
+            body: body ? JSON.stringify(body) : undefined,
+            signal: controller?.signal
+        });
+    } catch (error) {
+        if (error?.name === 'AbortError' || error?.code === 'timeout') {
+            throw createTimeoutError(timeoutMs);
+        }
+        throw error;
+    } finally {
+        if (timeoutId) window.clearTimeout(timeoutId);
+    }
 
     let data = {};
     try {
@@ -246,7 +270,8 @@ export function completePasswordReset({ verificationId, channel, identifier, otp
 export function getMyProfile() {
     return edenAuthRequest('/getMyProfile', {
         method: 'GET',
-        authenticated: true
+        authenticated: true,
+        timeoutMs: 8000
     });
 }
 

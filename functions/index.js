@@ -641,7 +641,7 @@ exports.loginMember = onRequest(
 );
 
 exports.getMyProfile = onRequest(
-  { region: 'asia-southeast1' },
+  { region: 'asia-southeast1', minInstances: 1, memory: '256MiB' },
   memberAuthHandlers.getMyProfile
 );
 

@@ -25,6 +25,8 @@ autoEnhanceOtpInputs();
     const GOOGLE_SETUP_KEY = 'eden_google_password_setup';
     const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net';
     const PHONE_AUTH_EMAIL_DOMAIN = 'phone.edencafe.co';
+    const PROFILE_SYNC_TIMEOUT_MS = 4500;
+    const PROFILE_SAVED_DOC_TIMEOUT_MS = 2500;
     let cloudOrders = null;
     let cloudBookings = null;
     let cloudHistoryUid = '';
@@ -1129,7 +1131,11 @@ autoEnhanceOtpInputs();
     async function fetchSavedUserProfile(user) {
         if (!db || !user?.uid) return null;
         try {
-            const snap = await getDoc(doc(db, 'users', user.uid));
+            const snap = await withTimeout(
+                getDoc(doc(db, 'users', user.uid)),
+                PROFILE_SAVED_DOC_TIMEOUT_MS,
+                'saved profile document'
+            );
             return snap.exists() ? { uid: snap.id, ...(snap.data() || {}) } : null;
         } catch (error) {
             logClientError('Unable to load saved user profile document:', error);
@@ -1140,27 +1146,35 @@ autoEnhanceOtpInputs();
     async function refreshCloudProfile(user) {
         if (!user?.uid || cloudProfileLoading || cloudProfileUid === user.uid) return;
         cloudProfileLoading = true;
-        try {
+        const profileRequest = (async () => {
             const result = await getMyProfile();
             const profile = result.profile || {};
             if (result.customToken && profile.uid && auth?.currentUser?.uid !== profile.uid) {
                 await signInWithCustomToken(auth, result.customToken);
-                return;
+                return { redirected: true, profile };
             }
             if (!hasPasswordLogin(profile)) {
                 localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(profile)));
                 cloudProfileUid = user.uid;
                 redirectToPasswordSetup();
-                return;
+                return { redirected: true, profile };
             }
-            cloudProfileError = '';
             const savedProfile = profileHasSavedFields(profile) ? null : await fetchSavedUserProfile(user);
-            cloudProfile = buildCloudProfile(profile, user, savedProfile || {});
+            return { profile, savedProfile: savedProfile || {} };
+        })();
+
+        let timedOut = false;
+        try {
+            const result = await withTimeout(profileRequest, PROFILE_SYNC_TIMEOUT_MS, 'profile sync');
+            if (result?.redirected) return;
+            cloudProfileError = '';
+            cloudProfile = buildCloudProfile(result.profile || {}, user, result.savedProfile || {});
             localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(cloudProfile)));
             cloudProfileUid = user.uid;
         } catch (error) {
+            timedOut = error?.code === 'timeout';
             logClientError('Unable to load member profile:', error);
-            cloudProfileError = profileLoadFailedMessage();
+            cloudProfileError = timedOut ? profileSyncDelayedMessage() : profileLoadFailedMessage();
             cloudProfile = {
                 ...(cloudProfile || {}),
                 ...buildProfileFallback(user)
@@ -1170,6 +1184,20 @@ autoEnhanceOtpInputs();
             cloudProfileLoading = false;
             if (cloudProfileUid === user.uid) renderProfile();
         }
+
+        if (!timedOut) return;
+        profileRequest
+            .then(result => {
+                if (result?.redirected || !result?.profile || currentAuthUser?.uid !== user.uid) return;
+                cloudProfileError = '';
+                cloudProfile = buildCloudProfile(result.profile || {}, user, result.savedProfile || {});
+                localStorage.setItem(USER_KEY, JSON.stringify(profileToStoredUser(cloudProfile)));
+                cloudProfileUid = user.uid;
+                renderProfile();
+            })
+            .catch(error => {
+                logClientError('Delayed member profile sync failed:', error);
+            });
     }
 
     async function refreshLoyaltyData(user, options = {}) {
@@ -1204,6 +1232,27 @@ autoEnhanceOtpInputs();
         return isEnglishPage()
             ? 'Unable to load saved profile. Showing your current session details.'
             : 'โหลดข้อมูลโปรไฟล์ไม่สำเร็จ กำลังแสดงข้อมูลจากเซสชันปัจจุบัน';
+    }
+
+    function profileSyncDelayedMessage() {
+        return isEnglishPage()
+            ? 'Still syncing the latest profile. Showing your saved session for now.'
+            : 'กำลังซิงก์ข้อมูลโปรไฟล์ล่าสุดอยู่ ระหว่างนี้แสดงข้อมูลจากเซสชันที่บันทึกไว้ก่อน';
+    }
+
+    function createProfileTimeoutError(label, timeoutMs) {
+        const error = new Error(`${label} timed out after ${timeoutMs}ms`);
+        error.code = 'timeout';
+        error.timeoutMs = timeoutMs;
+        return error;
+    }
+
+    function withTimeout(promise, timeoutMs, label) {
+        let timeoutId;
+        const timeout = new Promise((_, reject) => {
+            timeoutId = window.setTimeout(() => reject(createProfileTimeoutError(label, timeoutMs)), timeoutMs);
+        });
+        return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timeoutId));
     }
 
     function buildProfileFallback(user = {}) {
@@ -2596,8 +2645,8 @@ autoEnhanceOtpInputs();
         const email = profileValue('email', user.email || '');
         const historyItems = buildHistoryItems(orders, bookings, labels);
         const profileLoadNotice = cloudProfileError
-            ? `<p class="profile-save-message" role="status">${escapeHTML(cloudProfileError)}</p>`
-            : '';
+            ? `<p class="profile-save-message" role="status">${escapeHTML(cloudProfileError)} <button class="btn btn-outline" type="button" onclick="retryProfileSync()">${escapeHTML(isEnglishPage() ? 'Retry' : 'ลองอีกครั้ง')}</button></p>`
+            : (cloudProfileLoading ? `<p class="profile-save-message" role="status">${escapeHTML(labels.loadingProfile)}</p>` : '');
         if (!PROFILE_TABS.includes(activeProfileTab)) activeProfileTab = 'points';
         if (!HISTORY_FILTERS.includes(activeHistoryFilter)) activeHistoryFilter = 'all';
 
@@ -2614,6 +2663,16 @@ autoEnhanceOtpInputs();
         refreshLoyaltyData(user);
         refreshCloudProfile(user);
         refreshCloudHistory(user);
+    }
+
+    function retryProfileSync() {
+        const user = readUser();
+        if (!user?.uid) return;
+        cloudProfileUid = '';
+        cloudProfileError = '';
+        cloudProfileLoading = false;
+        refreshCloudProfile(user);
+        renderProfile();
     }
 
     function showSaveMessage(message, isError = false) {
@@ -3458,11 +3517,6 @@ autoEnhanceOtpInputs();
             redirectToPasswordSetup();
             return;
         }
-        if (authStateResolved && currentAuthUser && !cloudProfile && cloudProfileUid !== user.uid) {
-            renderSkeleton(container, 'profile');
-            refreshCloudProfile(user);
-            return;
-        }
         clearSkeleton(container);
         renderSignedIn(container, user, labels);
     }
@@ -3473,6 +3527,7 @@ autoEnhanceOtpInputs();
     window.resetMemberProfileForm = resetMemberProfileForm;
     window.previewMemberTier = previewMemberTier;
     window.refreshProfileLoyalty = refreshProfileLoyalty;
+    window.retryProfileSync = retryProfileSync;
     window.setProfileTab = setProfileTab;
     window.setProfileHistoryFilter = setProfileHistoryFilter;
     window.setProfileHistoryDate = setProfileHistoryDate;
