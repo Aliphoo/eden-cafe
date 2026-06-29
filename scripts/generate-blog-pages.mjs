@@ -308,7 +308,7 @@ function renderHead({ title, description, canonical, image, type = 'website', sc
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="${escapeHTML(canonical)}">
     <link rel="icon" type="image/webp" href="/Images/Logo.webp">
-    <link rel="stylesheet" href="/style.css?v=5">
+    <link rel="stylesheet" href="/style.css?v=blog-layout-20260629-1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
