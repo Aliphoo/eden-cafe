@@ -86,6 +86,9 @@ window.EdenApi = {
     getArcheryPaymentStatus(params = {}) {
         return edenApiRequest('/getArcheryPaymentStatus', { method: 'POST', body: params });
     },
+    validatePromotion(promoData) {
+        return edenApiRequest('/validatePromotion', { method: 'POST', body: promoData, authenticated: true });
+    },
     createShopOrderDraft(orderData) {
         return edenApiRequest('/createShopOrderDraft', { method: 'POST', body: orderData, authenticated: true });
     },
