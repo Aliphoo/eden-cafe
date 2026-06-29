@@ -1689,6 +1689,11 @@ function dateInputToISO(value) {
     return Number.isNaN(date.getTime()) ? '' : date.toISOString();
 }
 
+function dateInputToDateKey(value) {
+    const text = String(value || '').trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
+}
+
 function isoToDateInput(value) {
     const text = String(value || '').trim();
     if (!text) return '';
@@ -1696,6 +1701,16 @@ function isoToDateInput(value) {
     if (Number.isNaN(date.getTime())) return '';
     const pad = item => String(item).padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function dateKeyToInput(value) {
+    const text = String(value || '').trim();
+    const direct = text.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (direct) return direct[1];
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) return '';
+    const pad = item => String(item).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 function discountTimestampMillis(value) {
@@ -1922,7 +1937,7 @@ async function exportDiscountCollectionCSV(collectionName, filenamePrefix, heade
 }
 
 window.exportPromoCampaignsCSV = function exportPromoCampaignsCSV() {
-    const headers = ['promotion_id', 'primary_code', 'name', 'channels', 'type', 'value', 'min_subtotal', 'max_discount', 'max_redemptions', 'max_per_customer', 'starts_at', 'expires_at', 'targets', 'status', 'used_count'];
+    const headers = ['promotion_id', 'primary_code', 'name', 'channels', 'type', 'value', 'min_subtotal', 'max_discount', 'max_redemptions', 'max_per_customer', 'starts_at', 'expires_at', 'booking_date_start', 'booking_date_end', 'targets', 'status', 'used_count'];
     const rows = Object.values(promoCampaignsData).map(promo => [
         promo.id,
         promo.primaryCode,
@@ -1936,6 +1951,8 @@ window.exportPromoCampaignsCSV = function exportPromoCampaignsCSV() {
         promo.maxPerCustomer,
         promo.startsAt,
         promo.expiresAt,
+        promo.bookingDateStart,
+        promo.bookingDateEnd,
         promoTargetSummary(promo),
         promo.status,
         promo.usedCount
@@ -1993,6 +2010,8 @@ function normalizePromotion(id, data = {}) {
     const productIds = Array.isArray(data.productIds) ? data.productIds : [];
     const variantIds = Array.isArray(data.variantIds) ? data.variantIds : [];
     const archeryItems = Array.isArray(data.archeryItems) ? data.archeryItems : [];
+    const bookingDateStart = dateKeyToInput(data.bookingDateStart || data.booking_date_start || data.serviceDateStart || data.service_date_start);
+    const bookingDateEnd = dateKeyToInput(data.bookingDateEnd || data.booking_date_end || data.serviceDateEnd || data.service_date_end);
     return {
         id: String(id || data.id || '').trim(),
         name: String(data.name || data.label || '').trim(),
@@ -2012,6 +2031,10 @@ function normalizePromotion(id, data = {}) {
         maxPerCustomer: Math.max(0, Math.floor(safeNumber(data.maxPerCustomer ?? data.max_per_customer))),
         startsAt: data.startsAt || data.starts_at || '',
         expiresAt: data.expiresAt || data.expires_at || '',
+        bookingDateStart,
+        bookingDateEnd,
+        serviceDateStart: bookingDateStart,
+        serviceDateEnd: bookingDateEnd,
         stackingPolicy: String(data.stackingPolicy || data.stacking_policy || 'exclusive').toLowerCase() === 'stackable' ? 'stackable' : 'exclusive',
         primaryCode: normalizePromoCodeValue(data.primaryCode || data.code || ''),
         usedCount: Math.max(0, Math.floor(safeNumber(data.usedCount ?? data.used_count))),
@@ -2048,6 +2071,9 @@ function promoRuleSummary(promo = {}) {
     if (promo.maxDiscount > 0) parts.push(`cap ${adminMoney(promo.maxDiscount)}`);
     if (promo.maxRedemptions > 0) parts.push(`limit ${promo.maxRedemptions}`);
     if (promo.expiresAt) parts.push(`expires ${discountDateText(promo.expiresAt)}`);
+    if (promo.bookingDateStart || promo.bookingDateEnd) {
+        parts.push(`booking ${promo.bookingDateStart || 'any'} to ${promo.bookingDateEnd || 'any'}`);
+    }
     return parts.join(' / ');
 }
 
@@ -2452,6 +2478,13 @@ function setupPromoForm() {
         const previousCodeId = normalizePromoCodeValue(codeIdInput?.value);
         const maxRedemptions = Math.max(0, Math.floor(safeNumber(document.getElementById('promo-max-redemptions')?.value)));
         const expiresAt = dateInputToISO(document.getElementById('promo-expires-at')?.value);
+        const bookingDateStart = dateInputToDateKey(document.getElementById('promo-booking-date-start')?.value);
+        const bookingDateEnd = dateInputToDateKey(document.getElementById('promo-booking-date-end')?.value);
+        if (bookingDateStart && bookingDateEnd && bookingDateStart > bookingDateEnd) {
+            alert('Booking date from must be before booking date to.');
+            document.getElementById('promo-booking-date-start')?.focus();
+            return;
+        }
         const payload = {
             id: promotionId,
             previousCode: previousCodeId,
@@ -2471,6 +2504,10 @@ function setupPromoForm() {
             maxPerCustomer: Math.max(0, Math.floor(safeNumber(document.getElementById('promo-max-per-customer')?.value))),
             startsAt: dateInputToISO(document.getElementById('promo-starts-at')?.value),
             expiresAt,
+            bookingDateStart,
+            bookingDateEnd,
+            serviceDateStart: bookingDateStart,
+            serviceDateEnd: bookingDateEnd,
             stackingPolicy: String(document.getElementById('promo-stacking')?.value || 'exclusive') === 'stackable' ? 'stackable' : 'exclusive'
         };
         try {
@@ -2690,6 +2727,10 @@ window.resetPromoForm = function resetPromoForm() {
     if (form) form.reset();
     document.getElementById('promo-id').value = '';
     document.getElementById('promo-code-id').value = '';
+    const bookingDateStart = document.getElementById('promo-booking-date-start');
+    const bookingDateEnd = document.getElementById('promo-booking-date-end');
+    if (bookingDateStart) bookingDateStart.value = '';
+    if (bookingDateEnd) bookingDateEnd.value = '';
     const title = document.getElementById('promo-form-title');
     if (title) title.textContent = 'Create Promo Code';
     setPromoChannelInputs(['POS', 'SHOP', 'ARCHERY']);
@@ -2711,6 +2752,8 @@ window.editPromo = function editPromo(id) {
     document.getElementById('promo-max-discount').value = promo.maxDiscount ? String(promo.maxDiscount) : '';
     document.getElementById('promo-starts-at').value = isoToDateInput(promo.startsAt);
     document.getElementById('promo-expires-at').value = isoToDateInput(promo.expiresAt || code?.expiresAt);
+    document.getElementById('promo-booking-date-start').value = dateKeyToInput(promo.bookingDateStart || promo.serviceDateStart);
+    document.getElementById('promo-booking-date-end').value = dateKeyToInput(promo.bookingDateEnd || promo.serviceDateEnd);
     document.getElementById('promo-max-redemptions').value = promo.maxRedemptions ? String(promo.maxRedemptions) : '';
     document.getElementById('promo-max-per-customer').value = promo.maxPerCustomer ? String(promo.maxPerCustomer) : '';
     document.getElementById('promo-category-ids').value = joinDiscountList(promo.categoryIds);

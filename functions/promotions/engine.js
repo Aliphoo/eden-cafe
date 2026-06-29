@@ -91,9 +91,49 @@ function isExpired(expiresAt, nowMs = Date.now()) {
   return Boolean(millis && millis <= nowMs);
 }
 
+function normalizeDateKey(value) {
+  const date = timestampToDate(value);
+  if (date) return date.toISOString().slice(0, 10);
+  const text = cleanString(value, 80);
+  if (!text) return '';
+  const direct = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (direct) return direct[1];
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
+}
+
+function promoServiceDate(input = {}) {
+  return normalizeDateKey(
+    input.service_date
+      || input.serviceDate
+      || input.booking_date
+      || input.bookingDate
+      || input.date
+  );
+}
+
+function validatePromotionServiceDate(promotion, input = {}) {
+  const starts = promotion.bookingDateStart || promotion.serviceDateStart || '';
+  const ends = promotion.bookingDateEnd || promotion.serviceDateEnd || '';
+  if (!starts && !ends) return '';
+  const date = promoServiceDate(input);
+  if (!date) {
+    throw apiError('PROMO_BOOKING_DATE_REQUIRED', 400, 'booking_date or service_date is required for this promo');
+  }
+  if (starts && date < starts) {
+    throw apiError('PROMO_BOOKING_DATE_TOO_EARLY', 409, 'Promo code is not valid for this booking date');
+  }
+  if (ends && date > ends) {
+    throw apiError('PROMO_BOOKING_DATE_TOO_LATE', 409, 'Promo code is not valid for this booking date');
+  }
+  return date;
+}
+
 function normalizePromotion(id, data = {}) {
   const type = normalizeStatus(data.type, 'percent') === 'amount' ? 'amount' : 'percent';
   const value = positiveMoney(data.value);
+  const bookingDateStart = normalizeDateKey(data.bookingDateStart || data.booking_date_start || data.serviceDateStart || data.service_date_start);
+  const bookingDateEnd = normalizeDateKey(data.bookingDateEnd || data.booking_date_end || data.serviceDateEnd || data.service_date_end);
   return {
     id: cleanString(id || data.id, 120),
     name: cleanString(data.name || data.label, 160),
@@ -113,6 +153,10 @@ function normalizePromotion(id, data = {}) {
     maxPerCustomer: Math.max(0, Math.floor(Number(data.maxPerCustomer ?? data.max_per_customer) || 0)),
     startsAt: data.startsAt || data.starts_at || '',
     expiresAt: data.expiresAt || data.expires_at || '',
+    bookingDateStart,
+    bookingDateEnd,
+    serviceDateStart: bookingDateStart,
+    serviceDateEnd: bookingDateEnd,
     stackingPolicy: normalizeStatus(data.stackingPolicy || data.stacking_policy, 'exclusive') === 'stackable' ? 'stackable' : 'exclusive',
     primaryCode: normalizeCode(data.primaryCode || data.code),
     usedCount: Math.max(0, Math.floor(Number(data.usedCount ?? data.used_count) || 0)),
@@ -305,6 +349,7 @@ async function validatePromotionInTransaction(transaction, db, input = {}) {
   if (isExpired(promotion.expiresAt, nowMs) || isExpired(codeData.expiresAt, nowMs)) {
     throw apiError('PROMO_EXPIRED', 409, 'Promo code has expired');
   }
+  const bookingDate = validatePromotionServiceDate(promotion, input);
   const maxRedemptions = Math.min(
     ...[promotion.maxRedemptions, codeData.maxRedemptions].filter(value => value > 0)
   );
@@ -332,6 +377,8 @@ async function validatePromotionInTransaction(transaction, db, input = {}) {
     type: promotion.type,
     value: promotion.value,
     stackingPolicy: promotion.stackingPolicy,
+    bookingDate,
+    serviceDate: bookingDate,
     ...application,
   };
 }
@@ -393,6 +440,8 @@ async function reservePromotionRedemptionInTransaction(transaction, db, input = 
     branchId,
     customerUid,
     cashierUid,
+    bookingDate: validation.bookingDate || '',
+    serviceDate: validation.serviceDate || validation.bookingDate || '',
     discountAmount: validation.discountAmount,
     eligibleSubtotal: validation.eligibleSubtotal,
     subtotal: validation.subtotal,
@@ -432,6 +481,8 @@ async function reservePromotionRedemptionInTransaction(transaction, db, input = 
     discountAmount: validation.discountAmount,
     eligibleSubtotal: validation.eligibleSubtotal,
     lineAllocations: validation.lineAllocations,
+    bookingDate: validation.bookingDate,
+    serviceDate: validation.serviceDate,
     replayed: false,
   };
 }
@@ -594,6 +645,8 @@ async function redeemPromotionRedemptionInTransaction(transaction, db, input = {
     branchId,
     customerUid,
     cashierUid,
+    bookingDate: validation.bookingDate || '',
+    serviceDate: validation.serviceDate || validation.bookingDate || '',
     discountAmount: validation.discountAmount,
     eligibleSubtotal: validation.eligibleSubtotal,
     subtotal: validation.subtotal,
@@ -635,6 +688,8 @@ async function redeemPromotionRedemptionInTransaction(transaction, db, input = {
     discountAmount: validation.discountAmount,
     eligibleSubtotal: validation.eligibleSubtotal,
     lineAllocations: validation.lineAllocations,
+    bookingDate: validation.bookingDate,
+    serviceDate: validation.serviceDate,
     replayed: false,
   };
 }
@@ -902,6 +957,7 @@ module.exports = {
   normalizeCode,
   normalizeSourceType,
   channelFromSourceType,
+  normalizeDateKey,
   normalizePromotion,
   normalizePromotionCode,
   normalizeLine,

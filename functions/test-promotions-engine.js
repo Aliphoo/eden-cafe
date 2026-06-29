@@ -179,6 +179,8 @@ function promotionSeed(overrides = {}) {
       maxPerCustomer: 0,
       startsAt: '',
       expiresAt: '',
+      bookingDateStart: '',
+      bookingDateEnd: '',
       stackingPolicy: 'exclusive',
       primaryCode: 'COFFEE20',
       usedCount: 0,
@@ -253,6 +255,46 @@ async function run() {
   assert.equal(valid.valid, true);
   assert.equal(valid.channel, 'POS');
   assert.equal(valid.discountAmount, 40);
+
+  const bookingWindowDb = new FakeFirestore({
+    promotions: promotionSeed({
+      targetType: 'all',
+      categoryIds: [],
+      bookingDateStart: '2026-07-11',
+      bookingDateEnd: '2026-07-17',
+    }),
+    promotion_codes: codeSeed(),
+    promotion_redemptions: {},
+  });
+  const bookingWindowValid = await engine.validatePromotion(bookingWindowDb, {
+    promo_code: 'COFFEE20',
+    source_type: 'ARCHERY_BOOKING',
+    booking_date: '2026-07-11',
+    subtotal: 200,
+    items: [{ archeryItem: 'ARCHERY_PACKAGE', lineTotal: 200 }],
+  });
+  assert.equal(bookingWindowValid.bookingDate, '2026-07-11');
+  assert.equal(bookingWindowValid.discountAmount, 40);
+  await expectAsyncApiError('PROMO_BOOKING_DATE_TOO_EARLY', () => engine.validatePromotion(bookingWindowDb, {
+    promo_code: 'COFFEE20',
+    source_type: 'ARCHERY_BOOKING',
+    booking_date: '2026-07-10',
+    subtotal: 200,
+    items: [{ archeryItem: 'ARCHERY_PACKAGE', lineTotal: 200 }],
+  }));
+  await expectAsyncApiError('PROMO_BOOKING_DATE_TOO_LATE', () => engine.validatePromotion(bookingWindowDb, {
+    promo_code: 'COFFEE20',
+    source_type: 'ARCHERY_BOOKING',
+    booking_date: '2026-07-18',
+    subtotal: 200,
+    items: [{ archeryItem: 'ARCHERY_PACKAGE', lineTotal: 200 }],
+  }));
+  await expectAsyncApiError('PROMO_BOOKING_DATE_REQUIRED', () => engine.validatePromotion(bookingWindowDb, {
+    promo_code: 'COFFEE20',
+    source_type: 'ARCHERY_BOOKING',
+    subtotal: 200,
+    items: [{ archeryItem: 'ARCHERY_PACKAGE', lineTotal: 200 }],
+  }));
 
   const expiredDb = new FakeFirestore({
     promotions: promotionSeed({ expiresAt: '2020-01-01T00:00:00.000Z' }),

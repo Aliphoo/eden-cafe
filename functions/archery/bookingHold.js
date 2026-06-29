@@ -1,5 +1,6 @@
 const { httpFunction, requireMember } = require('../security/authz');
 const { runIdempotentTransaction } = require('../shared/idempotency');
+const { writeAuditLog } = require('../shared/audit');
 const { FieldValue, Timestamp } = require('../shared/firestore');
 const {
   SERVICE_TYPE,
@@ -14,6 +15,7 @@ const {
 } = require('../shared/time');
 const {
   findAvailableLanes,
+  queryLocksForBooking,
   writeLocks,
 } = require('../shared/locks');
 const {
@@ -25,7 +27,13 @@ const {
   archeryPromoCode,
   reserveArcheryPromotionInTransaction,
   applyArcheryPromotionToPricing,
+  commitArcheryPromotionApplications,
+  archeryPromotionStatusUpdate,
 } = require('./promotions');
+
+function roundMoney(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
 
 function assertNoClientLane(data = {}) {
   if (
@@ -130,6 +138,8 @@ function buildBookingPayload(options = {}) {
     status: options.bookingStatus,
     payment_method: cleanString(options.paymentMethod, 40),
     payment_status: options.paymentStatus,
+    payment_id: cleanString(options.paymentId, 180),
+    payment_required: options.paymentRequired !== false,
     amount_total: amount,
     totalAmount: amount,
     amount_before_discount: totalBeforeDiscount,
@@ -232,6 +242,7 @@ async function createArcheryBookingInTransaction(transaction, db, options = {}) 
     requestId: options.requestId,
   });
   const finalPricing = applyArcheryPromotionToPricing(pricing, promotion);
+  const paymentRequired = roundMoney(finalPricing.amount_total) > 0;
   const customerName = cleanString(options.customerName, 120) || bookingDisplayName(member);
   const customerPhone = cleanString(options.customerPhone, 40) || bookingPhone(member);
   const customerEmail = cleanString(options.customerEmail, 180).toLowerCase() || bookingEmail(member);
@@ -249,6 +260,7 @@ async function createArcheryBookingInTransaction(transaction, db, options = {}) 
     requiredLaneCount,
     bookingStatus: options.bookingStatus,
     paymentStatus: options.paymentStatus,
+    paymentRequired,
     amount: finalPricing.amount_total,
     pricing: finalPricing,
     customerName,
@@ -386,22 +398,143 @@ const createArcheryHold = httpFunction(async ({ db, data, actor, requestId }) =>
       amount_breakdown: created.booking.amount_breakdown,
       pricing_version: created.booking.pricing_version,
       pricing_updated_at: created.booking.pricing_updated_at,
-      expires_at: created.expires_at.toDate().toISOString(),
-      payment_required: true,
+      expires_at: created.expires_at ? created.expires_at.toDate().toISOString() : '',
+      payment_required: created.booking.payment_required !== false && Number(created.booking.amount_total || 0) > 0,
     };
   });
 
+  let response = result.response;
+  if (roundMoney(response.amount_total || response.totalAmount) <= 0) {
+    const confirmed = await confirmFreeArcheryBooking(db, {
+      branchId,
+      bookingId: response.booking_id,
+      actor,
+      requestId,
+    });
+    response = {
+      ...response,
+      ...confirmed,
+      expires_at: '',
+      payment_required: false,
+    };
+  }
+
   return {
     replayed: result.replayed,
-    ...result.response,
+    ...response,
   };
 }, {
   name: 'createArcheryHold',
   methods: ['POST'],
 });
 
+async function confirmFreeArcheryBooking(db, options = {}) {
+  const branchId = options.branchId;
+  const bookingId = cleanString(options.bookingId, 180);
+  if (!bookingId) throw apiError('BOOKING_REQUIRED', 400, 'booking_id is required');
+  return db.runTransaction(async transaction => {
+    const bookingRef = db.collection('bookings').doc(bookingId);
+    const bookingSnap = await transaction.get(bookingRef);
+    if (!bookingSnap.exists) throw apiError('BOOKING_NOT_FOUND', 404, 'Booking was not found');
+    const booking = bookingSnap.data() || {};
+    if (booking.branch_id !== branchId || booking.service_type !== SERVICE_TYPE) {
+      throw apiError('BOOKING_NOT_FOUND', 404, 'Archery booking was not found for this branch');
+    }
+    const amount = roundMoney(booking.amount_total || booking.totalAmount || 0);
+    if (amount > 0) return { payment_required: true };
+    const bookingStatus = cleanString(booking.booking_status || booking.status, 40).toUpperCase();
+    const paymentId = cleanString(booking.payment_id, 180) || `pay_free_${bookingId}`;
+    const paymentRef = db.collection('payments').doc(paymentId);
+    const locksSnap = await queryLocksForBooking(transaction, db, branchId, bookingId);
+    const paymentSnap = await transaction.get(paymentRef);
+    if (bookingStatus === 'CONFIRMED') {
+      return {
+        booking_id: bookingId,
+        booking_status: 'CONFIRMED',
+        payment_status: booking.payment_status || 'PAID_PROMO',
+        payment_id: paymentId,
+        payment_required: false,
+      };
+    }
+    if (bookingStatus !== 'HELD') {
+      throw apiError('BOOKING_STATE_DOES_NOT_ALLOW_ACTION', 409, 'Only HELD free bookings can be confirmed');
+    }
+    await commitArcheryPromotionApplications(transaction, db, {
+      branchId,
+      bookingId,
+      booking,
+      paymentId,
+      actor: options.actor || {},
+      requestId: options.requestId || '',
+    });
+    const now = FieldValue.serverTimestamp();
+    const promoStatusUpdate = archeryPromotionStatusUpdate(booking, 'redeemed', { paymentId });
+    locksSnap.forEach(lockSnap => {
+      transaction.set(lockSnap.ref, {
+        lock_status: 'CONFIRMED',
+        status: 'CONFIRMED',
+        expires_at: null,
+        hold_expires_at: null,
+        updated_at: now,
+      }, { merge: true });
+    });
+    transaction.set(paymentRef, {
+      payment_id: paymentId,
+      branch_id: branchId,
+      booking_id: bookingId,
+      member_id: cleanString(booking.member_id || booking.uid || booking.customerUid, 160),
+      service_type: SERVICE_TYPE,
+      amount: 0,
+      currency: booking.currency || 'THB',
+      provider: 'PROMO_CODE',
+      payment_method: 'PROMO_CODE',
+      payment_status: 'PAID_PROMO',
+      status: 'PAID',
+      provider_ref: paymentId,
+      paid_at: now,
+      created_at: paymentSnap.exists ? paymentSnap.data().created_at || now : now,
+      updated_at: now,
+    }, { merge: true });
+    transaction.update(bookingRef, {
+      booking_status: 'CONFIRMED',
+      status: 'CONFIRMED',
+      payment_status: 'PAID_PROMO',
+      payment_method: 'PROMO_CODE',
+      payment_id: paymentId,
+      provider_ref: paymentId,
+      payment_required: false,
+      expires_at: null,
+      hold_expires_at: null,
+      confirmed_at: now,
+      updated_at: now,
+      ...promoStatusUpdate,
+    });
+    writeAuditLog(transaction, db, {
+      branchId,
+      actor: options.actor || {},
+      actorType: 'CUSTOMER',
+      action: 'confirmFreeArcheryBooking',
+      targetCollection: 'bookings',
+      targetId: bookingId,
+      before: booking,
+      after: { booking_id: bookingId, booking_status: 'CONFIRMED', payment_status: 'PAID_PROMO' },
+      requestId: options.requestId || '',
+    });
+    return {
+      booking_id: bookingId,
+      booking_status: 'CONFIRMED',
+      payment_status: 'PAID_PROMO',
+      payment_id: paymentId,
+      payment_required: false,
+      promoApplications: promoStatusUpdate.promoApplications || booking.promoApplications || [],
+      promo_applications: promoStatusUpdate.promo_applications || booking.promo_applications || [],
+    };
+  });
+}
+
 module.exports = {
   createArcheryHold,
+  confirmFreeArcheryBooking,
   createArcheryBookingInTransaction,
   readMemberInTransaction,
   assertNoClientLane,

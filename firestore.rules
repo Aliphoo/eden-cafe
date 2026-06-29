@@ -754,7 +754,8 @@ service cloud.firestore {
           'id', 'name', 'label', 'type', 'value', 'active', 'status',
           'channels', 'targetType', 'categoryIds', 'productIds', 'variantIds',
           'archeryItems', 'minSubtotal', 'maxDiscount', 'maxRedemptions',
-          'maxPerCustomer', 'startsAt', 'expiresAt', 'stackingPolicy',
+          'maxPerCustomer', 'startsAt', 'expiresAt', 'bookingDateStart',
+          'bookingDateEnd', 'serviceDateStart', 'serviceDateEnd', 'stackingPolicy',
           'primaryCode', 'usedCount', 'reservedCount', 'createdAt', 'updatedAt',
           'createdBy', 'updatedBy'
         ])
@@ -792,6 +793,14 @@ service cloud.firestore {
         && request.resource.data.startsAt.size() <= 40
         && request.resource.data.expiresAt is string
         && request.resource.data.expiresAt.size() <= 40
+        && request.resource.data.bookingDateStart is string
+        && request.resource.data.bookingDateStart.size() <= 40
+        && request.resource.data.bookingDateEnd is string
+        && request.resource.data.bookingDateEnd.size() <= 40
+        && request.resource.data.serviceDateStart is string
+        && request.resource.data.serviceDateStart.size() <= 40
+        && request.resource.data.serviceDateEnd is string
+        && request.resource.data.serviceDateEnd.size() <= 40
         && request.resource.data.stackingPolicy in ['exclusive', 'stackable']
         && request.resource.data.primaryCode is string
         && request.resource.data.primaryCode.size() > 0

@@ -1781,6 +1781,14 @@
                                         <input id="promo-expires-at" type="datetime-local">
                                     </div>
                                     <div class="form-group">
+                                        <label for="promo-booking-date-start">Booking date from</label>
+                                        <input id="promo-booking-date-start" type="date">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="promo-booking-date-end">Booking date to</label>
+                                        <input id="promo-booking-date-end" type="date">
+                                    </div>
+                                    <div class="form-group">
                                         <label for="promo-max-redemptions">Max redemptions</label>
                                         <input id="promo-max-redemptions" type="number" min="0" step="1" placeholder="0 = no limit">
                                     </div>
@@ -3944,7 +3952,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=promo-center-phase1-2"></script>
+    <script type="module" src="js/admin.js?v=promo-booking-window-20260629"></script>
     <script>
         (function cleanRemovedAdminHash() {
             const rawHash = String(window.location.hash || '').replace(/^#/, '');

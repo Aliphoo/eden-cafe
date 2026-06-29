@@ -77,6 +77,15 @@ function cleanDateText(value) {
   return cleanString(value, 80);
 }
 
+function cleanDateKey(value) {
+  const text = cleanDateText(value);
+  if (!text) return '';
+  const direct = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (direct) return direct[1];
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
+}
+
 function hasDiscountAdminAccess(actor = {}) {
   const email = cleanString(actor.email, 180).toLowerCase();
   if (ADMIN_EMAILS.has(email)) return true;
@@ -161,6 +170,11 @@ function buildPromotionPayload(data = {}, existing = {}) {
   const status = normalizeStatus(data.status, PROMO_STATUSES, 'active');
   const maxRedemptions = Math.max(0, Math.floor(Number(data.maxRedemptions ?? data.max_redemptions) || 0));
   const promotionId = cleanString(data.id || data.promotionId || `promo-${code.toLowerCase()}`, 120);
+  const bookingDateStart = cleanDateKey(data.bookingDateStart || data.booking_date_start || data.serviceDateStart || data.service_date_start);
+  const bookingDateEnd = cleanDateKey(data.bookingDateEnd || data.booking_date_end || data.serviceDateEnd || data.service_date_end);
+  if (bookingDateStart && bookingDateEnd && bookingDateStart > bookingDateEnd) {
+    throw apiError('PROMO_BOOKING_DATE_RANGE_INVALID', 400, 'Booking date from must be before booking date to');
+  }
   return {
     promotionId,
     code,
@@ -184,6 +198,10 @@ function buildPromotionPayload(data = {}, existing = {}) {
       maxPerCustomer: Math.max(0, Math.floor(Number(data.maxPerCustomer ?? data.max_per_customer) || 0)),
       startsAt: cleanDateText(data.startsAt || data.starts_at),
       expiresAt: cleanDateText(data.expiresAt || data.expires_at),
+      bookingDateStart,
+      bookingDateEnd,
+      serviceDateStart: bookingDateStart,
+      serviceDateEnd: bookingDateEnd,
       stackingPolicy: cleanString(data.stackingPolicy || data.stacking_policy, 40).toLowerCase() === 'stackable'
         ? 'stackable'
         : 'exclusive',

@@ -15,8 +15,13 @@ function archeryItemCode(value) {
   return item.startsWith('ARCHERY_') ? item : `ARCHERY_${item}`;
 }
 
+function archeryBookingDate(timing = {}) {
+  return cleanString(timing.booking_date || timing.bookingDate || timing.service_date || timing.serviceDate || '', 40);
+}
+
 function archeryPromotionLines(pricing = {}, timing = {}) {
   const items = Array.isArray(pricing.booking_items) ? pricing.booking_items : [];
+  const bookingDate = archeryBookingDate(timing);
   return items.map((item, index) => {
     const itemType = archeryItemCode(item.item_type || item.itemType || '');
     const amount = roundMoney(item.amount || item.total_price || item.lineTotal || 0);
@@ -33,6 +38,10 @@ function archeryPromotionLines(pricing = {}, timing = {}) {
       lineTotal: amount,
       amount,
       durationMinutes: timing.duration_minutes || timing.packageMinutes || 0,
+      bookingDate,
+      booking_date: bookingDate,
+      serviceDate: bookingDate,
+      service_date: bookingDate,
     };
   }).filter(item => item.archeryItem && item.amount > 0);
 }
@@ -132,6 +141,10 @@ async function reserveArcheryPromotionInTransaction(transaction, db, options = {
     source_id: options.bookingId,
     customer_uid: options.memberId,
     member_id: options.memberId,
+    booking_date: archeryBookingDate(options.timing),
+    bookingDate: archeryBookingDate(options.timing),
+    service_date: archeryBookingDate(options.timing),
+    serviceDate: archeryBookingDate(options.timing),
     subtotal,
     items: archeryPromotionLines(options.pricing, options.timing),
   }, {
@@ -141,9 +154,6 @@ async function reserveArcheryPromotionInTransaction(transaction, db, options = {
   const application = promotionApplicationFromReservation(code, reservation);
   if (!application) throw apiError('PROMO_CODE_INVALID', 409, 'Promo code is invalid');
   const totalAmount = roundMoney(Math.max(0, subtotal - application.discountAmount));
-  if (totalAmount <= 0) {
-    throw apiError('ARCHERY_TOTAL_INVALID', 409, 'Archery online payment total must be greater than zero after promo discount');
-  }
   return {
     promoCode: code,
     discountAmount: application.discountAmount,

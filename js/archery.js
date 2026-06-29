@@ -231,6 +231,7 @@ function currentArcheryPromoDiscount(pricing = calculateDraftPricing()) {
 
 function archeryPromoItems(pricing = calculateDraftPricing()) {
     const duration = packageMinutes();
+    const bookingDate = selectedDate();
     return [
         {
             id: `${packageCode(duration)}_PACKAGE`,
@@ -242,7 +243,11 @@ function archeryPromoItems(pricing = calculateDraftPricing()) {
             quantity: pricing.partySize,
             unitPrice: pricing.packageAmount,
             lineTotal: pricing.packageTotal,
-            amount: pricing.packageTotal
+            amount: pricing.packageTotal,
+            bookingDate,
+            booking_date: bookingDate,
+            serviceDate: bookingDate,
+            service_date: bookingDate
         },
         {
             id: `${packageCode(duration)}_COACH`,
@@ -254,7 +259,11 @@ function archeryPromoItems(pricing = calculateDraftPricing()) {
             quantity: pricing.partySize,
             unitPrice: pricing.coachAmount,
             lineTotal: pricing.coachTotal,
-            amount: pricing.coachTotal
+            amount: pricing.coachTotal,
+            bookingDate,
+            booking_date: bookingDate,
+            serviceDate: bookingDate,
+            service_date: bookingDate
         },
         {
             id: `${packageCode(duration)}_EQUIPMENT`,
@@ -266,7 +275,11 @@ function archeryPromoItems(pricing = calculateDraftPricing()) {
             quantity: pricing.partySize,
             unitPrice: pricing.equipmentAmount,
             lineTotal: pricing.equipmentTotal,
-            amount: pricing.equipmentTotal
+            amount: pricing.equipmentTotal,
+            bookingDate,
+            booking_date: bookingDate,
+            serviceDate: bookingDate,
+            service_date: bookingDate
         }
     ].filter(item => item.amount > 0);
 }
@@ -277,6 +290,8 @@ function promoPayloadFromResponse(result = {}) {
 
 function promoErrorMessage(error = {}) {
     const code = String(error.code || error.error || error.message || '').toUpperCase();
+    if (code.includes('BOOKING_DATE') || code.includes('SERVICE_DATE')) return 'Promo code is available only for selected booking dates.';
+    if (code.includes('NOT_STARTED')) return 'Promo code is not active yet.';
     if (code.includes('EXPIRED')) return 'Promo code has expired.';
     if (code.includes('MIN_SUBTOTAL')) return 'Booking total does not meet this promo minimum.';
     if (code.includes('NOT_APPLICABLE')) return 'Promo code does not apply to this archery selection.';
@@ -349,6 +364,10 @@ async function applyArcheryPromoCode(event) {
             promo_code: code,
             source_type: 'ARCHERY_BOOKING',
             channel: 'ARCHERY',
+            booking_date: selectedDate(),
+            bookingDate: selectedDate(),
+            service_date: selectedDate(),
+            serviceDate: selectedDate(),
             subtotal: pricing.amountTotal,
             items: archeryPromoItems(pricing)
         });
@@ -494,11 +513,20 @@ function restoreButtonStates() {
     if (confirmBtn) {
         const paymentStatus = String(currentHold?.payment_status || '').toUpperCase();
         const bookingStatus = String(currentHold?.booking_status || currentHold?.status || '').toUpperCase();
-        confirmBtn.textContent = paymentStatus === 'PENDING' ? 'เปิดหน้าชำระเงิน' : 'ชำระเงิน';
+        const paymentRequired = currentHold?.payment_required !== false;
+        confirmBtn.textContent = bookingStatus === 'CONFIRMED'
+            ? 'ดูใบยืนยัน'
+            : paymentStatus === 'PENDING'
+                ? 'เปิดหน้าชำระเงิน'
+                : paymentRequired
+                    ? 'ชำระเงิน'
+                    : 'ยืนยันการจอง';
         confirmBtn.disabled = !currentHold
             || isHoldExpired(currentHold)
             || bookingStatus === 'CONFIRMED'
             || paymentStatus === 'PAID_ONLINE'
+            || paymentStatus === 'PAID_PROMO'
+            || paymentStatus === 'PAID_FREE'
             || paymentStatus === 'PAID_COUNTER'
             || paymentStatus === 'REFUNDED';
         confirmBtn.setAttribute('aria-disabled', confirmBtn.disabled ? 'true' : 'false');
@@ -871,7 +899,7 @@ function sanitizeHoldResponse(hold = {}) {
         },
         pricing_version: hold.pricing_version || archeryPricingConfig.version || '',
         expires_at: hold.expires_at || new Date(Date.now() + HOLD_MINUTES * 60 * 1000).toISOString(),
-        payment_required: hold.payment_required !== false
+        payment_required: hold.payment_required !== false && amountTotal > 0
     };
 }
 
@@ -917,6 +945,12 @@ function isHoldExpired(hold) {
 function renderCountdown() {
     const countdown = $('archery-countdown');
     if (!countdown || !currentHold) return;
+    if (String(currentHold.booking_status || currentHold.status || '').toUpperCase() === 'CONFIRMED') {
+        countdown.textContent = '';
+        window.clearInterval(holdTimer);
+        holdTimer = null;
+        return;
+    }
     const remaining = Math.max(0, Math.floor((holdExpiresAt(currentHold) - Date.now()) / 1000));
     const minutes = Math.floor(remaining / 60);
     const seconds = remaining % 60;
@@ -990,7 +1024,7 @@ function finishConfirmedPayment(result = {}) {
         ...currentHold,
         booking_status: result.booking_status || 'CONFIRMED',
         payment_status: result.payment_status || 'PAID_ONLINE',
-        payment_id: result.payment?.payment_id || currentHold.payment_id || ''
+        payment_id: result.payment_id || result.payment?.payment_id || currentHold.payment_id || ''
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     localStorage.removeItem(HOLD_STORAGE_KEY);
@@ -1009,7 +1043,7 @@ async function refreshPaymentStatus({ redirectOnConfirmed = false } = {}) {
     mergePaymentStatus(result);
     const paymentStatus = String(result.payment_status || currentHold.payment_status || '').toUpperCase();
     const bookingStatus = String(result.booking_status || currentHold.booking_status || '').toUpperCase();
-    if (redirectOnConfirmed && bookingStatus === 'CONFIRMED' && paymentStatus === 'PAID_ONLINE') {
+    if (redirectOnConfirmed && bookingStatus === 'CONFIRMED' && (paymentStatus === 'PAID_ONLINE' || paymentStatus === 'PAID_PROMO' || paymentStatus === 'PAID_FREE')) {
         finishConfirmedPayment(result);
         return result;
     }
@@ -1206,6 +1240,15 @@ async function createHold(event) {
         currentHold = sanitizeHoldResponse(hold);
         saveHold(currentHold);
         renderHoldSummary(currentHold);
+        if (String(currentHold.booking_status || currentHold.status || '').toUpperCase() === 'CONFIRMED') {
+            setStatus('archery-status', 'จองฟรีสำเร็จแล้ว', 'success');
+            finishConfirmedPayment({
+                booking_status: currentHold.booking_status,
+                payment_status: currentHold.payment_status || 'PAID_PROMO',
+                payment_id: currentHold.payment_id || ''
+            });
+            return;
+        }
         setStatus('archery-status', 'ล็อกเวลาจองชั่วคราวแล้ว กรุณายืนยันภายใน 10 นาที', 'success');
         setStatus('archery-confirm-status', 'กดชำระเงินเพื่อเปิด Beam');
     } catch (error) {
@@ -1228,6 +1271,14 @@ async function startBeamPayment() {
     if (!currentHold?.booking_id) {
         setStatus('archery-confirm-status', 'กรุณากดยืนยันการจองก่อนชำระเงิน', 'error');
         restoreButtonStates();
+        return;
+    }
+    if (String(currentHold.booking_status || currentHold.status || '').toUpperCase() === 'CONFIRMED') {
+        finishConfirmedPayment({
+            booking_status: currentHold.booking_status,
+            payment_status: currentHold.payment_status || 'PAID_PROMO',
+            payment_id: currentHold.payment_id || ''
+        });
         return;
     }
     setLoading('confirm', true);
