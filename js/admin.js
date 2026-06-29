@@ -2427,14 +2427,60 @@ function setupDiscountForm() {
     discountFormBound = true;
 }
 
+function setPromoFormStatus(message = '', type = '') {
+    const statusEl = document.getElementById('promo-form-status');
+    if (!statusEl) return;
+    const text = String(message || '').trim();
+    statusEl.textContent = text;
+    statusEl.className = 'admin-inline-status';
+    if (text) statusEl.classList.add('is-visible');
+    if (text && type) statusEl.classList.add(`is-${type}`);
+}
+
+function setPromoFormSaving(isSaving) {
+    const form = document.getElementById('promo-form');
+    const saveButton = document.getElementById('promo-save-button');
+    const clearButton = document.getElementById('promo-clear-button');
+    const label = saveButton?.querySelector('.button-label');
+    const loadingLabel = saveButton?.dataset.loadingLabel || 'Saving promo code...';
+    const readyLabel = saveButton?.dataset.readyLabel || 'Save promo code';
+    if (form) {
+        form.setAttribute('aria-busy', isSaving ? 'true' : 'false');
+        form.querySelectorAll('input, select, textarea, button').forEach(control => {
+            if (isSaving) {
+                if (!Object.prototype.hasOwnProperty.call(control.dataset, 'promoSaveWasDisabled')) {
+                    control.dataset.promoSaveWasDisabled = control.disabled ? '1' : '0';
+                }
+                control.disabled = true;
+            } else if (Object.prototype.hasOwnProperty.call(control.dataset, 'promoSaveWasDisabled')) {
+                control.disabled = control.dataset.promoSaveWasDisabled === '1';
+                delete control.dataset.promoSaveWasDisabled;
+            }
+        });
+    }
+    if (saveButton) {
+        saveButton.classList.toggle('is-loading', isSaving);
+        saveButton.disabled = !!isSaving;
+    }
+    if (clearButton) clearButton.disabled = !!isSaving;
+    if (label) label.textContent = isSaving ? loadingLabel : readyLabel;
+}
+
+function promoFormValidationError(message, field = null) {
+    setPromoFormStatus(message, 'error');
+    field?.focus();
+    return false;
+}
+
 function setupPromoForm() {
     if (promoFormBound) return;
     const form = document.getElementById('promo-form');
     if (!form) return;
     form.addEventListener('submit', async event => {
         event.preventDefault();
+        setPromoFormStatus();
         if (!canAdmin('discounts')) {
-            alert('This account cannot manage promo codes.');
+            promoFormValidationError('This account cannot manage promo codes.');
             return;
         }
         const idInput = document.getElementById('promo-id');
@@ -2450,18 +2496,15 @@ function setupPromoForm() {
         const value = safeNumber(valueInput?.value);
         const channels = selectedPromoChannels();
         if (!name) {
-            alert('Please enter a campaign name.');
-            nameInput?.focus();
+            promoFormValidationError('Please enter a campaign name.', nameInput);
             return;
         }
         if (!code) {
-            alert('Please enter a promo code using letters, numbers, dash, or underscore.');
-            codeInput?.focus();
+            promoFormValidationError('Please enter a promo code using letters, numbers, dash, or underscore.', codeInput);
             return;
         }
         if (value <= 0 || (type === 'percent' && value > 100)) {
-            alert('Promo value must be greater than 0. Percent promos cannot exceed 100%.');
-            valueInput?.focus();
+            promoFormValidationError('Promo value must be greater than 0. Percent promos cannot exceed 100%.', valueInput);
             return;
         }
         const categoryIds = splitDiscountList(document.getElementById('promo-category-ids')?.value);
@@ -2481,8 +2524,7 @@ function setupPromoForm() {
         const bookingDateStart = dateInputToDateKey(document.getElementById('promo-booking-date-start')?.value);
         const bookingDateEnd = dateInputToDateKey(document.getElementById('promo-booking-date-end')?.value);
         if (bookingDateStart && bookingDateEnd && bookingDateStart > bookingDateEnd) {
-            alert('Booking date from must be before booking date to.');
-            document.getElementById('promo-booking-date-start')?.focus();
+            promoFormValidationError('Booking date from must be before booking date to.', document.getElementById('promo-booking-date-start'));
             return;
         }
         const payload = {
@@ -2510,12 +2552,17 @@ function setupPromoForm() {
             serviceDateEnd: bookingDateEnd,
             stackingPolicy: String(document.getElementById('promo-stacking')?.value || 'exclusive') === 'stackable' ? 'stackable' : 'exclusive'
         };
+        setPromoFormStatus(`Saving ${code}...`, 'loading');
+        setPromoFormSaving(true);
         try {
             await callAdminFunction('adminUpsertPromotion', payload);
             resetPromoForm();
+            setPromoFormStatus(`${code} saved. Promo campaign is updating in the table.`, 'success');
         } catch (error) {
             console.error('Unable to save promo code:', error);
-            alert(safeAdminError('Save promo code failed'));
+            setPromoFormStatus(safeAdminError('Save promo code failed'), 'error');
+        } finally {
+            setPromoFormSaving(false);
         }
     });
     promoFormBound = true;
@@ -2723,6 +2770,8 @@ window.switchDiscountCenterTab = function switchDiscountCenterTab(tabId, button 
 };
 
 window.resetPromoForm = function resetPromoForm() {
+    setPromoFormSaving(false);
+    setPromoFormStatus();
     const form = document.getElementById('promo-form');
     if (form) form.reset();
     document.getElementById('promo-id').value = '';
@@ -2740,6 +2789,8 @@ window.resetPromoForm = function resetPromoForm() {
 window.editPromo = function editPromo(id) {
     const promo = promoCampaignsData[id];
     if (!promo) return;
+    setPromoFormSaving(false);
+    setPromoFormStatus();
     const code = promoCodeForPromotion(promo);
     document.getElementById('promo-id').value = promo.id;
     document.getElementById('promo-code-id').value = code?.code || promo.primaryCode || '';

@@ -536,7 +536,10 @@
         .form-group label { display: block; margin-bottom: 5px; font-weight: 500; }
         .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
         .form-group textarea { resize: vertical; min-height: 80px; }
-        .btn-submit { width: 100%; padding: 10px; background: var(--primary-color); color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1rem; }
+        .btn-submit { width: 100%; padding: 10px; background: var(--primary-color); color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1rem; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; transition: background-color 0.18s ease, opacity 0.18s ease, transform 0.18s ease; }
+        .btn-submit:disabled, .btn-action:disabled { cursor: not-allowed; opacity: 0.64; }
+        .btn-submit.is-loading::before { content: ""; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.45); border-top-color: #fff; border-radius: 50%; flex: 0 0 auto; animation: admin-spin 0.75s linear infinite; }
+        @keyframes admin-spin { to { transform: rotate(360deg); } }
         .product-form-section { border: 1px solid #e5eee6; border-radius: 16px; padding: 18px; margin-bottom: 18px; background: #fff; }
         .product-form-section h3 { font-size: 1rem; margin-bottom: 14px; color: #24352d; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
         .product-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
@@ -665,6 +668,15 @@
         .discount-picker-grid strong, .discount-picker-grid span { min-width: 0; overflow-wrap: anywhere; }
         .discount-picker-grid small { display: block; color: #6b7a70; margin-top: 2px; overflow-wrap: anywhere; }
         .discount-picker-empty { grid-column: 1 / -1; padding: 10px; text-align: center; color: #667; border: 1px dashed #dceee1; border-radius: 8px; }
+        .discount-form-actions { display: grid; gap: 10px; margin-top: 4px; }
+        .discount-form-actions .btn-submit, .discount-form-actions .btn-action { border-radius: 8px; min-height: 46px; width: 100%; }
+        .discount-form-actions .btn-action { margin-top: 0 !important; }
+        .admin-inline-status { align-items: center; border: 1px solid transparent; border-radius: 8px; display: none; font-size: 0.92rem; font-weight: 800; gap: 8px; line-height: 1.4; margin-top: 10px; min-height: 42px; padding: 10px 12px; }
+        .admin-inline-status.is-visible { display: flex; }
+        .admin-inline-status.is-loading { background: #eff7ff; border-color: #cfe3f8; color: #24527a; }
+        .admin-inline-status.is-success { background: #ecf9f1; border-color: #b9e5c7; color: #0b7040; }
+        .admin-inline-status.is-error { background: #fff1f0; border-color: #ffc8c2; color: #b42318; }
+        .admin-inline-status.is-loading::before { content: ""; width: 15px; height: 15px; border: 2px solid rgba(36,82,122,0.25); border-top-color: #24527a; border-radius: 50%; flex: 0 0 auto; animation: admin-spin 0.75s linear infinite; }
         @media (max-width: 980px) { .discount-admin-layout { grid-template-columns: 1fr; } }
         @media (max-width: 640px) { .discount-form-grid, .discount-checkbox-grid, .discount-picker-grid, .discount-picker-toolbar { grid-template-columns: 1fr; } }
 
@@ -1826,8 +1838,11 @@
                                         </select>
                                     </div>
                                 </div>
-                                <button type="submit" class="btn-submit">Save promo code</button>
-                                <button type="button" class="btn-action" style="width:100%; margin-top:10px; background:#789;" onclick="resetPromoForm()">Clear form</button>
+                                <div class="discount-form-actions">
+                                    <button id="promo-save-button" type="submit" class="btn-submit" data-ready-label="Save promo code" data-loading-label="Saving promo code..."><span class="button-label">Save promo code</span></button>
+                                    <button id="promo-clear-button" type="button" class="btn-action" style="background:#789;" onclick="resetPromoForm()">Clear form</button>
+                                </div>
+                                <p id="promo-form-status" class="admin-inline-status" role="status" aria-live="polite"></p>
                             </form>
                         </div>
 
@@ -3952,7 +3967,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=promo-booking-window-20260629"></script>
+    <script type="module" src="js/admin.js?v=promo-save-feedback-20260629"></script>
     <script>
         (function cleanRemovedAdminHash() {
             const rawHash = String(window.location.hash || '').replace(/^#/, '');
