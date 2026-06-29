@@ -8,7 +8,7 @@
     <meta name="description" content="เลือกวัน เวลา และแพ็กเกจสำหรับการจอง Eden Archery">
     <link rel="canonical" href="https://edencafe.co/archery/booking">
     <link rel="stylesheet" href="/style.css?v=mobile-ux-20260619">
-    <link rel="stylesheet" href="/archery.css?v=availability-progress-2">
+    <link rel="stylesheet" href="/archery.css?v=promo-code-ui-20260629">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -139,12 +139,17 @@
                         <ul class="archery-summary-list" id="archery-hold-summary">
                             <li><span>สถานะ</span><strong>ยังไม่ได้เลือกเวลา</strong></li>
                         </ul>
-                        <div class="archery-promo-code" style="margin:16px 0; padding:12px 0; border-top:1px dashed #ddd; border-bottom:1px dashed #ddd;">
-                            <div style="display:flex; gap:8px; align-items:center;">
-                                <input type="text" id="archery-promo-code-input" placeholder="Promo code" autocomplete="off" style="flex:1; min-width:0;">
-                                <button type="button" class="btn btn-outline" id="archery-promo-apply-btn">Apply</button>
+                        <div class="archery-promo-code">
+                            <label class="archery-promo-label" for="archery-promo-code-input">
+                                <span class="archery-promo-kicker">Promo code</span>
+                                <span>ใส่ก่อนยืนยันการจองเพื่อคำนวณยอดใหม่</span>
+                            </label>
+                            <div class="archery-promo-control">
+                                <span class="archery-promo-icon" aria-hidden="true">%</span>
+                                <input class="archery-promo-input" type="text" id="archery-promo-code-input" placeholder="EDEN10" autocomplete="off">
+                                <button type="button" class="btn btn-outline archery-promo-apply" id="archery-promo-apply-btn">ใช้โค้ด</button>
                             </div>
-                            <p class="archery-status" id="archery-promo-message" aria-live="polite" style="margin-top:6px;"></p>
+                            <p class="archery-status archery-promo-message" id="archery-promo-message" aria-live="polite"></p>
                         </div>
                         <p class="archery-status" id="archery-countdown" aria-live="polite"></p>
                         <p class="archery-status" id="archery-confirm-status" aria-live="polite"></p>

@@ -589,6 +589,106 @@
     color: #66756c;
 }
 
+.archery-promo-code {
+    background: #f8fcf8;
+    border: 1px solid #dce9de;
+    border-radius: 8px;
+    box-shadow: 0 8px 22px rgba(18, 58, 38, 0.06);
+    display: grid;
+    gap: 10px;
+    margin: 18px 0;
+    padding: 14px;
+}
+
+.archery-promo-label {
+    color: #5d6e64;
+    display: grid;
+    font-size: 0.86rem;
+    font-weight: 700;
+    gap: 2px;
+    line-height: 1.35;
+}
+
+.archery-promo-kicker {
+    color: #123a26;
+    font-size: 0.96rem;
+}
+
+.archery-promo-control {
+    align-items: center;
+    background: #fff;
+    border: 1px solid #cbdccd;
+    border-radius: 8px;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    min-height: 56px;
+    padding: 6px;
+    transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+
+.archery-promo-control:focus-within {
+    background: #ffffff;
+    border-color: #18823c;
+    box-shadow: 0 0 0 3px rgba(24, 130, 60, .14);
+}
+
+.archery-promo-icon {
+    align-items: center;
+    background: #edf7ef;
+    border-radius: 8px;
+    color: #0f6f33;
+    display: inline-flex;
+    font-weight: 900;
+    height: 36px;
+    justify-content: center;
+    width: 36px;
+}
+
+.archery-promo-input {
+    background: transparent;
+    border: 0;
+    color: #17261d;
+    font: inherit;
+    font-weight: 800;
+    min-height: 42px;
+    min-width: 0;
+    outline: none;
+    padding: 0 2px;
+    text-transform: uppercase;
+    width: 100%;
+}
+
+.archery-promo-input::placeholder {
+    color: #9ba8a0;
+    font-weight: 700;
+    opacity: 1;
+}
+
+.archery-promo-apply {
+    border-radius: 8px;
+    border-width: 1px;
+    min-height: 42px;
+    min-width: 92px;
+    padding: 0 16px;
+    white-space: nowrap;
+}
+
+.archery-promo-apply:hover {
+    transform: none;
+}
+
+.archery-promo-input:disabled,
+.archery-promo-apply:disabled {
+    cursor: not-allowed;
+}
+
+.archery-promo-message {
+    font-size: 0.88rem;
+    margin: 0 2px;
+    min-height: 20px;
+}
+
 .archery-confirm-grid {
     display: grid;
     grid-template-columns: minmax(0, 0.9fr) 300px;
@@ -1166,6 +1266,15 @@
 
     .archery-inline-action {
         margin-left: 0;
+        width: 100%;
+    }
+
+    .archery-promo-control {
+        grid-template-columns: 36px minmax(0, 1fr);
+    }
+
+    .archery-promo-apply {
+        grid-column: 1 / -1;
         width: 100%;
     }
 
