@@ -1854,7 +1854,7 @@ function mergeMemberPhone(rows = [], requestedPhone = '') {
   return '';
 }
 
-function buildMergedMemberPayload(primaryUid, rows = [], email = '', phoneNumber = '', auditId = '') {
+function buildMergedMemberPayload(primaryUid, rows = [], email = '', phoneNumber = '', auditId = '', membershipTiers = undefined) {
   const primaryRow = rows.find(row => row.uid === primaryUid) || rows[0] || {};
   const primaryUser = primaryRow.user || {};
   const primarySummary = primaryRow.summary || {};
@@ -1869,7 +1869,7 @@ function buildMergedMemberPayload(primaryUid, rows = [], email = '', phoneNumber
   const lifetimePoints = rows.reduce((sum, row) => sum + Math.max(0, mergeAccountMetric(row, 'lifetimePoints')), 0);
   const totalRedeemed = rows.reduce((sum, row) => sum + Math.max(0, mergeAccountMetric(row, 'totalRedeemed')), 0);
   const totalManualDeducted = rows.reduce((sum, row) => sum + Math.max(0, mergeAccountMetric(row, 'totalManualDeducted')), 0);
-  const tier = memberTierFromMetrics(mergedPoints, totalSpent, visitCount);
+  const tier = memberTierFromMetrics(mergedPoints, totalSpent, membershipTiers);
   const now = admin.firestore.FieldValue.serverTimestamp();
   const authProviderIds = uniqueArray(rows.flatMap(row => row.user?.authProviderIds || []), 80);
   const mergedFromUids = uniqueArray([
@@ -2133,13 +2133,8 @@ function authUserToMemberDoc(userRecord) {
   return data;
 }
 
-function memberTierFromMetrics(points = 0, totalSpent = 0, visitCount = 0) {
-  const p = Number(points) || 0;
-  const spent = Number(totalSpent) || 0;
-  const visits = Number(visitCount) || 0;
-  if (p >= 5000 || spent >= 50000 || visits >= 50) return 'Platinum';
-  if (p >= 1200 || spent >= 15000 || visits >= 15) return 'Gold';
-  return 'Silver';
+function memberTierFromMetrics(points = 0, totalSpent = 0, membershipTiers = undefined) {
+  return loyaltyFormula.memberTierFromMetrics(points, totalSpent, membershipTiers);
 }
 
 function cleanString(value, maxLength) {
@@ -4537,6 +4532,10 @@ exports.mergeDuplicateMemberAccounts = onRequest(
       const mergedEmail = mergeMemberEmail(rows, email);
       const mergedPhone = mergeMemberPhone(rows, phoneNumber);
       const phoneIndexKey = mergedPhone ? memberPhoneIndexKey(mergedPhone) : '';
+      const loyaltySnap = await db.collection('site_settings').doc('loyalty').get();
+      const loyaltySettings = loyaltyFormula.normalizeLoyaltySettings(
+        loyaltySnap.exists ? loyaltySnap.data() || {} : {}
+      );
       const {
         userPayload,
         summaryPayload,
@@ -4546,7 +4545,7 @@ exports.mergeDuplicateMemberAccounts = onRequest(
         orderCount,
         bookingCount,
         tier,
-      } = buildMergedMemberPayload(primaryUid, rows, mergedEmail, mergedPhone, auditId);
+      } = buildMergedMemberPayload(primaryUid, rows, mergedEmail, mergedPhone, auditId, loyaltySettings.membershipTiers);
       const credentialPayload = buildMergedCredentialPayload(primaryUid, rows, mergedEmail, mergedPhone);
 
       const [orderDocs, bookingDocs, ledgerDocs] = await Promise.all([
@@ -4748,11 +4747,15 @@ exports.adjustMemberPoints = onRequest(
 
       const userRef = db.collection('users').doc(userId);
       const summaryRef = db.collection('member_summaries').doc(userId);
+      const loyaltyRef = db.collection('site_settings').doc('loyalty');
       const ledgerRef = db.collection('point_ledger').doc();
       let resultPayload = null;
 
       await db.runTransaction(async transaction => {
-        const userSnap = await transaction.get(userRef);
+        const [userSnap, loyaltySnap] = await Promise.all([
+          transaction.get(userRef),
+          transaction.get(loyaltyRef),
+        ]);
         if (!userSnap.exists) {
           const error = new Error('Member profile was not found');
           error.statusCode = 404;
@@ -4770,8 +4773,10 @@ exports.adjustMemberPoints = onRequest(
         }
 
         const totalSpent = Number(member.totalSpent || 0);
-        const visitCount = Number(member.visitCount || 0);
-        const tier = memberTierFromMetrics(after, totalSpent, visitCount);
+        const loyaltySettings = loyaltyFormula.normalizeLoyaltySettings(
+          loyaltySnap.exists ? loyaltySnap.data() || {} : {}
+        );
+        const tier = memberTierFromMetrics(after, totalSpent, loyaltySettings.membershipTiers);
         const now = admin.firestore.FieldValue.serverTimestamp();
         const actorEmail = cleanString(decoded.email || '', 180);
 
@@ -4858,6 +4863,8 @@ function normalizeLoyaltySettings(raw = {}) {
     excludedCategories: Array.isArray(raw.excludedCategories)
       ? raw.excludedCategories.map(value => cleanString(value, 120).toLowerCase()).filter(Boolean)
       : ['เครื่องดื่มแอลกอฮอล์', 'ฝากเงิน', 'โปรแรง'],
+    membershipTierMode: 'points_or_spend',
+    membershipTiers: loyaltyFormula.normalizeMembershipTiers(raw.membershipTiers || raw.tierRules),
     tierMultipliers,
   };
 }

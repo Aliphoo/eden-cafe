@@ -132,7 +132,7 @@ function calculateArcheryLoyalty({ config = {}, member = null, summary = {}, boo
   const tier = loyaltyFormula.memberTierFromMetrics(
     pointsAfter,
     Math.max(totalSpentAfter, summaryTotalSpentAfter),
-    Math.max(visitCountAfter, summaryVisitCountAfter)
+    loyaltyConfig.membershipTiers
   );
   const summaryLifetimeBase = Math.max(
     Math.max(0, Number(summary.lifetimePoints || 0)),

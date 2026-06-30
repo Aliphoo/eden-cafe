@@ -1,6 +1,6 @@
 import './page-telemetry.js';
 import { auth, provider, db } from './firebase-config.js';
-import { getMemberTier, getTierBenefits } from './membership.js';
+import { getMemberTier, getTierBenefits, normalizeTierRules } from './membership.js';
 import { renderSkeleton } from './ui-skeleton.js';
 import { runAdminFileOperationFlow, runAdminImageUploadFlow } from './admin-upload-modal.js';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
@@ -2915,11 +2915,36 @@ const DEFAULT_LOYALTY_CONFIG = Object.freeze({
         Silver: 1,
         Gold: 1.25,
         Platinum: 1.5
+    },
+    membershipTierMode: 'points_or_spend',
+    membershipTiers: {
+        Silver: { minPoints: 0, minTotalSpent: 0 },
+        Gold: { minPoints: 1200, minTotalSpent: 15000 },
+        Platinum: { minPoints: 5000, minTotalSpent: 50000 }
     }
 });
 
+function normalizeMembershipTiers(raw = {}) {
+    const normalized = normalizeTierRules(raw);
+    return {
+        Silver: {
+            minPoints: normalized.SILVER.minPoints,
+            minTotalSpent: normalized.SILVER.minTotalSpent
+        },
+        Gold: {
+            minPoints: normalized.GOLD.minPoints,
+            minTotalSpent: normalized.GOLD.minTotalSpent
+        },
+        Platinum: {
+            minPoints: normalized.PLATINUM.minPoints,
+            minTotalSpent: normalized.PLATINUM.minTotalSpent
+        }
+    };
+}
+
 function normalizeLoyaltyConfig(raw = {}) {
     const tierMultipliers = raw.tierMultipliers || {};
+    const membershipTiers = normalizeMembershipTiers(raw.membershipTiers || raw.tierRules || DEFAULT_LOYALTY_CONFIG.membershipTiers);
     const excludedCategories = Array.isArray(raw.excludedCategories)
         ? raw.excludedCategories
         : String(raw.excludedCategoryText || '').split(',');
@@ -2939,12 +2964,51 @@ function normalizeLoyaltyConfig(raw = {}) {
             Silver: Math.max(1, safeNumber(tierMultipliers.Silver, 1)),
             Gold: Math.max(1, safeNumber(tierMultipliers.Gold, DEFAULT_LOYALTY_CONFIG.tierMultipliers.Gold)),
             Platinum: Math.max(1, safeNumber(tierMultipliers.Platinum, DEFAULT_LOYALTY_CONFIG.tierMultipliers.Platinum))
-        }
+        },
+        membershipTierMode: 'points_or_spend',
+        membershipTiers
     };
 }
 
 function loyaltyCurrency(value) {
     return '฿' + safeNumber(value).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function loyaltyNumber(value) {
+    return Math.max(0, Math.floor(safeNumber(value))).toLocaleString('th-TH');
+}
+
+function loyaltySpend(value) {
+    return '฿' + Math.max(0, Math.floor(safeNumber(value))).toLocaleString('th-TH');
+}
+
+function loyaltyMoney(value) {
+    const amount = Math.max(0, safeNumber(value));
+    const hasDecimals = !Number.isInteger(amount);
+    return '฿' + amount.toLocaleString('th-TH', {
+        minimumFractionDigits: hasDecimals ? 2 : 0,
+        maximumFractionDigits: hasDecimals ? 2 : 0
+    });
+}
+
+function loyaltyRuleSummary(config) {
+    const normalized = normalizeLoyaltyConfig(config);
+    return [
+        `ซื้อครบ ${loyaltySpend(normalized.spendPerPoint)} = 1 คะแนน`,
+        `1 คะแนน = ${loyaltyMoney(normalized.pointValue)}`,
+        `Gold x${normalized.tierMultipliers.Gold}`,
+        `Platinum x${normalized.tierMultipliers.Platinum}`,
+        `ใช้แต้มได้ไม่เกิน ${loyaltyNumber(normalized.maxRedeemPercent)}% ต่อบิล`
+    ].join(' | ');
+}
+
+function membershipTierSummary(config) {
+    const tiers = normalizeLoyaltyConfig(config).membershipTiers;
+    return [
+        'Silver: เริ่มต้น',
+        `Gold: ${loyaltyNumber(tiers.Gold.minPoints)}+ คะแนน หรือยอดใช้จ่าย ${loyaltySpend(tiers.Gold.minTotalSpent)}+`,
+        `Platinum: ${loyaltyNumber(tiers.Platinum.minPoints)}+ คะแนน หรือยอดใช้จ่าย ${loyaltySpend(tiers.Platinum.minTotalSpent)}+`
+    ].join(' | ');
 }
 
 function setLoyaltyFormValues(config = loyaltyConfig) {
@@ -2965,9 +3029,17 @@ function setLoyaltyFormValues(config = loyaltyConfig) {
     setValue('loyalty-min-redeem-points', normalized.minRedeemPoints);
     setValue('loyalty-gold-multiplier', normalized.tierMultipliers.Gold);
     setValue('loyalty-platinum-multiplier', normalized.tierMultipliers.Platinum);
+    setValue('loyalty-tier-gold-points', normalized.membershipTiers.Gold.minPoints);
+    setValue('loyalty-tier-gold-spend', normalized.membershipTiers.Gold.minTotalSpent);
+    setValue('loyalty-tier-platinum-points', normalized.membershipTiers.Platinum.minPoints);
+    setValue('loyalty-tier-platinum-spend', normalized.membershipTiers.Platinum.minTotalSpent);
     setChecked('loyalty-earn-after-discount', normalized.earnAfterDiscount);
     setChecked('loyalty-earn-on-redeemed', normalized.earnOnRedeemedAmount);
     setValue('loyalty-excluded-categories', normalized.excludedCategories.join(', '));
+    const loyaltySummaryEl = document.getElementById('loyalty-config-summary') || document.querySelector('#loyalty .access-help');
+    if (loyaltySummaryEl) loyaltySummaryEl.textContent = loyaltyRuleSummary(normalized);
+    const tierSummaryEl = document.getElementById('loyalty-tier-summary');
+    if (tierSummaryEl) tierSummaryEl.textContent = membershipTierSummary(normalized);
 }
 
 function readLoyaltyFormPayload() {
@@ -2988,6 +3060,18 @@ function readLoyaltyFormPayload() {
             Gold: safeNumber(document.getElementById('loyalty-gold-multiplier')?.value, 1.25),
             Platinum: safeNumber(document.getElementById('loyalty-platinum-multiplier')?.value, 1.5)
         },
+        membershipTierMode: 'points_or_spend',
+        membershipTiers: {
+            Silver: { minPoints: 0, minTotalSpent: 0 },
+            Gold: {
+                minPoints: safeNumber(document.getElementById('loyalty-tier-gold-points')?.value, 1200),
+                minTotalSpent: safeNumber(document.getElementById('loyalty-tier-gold-spend')?.value, 15000)
+            },
+            Platinum: {
+                minPoints: safeNumber(document.getElementById('loyalty-tier-platinum-points')?.value, 5000),
+                minTotalSpent: safeNumber(document.getElementById('loyalty-tier-platinum-spend')?.value, 50000)
+            }
+        },
         updatedAt: serverTimestamp(),
         updatedBy: auth.currentUser?.uid || ''
     });
@@ -3001,6 +3085,7 @@ function setupRealtimeLoyalty() {
     loyaltyConfigUnsubscribe = onSnapshot(doc(db, 'site_settings', 'loyalty'), snap => {
         loyaltyConfig = normalizeLoyaltyConfig(snap.exists() ? snap.data() : DEFAULT_LOYALTY_CONFIG);
         setLoyaltyFormValues(loyaltyConfig);
+        renderMembersTable();
         renderLoyaltySummary();
     }, error => {
         console.error('Error listening to loyalty config:', error);
@@ -10334,11 +10419,11 @@ function memberAvatar(member) {
 }
 
 function memberTier(member) {
+    const config = normalizeLoyaltyConfig(loyaltyConfig);
     return getMemberTier({
         points: safeNumber(member.points),
-        totalSpent: safeNumber(member.totalSpent),
-        visitCount: safeNumber(member.visitCount)
-    });
+        totalSpent: safeNumber(member.totalSpent)
+    }, config.membershipTiers);
 }
 
 function tierBadgeHTML(tier) {

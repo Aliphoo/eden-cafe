@@ -1,23 +1,20 @@
-﻿const TIER_RULES = {
+const DEFAULT_TIER_RULES = {
     SILVER: {
         key: 'Silver',
         minPoints: 0,
         minTotalSpent: 0,
-        minVisitCount: 0,
         next: 'Gold'
     },
     GOLD: {
         key: 'Gold',
         minPoints: 1200,
         minTotalSpent: 15000,
-        minVisitCount: 15,
         next: 'Platinum'
     },
     PLATINUM: {
         key: 'Platinum',
         minPoints: 5000,
         minTotalSpent: 50000,
-        minVisitCount: 50,
         next: null
     }
 };
@@ -60,23 +57,55 @@ function numberValue(value) {
     return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
-export function getMemberTier(user = {}) {
+function ruleValue(source, tier, field, fallback) {
+    const direct = source?.[tier]?.[field];
+    const upper = source?.[tier.toUpperCase()]?.[field];
+    const value = direct ?? upper;
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? number : fallback;
+}
+
+export function normalizeTierRules(raw = {}) {
+    const source = raw?.membershipTiers || raw?.tierRules || raw || {};
+    const goldPoints = Math.max(1, Math.floor(ruleValue(source, 'Gold', 'minPoints', DEFAULT_TIER_RULES.GOLD.minPoints)));
+    const goldSpent = Math.max(1, Math.floor(ruleValue(source, 'Gold', 'minTotalSpent', DEFAULT_TIER_RULES.GOLD.minTotalSpent)));
+    const platinumPoints = Math.max(goldPoints + 1, Math.floor(ruleValue(source, 'Platinum', 'minPoints', DEFAULT_TIER_RULES.PLATINUM.minPoints)));
+    const platinumSpent = Math.max(goldSpent + 1, Math.floor(ruleValue(source, 'Platinum', 'minTotalSpent', DEFAULT_TIER_RULES.PLATINUM.minTotalSpent)));
+
+    return {
+        SILVER: {
+            ...DEFAULT_TIER_RULES.SILVER,
+            minPoints: 0,
+            minTotalSpent: 0
+        },
+        GOLD: {
+            ...DEFAULT_TIER_RULES.GOLD,
+            minPoints: goldPoints,
+            minTotalSpent: goldSpent
+        },
+        PLATINUM: {
+            ...DEFAULT_TIER_RULES.PLATINUM,
+            minPoints: platinumPoints,
+            minTotalSpent: platinumSpent
+        }
+    };
+}
+
+export function getMemberTier(user = {}, tierRules = DEFAULT_TIER_RULES) {
+    const rules = normalizeTierRules(tierRules);
     const points = numberValue(user.points);
     const totalSpent = numberValue(user.totalSpent);
-    const visitCount = numberValue(user.visitCount);
 
     if (
-        points >= TIER_RULES.PLATINUM.minPoints ||
-        totalSpent >= TIER_RULES.PLATINUM.minTotalSpent ||
-        visitCount >= TIER_RULES.PLATINUM.minVisitCount
+        points >= rules.PLATINUM.minPoints ||
+        totalSpent >= rules.PLATINUM.minTotalSpent
     ) {
         return 'Platinum';
     }
 
     if (
-        points >= TIER_RULES.GOLD.minPoints ||
-        totalSpent >= TIER_RULES.GOLD.minTotalSpent ||
-        visitCount >= TIER_RULES.GOLD.minVisitCount
+        points >= rules.GOLD.minPoints ||
+        totalSpent >= rules.GOLD.minTotalSpent
     ) {
         return 'Gold';
     }
@@ -98,9 +127,10 @@ function metricProgress(current, target, label, unit, formatter) {
     };
 }
 
-export function getNextTierProgress(user = {}) {
-    const tier = getMemberTier(user);
-    const nextTier = TIER_RULES[tier.toUpperCase()]?.next || null;
+export function getNextTierProgress(user = {}, tierRules = DEFAULT_TIER_RULES) {
+    const rules = normalizeTierRules(tierRules);
+    const tier = getMemberTier(user, rules);
+    const nextTier = rules[tier.toUpperCase()]?.next || null;
 
     if (!nextTier) {
         return {
@@ -113,11 +143,10 @@ export function getNextTierProgress(user = {}) {
         };
     }
 
-    const target = TIER_RULES[nextTier.toUpperCase()];
+    const target = rules[nextTier.toUpperCase()];
     const metrics = [
         metricProgress(user.points, target.minPoints, 'points', 'points', value => Math.ceil(value).toLocaleString()),
-        metricProgress(user.totalSpent, target.minTotalSpent, 'totalSpent', 'baht', value => Math.ceil(value).toLocaleString()),
-        metricProgress(user.visitCount, target.minVisitCount, 'visitCount', 'visits', value => Math.ceil(value).toLocaleString())
+        metricProgress(user.totalSpent, target.minTotalSpent, 'totalSpent', 'baht', value => Math.ceil(value).toLocaleString())
     ];
 
     const bestMetric = metrics.sort((a, b) => b.percent - a.percent || a.remaining - b.remaining)[0];
@@ -143,6 +172,6 @@ export function getTierTheme(tier) {
     return TIER_THEMES[tier] || TIER_THEMES.Silver;
 }
 
-export function getTierRules() {
-    return JSON.parse(JSON.stringify(TIER_RULES));
+export function getTierRules(tierRules = DEFAULT_TIER_RULES) {
+    return JSON.parse(JSON.stringify(normalizeTierRules(tierRules)));
 }

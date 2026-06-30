@@ -2,7 +2,7 @@ import './page-telemetry.js';
 import { auth, db } from './firebase-config.js';
 import { onAuthStateChanged, PhoneAuthProvider, RecaptchaVerifier, reauthenticateWithCredential, signInWithCustomToken, updatePhoneNumber } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, doc, getDoc, getDocs, limit, orderBy, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getTierRules } from './membership.js';
+import { getMemberTier, getNextTierProgress, getTierBenefits, getTierTheme, getTierRules, normalizeTierRules } from './membership.js';
 import { autoEnhanceOtpInputs, setOtpUiStatus } from './eden-otp-experience.js?v=otp-experience-20260624-1';
 import {
     checkPhoneChange,
@@ -98,7 +98,13 @@ autoEnhanceOtpInputs();
         earnAfterDiscount: true,
         earnOnRedeemedAmount: false,
         excludedCategories: ['เครื่องดื่มแอลกอฮอล์', 'ฝากเงิน', 'โปรแรง'],
-        tierMultipliers: { Silver: 1, Gold: 1.25, Platinum: 1.5 }
+        tierMultipliers: { Silver: 1, Gold: 1.25, Platinum: 1.5 },
+        membershipTierMode: 'points_or_spend',
+        membershipTiers: {
+            Silver: { minPoints: 0, minTotalSpent: 0 },
+            Gold: { minPoints: 1200, minTotalSpent: 15000 },
+            Platinum: { minPoints: 5000, minTotalSpent: 50000 }
+        }
     };
 
     function isEnglishPage() {
@@ -473,8 +479,27 @@ autoEnhanceOtpInputs();
         return Number.isFinite(number) ? number : fallback;
     }
 
+    function normalizeMembershipTiers(raw = {}) {
+        const normalized = normalizeTierRules(raw);
+        return {
+            Silver: {
+                minPoints: normalized.SILVER.minPoints,
+                minTotalSpent: normalized.SILVER.minTotalSpent
+            },
+            Gold: {
+                minPoints: normalized.GOLD.minPoints,
+                minTotalSpent: normalized.GOLD.minTotalSpent
+            },
+            Platinum: {
+                minPoints: normalized.PLATINUM.minPoints,
+                minTotalSpent: normalized.PLATINUM.minTotalSpent
+            }
+        };
+    }
+
     function normalizeLoyaltyConfig(raw = {}) {
         const tierMultipliers = raw.tierMultipliers || {};
+        const membershipTiers = normalizeMembershipTiers(raw.membershipTiers || raw.tierRules || DEFAULT_LOYALTY_CONFIG.membershipTiers);
         const excludedCategories = Array.isArray(raw.excludedCategories)
             ? raw.excludedCategories
             : String(raw.excludedCategories || '')
@@ -497,7 +522,9 @@ autoEnhanceOtpInputs();
                 Silver: numberValue(tierMultipliers.Silver, DEFAULT_LOYALTY_CONFIG.tierMultipliers.Silver),
                 Gold: numberValue(tierMultipliers.Gold, DEFAULT_LOYALTY_CONFIG.tierMultipliers.Gold),
                 Platinum: numberValue(tierMultipliers.Platinum, DEFAULT_LOYALTY_CONFIG.tierMultipliers.Platinum)
-            }
+            },
+            membershipTierMode: 'points_or_spend',
+            membershipTiers
         };
     }
 
@@ -539,7 +566,7 @@ autoEnhanceOtpInputs();
             howItWorks: 'How it works',
             howItWorksEarn: 'Earn points from eligible Eden Cafe orders and bookings.',
             howItWorksRedeem: 'Use points and member benefits with Eden promotions.',
-            howItWorksTier: 'Grow your tier from Silver to Gold and Platinum as you spend, collect points, or visit.',
+            howItWorksTier: 'Grow your tier from Silver to Gold and Platinum with eligible points or lifetime spend.',
             bookArchery: 'Book Archery',
             historyAll: 'All',
             historyOrders: 'Orders',
@@ -596,14 +623,12 @@ autoEnhanceOtpInputs();
             progressTo: 'Progress to',
             remainingPoints: 'More {value} points to reach {tier}',
             remainingSpend: 'Spend THB {value} more to reach {tier}',
-            remainingVisits: 'Visit {value} more times to reach {tier}',
             metricPoints: 'Points',
             metricSpent: 'Spending',
             metricVisits: 'Visits',
             nextRulesPrefix: 'Reach any one condition to upgrade:',
             pointRule: '{value}+ points',
             spentRule: 'THB {value}+ total spending',
-            visitRule: '{value}+ visits',
             recentOrders: 'Recent Orders',
             noOrders: 'No order history yet.',
             noBookings: 'No booking history yet.',
@@ -723,7 +748,7 @@ autoEnhanceOtpInputs();
             howItWorks: 'วิธีใช้งาน',
             howItWorksEarn: 'สะสมแต้มจากคำสั่งซื้อและการจองที่เข้าร่วมของ Eden Cafe',
             howItWorksRedeem: 'ใช้แต้มและสิทธิ์สมาชิกกับโปรโมชันของ Eden',
-            howItWorksTier: 'ขยับระดับจาก Silver ไป Gold และ Platinum เมื่อยอดใช้จ่าย แต้ม หรือจำนวนครั้งเข้าเงื่อนไข',
+            howItWorksTier: 'ขยับระดับจาก Silver ไป Gold และ Platinum เมื่อคะแนนหรือยอดใช้จ่ายสะสมเข้าเงื่อนไข',
             bookArchery: 'จองยิงธนู',
             historyAll: 'ทั้งหมด',
             historyOrders: 'คำสั่งซื้อ',
@@ -769,14 +794,12 @@ autoEnhanceOtpInputs();
             progressTo: 'ความคืบหน้าไป',
             remainingPoints: 'อีก {value} คะแนน จะอัปเป็น {tier}',
             remainingSpend: 'อีก {value} บาท จะอัปเป็น {tier}',
-            remainingVisits: 'อีก {value} ครั้ง จะอัปเป็น {tier}',
             metricPoints: 'คะแนน',
             metricSpent: 'ยอดใช้จ่าย',
             metricVisits: 'จำนวนครั้ง',
             nextRulesPrefix: 'ทำให้ถึงเงื่อนไขใดเงื่อนไขหนึ่งเพื่ออัประดับ:',
             pointRule: '{value}+ คะแนน',
             spentRule: 'ยอดใช้จ่าย ฿{value}+',
-            visitRule: '{value}+ ครั้ง',
             recentOrders: 'ประวัติคำสั่งซื้อล่าสุด',
             noOrders: 'ยังไม่มีประวัติคำสั่งซื้อ',
             noBookings: 'ยังไม่มีประวัติการจอง',
@@ -1355,7 +1378,7 @@ autoEnhanceOtpInputs();
     }
 
     function tierUnlockRules(tier, labels) {
-        const rules = getTierRules();
+        const rules = getTierRules(getLoyaltyConfig().membershipTiers);
         const rule = rules[tier.toUpperCase()];
         if (!rule || tier === 'Silver') return '';
         return `
@@ -1363,7 +1386,6 @@ autoEnhanceOtpInputs();
                 <p>${escapeHTML(labels.unlockBy)}</p>
                 <span>${escapeHTML(labels.pointRule.replace('{value}', formatNumber(rule.minPoints)))}</span>
                 <span>${escapeHTML(labels.spentRule.replace('{value}', formatBaht(rule.minTotalSpent)))}</span>
-                <span>${escapeHTML(labels.visitRule.replace('{value}', formatNumber(rule.minVisitCount)))}</span>
             </div>
         `;
     }
@@ -1373,16 +1395,14 @@ autoEnhanceOtpInputs();
         const value = progress.unit === 'baht' ? formatBaht(progress.remaining) : formatNumber(progress.remaining);
         const template = progress.metric === 'totalSpent'
             ? labels.remainingSpend
-            : progress.metric === 'visitCount'
-                ? labels.remainingVisits
-                : labels.remainingPoints;
+            : labels.remainingPoints;
         return template.replace('{value}', value).replace('{tier}', progress.nextTier);
     }
 
     function renderMemberCard(user, labels, membershipUser) {
-        const tier = getMemberTier(membershipUser);
+        const tier = getMemberTier(membershipUser, getLoyaltyConfig().membershipTiers);
         const theme = getTierTheme(tier);
-        const progress = getNextTierProgress(membershipUser);
+        const progress = getNextTierProgress(membershipUser, getLoyaltyConfig().membershipTiers);
         const progressLabel = progress.completed ? labels.highestTier : `${labels.progressTo} ${progress.nextTier}`;
         const percent = progress.completed ? 100 : progress.percent;
 
@@ -1524,8 +1544,9 @@ autoEnhanceOtpInputs();
     }
 
     function renderNextTierRequirements(membershipUser, labels) {
-        const progress = getNextTierProgress(membershipUser);
-        const rules = getTierRules();
+        const tierRules = getLoyaltyConfig().membershipTiers;
+        const progress = getNextTierProgress(membershipUser, tierRules);
+        const rules = getTierRules(tierRules);
         if (progress.completed || !progress.nextTier) {
             return `
                 <div class="membership-panel">
@@ -1538,8 +1559,7 @@ autoEnhanceOtpInputs();
         const nextRules = rules[progress.nextTier.toUpperCase()];
         const rows = [
             { label: labels.metricPoints, current: formatNumber(membershipUser.points), rule: labels.pointRule.replace('{value}', formatNumber(nextRules.minPoints)) },
-            { label: labels.metricSpent, current: '฿' + formatBaht(membershipUser.totalSpent), rule: labels.spentRule.replace('{value}', formatBaht(nextRules.minTotalSpent)) },
-            { label: labels.metricVisits, current: formatNumber(membershipUser.visitCount), rule: labels.visitRule.replace('{value}', formatNumber(nextRules.minVisitCount)) }
+            { label: labels.metricSpent, current: '฿' + formatBaht(membershipUser.totalSpent), rule: labels.spentRule.replace('{value}', formatBaht(nextRules.minTotalSpent)) }
         ];
 
         return `
@@ -1783,12 +1803,13 @@ autoEnhanceOtpInputs();
     }
 
     function tierPointTarget(tier) {
-        const rules = getTierRules();
+        const rules = getTierRules(getLoyaltyConfig().membershipTiers);
         return Number(rules[tier.toUpperCase()]?.minPoints || 0) || 0;
     }
 
     function renderTierJourney(membershipUser, labels) {
-        const currentTier = getMemberTier(membershipUser);
+        const tierRules = getLoyaltyConfig().membershipTiers;
+        const currentTier = getMemberTier(membershipUser, tierRules);
         const tiers = ['Silver', 'Gold', 'Platinum'];
         const maxPoints = Math.max(1, tierPointTarget('Platinum'));
         const pointsForRail = Math.max(Number(membershipUser.points) || 0, tierPointTarget(currentTier));
@@ -1817,7 +1838,7 @@ autoEnhanceOtpInputs();
                         `;
                     }).join('')}
                 </div>
-                <p class="membership-rule-lead">${escapeHTML(progressMessage(getNextTierProgress(membershipUser), labels))}</p>
+                <p class="membership-rule-lead">${escapeHTML(progressMessage(getNextTierProgress(membershipUser, tierRules), labels))}</p>
             </section>
         `;
     }
@@ -2639,7 +2660,7 @@ autoEnhanceOtpInputs();
         const bookings = cloudBookings || readBookings();
         const nonArcheryBookings = bookings.filter(booking => !isArcheryBooking(booking));
         const membershipUser = buildMembershipUser(user, orders, bookings);
-        const tier = getMemberTier(membershipUser);
+        const tier = getMemberTier(membershipUser, getLoyaltyConfig().membershipTiers);
         const avatar = profileValue('photoURL', user.avatar || user.photoURL || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(user.name || labels.member) + '&background=4caf50&color=fff');
         const displayName = profileValue('displayName', user.name || labels.member);
         const email = profileValue('email', user.email || '');

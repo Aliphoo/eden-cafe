@@ -13,6 +13,33 @@ function errorWithStatus(message, statusCode = 400) {
   return error;
 }
 
+const DEFAULT_MEMBERSHIP_TIERS = {
+  Silver: { minPoints: 0, minTotalSpent: 0 },
+  Gold: { minPoints: 1200, minTotalSpent: 15000 },
+  Platinum: { minPoints: 5000, minTotalSpent: 50000 },
+};
+
+function tierRuleValue(source, tier, field, fallback) {
+  const direct = source?.[tier]?.[field];
+  const upper = source?.[tier.toUpperCase()]?.[field];
+  const value = direct ?? upper;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function normalizeMembershipTiers(raw = {}) {
+  const source = raw?.membershipTiers || raw?.tierRules || raw || {};
+  const goldPoints = Math.max(1, Math.trunc(tierRuleValue(source, 'Gold', 'minPoints', DEFAULT_MEMBERSHIP_TIERS.Gold.minPoints)));
+  const goldSpent = Math.max(1, Math.trunc(tierRuleValue(source, 'Gold', 'minTotalSpent', DEFAULT_MEMBERSHIP_TIERS.Gold.minTotalSpent)));
+  const platinumPoints = Math.max(goldPoints + 1, Math.trunc(tierRuleValue(source, 'Platinum', 'minPoints', DEFAULT_MEMBERSHIP_TIERS.Platinum.minPoints)));
+  const platinumSpent = Math.max(goldSpent + 1, Math.trunc(tierRuleValue(source, 'Platinum', 'minTotalSpent', DEFAULT_MEMBERSHIP_TIERS.Platinum.minTotalSpent)));
+  return {
+    Silver: { minPoints: 0, minTotalSpent: 0 },
+    Gold: { minPoints: goldPoints, minTotalSpent: goldSpent },
+    Platinum: { minPoints: platinumPoints, minTotalSpent: platinumSpent },
+  };
+}
+
 function normalizeLoyaltySettings(raw = {}) {
   const defaultTierMultipliers = { Silver: 1, Gold: 1.25, Platinum: 1.5 };
   const tierMultipliers = raw.tierMultipliers && typeof raw.tierMultipliers === 'object'
@@ -36,6 +63,8 @@ function normalizeLoyaltySettings(raw = {}) {
     excludedCategories: Array.isArray(raw.excludedCategories)
       ? raw.excludedCategories.map(value => cleanString(value, 120).toLowerCase()).filter(Boolean)
       : [],
+    membershipTierMode: 'points_or_spend',
+    membershipTiers: normalizeMembershipTiers(raw.membershipTiers || raw.tierRules || DEFAULT_MEMBERSHIP_TIERS),
     tierMultipliers,
   };
 }
@@ -131,12 +160,12 @@ function resolvePosOrderDiscount({ orderDiscount, normalDiscount, discount, subt
   return 0;
 }
 
-function memberTierFromMetrics(points = 0, totalSpent = 0, visitCount = 0) {
+function memberTierFromMetrics(points = 0, totalSpent = 0, membershipTiers = DEFAULT_MEMBERSHIP_TIERS) {
+  const tiers = normalizeMembershipTiers(membershipTiers);
   const p = Number(points) || 0;
   const spent = Number(totalSpent) || 0;
-  const visits = Number(visitCount) || 0;
-  if (p >= 5000 || spent >= 50000 || visits >= 50) return 'Platinum';
-  if (p >= 1200 || spent >= 15000 || visits >= 15) return 'Gold';
+  if (p >= tiers.Platinum.minPoints || spent >= tiers.Platinum.minTotalSpent) return 'Platinum';
+  if (p >= tiers.Gold.minPoints || spent >= tiers.Gold.minTotalSpent) return 'Gold';
   return 'Silver';
 }
 
@@ -223,7 +252,7 @@ function calculatePosLoyaltySale({
   const pointsAfter = Math.max(0, pointsBefore - redeemedPoints + earnedPoints);
   const totalSpentAfter = memberTotalSpent + payableAmount;
   const visitCountAfter = memberVisitCount + 1;
-  const tier = memberTierFromMetrics(pointsAfter, totalSpentAfter, visitCountAfter);
+  const tier = memberTierFromMetrics(pointsAfter, totalSpentAfter, loyaltyConfig.membershipTiers);
 
   return {
     config: loyaltyConfig,
@@ -251,6 +280,7 @@ module.exports = {
   eligibleSubtotalForPosSale,
   finiteNumberOrNull,
   memberTierFromMetrics,
+  normalizeMembershipTiers,
   normalizeLoyaltySettings,
   normalizePosSaleItems,
   resolvePosOrderDiscount,
