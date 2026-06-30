@@ -13507,7 +13507,7 @@ function readPromoPopupSlidesFromRows(options = {}) {
 
 function syncPromoPopupSlidesFromDom() {
     const slides = readPromoPopupSlidesFromRows({ includeBlank: true });
-    if (slides.length) promoPopupSlides = slides.slice(0, PROMO_POPUP_MAX_SLIDES);
+    promoPopupSlides = slides.slice(0, PROMO_POPUP_MAX_SLIDES);
 }
 
 function readPromoPopupSettingsForm() {
@@ -13539,10 +13539,25 @@ function updatePromoPopupPreview(promo = readPromoPopupSettingsForm()) {
     }
 }
 
-function renderPromoPopupSlides(slides = promoPopupSlides) {
+function renderPromoPopupSlides(slides = promoPopupSlides, options = {}) {
     const list = document.getElementById('promo-popup-slide-list');
     if (!list) return;
-    const rows = (slides.length ? slides : [createBlankPromoSlide()]).slice(0, PROMO_POPUP_MAX_SLIDES);
+    const normalizedRows = Array.isArray(slides) ? slides.slice(0, PROMO_POPUP_MAX_SLIDES) : [];
+    if (!normalizedRows.length && options.allowEmpty) {
+        promoPopupSlides = [];
+        list.innerHTML = `
+        <div class="index-promo-slide is-empty">
+            <div class="index-promo-slide-head">
+                <strong>No popup slides</strong>
+            </div>
+            <p>All slides have been removed. Click Add slide to create a new one, or save now to keep the popup empty and disabled.</p>
+        </div>
+    `;
+        updatePromoPopupPreview();
+        return;
+    }
+
+    const rows = (normalizedRows.length ? normalizedRows : [createBlankPromoSlide()]).slice(0, PROMO_POPUP_MAX_SLIDES);
     promoPopupSlides = rows;
     list.innerHTML = rows.map((slide, index) => `
         <div class="index-promo-slide" data-promo-popup-slide-index="${index}" data-promo-popup-slide-id="${escapeHTML(slide.id || '')}">
@@ -13584,8 +13599,21 @@ function renderPromoPopupSlides(slides = promoPopupSlides) {
         button.addEventListener('click', () => {
             syncPromoPopupSlidesFromDom();
             const index = Number(button.dataset.promoPopupIndex);
-            if (Number.isInteger(index)) promoPopupSlides.splice(index, 1);
-            renderPromoPopupSlides(promoPopupSlides);
+            const removedSlide = Number.isInteger(index) ? promoPopupSlides[index] : null;
+            if (Number.isInteger(index) && index >= 0 && index < promoPopupSlides.length) {
+                promoPopupSlides.splice(index, 1);
+            }
+            if (!promoPopupSlides.some(slide => slide.imageUrl)) {
+                const enabled = promoPopupField('promo-popup-enabled');
+                if (enabled) enabled.checked = false;
+            }
+            renderPromoPopupSlides(promoPopupSlides, { allowEmpty: true });
+            setPromoPopupStatus(
+                removedSlide?.imageUrl
+                    ? 'Slide removed. Click Save Promotional Popup to publish this change.'
+                    : 'Blank slide removed. Click Save Promotional Popup to keep the list empty.',
+                'warning'
+            );
         });
     });
     list.querySelectorAll('[data-promo-popup-upload]').forEach(input => {
@@ -13655,6 +13683,7 @@ window.addPromoPopupSlide = function() {
     }
     promoPopupSlides.push(createBlankPromoSlide());
     renderPromoPopupSlides(promoPopupSlides);
+    setPromoPopupStatus('New blank slide added. Add an image URL or upload an image, then save.', 'warning');
 };
 
 window.loadPromoPopupSettings = async function() {

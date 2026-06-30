@@ -735,6 +735,7 @@
         .index-preview-about small { display: block; margin-top: 12px; color: #78857d; font-weight: 800; }
         .index-settings-actions { display: flex; justify-content: flex-end; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
         .index-settings-status { min-height: 22px; color: #137234; font-weight: 700; margin-top: 12px; }
+        .index-settings-status.warning { color: #9a6700; }
         .index-settings-status.error { color: #b42318; }
         .index-settings-full { grid-column: 1 / -1; }
         .index-about-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -761,6 +762,8 @@
         .index-promo-toolbar p { margin: 0; color: #66746c; font-size: 0.9rem; }
         .index-promo-slide-list { display: grid; gap: 14px; }
         .index-promo-slide { border: 1px solid #e0eadc; border-radius: 12px; background: #fff; padding: 16px; }
+        .index-promo-slide.is-empty { border-style: dashed; background: #fbfdfb; color: #66746c; }
+        .index-promo-slide.is-empty p { margin: 0; line-height: 1.5; }
         .index-promo-slide-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
         .index-promo-slide-head strong { color: #173f2a; }
         .index-promo-slide-grid { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 16px; align-items: start; }
@@ -4074,7 +4077,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=promo-popup-restore-20260630"></script>
+    <script type="module" src="js/admin.js?v=promo-popup-remove-20260630"></script>
     <script>
         (function cleanRemovedAdminHash() {
             const rawHash = String(window.location.hash || '').replace(/^#/, '');
