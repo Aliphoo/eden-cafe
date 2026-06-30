@@ -1454,14 +1454,14 @@ autoEnhanceOtpInputs();
         }).join('');
 
         return `
-            <div class="membership-panel" id="profile-loyalty-wallet">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-                    <h2 style="margin:0;">${escapeHTML(labels.loyaltyWallet)}</h2>
-                    <button class="btn btn-outline" type="button" onclick="refreshProfileLoyalty()" ${loyaltyLoading ? 'disabled' : ''}>${escapeHTML(loyaltyLoading ? (labels.refreshingLoyalty || 'Refreshing...') : (labels.refreshLoyalty || 'Refresh points'))}</button>
+            <div class="membership-panel profile-wallet-panel" id="profile-loyalty-wallet">
+                <div class="profile-wallet-head">
+                    <h2>${escapeHTML(labels.loyaltyWallet)}</h2>
+                    <button class="btn btn-outline profile-wallet-refresh" type="button" onclick="refreshProfileLoyalty()" ${loyaltyLoading ? 'disabled' : ''}>${escapeHTML(loyaltyLoading ? (labels.refreshingLoyalty || 'Refreshing...') : (labels.refreshLoyalty || 'Refresh points'))}</button>
                 </div>
-                <div class="stats-grid">
-                    <div class="stat-box"><div class="stat-value">${formatNumber(membershipUser.points)}</div><div class="stat-label">${escapeHTML(labels.points)}</div></div>
-                    <div class="stat-box"><div class="stat-value">฿${formatBaht(pointCashValue)}</div><div class="stat-label">${escapeHTML(labels.pointValue)}</div></div>
+                <div class="stats-grid profile-wallet-stats">
+                    <div class="stat-box profile-wallet-stat"><div class="stat-value">${formatNumber(membershipUser.points)}</div><div class="stat-label">${escapeHTML(labels.points)}</div></div>
+                    <div class="stat-box profile-wallet-stat"><div class="stat-value">฿${formatBaht(pointCashValue)}</div><div class="stat-label">${escapeHTML(labels.pointValue)}</div></div>
                 </div>
                 <p class="membership-rule-lead">${escapeHTML(walletValue)}</p>
                 <div class="benefit-grid">
@@ -1469,9 +1469,9 @@ autoEnhanceOtpInputs();
                     <div class="benefit-pill">${escapeHTML(redeemRule)}</div>
                     <div class="benefit-pill">${escapeHTML(expiryRule)}</div>
                 </div>
-                <h3 style="margin:24px 0 10px;">${escapeHTML(labels.loyaltyHistory)}</h3>
+                <h3 class="profile-wallet-history-title">${escapeHTML(labels.loyaltyHistory)}</h3>
                 ${loyaltyLoading ? `<p class="membership-rule-lead">${escapeHTML(labels.loyaltyLoading)}</p>` : ''}
-                <div class="membership-rule-list">
+                <div class="membership-rule-list profile-wallet-history">
                     ${historyRows || `<p class="membership-rule-lead">${escapeHTML(labels.noLoyaltyHistory)}</p>`}
                 </div>
             </div>
