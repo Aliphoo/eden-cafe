@@ -1,4 +1,4 @@
-const { httpFunction, requireRoles, requireStaffSession } = require('../security/authz');
+const { httpFunction, requireRoles, requireMember, requireStaffSession } = require('../security/authz');
 const { runIdempotentTransaction, sha256 } = require('../shared/idempotency');
 const { writeAuditLog } = require('../shared/audit');
 const { FieldValue } = require('../shared/firestore');
@@ -10,10 +10,14 @@ const {
 } = require('../shared/time');
 const beamArcheryPayments = require('./beamArchery');
 const webPaymentCore = require('./webPaymentCore');
+const loyaltyWallet = require('../loyaltyWallet');
 const {
   readArcheryLoyaltyState,
   writeArcheryLoyaltyState,
 } = require('../archery/loyalty');
+const {
+  commitArcheryLoyaltyForBooking,
+} = require('../archery/loyaltyRedemption');
 
 function paymentId(prefix, value) {
   return `${prefix}_${sha256(value).slice(0, 40)}`;
@@ -28,6 +32,35 @@ async function readArcheryBooking(transaction, db, branchId, bookingId) {
     throw apiError('BOOKING_NOT_FOUND', 404, 'Archery booking was not found for this branch');
   }
   return { ref, booking };
+}
+
+function isStaffActor(actor) {
+  return actor && ['OWNER', 'MANAGER', 'ARCHERY_STAFF', 'CASHIER'].includes(actor.role);
+}
+
+function loyaltyMemberId(data = {}, actor = {}, options = {}) {
+  const memberId = cleanString(
+    data.member_id
+      || data.memberId
+      || data.customer_uid
+      || data.customerUid
+      || data.userId
+      || data.uid,
+    180
+  );
+  if (memberId) return memberId;
+  if (actor?.uid && !isStaffActor(actor)) return actor.uid;
+  if (actor?.uid && options.defaultToActor === true) return actor.uid;
+  if (options.optionalForStaff === true && isStaffActor(actor)) return '';
+  throw apiError('LOYALTY_MEMBER_REQUIRED', 400, 'member_id is required');
+}
+
+function requireLoyaltyAccess(actor, memberId, branchId = '') {
+  if (isStaffActor(actor)) {
+    requireRoles(actor, ['OWNER', 'MANAGER', 'ARCHERY_STAFF', 'CASHIER'], branchId);
+    return;
+  }
+  requireMember(actor, memberId);
 }
 
 const recordCounterPayment = httpFunction(async ({ db, data, actor, requestId }) => {
@@ -124,7 +157,30 @@ const recordCounterPayment = httpFunction(async ({ db, data, actor, requestId })
     };
   });
 
-  return { replayed: result.replayed, ...result.response };
+  let loyaltyRedemption = null;
+  let loyaltyRedemptionError = '';
+  if (result.response?.booking_id && result.response?.payment_id) {
+    try {
+      loyaltyRedemption = await commitArcheryLoyaltyForBooking(db, {
+        branchId,
+        bookingId: result.response.booking_id,
+        paymentId: result.response.payment_id,
+        actor,
+      });
+    } catch (error) {
+      loyaltyRedemptionError = cleanString(error.code || error.message || 'LOYALTY_REDEMPTION_COMMIT_FAILED', 180);
+    }
+  }
+
+  return {
+    replayed: result.replayed,
+    ...result.response,
+    loyalty: {
+      ...(result.response?.loyalty || {}),
+      redemption: loyaltyRedemption || null,
+      redemptionError: loyaltyRedemptionError,
+    },
+  };
 }, {
   name: 'recordCounterPayment',
   methods: ['POST'],
@@ -210,9 +266,57 @@ const refundPayment = httpFunction(async ({ db, data, actor, requestId }) => {
   methods: ['POST'],
 });
 
+const quoteLoyaltyRedemption = httpFunction(async ({ db, data, actor }) => {
+  const memberId = loyaltyMemberId(data, actor);
+  const branchId = cleanString(data.branch_id || data.branchId, 80);
+  requireLoyaltyAccess(actor, memberId, branchId);
+  const quote = await loyaltyWallet.quoteLoyaltyRedemption(db, {
+    ...data,
+    member_id: memberId,
+    branch_id: branchId,
+  });
+  return { loyalty: quote };
+}, {
+  name: 'quoteLoyaltyRedemption',
+  methods: ['POST'],
+});
+
+const reserveLoyaltyRedemption = httpFunction(async ({ db, data, actor }) => {
+  const memberId = loyaltyMemberId(data, actor);
+  const branchId = cleanString(data.branch_id || data.branchId, 80);
+  requireLoyaltyAccess(actor, memberId, branchId);
+  const reservation = await loyaltyWallet.reserveLoyaltyRedemption(db, {
+    ...data,
+    member_id: memberId,
+    branch_id: branchId,
+  }, { actor });
+  return { loyalty: reservation };
+}, {
+  name: 'reserveLoyaltyRedemption',
+  methods: ['POST'],
+});
+
+const releaseLoyaltyReservation = httpFunction(async ({ db, data, actor }) => {
+  const memberId = loyaltyMemberId(data, actor, { optionalForStaff: true, defaultToActor: !isStaffActor(actor) });
+  const branchId = cleanString(data.branch_id || data.branchId, 80);
+  requireLoyaltyAccess(actor, memberId || actor.uid, branchId);
+  const release = await loyaltyWallet.releaseLoyaltyReservation(db, {
+    ...data,
+    member_id: memberId || (isStaffActor(actor) ? '' : actor.uid),
+    branch_id: branchId,
+  }, { actor });
+  return { loyalty: release };
+}, {
+  name: 'releaseLoyaltyReservation',
+  methods: ['POST'],
+});
+
 module.exports = {
   recordCounterPayment,
   refundPayment,
+  quoteLoyaltyRedemption,
+  reserveLoyaltyRedemption,
+  releaseLoyaltyReservation,
   createBeamArcheryPayment: beamArcheryPayments.createBeamArcheryPayment,
   beamArcheryPaymentWebhook: beamArcheryPayments.beamArcheryPaymentWebhook,
   getArcheryPaymentStatus: beamArcheryPayments.getArcheryPaymentStatus,

@@ -15,6 +15,9 @@ const {
   releaseArcheryPromotionApplications,
   archeryPromotionStatusUpdate,
 } = require('./promotions');
+const {
+  releaseArcheryLoyaltyForBooking,
+} = require('./loyaltyRedemption');
 
 function readBookingOrThrow(transaction, db, branchId, bookingId) {
   const ref = db.collection('bookings').doc(bookingId);
@@ -90,9 +93,26 @@ const requestCancelBooking = httpFunction(async ({ db, data, actor, requestId })
     };
   });
 
+  let loyaltyRelease = null;
+  let loyaltyReleaseError = '';
+  if (result.response?.booking_id && result.response?.refund_required === false) {
+    try {
+      loyaltyRelease = await releaseArcheryLoyaltyForBooking(db, {
+        branchId,
+        bookingId: result.response.booking_id,
+        reason,
+        actor,
+      });
+    } catch (error) {
+      loyaltyReleaseError = cleanString(error.code || error.message || 'LOYALTY_REDEMPTION_RELEASE_FAILED', 180);
+    }
+  }
+
   return {
     replayed: result.replayed,
     ...result.response,
+    loyalty_redemption: loyaltyRelease,
+    loyalty_redemption_error: loyaltyReleaseError,
   };
 }, {
   name: 'requestCancelBooking',

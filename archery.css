@@ -589,7 +589,8 @@
     color: #66756c;
 }
 
-.archery-promo-code {
+.archery-promo-code,
+.archery-loyalty-code {
     background: #f8fcf8;
     border: 1px solid #dce9de;
     border-radius: 8px;
@@ -598,6 +599,10 @@
     gap: 10px;
     margin: 18px 0;
     padding: 14px;
+}
+
+.archery-loyalty-code[hidden] {
+    display: none !important;
 }
 
 .archery-promo-label {
@@ -614,7 +619,8 @@
     font-size: 0.96rem;
 }
 
-.archery-promo-control {
+.archery-promo-control,
+.archery-loyalty-control {
     align-items: center;
     background: #fff;
     border: 1px solid #cbdccd;
@@ -627,7 +633,12 @@
     transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
 }
 
-.archery-promo-control:focus-within {
+.archery-loyalty-control {
+    grid-template-columns: 36px minmax(72px, 1fr) auto auto;
+}
+
+.archery-promo-control:focus-within,
+.archery-loyalty-control:focus-within {
     background: #ffffff;
     border-color: #18823c;
     box-shadow: 0 0 0 3px rgba(24, 130, 60, .14);
@@ -645,7 +656,8 @@
     width: 36px;
 }
 
-.archery-promo-input {
+.archery-promo-input,
+.archery-loyalty-input {
     background: transparent;
     border: 0;
     color: #17261d;
@@ -659,19 +671,36 @@
     width: 100%;
 }
 
+.archery-loyalty-input {
+    text-transform: none;
+}
+
 .archery-promo-input::placeholder {
     color: #9ba8a0;
     font-weight: 700;
     opacity: 1;
 }
 
-.archery-promo-apply {
+.archery-loyalty-input::placeholder {
+    color: #9ba8a0;
+    font-weight: 700;
+    opacity: 1;
+}
+
+.archery-promo-apply,
+.archery-loyalty-quote,
+.archery-loyalty-reserve {
     border-radius: 8px;
     border-width: 1px;
     min-height: 42px;
     min-width: 92px;
     padding: 0 16px;
     white-space: nowrap;
+}
+
+.archery-loyalty-message:not(:empty) {
+    font-size: 0.9rem;
+    line-height: 1.45;
 }
 
 .archery-promo-apply:hover {
@@ -1269,11 +1298,14 @@
         width: 100%;
     }
 
-    .archery-promo-control {
+    .archery-promo-control,
+    .archery-loyalty-control {
         grid-template-columns: 36px minmax(0, 1fr);
     }
 
-    .archery-promo-apply {
+    .archery-promo-apply,
+    .archery-loyalty-quote,
+    .archery-loyalty-reserve {
         grid-column: 1 / -1;
         width: 100%;
     }

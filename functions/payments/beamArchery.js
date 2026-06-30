@@ -33,6 +33,10 @@ const {
   releaseArcheryPromotionApplications,
   archeryPromotionStatusUpdate,
 } = require('../archery/promotions');
+const {
+  commitArcheryLoyaltyForBooking,
+  releaseArcheryLoyaltyForBooking,
+} = require('../archery/loyaltyRedemption');
 
 const BEAM_API_KEY_SANDBOX = defineSecret('BEAM_API_KEY_SANDBOX');
 const BEAM_WEBHOOK_SECRET_SANDBOX = defineSecret('BEAM_WEBHOOK_SECRET_SANDBOX');
@@ -769,7 +773,7 @@ async function processSuccessfulWebhook(transaction, db, context) {
       payment_id: paymentRef.id,
       updated_at: FieldValue.serverTimestamp(),
     }, { merge: true });
-    return { status: 'DUPLICATE_SUCCESS', booking_id: bookingId, payment_id: paymentRef.id };
+    return { status: 'DUPLICATE_SUCCESS', branch_id: branchId, booking_id: bookingId, payment_id: paymentRef.id };
   }
 
   if (late) {
@@ -806,7 +810,7 @@ async function processSuccessfulWebhook(transaction, db, context) {
       reconciliation_id: queueRef.id,
       updated_at: FieldValue.serverTimestamp(),
     }, { merge: true });
-    return { status: 'RECONCILIATION_REQUIRED', reconciliation_id: queueRef.id };
+    return { status: 'RECONCILIATION_REQUIRED', branch_id: branchId, booking_id: bookingId, payment_id: paymentRef.id, reconciliation_id: queueRef.id };
   }
 
   const locksSnap = await queryLocksForBooking(transaction, db, branchId, bookingId);
@@ -889,6 +893,7 @@ async function processSuccessfulWebhook(transaction, db, context) {
   }, { merge: true });
   return {
     status: 'PROCESSED',
+    branch_id: branchId,
     booking_id: bookingId,
     payment_id: paymentRef.id,
     loyalty: loyaltyResult,
@@ -1048,8 +1053,35 @@ const beamArcheryPaymentWebhook = onRequest({
         payment_id: paymentRef.id,
         updated_at: FieldValue.serverTimestamp(),
       }, { merge: true });
-      return { status: failedStatus, booking_id: bookingId, payment_id: paymentRef.id };
+      return { status: failedStatus, branch_id: branchId, booking_id: bookingId, payment_id: paymentRef.id };
     });
+
+    let loyaltyRedemption = null;
+    let loyaltyRelease = null;
+    let loyaltyRedemptionError = '';
+    if (result.status === 'PROCESSED' && result.branch_id && result.booking_id && result.payment_id) {
+      try {
+        loyaltyRedemption = await commitArcheryLoyaltyForBooking(db, {
+          branchId: result.branch_id,
+          bookingId: result.booking_id,
+          paymentId: result.payment_id,
+          actor: { uid: 'BEAM_WEBHOOK', role: 'SYSTEM', system: true },
+        });
+      } catch (error) {
+        loyaltyRedemptionError = cleanString(error.code || error.message || 'LOYALTY_REDEMPTION_COMMIT_FAILED', 180);
+      }
+    } else if (['FAILED', 'CANCELLED', 'RECONCILIATION_REQUIRED'].includes(result.status) && result.branch_id && result.booking_id) {
+      try {
+        loyaltyRelease = await releaseArcheryLoyaltyForBooking(db, {
+          branchId: result.branch_id,
+          bookingId: result.booking_id,
+          reason: result.status === 'RECONCILIATION_REQUIRED' ? 'beam-payment-review-required' : `beam-payment-${String(result.status).toLowerCase()}`,
+          actor: { uid: 'BEAM_WEBHOOK', role: 'SYSTEM', system: true },
+        });
+      } catch (error) {
+        loyaltyRedemptionError = cleanString(error.code || error.message || 'LOYALTY_REDEMPTION_RELEASE_FAILED', 180);
+      }
+    }
 
     logger.info('Beam archery webhook processed', {
       event_type: eventType,
@@ -1062,8 +1094,15 @@ const beamArcheryPaymentWebhook = onRequest({
       payment_id: result.payment_id || '',
       reconciliation_id: result.reconciliation_id || '',
       duplicate: result.duplicate === true,
+      loyalty_redemption_status: loyaltyRedemption?.status || loyaltyRelease?.status || '',
+      loyalty_redemption_error: loyaltyRedemptionError,
     });
-    res.status(200).json({ ok: true, ...result });
+    res.status(200).json({
+      ok: true,
+      ...result,
+      loyalty_redemption: loyaltyRedemption || loyaltyRelease || null,
+      loyalty_redemption_error: loyaltyRedemptionError,
+    });
   } catch (error) {
     logger.warn('Beam archery webhook failed', {
       code: error.code || '',

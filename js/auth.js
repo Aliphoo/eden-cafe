@@ -60,6 +60,10 @@ async function edenApiRequest(path, { method = 'GET', query: queryParams = {}, b
     if (!response.ok) {
         const error = new Error(data.error || 'Eden API request failed');
         error.status = response.status;
+        error.code = data.code || data.error || '';
+        error.details = data.details || null;
+        error.reason = data.details?.reason || data.reason || '';
+        error.quote = data.details?.quote || data.quote || null;
         error.conflictIds = Array.isArray(data.conflictIds) ? data.conflictIds : [];
         throw error;
     }
@@ -86,6 +90,12 @@ window.EdenApi = {
     },
     getArcheryPaymentStatus(params = {}) {
         return edenApiRequest('/getArcheryPaymentStatus', { method: 'POST', body: params });
+    },
+    quoteLoyaltyRedemption(params = {}) {
+        return edenApiRequest('/quoteLoyaltyRedemption', { method: 'POST', body: params, authenticated: true });
+    },
+    reserveArcheryLoyaltyRedemption(params = {}) {
+        return edenApiRequest('/reserveArcheryLoyaltyRedemption', { method: 'POST', body: params, authenticated: true });
     },
     validatePromotion(promoData) {
         return edenApiRequest('/validatePromotion', { method: 'POST', body: promoData, authenticated: true });

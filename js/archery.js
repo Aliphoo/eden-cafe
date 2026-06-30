@@ -45,6 +45,10 @@ let pricingSettingsError = '';
 let appliedArcheryPromo = null;
 let archeryPromoValidationToken = 0;
 let participantSelections = [];
+let archeryLoyaltyQuote = null;
+let archeryLoyaltyQuotePoints = 0;
+let archeryLoyaltyReservationIdempotencyKey = '';
+let archeryLoyaltyBusy = false;
 
 const AUTO_AVAILABILITY_DELAY_MS = 350;
 
@@ -536,6 +540,267 @@ async function applyArcheryPromoCode(event) {
     }
 }
 
+function integerPointsValue(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return 0;
+    return Math.max(0, Math.floor(number));
+}
+
+function setArcheryLoyaltyMessage(message = '', type = '') {
+    setStatus('archery-loyalty-message', message, type);
+}
+
+function setArcheryLoyaltyBusy(isBusy) {
+    archeryLoyaltyBusy = isBusy;
+    renderArcheryLoyaltyPanel();
+}
+
+function resetArcheryLoyaltyQuote({ clearInput = false } = {}) {
+    archeryLoyaltyQuote = null;
+    archeryLoyaltyQuotePoints = 0;
+    archeryLoyaltyReservationIdempotencyKey = '';
+    if (clearInput) {
+        const input = $('archery-loyalty-points');
+        if (input) input.value = '';
+    }
+    setArcheryLoyaltyMessage('');
+    renderArcheryLoyaltyPanel();
+}
+
+function archeryHasReservedLoyalty(hold = currentHold) {
+    const status = String(hold?.loyalty_status || hold?.loyaltyStatus || '').toLowerCase();
+    return Boolean((hold?.loyalty_reservation_id || hold?.loyaltyReservationId) && status === 'reserved');
+}
+
+function archeryPaymentStarted(hold = currentHold) {
+    const paymentStatus = String(hold?.payment_status || hold?.paymentStatus || '').toUpperCase();
+    return ['PENDING', 'PAID_ONLINE', 'PAID_COUNTER', 'PAID', 'PAID_PROMO', 'PAID_FREE', 'REFUNDED'].includes(paymentStatus);
+}
+
+function archeryLoyaltyInputPoints() {
+    return integerPointsValue($('archery-loyalty-points')?.value);
+}
+
+function archeryHoldTotalBeforeLoyalty(hold = currentHold) {
+    const breakdown = hold?.amount_breakdown || {};
+    const loyaltyDiscount = firstFiniteNumber(
+        hold?.loyalty_discount,
+        hold?.loyaltyDiscount,
+        hold?.loyalty?.loyaltyDiscount,
+        breakdown.loyalty_discount,
+        0
+    );
+    const payableAmount = firstFiniteNumber(hold?.amount_total, hold?.totalAmount, breakdown.total, 0);
+    return firstFiniteNumber(
+        hold?.total_before_loyalty,
+        hold?.totalBeforeLoyalty,
+        hold?.amount_before_loyalty,
+        hold?.amountBeforeLoyalty,
+        breakdown.total_before_loyalty,
+        payableAmount + loyaltyDiscount
+    );
+}
+
+function archeryLoyaltyItemsForHold(hold = currentHold) {
+    const amount = roundMoney(archeryHoldTotalBeforeLoyalty(hold));
+    if (amount <= 0) return [];
+    return [{
+        productId: hold?.package_code || 'ARCHERY_BOOKING',
+        name: `Eden Archery ${normalizeDuration(hold?.duration_minutes)} min`,
+        category: 'archery',
+        quantity: 1,
+        unitPrice: amount,
+        lineDiscount: 0
+    }];
+}
+
+function archeryLoyaltyPayload(points) {
+    const totalBeforeLoyalty = roundMoney(archeryHoldTotalBeforeLoyalty(currentHold));
+    return {
+        branch_id: currentHold?.branch_id || BRANCH_ID,
+        booking_id: currentHold?.booking_id || '',
+        source_id: currentHold?.booking_id || '',
+        source_type: 'ARCHERY_BOOKING',
+        member_id: currentUser?.uid || '',
+        total_before_loyalty: totalBeforeLoyalty,
+        redeemable_amount: totalBeforeLoyalty,
+        redeemed_points: integerPointsValue(points),
+        items: archeryLoyaltyItemsForHold(currentHold),
+        earn_eligible: false
+    };
+}
+
+function normalizeArcheryLoyaltyQuote(result = {}) {
+    const quote = result.loyalty || result.quote || result;
+    return {
+        ...quote,
+        requestedRedeemedPoints: integerPointsValue(quote.requestedRedeemedPoints ?? quote.requested_redeemed_points),
+        availablePoints: integerPointsValue(quote.availablePoints ?? quote.available_points),
+        maxRedeemablePoints: integerPointsValue(quote.maxRedeemablePoints ?? quote.max_redeemable_points),
+        redeemedPoints: integerPointsValue(quote.redeemedPoints ?? quote.redeemed_points),
+        loyaltyDiscount: roundMoney(quote.loyaltyDiscount ?? quote.loyalty_discount),
+        payableAmount: roundMoney(quote.payableAmount ?? quote.payable_amount),
+        blockedReason: String(quote.blockedReason || quote.blocked_reason || '')
+    };
+}
+
+function loyaltyBlockedMessage(reason, quote = {}) {
+    const maxPoints = integerPointsValue(quote.maxRedeemablePoints ?? quote.max_redeemable_points);
+    const availablePoints = integerPointsValue(quote.availablePoints ?? quote.available_points);
+    const minPoints = integerPointsValue(quote.config?.minRedeemPoints ?? quote.config?.min_redeem_points);
+    const messages = {
+        'loyalty-disabled': 'Point redemption is not enabled right now.',
+        'missing-member': 'Please sign in before using points.',
+        'insufficient-points': `Available points: ${availablePoints}.`,
+        'below-min-redeem-points': minPoints ? `Minimum redemption is ${minPoints} points.` : 'Points are below the minimum redemption.',
+        'exceeds-max-redeem-percent': maxPoints ? `This bill can use up to ${maxPoints} points.` : 'Points exceed the maximum allowed for this bill.'
+    };
+    return messages[reason] || 'Points cannot be used for this booking.';
+}
+
+function archeryLoyaltyQuoteMessage(quote = {}) {
+    if (quote.blockedReason) return loyaltyBlockedMessage(quote.blockedReason, quote);
+    if (quote.redeemedPoints <= 0) return 'Enter points to quote.';
+    return `${quote.redeemedPoints} points = -${money(quote.loyaltyDiscount)}. Beam amount ${money(quote.payableAmount)}.`;
+}
+
+function renderArcheryLoyaltyPanel() {
+    const panel = $('archery-loyalty-panel');
+    if (!panel) return;
+    const input = $('archery-loyalty-points');
+    const quoteButton = $('archery-loyalty-quote-btn');
+    const reserveButton = $('archery-loyalty-reserve-btn');
+    const hasHold = Boolean(currentHold?.booking_id);
+    panel.hidden = !hasHold;
+    if (!hasHold) return;
+
+    const reserved = archeryHasReservedLoyalty();
+    const locked = reserved
+        || archeryPaymentStarted()
+        || String(currentHold?.booking_status || currentHold?.status || '').toUpperCase() !== 'HELD'
+        || isHoldExpired(currentHold);
+    const pageBusy = Boolean(busyAction);
+    const points = archeryLoyaltyInputPoints();
+    if (input && reserved && !input.value) input.value = String(integerPointsValue(currentHold.redeemed_points || currentHold.redeemedPoints));
+    if (input) input.disabled = locked || archeryLoyaltyBusy || pageBusy;
+    if (quoteButton) quoteButton.disabled = locked || archeryLoyaltyBusy || pageBusy || points <= 0;
+    if (reserveButton) {
+        const quoteReady = archeryLoyaltyQuote
+            && archeryLoyaltyQuotePoints === points
+            && !archeryLoyaltyQuote.blockedReason
+            && archeryLoyaltyQuote.redeemedPoints > 0;
+        reserveButton.disabled = locked || archeryLoyaltyBusy || pageBusy || !quoteReady;
+    }
+    panel.setAttribute('aria-busy', archeryLoyaltyBusy ? 'true' : 'false');
+}
+
+async function quoteArcheryLoyaltyRedemption(eventOrOptions = {}) {
+    const event = typeof eventOrOptions?.preventDefault === 'function' ? eventOrOptions : null;
+    if (event) event.preventDefault();
+    if (archeryLoyaltyBusy) return null;
+    if (!currentHold?.booking_id) {
+        setArcheryLoyaltyMessage('Confirm the booking hold before using points.', 'error');
+        return null;
+    }
+    if (!currentUser) {
+        setArcheryLoyaltyMessage('Please sign in before using points.', 'error');
+        return null;
+    }
+    if (archeryPaymentStarted()) {
+        setArcheryLoyaltyMessage('Payment has already started for this booking.', 'error');
+        return null;
+    }
+    if (isHoldExpired(currentHold)) {
+        setArcheryLoyaltyMessage(userMessage({ code: 'HOLD_EXPIRED' }), 'error');
+        return null;
+    }
+    const points = archeryLoyaltyInputPoints();
+    if (points <= 0) {
+        setArcheryLoyaltyMessage('Enter points to quote.', 'error');
+        return null;
+    }
+
+    setArcheryLoyaltyBusy(true);
+    setArcheryLoyaltyMessage('Quoting points...', 'loading');
+    try {
+        const api = await waitForApi();
+        if (!api?.quoteLoyaltyRedemption) throw new Error('Point quote service is not ready');
+        const quote = normalizeArcheryLoyaltyQuote(await api.quoteLoyaltyRedemption(archeryLoyaltyPayload(points)));
+        archeryLoyaltyQuote = quote;
+        archeryLoyaltyQuotePoints = points;
+        setArcheryLoyaltyMessage(archeryLoyaltyQuoteMessage(quote), quote.blockedReason ? 'error' : 'success');
+        renderArcheryLoyaltyPanel();
+        return quote;
+    } catch (error) {
+        const quote = error?.quote ? normalizeArcheryLoyaltyQuote(error.quote) : null;
+        archeryLoyaltyQuote = quote;
+        archeryLoyaltyQuotePoints = points;
+        console.warn('Archery loyalty quote failed:', error);
+        setArcheryLoyaltyMessage(quote?.blockedReason ? loyaltyBlockedMessage(quote.blockedReason, quote) : userMessage(error), 'error');
+        renderArcheryLoyaltyPanel();
+        return null;
+    } finally {
+        setArcheryLoyaltyBusy(false);
+    }
+}
+
+async function reserveArcheryLoyaltyRedemptionBeforePayment({ api = null } = {}) {
+    const points = archeryLoyaltyInputPoints();
+    if (points <= 0 || archeryHasReservedLoyalty()) return true;
+    let quote = archeryLoyaltyQuote;
+    if (!quote || archeryLoyaltyQuotePoints !== points || quote.blockedReason) {
+        quote = await quoteArcheryLoyaltyRedemption();
+    }
+    if (!quote || quote.blockedReason || quote.redeemedPoints <= 0) {
+        setArcheryLoyaltyMessage(quote?.blockedReason ? loyaltyBlockedMessage(quote.blockedReason, quote) : 'Quote points before payment.', 'error');
+        return false;
+    }
+
+    setArcheryLoyaltyBusy(true);
+    setArcheryLoyaltyMessage('Reserving points...', 'loading');
+    try {
+        const apiClient = api || await waitForApi();
+        if (!apiClient?.reserveArcheryLoyaltyRedemption) throw new Error('Point reserve service is not ready');
+        archeryLoyaltyReservationIdempotencyKey = archeryLoyaltyReservationIdempotencyKey
+            || idempotencyKey('reserveArcheryLoyaltyRedemption', [currentHold.booking_id, String(points)]);
+        const result = await apiClient.reserveArcheryLoyaltyRedemption({
+            ...archeryLoyaltyPayload(points),
+            idempotency_key: archeryLoyaltyReservationIdempotencyKey
+        });
+        const mergedHold = {
+            ...currentHold,
+            ...result,
+            amount_breakdown: {
+                ...(currentHold.amount_breakdown || {}),
+                ...(result.amount_breakdown || {})
+            }
+        };
+        currentHold = sanitizeHoldResponse(mergedHold);
+        saveHold(currentHold);
+        archeryLoyaltyQuote = normalizeArcheryLoyaltyQuote({
+            ...quote,
+            redeemedPoints: currentHold.redeemed_points,
+            loyaltyDiscount: currentHold.loyalty_discount,
+            payableAmount: currentHold.amount_total,
+            blockedReason: ''
+        });
+        archeryLoyaltyQuotePoints = points;
+        renderHoldSummary(currentHold);
+        setArcheryLoyaltyMessage(`Reserved ${archeryLoyaltyQuote.redeemedPoints} points. Beam amount ${money(currentHold.amount_total)}.`, 'success');
+        return true;
+    } catch (error) {
+        const quoteFromError = error?.quote ? normalizeArcheryLoyaltyQuote(error.quote) : null;
+        console.warn('Archery loyalty reserve failed:', error);
+        setArcheryLoyaltyMessage(
+            quoteFromError?.blockedReason ? loyaltyBlockedMessage(quoteFromError.blockedReason, quoteFromError) : userMessage(error),
+            'error'
+        );
+        return false;
+    } finally {
+        setArcheryLoyaltyBusy(false);
+    }
+}
+
 function optionDisplayLabel(option = {}) {
     return OPTION_LABELS_TH[option.id || option.option_id] || option.label || '-';
 }
@@ -672,6 +937,7 @@ function restoreButtonStates() {
         confirmBtn.setAttribute('aria-disabled', confirmBtn.disabled ? 'true' : 'false');
         confirmBtn.title = !currentHold ? 'กรุณากดยืนยันการจองก่อนชำระเงิน' : '';
     }
+    renderArcheryLoyaltyPanel();
 }
 
 function idempotencyKey(action, keyParts = []) {
@@ -836,6 +1102,7 @@ function renderDraftSummary() {
         rows.push(['Total', money(pricing.amountTotal)]);
     }
     el.innerHTML = summaryRows(rows);
+    renderArcheryLoyaltyPanel();
 }
 
 function renderSuggestions(times = []) {
@@ -1078,12 +1345,33 @@ function sanitizeHoldResponse(hold = {}) {
     const breakdown = hold.amount_breakdown || {};
     const amountTotal = firstFiniteNumber(hold.amount_total, hold.totalAmount, breakdown.total, pricing.amountTotal);
     const discount = firstFiniteNumber(hold.discount_total, hold.discount, breakdown.discount, 0);
+    const loyaltyDiscount = firstFiniteNumber(
+        hold.loyalty_discount,
+        hold.loyaltyDiscount,
+        hold.loyalty?.loyaltyDiscount,
+        breakdown.loyalty_discount,
+        0
+    );
+    const redeemedPoints = integerPointsValue(
+        hold.redeemed_points
+        ?? hold.redeemedPoints
+        ?? hold.loyalty?.redeemedPoints
+        ?? hold.loyalty?.redeemed_points
+    );
+    const totalBeforeLoyalty = firstFiniteNumber(
+        hold.total_before_loyalty,
+        hold.totalBeforeLoyalty,
+        hold.amount_before_loyalty,
+        hold.amountBeforeLoyalty,
+        breakdown.total_before_loyalty,
+        amountTotal + loyaltyDiscount
+    );
     const subtotal = firstFiniteNumber(
         hold.total_before_discount,
         hold.subtotal_amount,
         hold.amount_before_discount,
         breakdown.subtotal,
-        amountTotal + discount
+        totalBeforeLoyalty + discount
     );
     const promoApplications = Array.isArray(hold.promoApplications)
         ? hold.promoApplications
@@ -1124,6 +1412,18 @@ function sanitizeHoldResponse(hold = {}) {
         subtotal_amount: subtotal,
         discount,
         discount_total: discount,
+        total_before_loyalty: totalBeforeLoyalty,
+        totalBeforeLoyalty: totalBeforeLoyalty,
+        amount_before_loyalty: totalBeforeLoyalty,
+        amountBeforeLoyalty: totalBeforeLoyalty,
+        loyalty_discount: loyaltyDiscount,
+        loyaltyDiscount: loyaltyDiscount,
+        redeemed_points: redeemedPoints,
+        redeemedPoints: redeemedPoints,
+        loyalty_reservation_id: hold.loyalty_reservation_id || hold.loyaltyReservationId || hold.loyalty?.reservationId || '',
+        loyaltyReservationId: hold.loyaltyReservationId || hold.loyalty_reservation_id || hold.loyalty?.reservationId || '',
+        loyalty_status: hold.loyalty_status || hold.loyaltyStatus || '',
+        loyaltyStatus: hold.loyaltyStatus || hold.loyalty_status || '',
         promo_code: hold.promo_code || hold.promoCode || '',
         promoCode: hold.promoCode || hold.promo_code || '',
         promoApplications,
@@ -1163,6 +1463,8 @@ function sanitizeHoldResponse(hold = {}) {
             equipment: firstFiniteNumber(breakdown.equipment, pricing.equipmentTotal),
             subtotal,
             discount,
+            total_before_loyalty: totalBeforeLoyalty,
+            loyalty_discount: loyaltyDiscount,
             total: amountTotal
         },
         pricing_version: hold.pricing_version || archeryPricingConfig.version || '',
@@ -1189,6 +1491,7 @@ function resetHoldState() {
     currentHold = null;
     holdIdempotencyKey = '';
     beamPaymentIdempotencyKey = '';
+    resetArcheryLoyaltyQuote({ clearInput: true });
     clearArcheryPromoAfterSelectionChange();
     localStorage.removeItem(HOLD_STORAGE_KEY);
     window.clearInterval(holdTimer);
@@ -1361,12 +1664,22 @@ function renderHoldSummary(hold) {
     const breakdown = hold.amount_breakdown || {};
     const total = firstFiniteNumber(hold.amount_total, hold.totalAmount, breakdown.total, packagePrice(duration));
     const discount = firstFiniteNumber(hold.discount_total, hold.discount, breakdown.discount, 0);
+    const loyaltyDiscount = firstFiniteNumber(hold.loyalty_discount, hold.loyaltyDiscount, breakdown.loyalty_discount, 0);
+    const redeemedPoints = integerPointsValue(hold.redeemed_points || hold.redeemedPoints);
+    const totalBeforeLoyalty = firstFiniteNumber(
+        hold.total_before_loyalty,
+        hold.totalBeforeLoyalty,
+        hold.amount_before_loyalty,
+        hold.amountBeforeLoyalty,
+        breakdown.total_before_loyalty,
+        total + loyaltyDiscount
+    );
     const subtotal = firstFiniteNumber(
         hold.total_before_discount,
         hold.subtotal_amount,
         hold.amount_before_discount,
         breakdown.subtotal,
-        total + discount
+        totalBeforeLoyalty + discount
     );
     const promoCode = normalizePromoCode(hold.promo_code || hold.promoCode);
     const staffCount = firstFiniteNumber(hold.staff_count, hold.staffCount, breakdown.staff_count, 0);
@@ -1388,12 +1701,14 @@ function renderHoldSummary(hold) {
         ['Staff', `${staffCount} people / ${money(coachTotal)}`],
         ['Equipment / person', `${optionDisplayLabel({ id: hold.equipment_option_id, label: hold.equipment_label })} / ${money(breakdown.equipment_per_person || 0)}`]
     ];
-    if (discount > 0) {
-        rows.push(
-            ['Subtotal', money(subtotal)],
-            [`Promo ${promoCode || ''}`.trim(), '-' + money(discount)],
-            ['Total', money(total)]
-        );
+    if (discount > 0 || loyaltyDiscount > 0) {
+        rows.push(['Subtotal', money(subtotal)]);
+        if (discount > 0) rows.push([`Promo ${promoCode || ''}`.trim(), '-' + money(discount)]);
+        if (loyaltyDiscount > 0) {
+            if (discount > 0) rows.push(['After promo', money(totalBeforeLoyalty)]);
+            rows.push([`${redeemedPoints} points`, '-' + money(loyaltyDiscount)]);
+        }
+        rows.push(['Total', money(total)]);
     } else {
         rows.push(['Total', money(total)]);
     }
@@ -1402,6 +1717,7 @@ function renderHoldSummary(hold) {
     const promoInput = $('archery-promo-code-input');
     if (promoInput && promoCode) promoInput.value = promoCode;
     startCountdown();
+    renderArcheryLoyaltyPanel();
 }
 
 async function fillMemberState(user) {
@@ -1581,6 +1897,8 @@ async function startBeamPayment() {
     }
     try {
         setStatus('archery-confirm-status', 'กำลังสร้างรายการชำระเงิน Beam...');
+        const loyaltyReady = await reserveArcheryLoyaltyRedemptionBeforePayment({ api });
+        if (!loyaltyReady) return;
         beamPaymentIdempotencyKey = beamPaymentIdempotencyKey || idempotencyKey('createBeamArcheryPayment', [currentHold.booking_id]);
         const result = await api.createBeamArcheryPayment({
             branch_id: currentHold.branch_id || BRANCH_ID,
@@ -1636,6 +1954,18 @@ function initBookingPage() {
     form.addEventListener('submit', createHold);
     $('archery-confirm-btn')?.addEventListener('click', startBeamPayment);
     $('archery-promo-apply-btn')?.addEventListener('click', applyArcheryPromoCode);
+    $('archery-loyalty-quote-btn')?.addEventListener('click', quoteArcheryLoyaltyRedemption);
+    $('archery-loyalty-reserve-btn')?.addEventListener('click', event => {
+        event.preventDefault();
+        reserveArcheryLoyaltyRedemptionBeforePayment();
+    });
+    $('archery-loyalty-points')?.addEventListener('input', () => {
+        archeryLoyaltyQuote = null;
+        archeryLoyaltyQuotePoints = 0;
+        archeryLoyaltyReservationIdempotencyKey = '';
+        setArcheryLoyaltyMessage('');
+        renderArcheryLoyaltyPanel();
+    });
     const promoInput = $('archery-promo-code-input');
     if (promoInput) {
         promoInput.addEventListener('keydown', event => {

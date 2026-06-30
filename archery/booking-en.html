@@ -152,6 +152,19 @@
                             </div>
                             <p class="archery-status archery-promo-message" id="archery-promo-message" aria-live="polite"></p>
                         </div>
+                        <div class="archery-loyalty-code" id="archery-loyalty-panel" hidden>
+                            <label class="archery-promo-label" for="archery-loyalty-points">
+                                <span class="archery-promo-kicker">Eden points</span>
+                                <span>Quote points after the hold, then reserve before Beam opens.</span>
+                            </label>
+                            <div class="archery-loyalty-control">
+                                <span class="archery-promo-icon" aria-hidden="true">P</span>
+                                <input class="archery-loyalty-input" type="number" id="archery-loyalty-points" min="0" step="1" inputmode="numeric" placeholder="0" autocomplete="off">
+                                <button type="button" class="btn btn-outline archery-loyalty-quote" id="archery-loyalty-quote-btn">Quote</button>
+                                <button type="button" class="btn archery-loyalty-reserve" id="archery-loyalty-reserve-btn" disabled>Apply</button>
+                            </div>
+                            <p class="archery-status archery-loyalty-message" id="archery-loyalty-message" aria-live="polite"></p>
+                        </div>
                         <p class="archery-status" id="archery-countdown" aria-live="polite"></p>
                         <p class="archery-status" id="archery-confirm-status" aria-live="polite"></p>
                         <div class="archery-summary-actions">

@@ -9,6 +9,9 @@ const {
   releaseArcheryPromotionApplications,
   archeryPromotionStatusUpdate,
 } = require('../archery/promotions');
+const {
+  releaseArcheryLoyaltyForBooking,
+} = require('../archery/loyaltyRedemption');
 
 const expireOldHolds = onSchedule(
   {
@@ -29,6 +32,8 @@ const expireOldHolds = onSchedule(
     let expiredCount = 0;
     let releasedLockCount = 0;
     for (const docSnap of snap.docs) {
+      let didExpire = false;
+      let expiredBranchId = '';
       await db.runTransaction(async transaction => {
         const bookingRef = docSnap.ref;
         const freshSnap = await transaction.get(bookingRef);
@@ -37,6 +42,7 @@ const expireOldHolds = onSchedule(
         const status = String(booking.booking_status || booking.status || '').toUpperCase();
         const expiresAt = timestampToDate(booking.expires_at);
         if (status !== 'HELD' || !expiresAt || expiresAt.getTime() >= Date.now()) return;
+        expiredBranchId = booking.branch_id;
 
         const locksSnap = await queryLocksForBooking(transaction, db, booking.branch_id, bookingRef.id);
         await releaseArcheryPromotionApplications(transaction, db, {
@@ -76,7 +82,26 @@ const expireOldHolds = onSchedule(
         });
         expiredCount += 1;
         releasedLockCount += locksSnap.size;
+        didExpire = true;
       });
+      if (didExpire && expiredBranchId) {
+        try {
+          await releaseArcheryLoyaltyForBooking(db, {
+            branchId: expiredBranchId,
+            bookingId: docSnap.id,
+            reason: 'HOLD_EXPIRED',
+            expired: true,
+            actor: { uid: 'SYSTEM', role: 'SYSTEM', system: true },
+          });
+        } catch (error) {
+          logger.warn('Unable to release archery loyalty reservation for expired hold', {
+            booking_id: docSnap.id,
+            branch_id: expiredBranchId,
+            code: error.code || '',
+            message: error.message,
+          });
+        }
+      }
     }
 
     logger.info('Eden Archery expired old holds', {
