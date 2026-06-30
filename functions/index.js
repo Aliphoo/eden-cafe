@@ -5764,32 +5764,42 @@ function publicPosMemberProfile(uid, data = {}) {
   };
 }
 
-function publicPosMemberSummary(uid, userData = {}, summaryData = {}) {
+function publicPosMemberSummary(uid, userData = {}, summaryData = {}, membershipTiers = undefined) {
   const profile = publicPosMemberProfile(uid, userData);
   const points = summaryData.pointsBalance !== undefined
     ? Number(summaryData.pointsBalance || 0)
     : profile.points;
+  const totalSpent = Number(summaryData.totalSpent ?? profile.totalSpent ?? 0);
+  const visitCount = Number(summaryData.visitCount ?? profile.visitCount ?? 0);
   return {
     ...profile,
     points,
-    totalSpent: Number(summaryData.totalSpent ?? profile.totalSpent ?? 0),
-    visitCount: Number(summaryData.visitCount ?? profile.visitCount ?? 0),
-    tier: cleanString(summaryData.tier || profile.tier || 'Silver', 30),
+    totalSpent,
+    visitCount,
+    tier: membershipTiers
+      ? memberTierFromMetrics(points, totalSpent, membershipTiers)
+      : cleanString(summaryData.tier || profile.tier || 'Silver', 30),
   };
 }
 
 async function enrichPosMemberProfiles(memberDocs = []) {
-  const summarySnaps = await Promise.all(
-    memberDocs.map(memberDoc =>
-      db.collection('member_summaries').doc(memberDoc.id).get().catch(() => null)
-    )
+  const [summarySnaps, loyaltySnap] = await Promise.all([
+    Promise.all(
+      memberDocs.map(memberDoc =>
+        db.collection('member_summaries').doc(memberDoc.id).get().catch(() => null)
+      )
+    ),
+    db.collection('site_settings').doc('loyalty').get().catch(() => null),
+  ]);
+  const loyaltySettings = loyaltyFormula.normalizeLoyaltySettings(
+    loyaltySnap && loyaltySnap.exists ? loyaltySnap.data() || {} : {}
   );
 
   return memberDocs.map((memberDoc, index) => {
     const userData = memberDoc.data() || {};
     const summarySnap = summarySnaps[index];
     const summaryData = summarySnap && summarySnap.exists ? summarySnap.data() || {} : {};
-    return publicPosMemberSummary(memberDoc.id, userData, summaryData);
+    return publicPosMemberSummary(memberDoc.id, userData, summaryData, loyaltySettings.membershipTiers);
   });
 }
 
@@ -5924,13 +5934,17 @@ exports.getPosMemberLoyaltySummary = onRequest(
       }
       checkRateLimitKey(`get-pos-member-summary:${decoded.uid || clientIp(req)}`, 240, 60 * 60 * 1000);
 
-      const [memberSnap, summarySnap] = await Promise.all([
+      const [memberSnap, summarySnap, loyaltySnap] = await Promise.all([
         db.collection('users').doc(uid).get(),
         db.collection('member_summaries').doc(uid).get(),
+        db.collection('site_settings').doc('loyalty').get(),
       ]);
       const member = memberSnap.exists ? memberSnap.data() || {} : {};
       const summary = summarySnap.exists ? summarySnap.data() || {} : {};
-      const publicMember = publicPosMemberSummary(uid, member, summary);
+      const loyaltySettings = loyaltyFormula.normalizeLoyaltySettings(
+        loyaltySnap.exists ? loyaltySnap.data() || {} : {}
+      );
+      const publicMember = publicPosMemberSummary(uid, member, summary, loyaltySettings.membershipTiers);
 
       res.status(200).json({
         ok: true,
