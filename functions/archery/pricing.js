@@ -79,10 +79,24 @@ function normalizePricingConfig(data = {}) {
   };
 }
 
+function hasPricingSourceData(data = {}) {
+  const pricing = data.pricing || data.bookingOptions || data.booking_options || {};
+  const source = Object.keys(pricing).length ? pricing : data;
+  return Boolean(
+    Array.isArray(source.packages) && source.packages.length
+    && Array.isArray(source.abilityOptions || source.ability_options) && (source.abilityOptions || source.ability_options).length
+    && Array.isArray(source.equipmentOptions || source.equipment_options) && (source.equipmentOptions || source.equipment_options).length
+  );
+}
+
 async function loadArcheryPricingConfig(transaction, db) {
   const ref = db.collection('site_settings').doc('archery');
   const snap = transaction ? await transaction.get(ref) : await ref.get();
-  return normalizePricingConfig(snap.exists ? snap.data() || {} : {});
+  const data = snap.exists ? snap.data() || {} : {};
+  if (!snap.exists || !hasPricingSourceData(data)) {
+    throw apiError('ARCHERY_PRICING_CONFIG_MISSING', 500, 'Archery pricing settings are missing');
+  }
+  return normalizePricingConfig(data);
 }
 
 function optionId(data = {}, snake, camel, fallback) {
@@ -105,6 +119,77 @@ function findActiveOption(options, id, code) {
   return option;
 }
 
+function participantOptionsFromData(data = {}) {
+  const source = data.participant_options || data.participantOptions || data.player_options || data.playerOptions || data.participants;
+  return Array.isArray(source) ? source : [];
+}
+
+function normalizeParticipantPricingRows(config, data, partySize, fallbackAbilityId, hours) {
+  const requested = participantOptionsFromData(data);
+  if (!requested.length) {
+    const ability = findActiveOption(config.abilityOptions, fallbackAbilityId, 'INVALID_ABILITY_OPTION');
+    const coachAmount = finiteMoney(ability.ratePerHour * hours);
+    return Array.from({ length: partySize }, (_, index) => ({
+      participant_index: index + 1,
+      experience: ability.id === 'first_time_with_coach' ? 'first_time' : 'experienced',
+      staff_choice: ability.coachRequired ? 'staff_required' : 'staff_not_required',
+      ability_option_id: ability.id,
+      ability_label: ability.label,
+      coach_required: ability.coachRequired === true,
+      coach_rate_per_hour: finiteMoney(ability.ratePerHour),
+      coach_amount: coachAmount,
+    }));
+  }
+
+  if (requested.length !== partySize) {
+    throw apiError('INVALID_PARTICIPANT_OPTIONS', 400, 'participant_options length must match party_size');
+  }
+
+  return requested.map((item = {}, index) => {
+    const participantIndex = Number(item.participant_index ?? item.participantIndex ?? index + 1);
+    if (!Number.isInteger(participantIndex) || participantIndex < 1 || participantIndex > partySize) {
+      throw apiError('INVALID_PARTICIPANT_OPTIONS', 400, 'participant_index is invalid');
+    }
+    const experience = cleanString(item.experience || item.experience_level || item.experienceLevel || 'experienced', 40);
+    const abilityId = cleanString(item.ability_option_id || item.abilityOptionId || '', 80);
+    if (!abilityId) throw apiError('INVALID_ABILITY_OPTION', 400, 'participant ability_option_id is required');
+    const ability = findActiveOption(config.abilityOptions, abilityId, 'INVALID_ABILITY_OPTION');
+    if (experience === 'first_time' && ability.coachRequired !== true) {
+      throw apiError('FIRST_TIME_STAFF_REQUIRED', 400, 'First-time participants must select a staff-supervised option');
+    }
+    const coachAmount = finiteMoney(ability.ratePerHour * hours);
+    return {
+      participant_index: participantIndex,
+      experience: experience === 'first_time' ? 'first_time' : 'experienced',
+      staff_choice: ability.coachRequired ? 'staff_required' : 'staff_not_required',
+      ability_option_id: ability.id,
+      ability_label: ability.label,
+      coach_required: ability.coachRequired === true,
+      coach_rate_per_hour: finiteMoney(ability.ratePerHour),
+      coach_amount: coachAmount,
+    };
+  });
+}
+
+function groupedCoachItems(participants = []) {
+  const groups = new Map();
+  participants.filter(item => item.coach_required || item.coach_amount > 0).forEach(item => {
+    const key = `${item.ability_option_id}:${item.coach_rate_per_hour}:${item.coach_amount}`;
+    const current = groups.get(key) || {
+      item_type: 'COACH',
+      label: item.ability_label,
+      quantity: 0,
+      unit_amount: item.coach_amount,
+      amount: 0,
+      rate_per_hour: item.coach_rate_per_hour,
+    };
+    current.quantity += 1;
+    current.amount += item.coach_amount;
+    groups.set(key, current);
+  });
+  return Array.from(groups.values());
+}
+
 function calculateArcheryPricing(config, timing, data = {}) {
   const duration = Number(timing.duration_minutes || 0) || 0;
   const hours = duration / 60;
@@ -114,27 +199,35 @@ function calculateArcheryPricing(config, timing, data = {}) {
   const abilityId = optionId(data, 'ability_option_id', 'abilityOptionId', 'experienced_no_coach');
   const equipmentId = optionId(data, 'equipment_option_id', 'equipmentOptionId', 'bring_own');
   const partySize = normalizePartySize(data);
-  const ability = findActiveOption(config.abilityOptions, abilityId, 'INVALID_ABILITY_OPTION');
   const equipment = findActiveOption(config.equipmentOptions, equipmentId, 'INVALID_EQUIPMENT_OPTION');
+  const participants = normalizeParticipantPricingRows(config, data, partySize, abilityId, hours);
+  const distinctAbilityIds = [...new Set(participants.map(item => item.ability_option_id))];
+  const primaryAbility = distinctAbilityIds.length === 1
+    ? config.abilityOptions.find(item => item.id === distinctAbilityIds[0])
+    : null;
 
   const packageAmount = finiteMoney(packageOption.price);
-  const coachAmount = finiteMoney(ability.ratePerHour * hours);
   const equipmentAmount = finiteMoney(equipment.ratePerHour * hours);
-  const perPersonTotal = packageAmount + coachAmount + equipmentAmount;
   const totalPackageAmount = packageAmount * partySize;
-  const totalCoachAmount = coachAmount * partySize;
+  const totalCoachAmount = participants.reduce((sum, item) => sum + item.coach_amount, 0);
   const totalEquipmentAmount = equipmentAmount * partySize;
-  const amountTotal = perPersonTotal * partySize;
+  const amountTotal = totalPackageAmount + totalCoachAmount + totalEquipmentAmount;
+  const staffCount = participants.filter(item => item.coach_required).length;
+  const averageCoachPerPerson = partySize ? finiteMoney(totalCoachAmount / partySize) : 0;
+  const perPersonTotal = packageAmount + averageCoachPerPerson + equipmentAmount;
+  const coachItems = groupedCoachItems(participants);
 
   return {
     pricing_version: config.version,
     pricing_updated_at: config.updatedAt || null,
     party_size: partySize,
     required_lane_count: partySize,
-    ability_option_id: ability.id,
-    ability_label: ability.label,
-    coach_required: ability.coachRequired === true,
-    coach_rate_per_hour: finiteMoney(ability.ratePerHour),
+    ability_option_id: primaryAbility ? primaryAbility.id : 'mixed_participant_abilities',
+    ability_label: primaryAbility ? primaryAbility.label : `${staffCount}/${partySize} staff supervised`,
+    participant_options: participants,
+    staff_count: staffCount,
+    coach_required: staffCount > 0,
+    coach_rate_per_hour: primaryAbility ? finiteMoney(primaryAbility.ratePerHour) : 0,
     coach_amount: totalCoachAmount,
     equipment_option_id: equipment.id,
     equipment_label: equipment.label,
@@ -144,11 +237,13 @@ function calculateArcheryPricing(config, timing, data = {}) {
     amount_total: amountTotal,
     amount_breakdown: {
       package_per_person: packageAmount,
-      coach_per_person: coachAmount,
+      coach_per_person: averageCoachPerPerson,
       equipment_per_person: equipmentAmount,
       per_person_total: perPersonTotal,
       party_size: partySize,
       required_lane_count: partySize,
+      staff_count: staffCount,
+      participant_options: participants,
       package: totalPackageAmount,
       coach: totalCoachAmount,
       equipment: totalEquipmentAmount,
@@ -157,7 +252,7 @@ function calculateArcheryPricing(config, timing, data = {}) {
     },
     booking_items: [
       { item_type: 'PACKAGE', label: packageOption.title || `${duration} min`, quantity: partySize, unit_amount: packageAmount, amount: totalPackageAmount, rate_per_hour: null },
-      { item_type: 'COACH', label: ability.label, quantity: partySize, unit_amount: coachAmount, amount: totalCoachAmount, rate_per_hour: finiteMoney(ability.ratePerHour) },
+      ...coachItems,
       { item_type: 'EQUIPMENT', label: equipment.label, quantity: partySize, unit_amount: equipmentAmount, amount: totalEquipmentAmount, rate_per_hour: finiteMoney(equipment.ratePerHour) },
     ],
   };

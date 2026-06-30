@@ -150,6 +150,8 @@ function buildBookingPayload(options = {}) {
     package_amount: Number(pricing.package_amount || amount) || 0,
     ability_option_id: pricing.ability_option_id || '',
     ability_label: pricing.ability_label || '',
+    participant_options: Array.isArray(pricing.participant_options) ? pricing.participant_options : [],
+    staff_count: Number(pricing.staff_count || pricing.amount_breakdown?.staff_count || 0) || 0,
     coach_required: pricing.coach_required === true,
     coach_rate_per_hour: Number(pricing.coach_rate_per_hour || 0) || 0,
     coach_amount: Number(pricing.coach_amount || 0) || 0,
@@ -273,9 +275,9 @@ async function createArcheryBookingInTransaction(transaction, db, options = {}) 
   });
 
   transaction.set(bookingRef, bookingPayload);
-  (finalPricing.booking_items || []).forEach(item => {
+  (finalPricing.booking_items || []).forEach((item, index) => {
     const itemType = cleanString(item.item_type || 'PACKAGE', 40).toLowerCase();
-    const bookingItemRef = db.collection('booking_items').doc(`${bookingRef.id}_${itemType}`);
+    const bookingItemRef = db.collection('booking_items').doc(`${bookingRef.id}_${String(index + 1).padStart(2, '0')}_${itemType}`);
     transaction.set(bookingItemRef, buildBookingItemPayload({
       bookingItemId: bookingItemRef.id,
       bookingId: bookingRef.id,
@@ -333,6 +335,7 @@ const createArcheryHold = httpFunction(async ({ db, data, actor, requestId }) =>
       package_code: timing.package_code,
       party_size: partySize,
       ability_option_id: pricingPreview.ability_option_id,
+      participant_options: pricingPreview.participant_options,
       equipment_option_id: pricingPreview.equipment_option_id,
       promo_code: promoCode,
     },
@@ -388,6 +391,8 @@ const createArcheryHold = httpFunction(async ({ db, data, actor, requestId }) =>
       package_amount: created.booking.package_amount,
       ability_option_id: created.booking.ability_option_id,
       ability_label: created.booking.ability_label,
+      participant_options: created.booking.participant_options,
+      staff_count: created.booking.staff_count,
       coach_required: created.booking.coach_required,
       coach_rate_per_hour: created.booking.coach_rate_per_hour,
       coach_amount: created.booking.coach_amount,
