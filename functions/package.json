@@ -8,7 +8,8 @@
   "scripts": {
     "lint": "node --check index.js",
     "test:promotions": "node test-promotions-engine.js",
-    "test": "npm run lint && npm run test:promotions"
+    "test:loyalty": "node test-loyalty-wallet.js",
+    "test": "npm run lint && npm run test:promotions && npm run test:loyalty"
   },
   "dependencies": {
     "basic-ftp": "^5.2.1",
