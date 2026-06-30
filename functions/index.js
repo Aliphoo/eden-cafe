@@ -1227,6 +1227,14 @@ exports.requestPasswordResetOtp = onRequest(
   memberAuthHandlers.requestPasswordResetOtp
 );
 
+exports.verifyPasswordResetOtp = onRequest(
+  {
+    region: 'asia-southeast1',
+    secrets: [AUTH_OTP_PEPPER],
+  },
+  memberAuthHandlers.verifyPasswordResetOtp
+);
+
 exports.completePasswordReset = onRequest(
   {
     region: 'asia-southeast1',

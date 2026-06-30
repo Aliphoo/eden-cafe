@@ -5,6 +5,7 @@ import {
     GoogleAuthProvider,
     onAuthStateChanged,
     RecaptchaVerifier,
+    signOut,
     signInWithCustomToken,
     signInWithPhoneNumber,
     signInWithPopup
@@ -14,8 +15,9 @@ import {
     getMyProfile,
     loginMember,
     requestPasswordResetOtp,
-    storeProfile
-} from './member-auth-service.js?v=phone-reset-firebase-20260605';
+    storeProfile,
+    verifyPasswordResetOtp
+} from './member-auth-service.js?v=password-reset-20260630-1';
 
 const GOOGLE_SETUP_KEY = 'eden_google_password_setup';
 const FIREBASE_OTP_RESEND_COOLDOWN_MS = 60 * 1000;
@@ -32,6 +34,8 @@ const els = {
     forgotClose: document.getElementById('forgot-password-close'),
     forgotRequestForm: document.getElementById('forgot-request-form'),
     forgotCompleteForm: document.getElementById('forgot-complete-form'),
+    forgotOtpStep: document.getElementById('forgot-otp-step'),
+    forgotPasswordStep: document.getElementById('forgot-password-step'),
     forgotIdentifierLabel: document.getElementById('forgot-identifier-label'),
     forgotIdentifier: document.getElementById('forgot-identifier'),
     forgotOtp: document.getElementById('forgot-otp'),
@@ -44,16 +48,22 @@ autoEnhanceOtpInputs();
 let authResolved = false;
 let loginInProgress = false;
 const resetState = {
+    step: 'request',
+    active: false,
     channel: 'phone',
     identifier: '',
     verificationId: '',
+    resetToken: '',
+    firebaseIdToken: '',
     phoneNumber: '',
     phoneConfirmationResult: null,
     recaptchaVerifier: null,
     firebasePhoneAuth: false,
     otpRequestPromise: null,
     otpRequestKey: '',
-    nextOtpAllowedAt: 0
+    nextOtpAllowedAt: 0,
+    verifyingOtp: false,
+    completing: false
 };
 
 function setStatus(message, type = 'info') {
@@ -79,6 +89,37 @@ function setGoogleBusy(isBusy) {
     els.google.textContent = isBusy ? 'กำลังเปิด Google...' : els.google.dataset.defaultText;
 }
 
+function isForgotResetActive() {
+    return resetState.active || resetState.verifyingOtp || resetState.completing;
+}
+
+function syncForgotStepFields(isBusy = false) {
+    const otpActive = resetState.step === 'otp';
+    const passwordActive = resetState.step === 'password';
+    if (els.forgotOtp) els.forgotOtp.disabled = isBusy || !otpActive;
+    if (els.forgotPassword) els.forgotPassword.disabled = isBusy || !passwordActive;
+    if (els.forgotPasswordConfirm) els.forgotPasswordConfirm.disabled = isBusy || !passwordActive;
+}
+
+function renderForgotResetStep(step) {
+    resetState.step = step;
+    const showRequest = step === 'request';
+    if (els.forgotRequestForm) els.forgotRequestForm.hidden = !showRequest;
+    if (els.forgotCompleteForm) els.forgotCompleteForm.hidden = showRequest;
+    if (els.forgotOtpStep) els.forgotOtpStep.hidden = step !== 'otp';
+    if (els.forgotPasswordStep) els.forgotPasswordStep.hidden = step !== 'password';
+    syncForgotStepFields(false);
+}
+
+async function clearForgotPhoneAuthSession() {
+    if (!auth?.currentUser) return;
+    try {
+        await signOut(auth);
+    } catch (error) {
+        console.warn('Unable to clear phone reset Firebase session:', error);
+    }
+}
+
 function getForgotChannel() {
     return document.querySelector('input[name="forgot-channel"]:checked')?.value === 'email' ? 'email' : 'phone';
 }
@@ -86,11 +127,16 @@ function getForgotChannel() {
 function updateForgotChannelUi() {
     const channel = getForgotChannel();
     resetState.channel = channel;
+    resetState.step = 'request';
+    resetState.resetToken = '';
+    resetState.firebaseIdToken = '';
     resetState.phoneConfirmationResult = null;
     resetState.firebasePhoneAuth = false;
     resetState.otpRequestPromise = null;
     resetState.otpRequestKey = '';
     resetState.nextOtpAllowedAt = 0;
+    resetState.verifyingOtp = false;
+    resetState.completing = false;
     resetRecaptcha();
     if (els.forgotIdentifierLabel) {
         els.forgotIdentifierLabel.textContent = channel === 'email' ? 'อีเมล' : 'เบอร์โทรศัพท์';
@@ -102,6 +148,7 @@ function updateForgotChannelUi() {
         els.forgotIdentifier.inputMode = channel === 'email' ? 'email' : 'tel';
         els.forgotIdentifier.autocomplete = channel === 'email' ? 'email' : 'tel';
     }
+    renderForgotResetStep('request');
 }
 
 function resetRecaptcha() {
@@ -150,7 +197,7 @@ async function requestForgotOtpOnce(channel, identifier) {
     }
     if (
         resetState.otpRequestKey === requestKey
-        && resetState.phoneConfirmationResult
+        && (resetState.phoneConfirmationResult || resetState.verificationId)
         && Date.now() < resetState.nextOtpAllowedAt
     ) {
         throw createForgotOtpAlreadySentError();
@@ -162,6 +209,8 @@ async function requestForgotOtpOnce(channel, identifier) {
         resetState.channel = channel;
         resetState.identifier = identifier;
         resetState.verificationId = result.verificationId || '';
+        resetState.resetToken = '';
+        resetState.firebaseIdToken = '';
         resetState.phoneNumber = result.phoneNumber || '';
         resetState.phoneConfirmationResult = null;
         resetState.firebasePhoneAuth = result.firebasePhoneAuth === true;
@@ -196,17 +245,19 @@ function setForgotBusy(form, isBusy, label) {
         if (button.type === 'submit') button.textContent = isBusy ? label : button.dataset.defaultText;
     });
     form?.querySelectorAll('input').forEach(input => {
-        input.disabled = isBusy;
+        input.disabled = isBusy || (form === els.forgotCompleteForm && !!input.closest('[hidden]'));
     });
+    if (form === els.forgotCompleteForm) syncForgotStepFields(isBusy);
 }
 
 function openForgotPanel() {
     if (!els.forgotPanel) return;
     els.forgotPanel.hidden = false;
-    els.forgotRequestForm.hidden = false;
-    els.forgotCompleteForm.hidden = true;
+    resetState.active = true;
     resetState.verificationId = '';
     resetState.identifier = '';
+    resetState.resetToken = '';
+    resetState.firebaseIdToken = '';
     updateForgotChannelUi();
     els.forgotIdentifier?.focus();
 }
@@ -216,17 +267,21 @@ function closeForgotPanel() {
     els.forgotPanel.hidden = true;
     els.forgotRequestForm?.reset();
     els.forgotCompleteForm?.reset();
-    els.forgotRequestForm.hidden = false;
-    els.forgotCompleteForm.hidden = true;
+    resetState.active = false;
+    renderForgotResetStep('request');
     resetState.channel = 'phone';
     resetState.identifier = '';
     resetState.verificationId = '';
+    resetState.resetToken = '';
+    resetState.firebaseIdToken = '';
     resetState.phoneNumber = '';
     resetState.phoneConfirmationResult = null;
     resetState.firebasePhoneAuth = false;
     resetState.otpRequestPromise = null;
     resetState.otpRequestKey = '';
     resetState.nextOtpAllowedAt = 0;
+    resetState.verifyingOtp = false;
+    resetState.completing = false;
     resetRecaptcha();
 }
 
@@ -249,7 +304,7 @@ function showRegisteredMessage() {
 onAuthStateChanged(auth, async user => {
     authResolved = true;
     const waitingForGoogleSetup = sessionStorage.getItem(GOOGLE_SETUP_KEY) === '1';
-    if (!user || loginInProgress || waitingForGoogleSetup) return;
+    if (!user || loginInProgress || waitingForGoogleSetup || isForgotResetActive()) return;
 
     try {
         const result = await getMyProfile();
@@ -339,17 +394,16 @@ els.forgotRequestForm?.addEventListener('submit', async event => {
     setForgotBusy(els.forgotRequestForm, true, 'กำลังส่ง OTP...');
     setStatus('กำลังตรวจสอบบัญชีและส่ง OTP...', 'info');
     try {
+        resetState.active = true;
         await requestForgotOtpOnce(channel, identifier);
 
-        els.forgotRequestForm.hidden = true;
-        els.forgotCompleteForm.hidden = false;
+        renderForgotResetStep('otp');
         els.forgotOtp?.focus();
         clearOtpUiStatus(els.forgotOtp);
-        setStatus('ส่ง OTP สำเร็จ กรุณาตรวจสอบรหัสแล้วตั้งรหัสผ่านใหม่', 'success');
+        setStatus('ส่ง OTP สำเร็จ กรุณากรอกรหัสเพื่อยืนยันก่อนตั้งรหัสผ่านใหม่', 'success');
     } catch (error) {
         if (error?.code === 'eden/otp-already-sent') {
-            els.forgotRequestForm.hidden = true;
-            els.forgotCompleteForm.hidden = false;
+            renderForgotResetStep('otp');
             els.forgotOtp?.focus();
             setStatus(error.message, 'info');
         } else {
@@ -365,14 +419,53 @@ els.forgotRequestForm?.addEventListener('submit', async event => {
 
 els.forgotCompleteForm?.addEventListener('submit', async event => {
     event.preventDefault();
-    const otp = String(els.forgotOtp?.value || '').trim();
-    const password = String(els.forgotPassword?.value || '');
-    const confirmPassword = String(els.forgotPasswordConfirm?.value || '');
-    if (!/^\d{6}$/.test(otp)) {
-        setOtpUiStatus(els.forgotOtp, 'error');
-        setStatus('กรุณากรอก OTP 6 หลัก', 'error');
+    if (resetState.step === 'otp') {
+        const otp = String(els.forgotOtp?.value || '').trim();
+        if (!/^\d{6}$/.test(otp)) {
+            setOtpUiStatus(els.forgotOtp, 'error');
+            setStatus('กรุณากรอก OTP 6 หลัก', 'error');
+            return;
+        }
+
+        resetState.verifyingOtp = true;
+        setForgotBusy(els.forgotCompleteForm, true, 'กำลังยืนยัน...');
+        setStatus('กำลังยืนยัน OTP...', 'info');
+        try {
+            setOtpUiStatus(els.forgotOtp, 'loading');
+            if (resetState.firebasePhoneAuth) {
+                if (!resetState.phoneConfirmationResult) throw new Error('ไม่พบรายการ OTP กรุณาขอรหัสใหม่');
+                const credential = await resetState.phoneConfirmationResult.confirm(otp);
+                resetState.firebaseIdToken = await credential.user.getIdToken(true);
+                await clearForgotPhoneAuthSession();
+            } else {
+                const result = await verifyPasswordResetOtp({
+                    verificationId: resetState.verificationId,
+                    channel: resetState.channel,
+                    identifier: resetState.identifier,
+                    otp
+                });
+                resetState.resetToken = result.resetToken || '';
+                if (!resetState.resetToken) throw new Error('ไม่พบข้อมูลยืนยัน OTP กรุณาขอรหัสใหม่');
+            }
+
+            setOtpUiStatus(els.forgotOtp, 'success');
+            renderForgotResetStep('password');
+            els.forgotPassword?.focus();
+            setStatus('ยืนยัน OTP สำเร็จ กรุณาตั้งรหัสผ่านใหม่', 'success');
+        } catch (error) {
+            resetState.firebaseIdToken = '';
+            resetState.resetToken = '';
+            setOtpUiStatus(els.forgotOtp, 'error');
+            setStatus(error.message || 'OTP ไม่ถูกต้อง กรุณาตรวจสอบแล้วลองอีกครั้ง', 'error');
+        } finally {
+            resetState.verifyingOtp = false;
+            setForgotBusy(els.forgotCompleteForm, false);
+        }
         return;
     }
+
+    const password = String(els.forgotPassword?.value || '');
+    const confirmPassword = String(els.forgotPasswordConfirm?.value || '');
     if (password.length < 8) {
         setStatus('รหัสผ่านต้องมีความยาวอย่างน้อย 8 ตัวอักษร', 'error');
         return;
@@ -382,36 +475,36 @@ els.forgotCompleteForm?.addEventListener('submit', async event => {
         return;
     }
 
-    setForgotBusy(els.forgotCompleteForm, true, 'กำลังรีเซ็ต...');
-    setStatus('กำลังรีเซ็ตรหัสผ่าน...', 'info');
+    resetState.completing = true;
+    setForgotBusy(els.forgotCompleteForm, true, 'กำลังเปลี่ยน...');
+    setStatus('กำลังเปลี่ยนรหัสผ่าน...', 'info');
     try {
-        setOtpUiStatus(els.forgotOtp, 'loading');
-        let firebaseIdToken = '';
-        if (resetState.firebasePhoneAuth) {
-            if (!resetState.phoneConfirmationResult) throw new Error('ไม่พบรายการ OTP กรุณาขอรหัสใหม่');
-            const credential = await resetState.phoneConfirmationResult.confirm(otp);
-            firebaseIdToken = await credential.user.getIdToken(true);
+        if (resetState.firebasePhoneAuth && !resetState.firebaseIdToken) {
+            throw new Error('กรุณายืนยัน OTP ก่อนตั้งรหัสผ่านใหม่');
+        }
+        if (!resetState.firebasePhoneAuth && !resetState.resetToken) {
+            throw new Error('กรุณายืนยัน OTP ก่อนตั้งรหัสผ่านใหม่');
         }
 
-        const result = await completePasswordReset({
+        await completePasswordReset({
             verificationId: resetState.verificationId,
             channel: resetState.channel,
             identifier: resetState.identifier,
-            otp,
             password,
             confirmPassword,
-            firebaseIdToken
+            firebaseIdToken: resetState.firebaseIdToken,
+            resetToken: resetState.resetToken
         });
+        await clearForgotPhoneAuthSession();
         const resetIdentifier = resetState.identifier;
-        setOtpUiStatus(els.forgotOtp, 'success');
         closeForgotPanel();
-        setStatus(result.message || 'รีเซ็ตรหัสผ่านสำเร็จ กรุณาเข้าสู่ระบบด้วยรหัสผ่านใหม่', 'success');
+        setStatus('รีเซ็ตรหัสผ่านของท่านแล้ว กรุณาเข้าสู่ระบบด้วยรหัสผ่านใหม่', 'success');
         if (els.identifier) els.identifier.value = resetIdentifier || els.identifier.value;
         els.password?.focus();
     } catch (error) {
-        setOtpUiStatus(els.forgotOtp, 'error');
-        setStatus(error.message || 'OTP ไม่ถูกต้อง กรุณาตรวจสอบแล้วลองอีกครั้ง', 'error');
+        setStatus(error.message || 'ไม่สามารถเปลี่ยนรหัสผ่านได้ กรุณาลองใหม่อีกครั้ง', 'error');
     } finally {
+        resetState.completing = false;
         setForgotBusy(els.forgotCompleteForm, false);
     }
 });

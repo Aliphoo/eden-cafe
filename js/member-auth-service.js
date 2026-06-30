@@ -247,7 +247,22 @@ export function requestPasswordResetOtp({ channel, identifier }) {
     });
 }
 
-export function completePasswordReset({ verificationId, channel, identifier, otp, password, confirmPassword, firebaseIdToken, idToken }) {
+export function verifyPasswordResetOtp({ verificationId, channel, identifier, otp }) {
+    const resetChannel = cleanString(channel, 20).toLowerCase();
+    const resetIdentifier = resetChannel === 'phone'
+        ? normalizeThaiPhone(identifier)
+        : cleanString(identifier, 180).toLowerCase();
+    return edenAuthRequest('/verifyPasswordResetOtp', {
+        body: {
+            verificationId: cleanString(verificationId, 160),
+            channel: resetChannel,
+            identifier: resetIdentifier,
+            otp: cleanString(otp, 6)
+        }
+    });
+}
+
+export function completePasswordReset({ verificationId, channel, identifier, password, confirmPassword, firebaseIdToken, idToken, resetToken }) {
     const resetChannel = cleanString(channel, 20).toLowerCase();
     const resetIdentifier = resetChannel === 'phone'
         ? normalizeThaiPhone(identifier)
@@ -261,7 +276,7 @@ export function completePasswordReset({ verificationId, channel, identifier, otp
     };
     if (verifiedFirebaseIdToken) body.firebaseIdToken = verifiedFirebaseIdToken;
     if (verificationId) body.verificationId = cleanString(verificationId, 160);
-    if (otp) body.otp = cleanString(otp, 6);
+    if (resetToken) body.resetToken = cleanString(resetToken, 1200);
     return edenAuthRequest('/completePasswordReset', {
         body
     });

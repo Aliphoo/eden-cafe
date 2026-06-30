@@ -5,6 +5,7 @@ const scrypt = promisify(crypto.scrypt);
 
 const OTP_TTL_MS = 5 * 60 * 1000;
 const REGISTRATION_TOKEN_TTL_MS = 10 * 60 * 1000;
+const PASSWORD_RESET_TOKEN_TTL_MS = 10 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
 const PASSWORD_MIN_LENGTH = 8;
 const PASSWORD_MAX_LENGTH = 128;
@@ -154,6 +155,55 @@ function verifyRegistrationToken(token, otpPepper) {
   }
   if (Number(payload.expiresAt) < Date.now()) {
     throw createPublicError('ข้อมูลยืนยัน OTP หมดอายุ กรุณาส่ง OTP ใหม่');
+  }
+  return payload;
+}
+
+function createPasswordResetToken(payload, otpPepper) {
+  const tokenPayload = {
+    v: 1,
+    purpose: 'password_reset',
+    verificationId: cleanString(payload.verificationId, 160),
+    uid: cleanString(payload.uid, 160),
+    channel: cleanString(payload.channel, 20),
+    identifierKey: cleanString(payload.identifierKey, 180),
+    expiresAt: Number(payload.expiresAt) || 0,
+    nonce: base64UrlEncode(crypto.randomBytes(18)),
+  };
+  const encodedPayload = base64UrlEncode(JSON.stringify(tokenPayload));
+  const signature = hmacHex(otpPepper, encodedPayload);
+  return `${encodedPayload}.${signature}`;
+}
+
+function verifyPasswordResetToken(token, otpPepper) {
+  const [encodedPayload, signature] = String(token || '').split('.');
+  if (!encodedPayload || !signature) {
+    throw createPublicError('กรุณายืนยัน OTP ก่อนตั้งรหัสผ่านใหม่');
+  }
+  const expected = hmacHex(otpPepper, encodedPayload);
+  if (!constantTimeEqualHex(signature, expected)) {
+    throw createPublicError('ข้อมูลยืนยัน OTP ไม่ถูกต้อง กรุณาขอรหัสใหม่');
+  }
+  let payload;
+  try {
+    payload = JSON.parse(base64UrlDecode(encodedPayload).toString('utf8'));
+  } catch (_) {
+    throw createPublicError('ข้อมูลยืนยัน OTP ไม่ถูกต้อง กรุณาขอรหัสใหม่');
+  }
+  if (
+    !payload
+    || payload.v !== 1
+    || payload.purpose !== 'password_reset'
+    || !payload.verificationId
+    || !payload.uid
+    || !payload.channel
+    || !payload.identifierKey
+    || !payload.expiresAt
+  ) {
+    throw createPublicError('ข้อมูลยืนยัน OTP ไม่ถูกต้อง กรุณาขอรหัสใหม่');
+  }
+  if (Number(payload.expiresAt) < Date.now()) {
+    throw createPublicError('ข้อมูลยืนยัน OTP หมดอายุ กรุณาขอรหัสใหม่');
   }
   return payload;
 }
@@ -1217,6 +1267,110 @@ function createMemberAuthHandlers({
     }
   }
 
+  async function verifyPasswordResetOtp(req, res) {
+    if (handleOptions(req, res)) return;
+    setCors(req, res);
+    if (req.method !== 'POST') {
+      res.status(405).json({ error: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      checkRateLimit(req, 'verifyPasswordResetOtp', 30, 10 * 60 * 1000);
+      const reset = normalizeResetIdentifier(req.body?.channel, req.body?.identifier);
+      checkRateLimitKey(`verifyPasswordResetOtp:${reset.channel}:${reset.rateKey}`, 10, 10 * 60 * 1000);
+      const verificationId = cleanString(req.body?.verificationId, 160);
+      if (!verificationId || verificationId.includes('/')) {
+        throw createPublicError('ไม่พบรายการ OTP กรุณาขอรหัสใหม่');
+      }
+      const code = cleanString(req.body?.otp || req.body?.code, 6);
+      if (!/^\d{6}$/.test(code)) throw createPublicError('กรุณากรอก OTP 6 หลัก');
+
+      const verificationRef = db.collection(OTP_COLLECTION).doc(verificationId);
+      let publicFailure = null;
+      let resetToken = '';
+      let tokenExpiresAt = 0;
+      await db.runTransaction(async tx => {
+        const snap = await tx.get(verificationRef);
+        if (!snap.exists) {
+          publicFailure = createPublicError('ไม่พบรายการ OTP กรุณาขอรหัสใหม่');
+          return;
+        }
+
+        const record = snap.data() || {};
+        const expiresAt = record.expires_at?.toDate ? record.expires_at.toDate().getTime() : 0;
+        if (
+          record.purpose !== 'password_reset'
+          || record.channel !== reset.channel
+          || record.identifier_key !== reset.identifierKey
+          || record.used_at
+        ) {
+          publicFailure = createPublicError('ไม่พบรายการ OTP กรุณาขอรหัสใหม่');
+          return;
+        }
+        if (!expiresAt || expiresAt < Date.now()) {
+          publicFailure = createPublicError('OTP หมดอายุ กรุณาขอรหัสใหม่');
+          return;
+        }
+
+        const attempts = Math.max(0, Number(record.attempt_count || 0));
+        const maxAttempts = Math.max(1, Number(record.max_attempts || OTP_MAX_ATTEMPTS));
+        if (attempts >= maxAttempts) {
+          publicFailure = createPublicError('OTP ไม่ถูกต้อง กรุณาตรวจสอบแล้วลองอีกครั้ง');
+          return;
+        }
+
+        const expected = otpHash(`${reset.channel}:${reset.identifierKey}`, code, getOtpPepper());
+        if (!constantTimeEqualHex(record.otp_hash, expected)) {
+          tx.update(verificationRef, {
+            attempt_count: admin.firestore.FieldValue.increment(1),
+            last_attempt_at: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          publicFailure = createPublicError('OTP ไม่ถูกต้อง กรุณาตรวจสอบแล้วลองอีกครั้ง');
+          return;
+        }
+
+        const uid = cleanString(record.uid, 160);
+        if (!uid) {
+          publicFailure = createPublicError('ไม่พบบัญชีสมาชิกนี้ กรุณาตรวจสอบข้อมูลอีกครั้ง', 404);
+          return;
+        }
+
+        tokenExpiresAt = Math.min(expiresAt, Date.now() + PASSWORD_RESET_TOKEN_TTL_MS);
+        resetToken = createPasswordResetToken({
+          verificationId,
+          uid,
+          channel: reset.channel,
+          identifierKey: reset.identifierKey,
+          expiresAt: tokenExpiresAt,
+        }, getOtpPepper());
+        tx.update(verificationRef, {
+          verified_at: admin.firestore.FieldValue.serverTimestamp(),
+          reset_token_hash: sha256(resetToken),
+          reset_token_expires_at: admin.firestore.Timestamp.fromDate(new Date(tokenExpiresAt)),
+          last_attempt_at: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      });
+
+      if (publicFailure) throw publicFailure;
+      res.json({
+        ok: true,
+        verificationId,
+        channel: reset.channel,
+        identifierDisplay: reset.identifierDisplay,
+        resetToken,
+        expiresInSeconds: Math.max(1, Math.ceil((tokenExpiresAt - Date.now()) / 1000)),
+        message: 'ยืนยัน OTP สำเร็จ กรุณาตั้งรหัสผ่านใหม่',
+      });
+    } catch (error) {
+      logger.warn('Password reset OTP verification failed', {
+        message: error.message,
+        status: error.statusCode || 500,
+      });
+      jsonError(res, error, 'ไม่สามารถยืนยัน OTP ได้ กรุณาลองใหม่อีกครั้ง');
+    }
+  }
+
   async function completePasswordReset(req, res) {
     if (handleOptions(req, res)) return;
     setCors(req, res);
@@ -1270,8 +1424,15 @@ function createMemberAuthHandlers({
       if (!verificationId || verificationId.includes('/')) {
         throw createPublicError('ไม่พบรายการ OTP กรุณาขอรหัสใหม่');
       }
-      const code = cleanString(req.body?.otp || req.body?.code, 6);
-      if (!/^\d{6}$/.test(code)) throw createPublicError('กรุณากรอก OTP 6 หลัก');
+      const resetToken = cleanString(req.body?.resetToken || req.body?.passwordResetToken, 1200);
+      const resetTokenPayload = verifyPasswordResetToken(resetToken, getOtpPepper());
+      if (
+        resetTokenPayload.verificationId !== verificationId
+        || resetTokenPayload.channel !== reset.channel
+        || resetTokenPayload.identifierKey !== reset.identifierKey
+      ) {
+        throw createPublicError('ข้อมูลยืนยัน OTP ไม่ตรงกับบัญชีนี้ กรุณาขอรหัสใหม่');
+      }
 
       const verificationRef = db.collection(OTP_COLLECTION).doc(verificationId);
       let publicFailure = null;
@@ -1284,6 +1445,7 @@ function createMemberAuthHandlers({
 
         const record = snap.data() || {};
         const expiresAt = record.expires_at?.toDate ? record.expires_at.toDate().getTime() : 0;
+        const resetTokenExpiresAt = record.reset_token_expires_at?.toDate ? record.reset_token_expires_at.toDate().getTime() : 0;
         if (
           record.purpose !== 'password_reset'
           || record.channel !== reset.channel
@@ -1294,29 +1456,22 @@ function createMemberAuthHandlers({
           return;
         }
         if (!expiresAt || expiresAt < Date.now()) {
-          publicFailure = createPublicError('OTP หมดอายุ กรุณาขอรหัสใหม่');
+          publicFailure = createPublicError('ข้อมูลยืนยัน OTP หมดอายุ กรุณาขอรหัสใหม่');
           return;
         }
-
-        const attempts = Math.max(0, Number(record.attempt_count || 0));
-        const maxAttempts = Math.max(1, Number(record.max_attempts || OTP_MAX_ATTEMPTS));
-        if (attempts >= maxAttempts) {
-          publicFailure = createPublicError('OTP ไม่ถูกต้อง กรุณาตรวจสอบแล้วลองอีกครั้ง');
-          return;
-        }
-
-        const expected = otpHash(`${reset.channel}:${reset.identifierKey}`, code, getOtpPepper());
-        if (!constantTimeEqualHex(record.otp_hash, expected)) {
-          tx.update(verificationRef, {
-            attempt_count: admin.firestore.FieldValue.increment(1),
-            last_attempt_at: admin.firestore.FieldValue.serverTimestamp(),
-          });
-          publicFailure = createPublicError('OTP ไม่ถูกต้อง กรุณาตรวจสอบแล้วลองอีกครั้ง');
+        if (
+          !record.verified_at
+          || !record.reset_token_hash
+          || record.reset_token_hash !== sha256(resetToken)
+          || !resetTokenExpiresAt
+          || resetTokenExpiresAt < Date.now()
+        ) {
+          publicFailure = createPublicError('กรุณายืนยัน OTP ก่อนตั้งรหัสผ่านใหม่');
           return;
         }
 
         const uid = cleanString(record.uid, 160);
-        if (!uid) {
+        if (!uid || uid !== cleanString(resetTokenPayload.uid, 160)) {
           publicFailure = createPublicError('ไม่พบบัญชีสมาชิกนี้ กรุณาตรวจสอบข้อมูลอีกครั้ง', 404);
           return;
         }
@@ -1352,8 +1507,8 @@ function createMemberAuthHandlers({
         }, { merge: true });
         tx.update(verificationRef, {
           used_at: now,
-          verified_at: now,
           reset_completed_at: now,
+          reset_token_used_at: now,
         });
       });
 
@@ -2053,6 +2208,7 @@ function createMemberAuthHandlers({
     verifyRegisterOtp,
     completeRegister,
     requestPasswordResetOtp,
+    verifyPasswordResetOtp,
     completePasswordReset,
     loginMember,
     getMyProfile,
