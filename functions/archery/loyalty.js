@@ -104,7 +104,11 @@ function calculateArcheryLoyalty({ config = {}, member = null, summary = {}, boo
   const pointsBefore = summary.pointsBalance !== undefined
     ? Math.max(0, Math.floor(Number(summary.pointsBalance || 0)))
     : Math.max(memberPoints, estimatedLegacyPoints);
-  const currentTier = cleanString(member.tier || summary.tier || 'Silver', 40);
+  const currentTier = loyaltyFormula.memberTierFromMetrics(
+    pointsBefore,
+    Math.max(memberTotalSpent, summaryTotalSpent),
+    loyaltyConfig.membershipTiers
+  );
   const multiplier = Number(loyaltyConfig.tierMultipliers[currentTier] || 1);
   const earnedPoints = loyaltyConfig.spendPerPoint > 0
     ? Math.floor((amount / loyaltyConfig.spendPerPoint) * multiplier)

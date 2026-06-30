@@ -244,7 +244,11 @@ function calculatePosLoyaltySale({
     ? 0
     : loyaltyDiscount * eligibleRatio;
   const earnBase = Math.max(0, eligibleSubtotal - orderDiscountShare - redeemedDiscountShare);
-  const currentTier = cleanString(member.tier || summary.tier || 'Silver', 40);
+  const currentTier = memberTierFromMetrics(
+    pointsBefore,
+    Math.max(memberTotalSpent, summaryTotalSpent),
+    loyaltyConfig.membershipTiers
+  );
   const multiplier = Number(loyaltyConfig.tierMultipliers[currentTier] || 1);
   const earnedPoints = loyaltyConfig.spendPerPoint > 0
     ? Math.floor((earnBase / loyaltyConfig.spendPerPoint) * multiplier)
