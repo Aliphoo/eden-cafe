@@ -922,6 +922,7 @@
             <li onclick="switchTab('promptpay', this)">&#128184; &#x0E08;&#x0E31;&#x0E14;&#x0E01;&#x0E32;&#x0E23;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C; (PromptPay)</li>
             <li onclick="switchTab('business-settings', this)">Business Info</li>
             <li data-title="จัดการ Index" onclick="switchTab('index-settings', this)">จัดการ Index</li>
+            <li onclick="switchTab('promo-popup-settings', this)">Promotional Popup</li>
             <li onclick="switchTab('footer-settings', this)">🦶 จัดการ Footer</li>
             <li onclick="switchTab('marketing-settings', this)">Marketing Tools</li>
         </ul>
@@ -3554,6 +3555,76 @@
             </div>
         </div>
 
+        <!-- Promotional Popup Settings Section -->
+        <div id="promo-popup-settings" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <div>
+                        <h2>Promotional Popup</h2>
+                        <p style="color:#667; margin-top:4px;">Manage carousel promotional modals, display location, audience, optional links, and daily hide behavior.</p>
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button class="btn-action btn-view" type="button" onclick="loadPromoPopupSettings()">โหลดข้อมูลปัจจุบัน</button>
+                    </div>
+                </div>
+
+                <form id="promoPopupSettingsForm">
+                    <div class="index-settings-grid">
+                        <div class="index-settings-card index-promo-card">
+                            <h3>Popup carousel</h3>
+                            <label class="index-promo-toggle" for="promo-popup-enabled">
+                                <span>
+                                    <strong>Enable popup carousel</strong>
+                                    <small>Show image promotions with a "do not show again today" checkbox.</small>
+                                </span>
+                                <input type="checkbox" id="promo-popup-enabled" oninput="updatePromoPopupPreview()">
+                            </label>
+                            <div class="index-promo-fields">
+                                <div class="form-group">
+                                    <label for="promo-popup-title">Popup title / admin label</label>
+                                    <input type="text" id="promo-popup-title" maxlength="90" placeholder="Eden Cafe promotions" oninput="updatePromoPopupPreview()">
+                                </div>
+                                <div class="form-group">
+                                    <label for="promo-popup-display-location">Display location</label>
+                                    <select id="promo-popup-display-location" oninput="updatePromoPopupPreview()">
+                                        <option value="home">Home only</option>
+                                        <option value="profile">Member profile only</option>
+                                        <option value="home_profile">Home + Member profile</option>
+                                        <option value="all_public">All public pages</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="promo-popup-audience">Audience</label>
+                                    <select id="promo-popup-audience" oninput="updatePromoPopupPreview()">
+                                        <option value="everyone">Everyone</option>
+                                        <option value="members">Logged-in members</option>
+                                        <option value="guests">Guests only</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="index-promo-toolbar">
+                                <p>Each slide needs an image. Link URL is optional.</p>
+                                <button type="button" class="btn-action btn-view" onclick="addPromoPopupSlide()">Add slide</button>
+                            </div>
+                            <div class="index-promo-slide-list" id="promo-popup-slide-list"></div>
+                            <div class="index-promo-preview" id="promo-popup-preview">
+                                <div class="index-promo-preview-media" id="promo-popup-preview-media"></div>
+                                <div>
+                                    <strong id="promo-popup-preview-title">Popup disabled</strong>
+                                    <span id="promo-popup-preview-detail">Enable the popup and add a slide image to publish it.</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="index-settings-status" id="promo-popup-settings-status"></p>
+                    <div class="index-settings-actions">
+                        <button type="button" class="btn-action" style="background:#789; padding: 10px 24px;" onclick="loadPromoPopupSettings()">ยกเลิก / โหลดใหม่</button>
+                        <button type="submit" class="btn-submit" style="width: auto; padding: 10px 32px; background: var(--accent-color);">บันทึก Promotional Popup</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <!-- Footer Settings Section -->
         <div id="footer-settings" class="content-section">
             <div class="section-container">
@@ -4003,7 +4074,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=promo-save-feedback-20260629"></script>
+    <script type="module" src="js/admin.js?v=promo-popup-restore-20260630"></script>
     <script>
         (function cleanRemovedAdminHash() {
             const rawHash = String(window.location.hash || '').replace(/^#/, '');

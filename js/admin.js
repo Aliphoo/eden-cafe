@@ -268,11 +268,13 @@ const ADMIN_PERMISSION_LABELS = {
     marketing: 'Marketing Tools',
     business: 'Business Info',
     index: '\u0e08\u0e31\u0e14\u0e01\u0e32\u0e23 Index',
+    promotions: 'Promotional Popup',
     footer: 'Footer'
 };
 const ADMIN_PERMISSION_HELP = {
     pos: 'อนุญาตให้ล็อกอิน Eden POS APK และซิงค์บิล/ใบเสร็จหน้าร้าน',
-    archery: 'อนุญาตให้จัดการ Archery, walk-in, payment watch และ action หน้างาน'
+    archery: 'อนุญาตให้จัดการ Archery, walk-in, payment watch และ action หน้างาน',
+    promotions: 'Manage promotional popup carousel, display locations, audiences, images, and optional links.'
 };
 const ADMIN_PERMISSION_FALLBACKS = {
     archery: ['bookings']
@@ -306,6 +308,7 @@ const ADMIN_ROLE_DEFAULT_PERMISSIONS = {
         marketing: false,
         business: false,
         index: false,
+        promotions: false,
         footer: false
     }
 };
@@ -331,6 +334,7 @@ const ADMIN_TAB_PERMISSIONS = {
     promptpay: 'promptpay',
     'business-settings': 'business',
     'index-settings': 'index',
+    'promo-popup-settings': 'promotions',
     'marketing-settings': 'marketing',
     'footer-settings': 'footer'
 };
@@ -1399,6 +1403,9 @@ function initAdminTab(tabId, options = {}) {
         case 'index-settings':
             if (typeof window.loadIndexSettings === 'function') window.loadIndexSettings();
             break;
+        case 'promo-popup-settings':
+            if (typeof window.loadPromoPopupSettings === 'function') window.loadPromoPopupSettings();
+            break;
         case 'marketing-settings':
             if (typeof window.loadMarketingSettings === 'function') window.loadMarketingSettings();
             break;
@@ -1567,6 +1574,9 @@ window.refreshAdminSection = async (tabId, button = null) => {
                 break;
             case 'index-settings':
                 if (typeof window.loadIndexSettings === 'function') await window.loadIndexSettings();
+                break;
+            case 'promo-popup-settings':
+                if (typeof window.loadPromoPopupSettings === 'function') await window.loadPromoPopupSettings();
                 break;
             case 'marketing-settings':
                 if (typeof window.loadMarketingSettings === 'function') await window.loadMarketingSettings();
@@ -13403,6 +13413,302 @@ indexSettingsForm?.addEventListener('submit', async (event) => {
         console.error('Unable to save index settings:', error);
         setIndexStatus(safeAdminError('\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01 Index \u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08'), 'error');
         alert(safeAdminError('\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01 Index \u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08'));
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+        }
+    }
+});
+
+// ==========================================
+// Promotional Popup Management Logic
+// ==========================================
+
+const promoPopupSettingsForm = document.getElementById('promoPopupSettingsForm');
+const PROMO_POPUP_SETTINGS_REF = () => doc(db, 'site_settings', 'promo_popup');
+const PROMO_POPUP_MAX_SLIDES = 8;
+const DEFAULT_PROMO_POPUP_SETTINGS = {
+    enabled: false,
+    title: 'Eden Cafe promotions',
+    displayLocation: 'home',
+    audience: 'everyone',
+    slides: []
+};
+let promoPopupSlides = [];
+
+function normalizePromoDisplayLocation(value = '') {
+    const location = String(value || '').trim();
+    return ['home', 'profile', 'home_profile', 'all_public'].includes(location) ? location : 'home';
+}
+
+function normalizePromoDisplayLocationFromSettings(raw = {}) {
+    const direct = normalizePromoDisplayLocation(raw.displayLocation || raw.display_location || raw.location);
+    if (direct !== 'home') return direct;
+    const list = Array.isArray(raw.displayLocations || raw.display_locations || raw.displayTargets || raw.display_targets)
+        ? raw.displayLocations || raw.display_locations || raw.displayTargets || raw.display_targets
+        : [];
+    const locations = list.map(item => String(item || '').trim()).filter(Boolean);
+    if (locations.includes('all_public')) return 'all_public';
+    if (locations.includes('home') && locations.includes('profile')) return 'home_profile';
+    if (locations.includes('profile')) return 'profile';
+    return direct;
+}
+
+function normalizePromoAudience(value = '') {
+    const audience = String(value || '').trim();
+    return ['everyone', 'members', 'guests'].includes(audience) ? audience : 'everyone';
+}
+
+function normalizeTargetPromoPopupSettings(raw = {}) {
+    const slides = Array.isArray(raw.slides)
+        ? raw.slides
+            .map((slide, index) => normalizePromoPopupSlide(slide, index))
+            .filter(slide => slide.imageUrl)
+            .slice(0, PROMO_POPUP_MAX_SLIDES)
+        : [];
+    return {
+        enabled: raw.enabled === true,
+        title: cleanIndexText(raw.title || raw.titleTh || raw.titleEn, DEFAULT_PROMO_POPUP_SETTINGS.title, 90),
+        displayLocation: normalizePromoDisplayLocationFromSettings(raw),
+        audience: normalizePromoAudience(raw.audience || raw.targetAudience || raw.target_audience),
+        slides
+    };
+}
+
+function setPromoPopupStatus(message = '', tone = '') {
+    const status = document.getElementById('promo-popup-settings-status');
+    if (!status) return;
+    status.textContent = message;
+    status.className = 'index-settings-status' + (tone ? ' ' + tone : '');
+}
+
+function promoPopupField(id) {
+    return document.getElementById(id);
+}
+
+function setPromoPopupField(id, value) {
+    const field = promoPopupField(id);
+    if (field) field.value = value || '';
+}
+
+function readPromoPopupSlidesFromRows(options = {}) {
+    const list = document.getElementById('promo-popup-slide-list');
+    const rows = Array.from(list?.querySelectorAll('[data-promo-popup-slide-index]') || []);
+    const slides = rows.map((row, index) => normalizePromoPopupSlide({
+        id: row.dataset.promoPopupSlideId || '',
+        imageUrl: row.querySelector('[data-promo-popup-field="imageUrl"]')?.value || '',
+        linkUrl: row.querySelector('[data-promo-popup-field="linkUrl"]')?.value || '',
+        altText: row.querySelector('[data-promo-popup-field="altText"]')?.value || '',
+        active: true
+    }, index));
+    return options.includeBlank ? slides : slides.filter(slide => slide.imageUrl);
+}
+
+function syncPromoPopupSlidesFromDom() {
+    const slides = readPromoPopupSlidesFromRows({ includeBlank: true });
+    if (slides.length) promoPopupSlides = slides.slice(0, PROMO_POPUP_MAX_SLIDES);
+}
+
+function readPromoPopupSettingsForm() {
+    return normalizeTargetPromoPopupSettings({
+        enabled: promoPopupField('promo-popup-enabled')?.checked === true,
+        title: promoPopupField('promo-popup-title')?.value || '',
+        displayLocation: promoPopupField('promo-popup-display-location')?.value || 'home',
+        audience: promoPopupField('promo-popup-audience')?.value || 'everyone',
+        slides: readPromoPopupSlidesFromRows()
+    });
+}
+
+function updatePromoPopupPreview(promo = readPromoPopupSettingsForm()) {
+    const title = document.getElementById('promo-popup-preview-title');
+    const detail = document.getElementById('promo-popup-preview-detail');
+    const media = document.getElementById('promo-popup-preview-media');
+    const firstSlide = promo.slides[0];
+    if (media) media.style.backgroundImage = firstSlide?.imageUrl ? `url("${firstSlide.imageUrl}")` : '';
+    if (!promo.enabled) {
+        if (title) title.textContent = 'Popup disabled';
+        if (detail) detail.textContent = 'Enable the popup and add a slide image to publish it.';
+        return;
+    }
+    if (title) title.textContent = promo.title || DEFAULT_PROMO_POPUP_SETTINGS.title;
+    if (detail) {
+        detail.textContent = promo.slides.length
+            ? `${promo.slides.length} slide${promo.slides.length === 1 ? '' : 's'} ready for ${promo.displayLocation.replace('_', ' ')} / ${promo.audience}${promo.slides.some(slide => slide.linkUrl) ? ' with optional links' : ''}.`
+            : 'Enabled, but no valid slide image has been added yet.';
+    }
+}
+
+function renderPromoPopupSlides(slides = promoPopupSlides) {
+    const list = document.getElementById('promo-popup-slide-list');
+    if (!list) return;
+    const rows = (slides.length ? slides : [createBlankPromoSlide()]).slice(0, PROMO_POPUP_MAX_SLIDES);
+    promoPopupSlides = rows;
+    list.innerHTML = rows.map((slide, index) => `
+        <div class="index-promo-slide" data-promo-popup-slide-index="${index}" data-promo-popup-slide-id="${escapeHTML(slide.id || '')}">
+            <div class="index-promo-slide-head">
+                <strong>Slide ${index + 1}</strong>
+                <button type="button" class="index-promo-remove" data-promo-popup-action="remove" data-promo-popup-index="${index}">Remove</button>
+            </div>
+            <div class="index-promo-slide-grid">
+                <div class="index-promo-thumb">${promoSlideThumbHTML(slide)}</div>
+                <div class="index-promo-fields">
+                    <div class="form-group">
+                        <label for="promo-popup-slide-${index}-image-url">Image URL</label>
+                        <input type="text" id="promo-popup-slide-${index}-image-url" data-promo-popup-field="imageUrl" value="${escapeHTML(slide.imageUrl || '')}" placeholder="https://... or /Images/..." maxlength="500">
+                    </div>
+                    <div class="form-group">
+                        <label for="promo-popup-slide-${index}-link-url">Optional link URL</label>
+                        <input type="text" id="promo-popup-slide-${index}-link-url" data-promo-popup-field="linkUrl" value="${escapeHTML(slide.linkUrl || '')}" placeholder="/shop.html or https://..." maxlength="500">
+                    </div>
+                    <div class="form-group">
+                        <label for="promo-popup-slide-${index}-alt-text">Alt text</label>
+                        <input type="text" id="promo-popup-slide-${index}-alt-text" data-promo-popup-field="altText" value="${escapeHTML(slide.altText || '')}" placeholder="Promotion image description" maxlength="180">
+                    </div>
+                    <div class="form-group">
+                        <label for="promo-popup-slide-${index}-upload">Upload image</label>
+                        <input type="file" id="promo-popup-slide-${index}-upload" data-promo-popup-upload="${index}" accept="image/*">
+                    </div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+
+    list.querySelectorAll('[data-promo-popup-field]').forEach(input => {
+        input.addEventListener('input', () => {
+            syncPromoPopupSlidesFromDom();
+            updatePromoPopupPreview();
+        });
+    });
+    list.querySelectorAll('[data-promo-popup-action="remove"]').forEach(button => {
+        button.addEventListener('click', () => {
+            syncPromoPopupSlidesFromDom();
+            const index = Number(button.dataset.promoPopupIndex);
+            if (Number.isInteger(index)) promoPopupSlides.splice(index, 1);
+            renderPromoPopupSlides(promoPopupSlides);
+        });
+    });
+    list.querySelectorAll('[data-promo-popup-upload]').forEach(input => {
+        input.addEventListener('change', event => uploadPromoPopupSlideImage(Number(input.dataset.promoPopupUpload), event.target.files?.[0]));
+    });
+    updatePromoPopupPreview();
+}
+
+async function uploadPromoPopupSlideImage(index, file) {
+    if (!file || !Number.isInteger(index)) return;
+    syncPromoPopupSlidesFromDom();
+    try {
+        setPromoPopupStatus('Uploading popup slide image...');
+        const url = await uploadAdminImageFromFile(file, 'promo-popup', safePromoFileName(file, index), {
+            surface: 'Promotional popup slide',
+            subtitle: 'promotional modal',
+            targetField: `promo-popup-slide-${index}-image-url`,
+            quality: 0.86
+        });
+        promoPopupSlides[index] = {
+            ...(promoPopupSlides[index] || createBlankPromoSlide()),
+            imageUrl: url
+        };
+        renderPromoPopupSlides(promoPopupSlides);
+        setPromoPopupStatus('Popup slide image uploaded.');
+    } catch (error) {
+        console.error('Unable to upload promotional popup slide image:', error);
+        setPromoPopupStatus(error.message || 'Popup slide upload failed.', 'error');
+    }
+}
+
+function fillPromoPopupSettingsForm(settings = DEFAULT_PROMO_POPUP_SETTINGS) {
+    const normalized = normalizeTargetPromoPopupSettings(settings);
+    const enabled = promoPopupField('promo-popup-enabled');
+    if (enabled) enabled.checked = normalized.enabled;
+    setPromoPopupField('promo-popup-title', normalized.title);
+    setPromoPopupField('promo-popup-display-location', normalized.displayLocation);
+    setPromoPopupField('promo-popup-audience', normalized.audience);
+    renderPromoPopupSlides(normalized.slides);
+    updatePromoPopupPreview();
+}
+
+async function buildPromoPopupSettingsFromDocs() {
+    const [promoSnap, indexSnap] = await Promise.all([
+        getDoc(PROMO_POPUP_SETTINGS_REF()).catch(() => null),
+        getDoc(INDEX_SETTINGS_REF()).catch(() => null)
+    ]);
+    if (promoSnap?.exists()) {
+        return { settings: promoSnap.data(), source: 'site_settings/promo_popup' };
+    }
+    const legacyPopup = indexSnap?.exists() ? indexSnap.data()?.promoPopup || indexSnap.data()?.promo_popup : null;
+    return {
+        settings: legacyPopup
+            ? { ...DEFAULT_PROMO_POPUP_SETTINGS, ...legacyPopup, displayLocation: 'home', audience: 'everyone' }
+            : DEFAULT_PROMO_POPUP_SETTINGS,
+        source: legacyPopup ? 'legacy site_settings/index.promoPopup prefill' : 'defaults'
+    };
+}
+
+window.updatePromoPopupPreview = () => updatePromoPopupPreview();
+
+window.addPromoPopupSlide = function() {
+    syncPromoPopupSlidesFromDom();
+    if (promoPopupSlides.length >= PROMO_POPUP_MAX_SLIDES) {
+        setPromoPopupStatus('Maximum popup slides reached.', 'error');
+        return;
+    }
+    promoPopupSlides.push(createBlankPromoSlide());
+    renderPromoPopupSlides(promoPopupSlides);
+};
+
+window.loadPromoPopupSettings = async function() {
+    try {
+        setPromoPopupStatus('Loading promotional popup settings...');
+        const { settings, source } = await buildPromoPopupSettingsFromDocs();
+        fillPromoPopupSettingsForm(settings);
+        setPromoPopupStatus(
+            source === 'site_settings/promo_popup'
+                ? 'Loaded from site_settings/promo_popup.'
+                : 'No popup doc yet. Prefilled from legacy Index popup/defaults; review and save to create site_settings/promo_popup.',
+            source === 'site_settings/promo_popup' ? '' : 'warning'
+        );
+    } catch (error) {
+        console.error('Error loading promotional popup settings:', error);
+        fillPromoPopupSettingsForm(DEFAULT_PROMO_POPUP_SETTINGS);
+        setPromoPopupStatus('Unable to load popup settings. Defaults are shown.', 'error');
+    }
+};
+
+promoPopupSettingsForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!canAdmin('promotions')) {
+        setPromoPopupStatus('This account cannot edit Promotional Popup.', 'error');
+        return;
+    }
+
+    const submitBtn = promoPopupSettingsForm.querySelector('button[type="submit"]');
+    const originalText = submitBtn?.textContent;
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+    }
+
+    try {
+        const settings = readPromoPopupSettingsForm();
+        if (settings.enabled && !settings.slides.length) {
+            setPromoPopupStatus('Enable popup needs at least one slide image.', 'error');
+            alert('Please add at least one popup slide image before enabling the popup.');
+            return;
+        }
+        await setDoc(PROMO_POPUP_SETTINGS_REF(), {
+            ...settings,
+            updatedAt: serverTimestamp(),
+            updatedBy: auth.currentUser?.uid || '',
+            updatedByEmail: auth.currentUser?.email || ''
+        }, { merge: true });
+        fillPromoPopupSettingsForm(settings);
+        setPromoPopupStatus('Promotional Popup saved to site_settings/promo_popup.');
+        alert('Promotional Popup saved.');
+    } catch (error) {
+        console.error('Unable to save promotional popup settings:', error);
+        setPromoPopupStatus(safeAdminError('Save Promotional Popup failed'), 'error');
+        alert(safeAdminError('Save Promotional Popup failed'));
     } finally {
         if (submitBtn) {
             submitBtn.disabled = false;

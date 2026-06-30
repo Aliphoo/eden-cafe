@@ -562,7 +562,6 @@ async function loadIndexSettings() {
     try {
         const snap = await getDoc(SETTINGS_REF);
         if (!snap.exists()) {
-            destroyPromoPopup();
             if (!cached) applyIndexSettings(FALLBACK_INDEX, 'fallback');
             return;
         }
@@ -570,7 +569,6 @@ async function loadIndexSettings() {
         const settings = normalizeIndexSettings(rawSettings);
         writeCache(settings);
         applyIndexSettings(settings, 'firestore');
-        renderPromoPopup(rawSettings.promoPopup || rawSettings.promo_popup || {});
     } catch (_) {
         if (!cached) applyIndexSettings(FALLBACK_INDEX, 'fallback');
     }
