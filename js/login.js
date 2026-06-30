@@ -47,6 +47,7 @@ autoEnhanceOtpInputs();
 
 let authResolved = false;
 let loginInProgress = false;
+const RESET_AUTH_SUPPRESS_KEY = 'eden_password_reset_auth_suppressed_until';
 const resetState = {
     step: 'request',
     active: false,
@@ -93,6 +94,29 @@ function isForgotResetActive() {
     return resetState.active || resetState.verifyingOtp || resetState.completing;
 }
 
+function setForgotAuthSuppression(isActive) {
+    try {
+        if (isActive) {
+            sessionStorage.setItem(RESET_AUTH_SUPPRESS_KEY, String(Date.now() + 2 * 60 * 1000));
+        } else {
+            sessionStorage.removeItem(RESET_AUTH_SUPPRESS_KEY);
+        }
+    } catch (_) {
+    }
+}
+
+function clearForgotMemberAuthUi() {
+    try {
+        localStorage.removeItem('eden_user');
+    } catch (_) {
+    }
+    if (typeof window.clearEdenStoredUser === 'function') {
+        window.clearEdenStoredUser('password-reset');
+    } else {
+        window.dispatchEvent(new CustomEvent('eden:user-changed', { detail: { reason: 'password-reset' } }));
+    }
+}
+
 function syncForgotStepFields(isBusy = false) {
     const otpActive = resetState.step === 'otp';
     const passwordActive = resetState.step === 'password';
@@ -112,9 +136,9 @@ function renderForgotResetStep(step) {
 }
 
 async function clearForgotPhoneAuthSession() {
-    if (!auth?.currentUser) return;
     try {
-        await signOut(auth);
+        if (auth?.currentUser) await signOut(auth);
+        clearForgotMemberAuthUi();
     } catch (error) {
         console.warn('Unable to clear phone reset Firebase session:', error);
     }
@@ -434,9 +458,11 @@ els.forgotCompleteForm?.addEventListener('submit', async event => {
             setOtpUiStatus(els.forgotOtp, 'loading');
             if (resetState.firebasePhoneAuth) {
                 if (!resetState.phoneConfirmationResult) throw new Error('ไม่พบรายการ OTP กรุณาขอรหัสใหม่');
+                setForgotAuthSuppression(true);
                 const credential = await resetState.phoneConfirmationResult.confirm(otp);
                 resetState.firebaseIdToken = await credential.user.getIdToken(true);
                 await clearForgotPhoneAuthSession();
+                setForgotAuthSuppression(false);
             } else {
                 const result = await verifyPasswordResetOtp({
                     verificationId: resetState.verificationId,
@@ -453,6 +479,10 @@ els.forgotCompleteForm?.addEventListener('submit', async event => {
             els.forgotPassword?.focus();
             setStatus('ยืนยัน OTP สำเร็จ กรุณาตั้งรหัสผ่านใหม่', 'success');
         } catch (error) {
+            if (resetState.firebasePhoneAuth) {
+                await clearForgotPhoneAuthSession();
+                setForgotAuthSuppression(false);
+            }
             resetState.firebaseIdToken = '';
             resetState.resetToken = '';
             setOtpUiStatus(els.forgotOtp, 'error');
@@ -496,6 +526,8 @@ els.forgotCompleteForm?.addEventListener('submit', async event => {
             resetToken: resetState.resetToken
         });
         await clearForgotPhoneAuthSession();
+        setForgotAuthSuppression(false);
+        clearForgotMemberAuthUi();
         const resetIdentifier = resetState.identifier;
         closeForgotPanel();
         setStatus('รีเซ็ตรหัสผ่านของท่านแล้ว กรุณาเข้าสู่ระบบด้วยรหัสผ่านใหม่', 'success');

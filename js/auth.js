@@ -8,6 +8,7 @@ import { collection, doc, setDoc, getDoc, serverTimestamp, getDocs, query, where
 const FUNCTIONS_BASE_URL = 'https://asia-southeast1-edencafe-d9095.cloudfunctions.net';
 const ADMIN_EMAILS = ['admin@edencafe.com', 'phoo1236@gmail.com', 'sonsawan.1231@gmail.com'];
 const PHONE_AUTH_EMAIL_DOMAIN = 'phone.edencafe.co';
+const RESET_AUTH_SUPPRESS_KEY = 'eden_password_reset_auth_suppressed_until';
 
 function wait(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -134,6 +135,20 @@ function isEnglishPage() {
 
 function isInternalPhoneEmail(email) {
     return String(email || '').toLowerCase().endsWith('@' + PHONE_AUTH_EMAIL_DOMAIN);
+}
+
+function isPasswordResetAuthSuppressed() {
+    try {
+        const until = Number(sessionStorage.getItem(RESET_AUTH_SUPPRESS_KEY) || 0);
+        if (!until) return false;
+        if (until < Date.now()) {
+            sessionStorage.removeItem(RESET_AUTH_SUPPRESS_KEY);
+            return false;
+        }
+        return true;
+    } catch (_) {
+        return false;
+    }
 }
 
 function publicEmail(user, fallback = '') {
@@ -377,6 +392,12 @@ function checkLoginStatus() {
     });
 }
 
+function clearStoredAuthUser(reason = '') {
+    localStorage.removeItem('eden_user');
+    checkLoginStatus();
+    window.dispatchEvent(new CustomEvent('eden:user-changed', { detail: { reason } }));
+}
+
 function toggleDropdown(imgElement) {
     const menu = imgElement?.nextElementSibling;
     if (menu) menu.classList.toggle('show');
@@ -466,6 +487,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (auth) {
         onAuthStateChanged(auth, user => {
+            if (user && isPasswordResetAuthSuppressed()) {
+                clearStoredAuthUser('password-reset');
+                return;
+            }
+
             if (user) {
                 syncAuthUserProfile(user);
                 const storedUser = getStoredUser() || {};
@@ -481,6 +507,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     phoneNumber: user.phoneNumber || storedUser.phoneNumber || ''
                 };
                 getUserAdminAccess(user).then(access => {
+                    if (isPasswordResetAuthSuppressed() || auth?.currentUser?.uid !== user.uid) return;
                     const isBackOffice = isBackOfficeAccess(access);
                     localStorage.setItem('eden_user', JSON.stringify({
                         ...baseStoredUser,
@@ -502,7 +529,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     canUsePos: canUsePosAccess(bootstrapAccess)
                 }));
             } else {
-                localStorage.removeItem('eden_user');
+                clearStoredAuthUser('signed-out');
+                return;
             }
             checkLoginStatus();
             window.dispatchEvent(new CustomEvent('eden:user-changed'));
@@ -525,6 +553,7 @@ window.closeLoginModal = closeLoginModal;
 window.startPhoneLogin = startPhoneLogin;
 window.logout = logout;
 window.toggleDropdown = toggleDropdown;
+window.clearEdenStoredUser = clearStoredAuthUser;
 window.updateGlobalCartBadge = updateGlobalCartBadge;
 window.saveBookingToCloud = saveBookingToCloud;
 window.fetchRoomsFromCloud = fetchRoomsFromCloud;
