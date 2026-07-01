@@ -13,6 +13,10 @@ function getLocalizedValue(element, key, lang) {
 }
 
 function initGalleryCarousel(root) {
+    if (typeof root.__galleryCarouselCleanup === 'function') {
+        root.__galleryCarouselCleanup();
+    }
+
     const viewport = root.querySelector('[data-gallery-viewport]');
     const track = root.querySelector('[data-gallery-track]');
     const cards = Array.from(root.querySelectorAll('[data-gallery-card]'));
@@ -20,8 +24,18 @@ function initGalleryCarousel(root) {
     const nextButton = root.querySelector('[data-gallery-next]');
     const dotsRoot = root.querySelector('[data-gallery-dots]');
     const status = root.querySelector('[data-gallery-status]');
+    const cleanup = [];
 
-    if (!viewport || !cards.length) return;
+    root.__galleryCarouselCleanup = () => {
+        cleanup.forEach(remove => remove());
+        root.__galleryCarouselCleanup = null;
+    };
+
+    if (!viewport || !cards.length) {
+        dotsRoot?.replaceChildren();
+        if (status) status.textContent = '';
+        return null;
+    }
 
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     const lang = isEnglishPage() ? 'En' : 'Th';
@@ -33,6 +47,10 @@ function initGalleryCarousel(root) {
     let pendingScrollLeft = 0;
 
     const wrapIndex = index => (index + cards.length) % cards.length;
+    const on = (target, type, listener, options) => {
+        target?.addEventListener(type, listener, options);
+        cleanup.push(() => target?.removeEventListener(type, listener, options));
+    };
 
     function resolveGalleryWidth(customProperty, fallback) {
         const probe = document.createElement('span');
@@ -82,7 +100,7 @@ function initGalleryCarousel(root) {
             dot.type = 'button';
             dot.className = 'gallery-carousel-dot';
             dot.setAttribute('aria-label', card.getAttribute('aria-label') || `Gallery image ${index + 1}`);
-            dot.addEventListener('click', () => setActive(index, { focus: true }));
+            on(dot, 'click', () => setActive(index, { focus: true }));
             dotsRoot.appendChild(dot);
             return dot;
         });
@@ -120,7 +138,7 @@ function initGalleryCarousel(root) {
             const title = getLocalizedValue(cards[activeIndex], 'Title', lang) || cards[activeIndex].getAttribute('aria-label') || '';
             status.textContent = lang === 'En'
                 ? `Showing image ${activeIndex + 1} of ${cards.length}: ${title}`
-                : `กำลังแสดงภาพที่ ${activeIndex + 1} จาก ${cards.length}: ${title}`;
+                : `\u0e01\u0e33\u0e25\u0e31\u0e07\u0e41\u0e2a\u0e14\u0e07\u0e20\u0e32\u0e1e\u0e17\u0e35\u0e48 ${activeIndex + 1} \u0e08\u0e32\u0e01 ${cards.length}: ${title}`;
         }
     }
 
@@ -204,7 +222,7 @@ function initGalleryCarousel(root) {
     }
 
     cards.forEach((card, index) => {
-        card.addEventListener('click', event => {
+        on(card, 'click', event => {
             if (suppressClick) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -214,16 +232,16 @@ function initGalleryCarousel(root) {
         });
     });
 
-    prevButton?.addEventListener('click', () => setActive(activeIndex - 1, { focus: true }));
-    nextButton?.addEventListener('click', () => setActive(activeIndex + 1, { focus: true }));
+    on(prevButton, 'click', () => setActive(activeIndex - 1, { focus: true }));
+    on(nextButton, 'click', () => setActive(activeIndex + 1, { focus: true }));
 
-    root.addEventListener('keydown', event => {
+    on(root, 'keydown', event => {
         if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
         event.preventDefault();
         setActive(activeIndex + (event.key === 'ArrowRight' ? 1 : -1), { focus: true });
     });
 
-    viewport.addEventListener('pointerdown', event => {
+    on(viewport, 'pointerdown', event => {
         if (event.button !== 0 || cards.length < 2) return;
 
         const card = event.target.closest?.('[data-gallery-card]');
@@ -242,7 +260,7 @@ function initGalleryCarousel(root) {
         } catch (_) {}
     });
 
-    viewport.addEventListener('pointermove', event => {
+    on(viewport, 'pointermove', event => {
         if (!dragState || event.pointerId !== dragState.pointerId) return;
 
         const deltaX = event.clientX - dragState.startX;
@@ -258,9 +276,9 @@ function initGalleryCarousel(root) {
         requestScroll(dragState.startScrollLeft - deltaX);
     });
 
-    viewport.addEventListener('pointerup', finishDrag);
-    viewport.addEventListener('pointercancel', finishDrag);
-    viewport.addEventListener('lostpointercapture', event => {
+    on(viewport, 'pointerup', finishDrag);
+    on(viewport, 'pointercancel', finishDrag);
+    on(viewport, 'lostpointercapture', event => {
         if (dragState && event.pointerId === dragState.pointerId) {
             root.classList.remove('is-dragging');
             root.classList.remove('is-pointer-down');
@@ -268,14 +286,25 @@ function initGalleryCarousel(root) {
         }
     });
 
-    window.addEventListener('resize', () => {
+    on(window, 'resize', () => {
         window.clearTimeout(resizeTimer);
         resizeTimer = window.setTimeout(() => snapToActive({ instant: true }), 120);
     }, { passive: true });
 
+    cleanup.push(() => {
+        window.clearTimeout(resizeTimer);
+        if (scrollFrame) cancelAnimationFrame(scrollFrame);
+    });
+
     localizeCards();
     dots = createDots();
     setActive(activeIndex, { instant: true });
+    return { setActive };
 }
 
-document.querySelectorAll('[data-gallery-carousel]').forEach(initGalleryCarousel);
+window.initGalleryCarousel = initGalleryCarousel;
+window.refreshGalleryCarousels = function refreshGalleryCarousels() {
+    document.querySelectorAll('[data-gallery-carousel]').forEach(initGalleryCarousel);
+};
+
+window.refreshGalleryCarousels();

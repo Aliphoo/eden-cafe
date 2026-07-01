@@ -12835,6 +12835,69 @@ const INDEX_ABOUT_QUICK_FACTS_MAX = 6;
 const INDEX_ABOUT_STORY_BLOCKS_MAX = 5;
 const INDEX_ABOUT_FAQ_MAX = 5;
 const INDEX_ABOUT_RELATED_LINKS_MAX = 6;
+const INDEX_ABOUT_GALLERY_CARDS_MAX = 8;
+const DEFAULT_ABOUT_GALLERY_CARDS = [
+    {
+        titleTh: 'มุมคาเฟ่และระเบียง',
+        titleEn: 'Cafe deck corner',
+        descriptionTh: 'มุมนั่งพักใกล้ธรรมชาติ เห็นบรรยากาศร้านและวิวสีเขียวรอบคาเฟ่',
+        descriptionEn: 'A relaxed seating corner with cafe atmosphere and green views.',
+        kickerTh: 'พื้นที่พักผ่อน',
+        kickerEn: 'Cafe corner',
+        imageUrl: '/Hero/Hero.webp',
+        imageAltTh: 'มุมคาเฟ่และระเบียงของ Eden Cafe ท่ามกลางธรรมชาติ',
+        imageAltEn: 'Cafe deck corner at Eden Cafe surrounded by nature',
+        objectPosition: '18% 52%'
+    },
+    {
+        titleTh: 'สวนสีเขียว',
+        titleEn: 'Green garden',
+        descriptionTh: 'พื้นที่สวนและสนามหญ้าสำหรับเดินเล่น ถ่ายรูป และใช้เวลาช้า ๆ',
+        descriptionEn: 'Garden and lawn space for slow walks, photos, and quiet time.',
+        kickerTh: 'สวน',
+        kickerEn: 'Garden',
+        imageUrl: '/Hero/Hero.webp',
+        imageAltTh: 'สวนสีเขียวและสนามหญ้าของ Eden Cafe เชียงราย',
+        imageAltEn: 'Green garden and lawn at Eden Cafe Chiang Rai',
+        objectPosition: '42% 66%'
+    },
+    {
+        titleTh: 'วิวทะเลสาบ',
+        titleEn: 'Lakeside view',
+        descriptionTh: 'วิวริมน้ำที่เปิดโล่ง สงบ และเหมาะกับการพักสายตาระหว่างวัน',
+        descriptionEn: 'An open lakeside view with a calm, refreshing atmosphere.',
+        kickerTh: 'ริมน้ำ',
+        kickerEn: 'Lakeside',
+        imageUrl: '/Hero/Hero.webp',
+        imageAltTh: 'วิวทะเลสาบและพื้นที่ธรรมชาติรอบ Eden Cafe',
+        imageAltEn: 'Lakeside view and nature area around Eden Cafe',
+        objectPosition: '76% 48%'
+    },
+    {
+        titleTh: 'ภูเขาเชียงราย',
+        titleEn: 'Chiang Rai hills',
+        descriptionTh: 'ฉากภูเขาและหมอกบาง ๆ ที่ทำให้บรรยากาศคาเฟ่ดูผ่อนคลาย',
+        descriptionEn: 'Chiang Rai hill scenery and soft mist around the cafe.',
+        kickerTh: 'ธรรมชาติ',
+        kickerEn: 'Nature',
+        imageUrl: '/Hero/Hero.webp',
+        imageAltTh: 'ภูเขาและหมอกใกล้ Eden Cafe เชียงราย',
+        imageAltEn: 'Hills and mist near Eden Cafe Chiang Rai',
+        objectPosition: '64% 24%'
+    },
+    {
+        titleTh: 'บรรยากาศคาเฟ่',
+        titleEn: 'Cafe atmosphere',
+        descriptionTh: 'ภาพรวมของร้าน สวน และวิวธรรมชาติที่เป็นเอกลักษณ์ของ Eden Cafe',
+        descriptionEn: 'A wide view of the cafe, garden, and natural Eden Cafe setting.',
+        kickerTh: 'บรรยากาศ',
+        kickerEn: 'Atmosphere',
+        imageUrl: '/Hero/Hero.webp',
+        imageAltTh: 'บรรยากาศธรรมชาติของ Eden Cafe พร้อมสวน ทะเลสาบ และภูเขา',
+        imageAltEn: 'Nature view at Eden Cafe with garden, lake, and hills',
+        objectPosition: '48% 50%'
+    }
+];
 const DEFAULT_INDEX_SETTINGS = {
     heroImageUrl: '/Hero/Hero.webp',
     heroTitleTh: 'จากใจเรา สู่มือคุณ',
@@ -12858,6 +12921,7 @@ const DEFAULT_INDEX_SETTINGS = {
             imageAltTh: 'บรรยากาศธรรมชาติของ Eden Cafe เชียงราย พร้อมกาแฟพิเศษจากเมล็ดกาแฟไทย',
             imageAltEn: 'Nature setting at Eden Cafe Chiang Rai with Thai specialty coffee'
         },
+        galleryCards: DEFAULT_ABOUT_GALLERY_CARDS,
         quickFacts: [
             { labelTh: 'ที่ตั้ง', valueTh: 'นางแล อำเภอเมืองเชียงราย', labelEn: 'Location', valueEn: 'Nang Lae, Mueang Chiang Rai' },
             { labelTh: 'กาแฟ', valueTh: 'เมล็ดกาแฟไทยจากแหล่งปลูกบนดอย', labelEn: 'Coffee', valueEn: 'Thai highland coffee beans' },
@@ -12968,19 +13032,54 @@ function cleanIndexRows(rows, mapper, maxItems) {
         .slice(0, maxItems);
 }
 
-function normalizeAboutSeoSettings(raw = {}) {
+function cleanIndexObjectPosition(value, fallback = '50% 50%') {
+    const position = String(value || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+    const token = '(?:center|left|right|top|bottom|(?:100|[1-9]?\\d)(?:\\.\\d{1,2})?%)';
+    return new RegExp(`^${token}(?: ${token})?$`, 'i').test(position) ? position : fallback;
+}
+
+function normalizeIndexGalleryCard(raw = {}, index = 0, fallbackImageUrl = DEFAULT_INDEX_SETTINGS.heroImageUrl) {
+    const fallback = DEFAULT_ABOUT_GALLERY_CARDS[index % DEFAULT_ABOUT_GALLERY_CARDS.length] || DEFAULT_ABOUT_GALLERY_CARDS[0];
+    const imageUrl = safeImageURL(raw.imageUrl || raw.image_url || '', fallbackImageUrl || fallback.imageUrl);
+
+    return {
+        titleTh: cleanIndexText(raw.titleTh || raw.title_th || raw.title, fallback.titleTh || `Gallery ${index + 1}`, 120),
+        titleEn: cleanIndexText(raw.titleEn || raw.title_en || raw.title, fallback.titleEn || `Gallery ${index + 1}`, 120),
+        descriptionTh: cleanIndexText(raw.descriptionTh || raw.description_th || raw.description, fallback.descriptionTh || '', 220),
+        descriptionEn: cleanIndexText(raw.descriptionEn || raw.description_en || raw.description, fallback.descriptionEn || '', 220),
+        kickerTh: cleanIndexText(raw.kickerTh || raw.kicker_th || raw.kicker, fallback.kickerTh || '', 80),
+        kickerEn: cleanIndexText(raw.kickerEn || raw.kicker_en || raw.kicker, fallback.kickerEn || '', 80),
+        imageUrl,
+        imageAltTh: cleanIndexText(raw.imageAltTh || raw.image_alt_th || raw.altTh || raw.alt, fallback.imageAltTh || fallback.titleTh, 180),
+        imageAltEn: cleanIndexText(raw.imageAltEn || raw.image_alt_en || raw.altEn || raw.alt, fallback.imageAltEn || fallback.titleEn, 180),
+        objectPosition: cleanIndexObjectPosition(raw.objectPosition || raw.object_position || raw.cropPosition, fallback.objectPosition)
+    };
+}
+
+function normalizeIndexGalleryCards(cards, fallbackImageUrl = DEFAULT_INDEX_SETTINGS.heroImageUrl, options = {}) {
+    const rows = cleanIndexRows(cards, (item = {}, index) => normalizeIndexGalleryCard(item, index, fallbackImageUrl), INDEX_ABOUT_GALLERY_CARDS_MAX);
+    if (rows.length || options.allowEmpty) return rows;
+    return DEFAULT_ABOUT_GALLERY_CARDS.map((item, index) => normalizeIndexGalleryCard(item, index, fallbackImageUrl));
+}
+
+function normalizeAboutSeoSettings(raw = {}, options = {}) {
     const fallback = DEFAULT_INDEX_SETTINGS.aboutSeo;
     const hero = raw.hero || {};
     const coffeeOrigin = raw.coffeeOrigin || raw.coffee_origin || {};
     const seo = raw.seo || {};
+    const normalizedHero = {
+        subtitleTh: cleanIndexText(hero.subtitleTh || raw.heroSubtitleTh, fallback.hero.subtitleTh, 320),
+        subtitleEn: cleanIndexText(hero.subtitleEn || raw.heroSubtitleEn, fallback.hero.subtitleEn, 320),
+        imageUrl: safeImageURL(hero.imageUrl || hero.image_url || raw.imageUrl || '', fallback.hero.imageUrl),
+        imageAltTh: cleanIndexText(hero.imageAltTh || raw.imageAltTh, fallback.hero.imageAltTh, 180),
+        imageAltEn: cleanIndexText(hero.imageAltEn || raw.imageAltEn, fallback.hero.imageAltEn, 180)
+    };
+
     return {
-        hero: {
-            subtitleTh: cleanIndexText(hero.subtitleTh || raw.heroSubtitleTh, fallback.hero.subtitleTh, 320),
-            subtitleEn: cleanIndexText(hero.subtitleEn || raw.heroSubtitleEn, fallback.hero.subtitleEn, 320),
-            imageUrl: safeImageURL(hero.imageUrl || hero.image_url || raw.imageUrl || '', fallback.hero.imageUrl),
-            imageAltTh: cleanIndexText(hero.imageAltTh || raw.imageAltTh, fallback.hero.imageAltTh, 180),
-            imageAltEn: cleanIndexText(hero.imageAltEn || raw.imageAltEn, fallback.hero.imageAltEn, 180)
-        },
+        hero: normalizedHero,
+        galleryCards: normalizeIndexGalleryCards(raw.galleryCards || raw.gallery_cards || fallback.galleryCards, normalizedHero.imageUrl, {
+            allowEmpty: options.allowEmptyGalleryCards === true
+        }),
         quickFacts: cleanIndexRows(raw.quickFacts || raw.quick_facts || fallback.quickFacts, (item = {}) => {
             const row = {
                 labelTh: cleanIndexText(item.labelTh || item.label_th || item.label, '', 80),
@@ -13109,6 +13208,110 @@ function readIndexAboutRelatedLinkRows() {
     }));
 }
 
+function indexGalleryCardFieldValue(row, field) {
+    return String(row.querySelector(`[data-gallery-card-field="${field}"]`)?.value || '').trim();
+}
+
+function createBlankIndexGalleryCard() {
+    return {
+        titleTh: '',
+        titleEn: '',
+        descriptionTh: '',
+        descriptionEn: '',
+        kickerTh: '',
+        kickerEn: '',
+        imageUrl: '',
+        imageAltTh: '',
+        imageAltEn: '',
+        objectPosition: '50% 50%'
+    };
+}
+
+function isMeaningfulIndexGalleryCard(card = {}) {
+    return Boolean(
+        card.titleTh || card.titleEn || card.descriptionTh || card.descriptionEn
+        || card.kickerTh || card.kickerEn || card.imageUrl || card.imageAltTh || card.imageAltEn
+    );
+}
+
+function isCompleteIndexGalleryCard(card = {}) {
+    return Boolean(
+        (card.titleTh || card.titleEn)
+        && (card.descriptionTh || card.descriptionEn)
+        && safeImageURL(card.imageUrl || '', '')
+    );
+}
+
+function readIndexGalleryCardRows(options = {}) {
+    const rows = Array.from(document.querySelectorAll('[data-index-gallery-card-row]'));
+    const fallbackImageUrl = indexField('index-about-image-url')?.value || DEFAULT_INDEX_SETTINGS.aboutSeo.hero.imageUrl;
+    const rawCards = rows.map(row => ({
+        titleTh: indexGalleryCardFieldValue(row, 'titleTh'),
+        titleEn: indexGalleryCardFieldValue(row, 'titleEn'),
+        descriptionTh: indexGalleryCardFieldValue(row, 'descriptionTh'),
+        descriptionEn: indexGalleryCardFieldValue(row, 'descriptionEn'),
+        kickerTh: indexGalleryCardFieldValue(row, 'kickerTh'),
+        kickerEn: indexGalleryCardFieldValue(row, 'kickerEn'),
+        imageUrl: indexGalleryCardFieldValue(row, 'imageUrl'),
+        imageAltTh: indexGalleryCardFieldValue(row, 'imageAltTh'),
+        imageAltEn: indexGalleryCardFieldValue(row, 'imageAltEn'),
+        objectPosition: indexGalleryCardFieldValue(row, 'objectPosition')
+    })).slice(0, INDEX_ABOUT_GALLERY_CARDS_MAX);
+
+    if (options.raw) return rawCards;
+    return rawCards
+        .filter(isMeaningfulIndexGalleryCard)
+        .map((card, index) => normalizeIndexGalleryCard(card, index, fallbackImageUrl));
+}
+
+function galleryCardThumbHTML(card = {}) {
+    if (!card.imageUrl) return '<span>No image yet</span>';
+    return '<img src="' + escapeHTML(card.imageUrl) + '" alt="">';
+}
+
+function renderIndexGalleryCards(items = DEFAULT_INDEX_SETTINGS.aboutSeo.galleryCards) {
+    const container = document.getElementById('index-gallery-card-list');
+    if (!container) return;
+    const rows = (Array.isArray(items) ? items : DEFAULT_INDEX_SETTINGS.aboutSeo.galleryCards).slice(0, INDEX_ABOUT_GALLERY_CARDS_MAX);
+    if (!rows.length) {
+        container.innerHTML = '<div class="index-about-row">No gallery cards yet. Add a card before saving.</div>';
+        return;
+    }
+
+    container.innerHTML = rows.map((item, index) => {
+        const previewImageUrl = safeImageURL(item.imageUrl || '', '');
+        const previewItem = { ...item, imageUrl: previewImageUrl };
+        return `
+            <div class="index-about-row" data-index-gallery-card-row>
+                <div class="index-about-row-head">
+                    <strong>Gallery card ${index + 1}</strong>
+                    <button type="button" class="index-about-remove" onclick="removeIndexGalleryCard(${index})">Remove</button>
+                </div>
+                <div class="index-gallery-row-grid">
+                    <div class="index-gallery-thumb">${galleryCardThumbHTML(previewItem)}</div>
+                    <div class="index-about-fields two">
+                        <label>Kicker TH<input type="text" maxlength="80" data-gallery-card-field="kickerTh" value="${escapeHTML(item.kickerTh || '')}" oninput="updateIndexPreview()"></label>
+                        <label>Kicker EN<input type="text" maxlength="80" data-gallery-card-field="kickerEn" value="${escapeHTML(item.kickerEn || '')}" oninput="updateIndexPreview()"></label>
+                        <label>Title TH<input type="text" maxlength="120" data-gallery-card-field="titleTh" value="${escapeHTML(item.titleTh || '')}" oninput="updateIndexPreview()"></label>
+                        <label>Title EN<input type="text" maxlength="120" data-gallery-card-field="titleEn" value="${escapeHTML(item.titleEn || '')}" oninput="updateIndexPreview()"></label>
+                        <label>Description TH<textarea maxlength="220" data-gallery-card-field="descriptionTh" oninput="updateIndexPreview()">${escapeHTML(item.descriptionTh || '')}</textarea></label>
+                        <label>Description EN<textarea maxlength="220" data-gallery-card-field="descriptionEn" oninput="updateIndexPreview()">${escapeHTML(item.descriptionEn || '')}</textarea></label>
+                        <label class="full">Image URL<input type="text" maxlength="500" data-gallery-card-field="imageUrl" id="index-gallery-card-${index}-image-url" value="${escapeHTML(item.imageUrl || '')}" placeholder="/Hero/Hero.webp or /Images/..." oninput="updateIndexPreview()"></label>
+                        <label>Crop / object-position<input type="text" maxlength="40" data-gallery-card-field="objectPosition" value="${escapeHTML(item.objectPosition || '50% 50%')}" placeholder="50% 50%" oninput="updateIndexPreview()"></label>
+                        <label>Upload image<input type="file" accept="image/*" data-gallery-card-upload="${index}"></label>
+                        <label>Image Alt TH<input type="text" maxlength="180" data-gallery-card-field="imageAltTh" value="${escapeHTML(item.imageAltTh || '')}" oninput="updateIndexPreview()"></label>
+                        <label>Image Alt EN<input type="text" maxlength="180" data-gallery-card-field="imageAltEn" value="${escapeHTML(item.imageAltEn || '')}" oninput="updateIndexPreview()"></label>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    container.querySelectorAll('[data-gallery-card-upload]').forEach(input => {
+        input.addEventListener('change', event => uploadIndexGalleryCardImage(Number(input.dataset.galleryCardUpload), event.target.files?.[0]));
+    });
+}
+
 function renderIndexAboutQuickFacts(items = []) {
     const container = document.getElementById('index-about-quick-facts-list');
     if (!container) return;
@@ -13199,6 +13402,7 @@ function readIndexAboutSeoForm() {
             imageAltTh: indexField('index-about-image-alt-th')?.value || '',
             imageAltEn: indexField('index-about-image-alt-en')?.value || ''
         },
+        galleryCards: readIndexGalleryCardRows(),
         quickFacts: readIndexAboutQuickFactsRows(),
         storyBlocks: readIndexAboutStoryRows(),
         coffeeOrigin: {
@@ -13216,7 +13420,7 @@ function readIndexAboutSeoForm() {
             metaDescriptionEn: indexField('index-about-meta-description-en')?.value || '',
             ogImage: indexField('index-about-og-image')?.value || ''
         }
-    });
+    }, { allowEmptyGalleryCards: true });
 }
 
 function fillIndexAboutSeoForm(aboutSeo = DEFAULT_INDEX_SETTINGS.aboutSeo) {
@@ -13235,11 +13439,30 @@ function fillIndexAboutSeoForm(aboutSeo = DEFAULT_INDEX_SETTINGS.aboutSeo) {
     setIndexField('index-about-meta-description-th', normalized.seo.metaDescriptionTh);
     setIndexField('index-about-meta-description-en', normalized.seo.metaDescriptionEn);
     setIndexField('index-about-og-image', normalized.seo.ogImage);
+    renderIndexGalleryCards(normalized.galleryCards);
     renderIndexAboutQuickFacts(normalized.quickFacts);
     renderIndexAboutStories(normalized.storyBlocks);
     renderIndexAboutFaqs(normalized.faq);
     renderIndexAboutRelatedLinks(normalized.relatedLinks);
 }
+
+window.addIndexGalleryCard = function() {
+    const rows = readIndexGalleryCardRows({ raw: true });
+    if (rows.length >= INDEX_ABOUT_GALLERY_CARDS_MAX) {
+        setIndexStatus('Maximum gallery cards reached.', 'error');
+        return;
+    }
+    rows.push(createBlankIndexGalleryCard());
+    renderIndexGalleryCards(rows);
+    window.updateIndexPreview();
+};
+
+window.removeIndexGalleryCard = function(index) {
+    const rows = readIndexGalleryCardRows({ raw: true });
+    rows.splice(index, 1);
+    renderIndexGalleryCards(rows);
+    window.updateIndexPreview();
+};
 
 window.addIndexAboutQuickFact = function() {
     const rows = readIndexAboutQuickFactsRows();
@@ -13404,6 +13627,35 @@ function updateIndexPromoPreview(promo = readIndexPromoPopupForm()) {
         : 'Enabled, but no valid slide image has been added yet.';
 }
 
+function safeGalleryCardFileName(file, index) {
+    const base = String(file?.name || `gallery-card-${index + 1}`).replace(/\.[^.]+$/, '');
+    const slug = base.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 70) || `gallery-card-${index + 1}`;
+    return `${Date.now()}-${slug}.webp`;
+}
+
+async function uploadIndexGalleryCardImage(index, file) {
+    if (!file || !Number.isInteger(index)) return;
+    const rows = readIndexGalleryCardRows({ raw: true });
+    if (!rows[index]) return;
+
+    try {
+        setIndexStatus('Uploading gallery card image...');
+        const url = await uploadAdminImageFromFile(file, 'index-gallery', safeGalleryCardFileName(file, index), {
+            surface: 'Index gallery carousel',
+            subtitle: 'about carousel card',
+            targetField: `index-gallery-card-${index}-image-url`,
+            quality: 0.86
+        });
+        rows[index].imageUrl = url;
+        renderIndexGalleryCards(rows);
+        window.updateIndexPreview();
+        setIndexStatus('Gallery card image uploaded.');
+    } catch (error) {
+        console.error('Unable to upload gallery card image:', error);
+        setIndexStatus(error.message || 'Gallery card upload failed.', 'error');
+    }
+}
+
 function safePromoFileName(file, index) {
     const base = String(file?.name || `promo-slide-${index + 1}`).replace(/\.[^.]+$/, '');
     const slug = base.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 70) || `promo-slide-${index + 1}`;
@@ -13492,7 +13744,7 @@ window.updateIndexPreview = function() {
     setText('index-preview-about-body', settings.aboutBodyTh);
     setText(
         'index-preview-about-seo-detail',
-        `${settings.aboutSeo.quickFacts.length} facts / ${settings.aboutSeo.storyBlocks.length} stories / ${settings.aboutSeo.faq.length} FAQs / ${settings.aboutSeo.relatedLinks.length} links`
+        `${settings.aboutSeo.galleryCards.length} gallery cards / ${settings.aboutSeo.quickFacts.length} facts / ${settings.aboutSeo.storyBlocks.length} stories / ${settings.aboutSeo.faq.length} FAQs / ${settings.aboutSeo.relatedLinks.length} links`
     );
     updateIndexPromoPreview(settings.promoPopup);
 };
@@ -13541,7 +13793,21 @@ indexSettingsForm?.addEventListener('submit', async (event) => {
     }
 
     try {
+        const rawGalleryCards = readIndexGalleryCardRows({ raw: true }).filter(isMeaningfulIndexGalleryCard);
+        if (!rawGalleryCards.length) {
+            setIndexStatus('Please add at least one gallery carousel card before saving.', 'error');
+            return;
+        }
+        const incompleteGalleryIndex = rawGalleryCards.findIndex(card => !isCompleteIndexGalleryCard(card));
+        if (incompleteGalleryIndex !== -1) {
+            setIndexStatus(`Gallery card ${incompleteGalleryIndex + 1} needs a title, description, and valid image URL.`, 'error');
+            return;
+        }
         const settings = readIndexSettingsForm();
+        if (!settings.aboutSeo.galleryCards.length) {
+            setIndexStatus('Please add at least one gallery carousel card before saving.', 'error');
+            return;
+        }
         if (settings.promoPopup.enabled && !settings.promoPopup.slides.length) {
             setIndexStatus('Enable popup needs at least one slide image.', 'error');
             alert('Please add at least one popup slide image before enabling the popup.');

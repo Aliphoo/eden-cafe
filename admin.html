@@ -746,6 +746,9 @@
         .index-about-row-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
         .index-about-row-head strong { color: #173f2a; }
         .index-about-remove { border: 1px solid #f1c6c6; color: #9b1c1c; background: #fff7f7; border-radius: 8px; padding: 8px 12px; cursor: pointer; font-weight: 800; }
+        .index-gallery-row-grid { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px; align-items: start; }
+        .index-gallery-thumb { width: 100%; aspect-ratio: 4 / 5; border: 1px dashed #cbdccf; border-radius: 12px; overflow: hidden; background: #f7fbf8 center/cover no-repeat; display: grid; place-items: center; color: #66746c; font-size: 0.82rem; font-weight: 800; text-align: center; }
+        .index-gallery-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .index-about-fields { display: grid; gap: 14px 16px; }
         .index-about-fields.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .index-about-fields.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -777,7 +780,7 @@
         .index-promo-preview strong { display: block; color: #173f2a; margin-bottom: 4px; }
         .index-promo-preview span { color: #66746c; font-size: 0.9rem; }
         @media (max-width: 980px) { .index-about-fields.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-        @media (max-width: 780px) { .index-promo-slide-grid, .index-promo-preview { grid-template-columns: 1fr; } .index-promo-fields, .index-about-fields.two, .index-about-fields.four { grid-template-columns: 1fr; } }
+        @media (max-width: 780px) { .index-gallery-row-grid, .index-promo-slide-grid, .index-promo-preview { grid-template-columns: 1fr; } .index-promo-fields, .index-about-fields.two, .index-about-fields.four { grid-template-columns: 1fr; } }
         @media (max-width: 1050px) { .index-settings-grid { grid-template-columns: 1fr; } }
 
         /* PromptPay Settings */
@@ -3474,6 +3477,17 @@
 
                         <div class="index-settings-card index-settings-full">
                             <div class="index-about-toolbar">
+                                <div>
+                                    <h3>Gallery Carousel Cards</h3>
+                                    <p>Manage visible cards, copy, image URL, and crop position for the About carousel.</p>
+                                </div>
+                                <button type="button" class="btn-action btn-view" onclick="addIndexGalleryCard()">Add card</button>
+                            </div>
+                            <div class="index-about-list" id="index-gallery-card-list"></div>
+                        </div>
+
+                        <div class="index-settings-card index-settings-full">
+                            <div class="index-about-toolbar">
                                 <h3>Quick Facts TH / EN</h3>
                                 <button type="button" class="btn-action btn-view" onclick="addIndexAboutQuickFact()">Add fact</button>
                             </div>
@@ -4077,7 +4091,7 @@
 
     <!-- Firebase Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script type="module" src="js/admin.js?v=archery-staff-session-20260701"></script>
+    <script type="module" src="js/admin.js?v=index-gallery-admin-20260701"></script>
     <script>
         (function cleanRemovedAdminHash() {
             const rawHash = String(window.location.hash || '').replace(/^#/, '');

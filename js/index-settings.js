@@ -9,6 +9,70 @@ const ABOUT_QUICK_FACTS_MAX = 6;
 const ABOUT_STORY_BLOCKS_MAX = 5;
 const ABOUT_FAQ_MAX = 5;
 const ABOUT_RELATED_LINKS_MAX = 6;
+const ABOUT_GALLERY_CARDS_MAX = 8;
+
+const DEFAULT_ABOUT_GALLERY_CARDS = [
+    {
+        titleTh: 'มุมคาเฟ่และระเบียง',
+        titleEn: 'Cafe deck corner',
+        descriptionTh: 'มุมนั่งพักใกล้ธรรมชาติ เห็นบรรยากาศร้านและวิวสีเขียวรอบคาเฟ่',
+        descriptionEn: 'A relaxed seating corner with cafe atmosphere and green views.',
+        kickerTh: 'พื้นที่พักผ่อน',
+        kickerEn: 'Cafe corner',
+        imageUrl: '/Hero/Hero.webp',
+        imageAltTh: 'มุมคาเฟ่และระเบียงของ Eden Cafe ท่ามกลางธรรมชาติ',
+        imageAltEn: 'Cafe deck corner at Eden Cafe surrounded by nature',
+        objectPosition: '18% 52%'
+    },
+    {
+        titleTh: 'สวนสีเขียว',
+        titleEn: 'Green garden',
+        descriptionTh: 'พื้นที่สวนและสนามหญ้าสำหรับเดินเล่น ถ่ายรูป และใช้เวลาช้า ๆ',
+        descriptionEn: 'Garden and lawn space for slow walks, photos, and quiet time.',
+        kickerTh: 'สวน',
+        kickerEn: 'Garden',
+        imageUrl: '/Hero/Hero.webp',
+        imageAltTh: 'สวนสีเขียวและสนามหญ้าของ Eden Cafe เชียงราย',
+        imageAltEn: 'Green garden and lawn at Eden Cafe Chiang Rai',
+        objectPosition: '42% 66%'
+    },
+    {
+        titleTh: 'วิวทะเลสาบ',
+        titleEn: 'Lakeside view',
+        descriptionTh: 'วิวริมน้ำที่เปิดโล่ง สงบ และเหมาะกับการพักสายตาระหว่างวัน',
+        descriptionEn: 'An open lakeside view with a calm, refreshing atmosphere.',
+        kickerTh: 'ริมน้ำ',
+        kickerEn: 'Lakeside',
+        imageUrl: '/Hero/Hero.webp',
+        imageAltTh: 'วิวทะเลสาบและพื้นที่ธรรมชาติรอบ Eden Cafe',
+        imageAltEn: 'Lakeside view and nature area around Eden Cafe',
+        objectPosition: '76% 48%'
+    },
+    {
+        titleTh: 'ภูเขาเชียงราย',
+        titleEn: 'Chiang Rai hills',
+        descriptionTh: 'ฉากภูเขาและหมอกบาง ๆ ที่ทำให้บรรยากาศคาเฟ่ดูผ่อนคลาย',
+        descriptionEn: 'Chiang Rai hill scenery and soft mist around the cafe.',
+        kickerTh: 'ธรรมชาติ',
+        kickerEn: 'Nature',
+        imageUrl: '/Hero/Hero.webp',
+        imageAltTh: 'ภูเขาและหมอกใกล้ Eden Cafe เชียงราย',
+        imageAltEn: 'Hills and mist near Eden Cafe Chiang Rai',
+        objectPosition: '64% 24%'
+    },
+    {
+        titleTh: 'บรรยากาศคาเฟ่',
+        titleEn: 'Cafe atmosphere',
+        descriptionTh: 'ภาพรวมของร้าน สวน และวิวธรรมชาติที่เป็นเอกลักษณ์ของ Eden Cafe',
+        descriptionEn: 'A wide view of the cafe, garden, and natural Eden Cafe setting.',
+        kickerTh: 'บรรยากาศ',
+        kickerEn: 'Atmosphere',
+        imageUrl: '/Hero/Hero.webp',
+        imageAltTh: 'บรรยากาศธรรมชาติของ Eden Cafe พร้อมสวน ทะเลสาบ และภูเขา',
+        imageAltEn: 'Nature view at Eden Cafe with garden, lake, and hills',
+        objectPosition: '48% 50%'
+    }
+];
 
 const FALLBACK_INDEX = {
     heroImageUrl: '/Hero/Hero.webp',
@@ -28,6 +92,7 @@ const FALLBACK_INDEX = {
             imageAltTh: 'บรรยากาศธรรมชาติของ Eden Cafe เชียงราย พร้อมกาแฟพิเศษจากเมล็ดกาแฟไทย',
             imageAltEn: 'Nature setting at Eden Cafe Chiang Rai with Thai specialty coffee'
         },
+        galleryCards: DEFAULT_ABOUT_GALLERY_CARDS,
         quickFacts: [
             { labelTh: 'ที่ตั้ง', valueTh: 'นางแล อำเภอเมืองเชียงราย', labelEn: 'Location', valueEn: 'Nang Lae, Mueang Chiang Rai' },
             { labelTh: 'กาแฟ', valueTh: 'เมล็ดกาแฟไทยจากแหล่งปลูกบนดอย', labelEn: 'Coffee', valueEn: 'Thai highland coffee beans' },
@@ -114,6 +179,12 @@ function safeImageURL(value, fallback = FALLBACK_INDEX.heroImageUrl) {
     return fallback;
 }
 
+function cleanObjectPosition(value, fallback = '50% 50%') {
+    const position = String(value || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+    const token = '(?:center|left|right|top|bottom|(?:100|[1-9]?\\d)(?:\\.\\d{1,2})?%)';
+    return new RegExp(`^${token}(?: ${token})?$`, 'i').test(position) ? position : fallback;
+}
+
 function safeOptionalLinkURL(value) {
     const url = String(value || '').trim();
     if (!url) return '';
@@ -129,19 +200,47 @@ function cleanRows(rows, mapper, maxItems) {
         .slice(0, maxItems);
 }
 
+function normalizeGalleryCard(raw = {}, index = 0, fallbackImageUrl = FALLBACK_INDEX.heroImageUrl) {
+    const fallback = DEFAULT_ABOUT_GALLERY_CARDS[index % DEFAULT_ABOUT_GALLERY_CARDS.length] || DEFAULT_ABOUT_GALLERY_CARDS[0];
+    const imageUrl = safeImageURL(raw.imageUrl || raw.image_url || '', fallbackImageUrl || fallback.imageUrl);
+
+    return {
+        titleTh: cleanText(raw.titleTh || raw.title_th || raw.title, fallback.titleTh || `Gallery ${index + 1}`, 120),
+        titleEn: cleanText(raw.titleEn || raw.title_en || raw.title, fallback.titleEn || `Gallery ${index + 1}`, 120),
+        descriptionTh: cleanText(raw.descriptionTh || raw.description_th || raw.description, fallback.descriptionTh || '', 220),
+        descriptionEn: cleanText(raw.descriptionEn || raw.description_en || raw.description, fallback.descriptionEn || '', 220),
+        kickerTh: cleanText(raw.kickerTh || raw.kicker_th || raw.kicker, fallback.kickerTh || '', 80),
+        kickerEn: cleanText(raw.kickerEn || raw.kicker_en || raw.kicker, fallback.kickerEn || '', 80),
+        imageUrl,
+        imageAltTh: cleanText(raw.imageAltTh || raw.image_alt_th || raw.altTh || raw.alt, fallback.imageAltTh || fallback.titleTh, 180),
+        imageAltEn: cleanText(raw.imageAltEn || raw.image_alt_en || raw.altEn || raw.alt, fallback.imageAltEn || fallback.titleEn, 180),
+        objectPosition: cleanObjectPosition(raw.objectPosition || raw.object_position || raw.cropPosition, fallback.objectPosition)
+    };
+}
+
+function normalizeGalleryCards(cards, fallbackImageUrl = FALLBACK_INDEX.heroImageUrl) {
+    const rows = cleanRows(cards, (item = {}, index) => normalizeGalleryCard(item, index, fallbackImageUrl), ABOUT_GALLERY_CARDS_MAX);
+    return rows.length
+        ? rows
+        : DEFAULT_ABOUT_GALLERY_CARDS.map((item, index) => normalizeGalleryCard(item, index, fallbackImageUrl));
+}
+
 function normalizeAboutSeo(raw = {}) {
     const fallback = FALLBACK_INDEX.aboutSeo;
     const hero = raw.hero || {};
     const coffeeOrigin = raw.coffeeOrigin || raw.coffee_origin || {};
     const seo = raw.seo || {};
+    const normalizedHero = {
+        subtitleTh: cleanText(hero.subtitleTh || raw.heroSubtitleTh, fallback.hero.subtitleTh, 320),
+        subtitleEn: cleanText(hero.subtitleEn || raw.heroSubtitleEn, fallback.hero.subtitleEn, 320),
+        imageUrl: safeImageURL(hero.imageUrl || hero.image_url || raw.imageUrl || '', fallback.hero.imageUrl),
+        imageAltTh: cleanText(hero.imageAltTh || raw.imageAltTh, fallback.hero.imageAltTh, 180),
+        imageAltEn: cleanText(hero.imageAltEn || raw.imageAltEn, fallback.hero.imageAltEn, 180)
+    };
+
     return {
-        hero: {
-            subtitleTh: cleanText(hero.subtitleTh || raw.heroSubtitleTh, fallback.hero.subtitleTh, 320),
-            subtitleEn: cleanText(hero.subtitleEn || raw.heroSubtitleEn, fallback.hero.subtitleEn, 320),
-            imageUrl: safeImageURL(hero.imageUrl || hero.image_url || raw.imageUrl || '', fallback.hero.imageUrl),
-            imageAltTh: cleanText(hero.imageAltTh || raw.imageAltTh, fallback.hero.imageAltTh, 180),
-            imageAltEn: cleanText(hero.imageAltEn || raw.imageAltEn, fallback.hero.imageAltEn, 180)
-        },
+        hero: normalizedHero,
+        galleryCards: normalizeGalleryCards(raw.galleryCards || raw.gallery_cards || fallback.galleryCards, normalizedHero.imageUrl),
         quickFacts: cleanRows(raw.quickFacts || raw.quick_facts || fallback.quickFacts, (item = {}) => {
             const row = {
                 labelTh: cleanOptionalText(item.labelTh || item.label_th || item.label, 80),
@@ -295,11 +394,75 @@ function renderAboutFaqSchema(faqs = [], lang = 'Th') {
     document.head.appendChild(script);
 }
 
+function createGalleryTextElement(className, text, dataAttribute) {
+    const element = document.createElement('span');
+    element.className = className;
+    element.textContent = text || '';
+    if (dataAttribute) element.setAttribute(dataAttribute, '');
+    return element;
+}
+
+function renderGalleryCards(cards = [], hero = FALLBACK_INDEX.aboutSeo.hero, lang = 'Th') {
+    const root = document.querySelector('[data-gallery-carousel]');
+    const track = root?.querySelector('[data-gallery-track]');
+    if (!root || !track) return;
+
+    const normalizedCards = normalizeGalleryCards(cards, hero.imageUrl);
+    const activeIndex = normalizedCards.length > 1 ? 1 : 0;
+    const fragment = document.createDocumentFragment();
+
+    normalizedCards.forEach((item, index) => {
+        const card = document.createElement('button');
+        const title = aboutText(item, 'title', lang);
+        const description = aboutText(item, 'description', lang);
+        const kicker = aboutText(item, 'kicker', lang);
+        const alt = aboutText(item, 'imageAlt', lang) || aboutText(hero, 'imageAlt', lang) || title;
+
+        card.type = 'button';
+        card.className = index === activeIndex ? 'gallery-card gallery-card-active' : 'gallery-card';
+        card.tabIndex = index === activeIndex ? 0 : -1;
+        card.setAttribute('data-gallery-card', '');
+        card.dataset.galleryIndex = String(index);
+        card.setAttribute('aria-current', index === activeIndex ? 'true' : 'false');
+        card.style.setProperty('--gallery-object-position', item.objectPosition);
+        card.dataset.galleryTitleTh = item.titleTh;
+        card.dataset.galleryTitleEn = item.titleEn;
+        card.dataset.galleryDescriptionTh = item.descriptionTh;
+        card.dataset.galleryDescriptionEn = item.descriptionEn;
+        card.dataset.galleryKickerTh = item.kickerTh;
+        card.dataset.galleryKickerEn = item.kickerEn;
+
+        const image = document.createElement('img');
+        image.src = item.imageUrl || hero.imageUrl;
+        image.alt = alt;
+        image.loading = index === activeIndex ? 'eager' : 'lazy';
+        image.decoding = 'async';
+        image.draggable = false;
+        image.setAttribute('data-gallery-card-image', '');
+
+        const content = document.createElement('span');
+        content.className = 'gallery-card-content';
+        content.append(
+            createGalleryTextElement('gallery-card-kicker', kicker, 'data-gallery-card-kicker'),
+            createGalleryTextElement('gallery-card-title', title, 'data-gallery-card-title'),
+            createGalleryTextElement('gallery-card-description', description, 'data-gallery-card-description')
+        );
+
+        card.append(image, content);
+        fragment.appendChild(card);
+    });
+
+    track.replaceChildren(fragment);
+    root.dataset.activeIndex = String(activeIndex);
+    window.refreshGalleryCarousels?.();
+}
+
 function renderAboutSeo(aboutSeo = FALLBACK_INDEX.aboutSeo, lang = 'Th') {
     const subtitle = aboutText(aboutSeo.hero, 'subtitle', lang);
     setText('[data-index-about="hero-subtitle"]', subtitle);
+    renderGalleryCards(aboutSeo.galleryCards, aboutSeo.hero, lang);
 
-    document.querySelectorAll('[data-index-about-image]').forEach(image => {
+    document.querySelectorAll('[data-index-about-image]:not([data-gallery-card-image])').forEach(image => {
         const galleryAlt = image.dataset[`galleryAlt${lang}`] || image.dataset.galleryAlt;
         image.src = aboutSeo.hero.imageUrl;
         image.alt = galleryAlt || aboutText(aboutSeo.hero, 'imageAlt', lang);
