@@ -43,6 +43,7 @@ let archeryPricingConfig = EMPTY_PRICING_CONFIG;
 let pricingSettingsReady = false;
 let pricingSettingsError = '';
 let appliedArcheryPromo = null;
+let archeryPromoBusy = false;
 let archeryPromoValidationToken = 0;
 let participantSelections = [];
 let archeryLoyaltyPreview = null;
@@ -406,6 +407,11 @@ function appliedArcheryPromoCode() {
     return normalizePromoCode(appliedArcheryPromo?.code || appliedArcheryPromo?.promoCode);
 }
 
+function archeryPromoNeedsApply() {
+    const code = currentArcheryPromoInputCode();
+    return Boolean(code && appliedArcheryPromoCode() !== code);
+}
+
 function currentArcheryPromoDiscount(pricing = calculateDraftPricing()) {
     const code = currentArcheryPromoInputCode();
     if (!appliedArcheryPromo || !appliedArcheryPromoCode() || appliedArcheryPromoCode() !== code) return 0;
@@ -540,6 +546,8 @@ async function applyArcheryPromoCode(event) {
     }
 
     clearArcheryPromo();
+    archeryPromoBusy = true;
+    restoreButtonStates();
     setArcheryPromoMessage(bookingText('กำลังตรวจสอบโค้ด...', 'Checking promo code...'), 'loading');
     const buttonLabel = button?.textContent || '';
     if (button) {
@@ -588,12 +596,14 @@ async function applyArcheryPromoCode(event) {
         renderDraftSummary();
         return false;
     } finally {
+        archeryPromoBusy = false;
         if (button) {
             button.textContent = buttonLabel || bookingText('ใช้โค้ด', 'Apply');
             button.classList.remove('is-loading');
             button.setAttribute('aria-busy', 'false');
             button.disabled = !!currentHold;
         }
+        restoreButtonStates();
     }
 }
 
@@ -663,6 +673,26 @@ function archeryLoyaltySelectedQuote(points = archeryLoyaltyInputPoints()) {
 function archeryLoyaltyQuoteReady(points = archeryLoyaltyInputPoints()) {
     const quote = archeryLoyaltySelectedQuote(points);
     return Boolean(quote && !quote.blockedReason && quote.redeemedPoints > 0);
+}
+
+function archeryLoyaltyNeedsQuote(points = archeryLoyaltyInputPoints()) {
+    return points > 0 && !archeryLoyaltyQuoteReady(points);
+}
+
+function bookingAdjustmentBlockMessage() {
+    if (archeryPromoBusy) {
+        return bookingText('กำลังตรวจสอบ Promo Code...', 'Checking promo code...');
+    }
+    if (archeryPromoNeedsApply()) {
+        return bookingText('กรุณากดใช้โค้ดก่อนยืนยันการจอง', 'Apply the promo code before confirming.');
+    }
+    if (archeryLoyaltyBusy) {
+        return bookingText('กำลังคำนวณ Eden Points...', 'Checking Eden Points...');
+    }
+    if (archeryLoyaltyNeedsQuote()) {
+        return bookingText('กรุณากดคำนวณ Eden Points ก่อนยืนยันการจอง', 'Quote Eden Points before confirming.');
+    }
+    return '';
 }
 
 function archeryHoldTotalBeforeLoyalty(hold = currentHold) {
@@ -1250,8 +1280,9 @@ function restoreButtonStates() {
     const confirmBtn = $('archery-confirm-btn');
     const promoInput = $('archery-promo-code-input');
     const promoButton = $('archery-promo-apply-btn');
-    if (promoInput) promoInput.disabled = Boolean(busyAction) || !pricingSettingsReady || !!currentHold;
-    if (promoButton) promoButton.disabled = Boolean(busyAction) || !pricingSettingsReady || !!currentHold;
+    const adjustmentBlockMessage = bookingAdjustmentBlockMessage();
+    if (promoInput) promoInput.disabled = Boolean(busyAction) || archeryPromoBusy || !pricingSettingsReady || !!currentHold;
+    if (promoButton) promoButton.disabled = Boolean(busyAction) || archeryPromoBusy || !pricingSettingsReady || !!currentHold;
     if (holdBtn) {
         const hasHold = Boolean(currentHold?.booking_id);
         const holdExpired = hasHold && isHoldExpired(currentHold);
@@ -1265,7 +1296,13 @@ function restoreButtonStates() {
             holdBtn.setAttribute('aria-busy', isCheckingAvailability ? 'true' : 'false');
         }
         holdBtn.disabled = Boolean(busyAction) || (
-            !hasHold && (!pricingSettingsReady || isCheckingAvailability || !currentUser || !latestAvailability?.available)
+            !hasHold && (
+                !pricingSettingsReady
+                || isCheckingAvailability
+                || !currentUser
+                || !latestAvailability?.available
+                || Boolean(adjustmentBlockMessage)
+            )
         );
         holdBtn.setAttribute('aria-disabled', holdBtn.disabled ? 'true' : 'false');
         holdBtn.title = hasHold
@@ -1281,6 +1318,7 @@ function restoreButtonStates() {
                 : !latestAvailability?.available
                     ? 'เลือกวันและเวลาให้ระบบตรวจเลนว่างก่อน'
                     : '';
+        if (!hasHold && adjustmentBlockMessage) holdBtn.title = adjustmentBlockMessage;
     }
     if (confirmBtn) {
         const paymentStatus = String(currentHold?.payment_status || '').toUpperCase();
@@ -2269,19 +2307,15 @@ async function createHold(event) {
     }
     const promoCodeInput = currentArcheryPromoInputCode();
     if (promoCodeInput && appliedArcheryPromoCode() !== promoCodeInput) {
-        const applied = await applyArcheryPromoCode();
-        if (!applied) {
-            restoreButtonStates();
-            return;
-        }
+        setArcheryPromoMessage(bookingText('กรุณากดใช้โค้ดก่อนยืนยันการจอง', 'Apply the promo code before confirming.'), 'error');
+        restoreButtonStates();
+        return;
     }
     const selectedLoyaltyPoints = archeryLoyaltyInputPoints();
     if (selectedLoyaltyPoints > 0 && !archeryLoyaltyQuoteReady(selectedLoyaltyPoints)) {
-        const quote = await quoteArcheryLoyaltyRedemption();
-        if (!quote || quote.blockedReason || quote.redeemedPoints <= 0) {
-            restoreButtonStates();
-            return;
-        }
+        setArcheryLoyaltyMessage(bookingText('กรุณากดคำนวณ Eden Points ก่อนยืนยันการจอง', 'Quote Eden Points before confirming.'), 'error');
+        restoreButtonStates();
+        return;
     }
     setLoading('hold', true);
     const api = await waitForApi();
@@ -2494,7 +2528,11 @@ function initBookingPage() {
     });
     $('archery-loyalty-points')?.addEventListener('input', () => {
         resetArcheryLoyaltyQuote({ clearPreview: false });
+        if (archeryLoyaltyInputPoints() > 0) {
+            setArcheryLoyaltyMessage(bookingText('กรุณากดคำนวณก่อนยืนยันการจอง', 'Quote points before confirming.'), 'loading');
+        }
         renderDraftSummary();
+        restoreButtonStates();
     });
     const promoInput = $('archery-promo-code-input');
     if (promoInput) {
@@ -2510,9 +2548,15 @@ function initBookingPage() {
                 holdIdempotencyKey = '';
                 appliedArcheryPromo = null;
                 resetArcheryLoyaltyQuote({ clearPreview: true });
-                setArcheryPromoMessage('');
-                renderDraftSummary();
             }
+            setArcheryPromoMessage(
+                currentArcheryPromoInputCode()
+                    ? bookingText('กรุณากดใช้โค้ดก่อนยืนยันการจอง', 'Apply the promo code before confirming.')
+                    : '',
+                currentArcheryPromoInputCode() ? 'loading' : ''
+            );
+            renderDraftSummary();
+            restoreButtonStates();
         });
     }
     const stored = readStoredHold();
