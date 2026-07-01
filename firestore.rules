@@ -137,9 +137,9 @@ service cloud.firestore {
         && isValidHeaderNavItem(request.resource.data.items[5])
         && isValidHeaderNavItem(request.resource.data.items[6])
         && isValidHeaderNavItem(request.resource.data.items[7])
-        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedAt is timestamp
         && (!request.resource.data.keys().hasAny(['updatedBy']) || request.resource.data.updatedBy == request.auth.uid)
-        && (!request.resource.data.keys().hasAny(['updatedByEmail']) || request.resource.data.updatedByEmail is string);
+        && (!request.resource.data.keys().hasAny(['updatedByEmail']) || (request.resource.data.updatedByEmail is string && request.resource.data.updatedByEmail.size() <= 160));
     }
     function isValidOptionalLoyaltyOrderFields() {
       return (!request.resource.data.keys().hasAny(['normalDiscount']) || (request.resource.data.normalDiscount is number && request.resource.data.normalDiscount >= 0 && request.resource.data.normalDiscount <= 1000000))
