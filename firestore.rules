@@ -96,7 +96,7 @@ service cloud.firestore {
         && isInternalHeaderHref(child.hrefTh)
         && isInternalHeaderHref(child.hrefEn)
         && child.visible is bool
-        && child.order is int
+        && child.order is number
         && child.order >= 1
         && child.order <= 4;
     }
@@ -116,7 +116,7 @@ service cloud.firestore {
         && isInternalHeaderHref(item.hrefTh)
         && isInternalHeaderHref(item.hrefEn)
         && item.visible is bool
-        && item.order is int
+        && item.order is number
         && item.order >= 1
         && item.order <= 20
         && (
