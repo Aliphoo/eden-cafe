@@ -55,6 +55,7 @@ let archeryLoyaltyQuotePoints = 0;
 let archeryLoyaltyReservationIdempotencyKey = '';
 let archeryLoyaltyBusy = false;
 let archeryLoyaltyBusyAction = '';
+let holdConfirmationModalOpen = false;
 
 const AUTO_AVAILABILITY_DELAY_MS = 350;
 
@@ -72,9 +73,7 @@ function escapeHTML(value) {
 }
 
 function todayISO() {
-    const now = new Date();
-    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-    return now.toISOString().slice(0, 10);
+    return localISODate();
 }
 
 function timeLabel(minutes) {
@@ -101,6 +100,16 @@ function normalizeDuration(value) {
     return VALID_DURATIONS.has(duration) ? duration : 60;
 }
 
+function localISODate(date = new Date()) {
+    const local = new Date(date);
+    local.setMinutes(local.getMinutes() - local.getTimezoneOffset());
+    return local.toISOString().slice(0, 10);
+}
+
+function currentMinuteOfDay(now = new Date()) {
+    return (now.getHours() * 60) + now.getMinutes();
+}
+
 function packageMinutes() {
     return normalizeDuration($('archery-package')?.value);
 }
@@ -115,11 +124,41 @@ function selectedDate() {
 }
 
 function selectedStartTime() {
-    return $('archery-start')?.value || '10:00';
+    const select = $('archery-start');
+    return select?.value || select?.selectedOptions?.[0]?.value || select?.options?.[0]?.value || '';
 }
 
 function selectedEndTime() {
-    return timeLabel(minutesFromTime(selectedStartTime()) + packageMinutes());
+    const startTime = selectedStartTime();
+    return startTime ? timeLabel(minutesFromTime(startTime) + packageMinutes()) : '';
+}
+
+function isBookingStartFuture(date = selectedDate(), startTime = selectedStartTime(), now = new Date()) {
+    if (!date || !startTime) return false;
+    const today = localISODate(now);
+    if (date < today) return false;
+    if (date > today) return true;
+    return minutesFromTime(startTime) > currentMinuteOfDay(now);
+}
+
+function futureTimeErrorMessage(date = selectedDate(), startTime = selectedStartTime(), now = new Date()) {
+    const today = localISODate(now);
+    if (date && date < today) {
+        return bookingText(
+            'ไม่สามารถจองย้อนหลังได้ กรุณาเลือกวันที่วันนี้หรืออนาคต',
+            'Past dates cannot be booked. Please choose today or a future date.'
+        );
+    }
+    if (!startTime) {
+        return bookingText(
+            'วันนี้ไม่มีเวลาเริ่มที่จองได้แล้ว กรุณาเลือกวันถัดไป',
+            'No bookable start times remain today. Please choose another date.'
+        );
+    }
+    return bookingText(
+        'กรุณาเลือกเวลาเริ่มในอนาคตเท่านั้น',
+        'Please choose a future start time.'
+    );
 }
 
 function packageCode(duration = packageMinutes()) {
@@ -820,7 +859,7 @@ function renderArcheryLoyaltyHelper(quote = null) {
         return;
     }
     const maxPoints = integerPointsValue(quote?.maxRedeemablePoints ?? quote?.max_redeemable_points);
-    const pointValue = Number(quote?.config?.pointValue ?? quote?.config?.point_value || 1) || 1;
+    const pointValue = Number((quote?.config?.pointValue ?? quote?.config?.point_value) || 1) || 1;
     const maxDiscount = money(maxPoints * pointValue);
     helper.textContent = maxPoints > 0
         ? bookingText(`ใช้ได้สูงสุด ${pointsText(maxPoints)} แต้ม (${maxDiscount}) สำหรับยอดนี้`, `Use up to ${pointsText(maxPoints)} points (${maxDiscount}) for this bill.`)
@@ -1162,6 +1201,50 @@ function setAvailabilityControlsChecking(isChecking) {
     }
 }
 
+function syncHoldConfirmationModal() {
+    const modal = $('archery-hold-modal');
+    if (!modal) return;
+    const summary = $('archery-hold-modal-summary');
+    const holdSummary = $('archery-hold-summary');
+    if (summary && holdSummary?.innerHTML) summary.innerHTML = holdSummary.innerHTML;
+    const closeButton = $('archery-hold-modal-close');
+    if (closeButton) {
+        closeButton.textContent = currentHold && isHoldExpired(currentHold)
+            ? bookingText('เลือกเวลาใหม่', 'Choose another time')
+            : bookingText('กลับไปแก้ไข', 'Back to edit');
+    }
+    modal.setAttribute('aria-busy', busyAction ? 'true' : 'false');
+}
+
+function openHoldConfirmationModal({ focusPay = false } = {}) {
+    const modal = $('archery-hold-modal');
+    if (!modal || !currentHold?.booking_id) return;
+    syncHoldConfirmationModal();
+    modal.hidden = false;
+    holdConfirmationModalOpen = true;
+    document.body?.classList.add('archery-hold-modal-open');
+    window.setTimeout(() => {
+        const payButton = $('archery-confirm-btn');
+        const target = focusPay && payButton && !payButton.disabled
+            ? payButton
+            : $('archery-hold-modal-close');
+        if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
+    }, 0);
+}
+
+function closeHoldConfirmationModal({ resetExpired = true, returnFocus = true } = {}) {
+    if (resetExpired && currentHold?.booking_id && isHoldExpired(currentHold)) {
+        resetHoldState();
+        setStatus('archery-status', userMessage({ code: 'HOLD_EXPIRED' }), 'error');
+        return;
+    }
+    const modal = $('archery-hold-modal');
+    if (modal) modal.hidden = true;
+    holdConfirmationModalOpen = false;
+    document.body?.classList.remove('archery-hold-modal-open');
+    if (returnFocus) $('archery-hold-btn')?.focus?.({ preventScroll: true });
+}
+
 function restoreButtonStates() {
     const holdBtn = $('archery-hold-btn');
     const confirmBtn = $('archery-confirm-btn');
@@ -1170,14 +1253,26 @@ function restoreButtonStates() {
     if (promoInput) promoInput.disabled = Boolean(busyAction) || !pricingSettingsReady || !!currentHold;
     if (promoButton) promoButton.disabled = Boolean(busyAction) || !pricingSettingsReady || !!currentHold;
     if (holdBtn) {
+        const hasHold = Boolean(currentHold?.booking_id);
+        const holdExpired = hasHold && isHoldExpired(currentHold);
         if (busyAction !== 'hold') {
-            holdBtn.textContent = bookingText('ยืนยันการจอง', 'Confirm booking');
+            holdBtn.textContent = hasHold
+                ? holdExpired
+                    ? bookingText('เลือกเวลาใหม่', 'Choose another time')
+                    : bookingText('ดูสรุปการทำรายการ', 'View summary')
+                : bookingText('ยืนยันการจอง', 'Confirm booking');
             holdBtn.classList.toggle('is-loading', isCheckingAvailability);
             holdBtn.setAttribute('aria-busy', isCheckingAvailability ? 'true' : 'false');
         }
-        holdBtn.disabled = Boolean(busyAction) || !pricingSettingsReady || isCheckingAvailability || !currentUser || !latestAvailability?.available || !!currentHold;
+        holdBtn.disabled = Boolean(busyAction) || (
+            !hasHold && (!pricingSettingsReady || isCheckingAvailability || !currentUser || !latestAvailability?.available)
+        );
         holdBtn.setAttribute('aria-disabled', holdBtn.disabled ? 'true' : 'false');
-        holdBtn.title = !pricingSettingsReady
+        holdBtn.title = hasHold
+            ? holdExpired
+                ? bookingText('เวลาจองหมดอายุ เลือกเวลาใหม่', 'The hold expired. Choose another time.')
+                : bookingText('เปิดสรุปการทำรายการเพื่อชำระเงิน', 'Open the transaction summary to pay.')
+            : !pricingSettingsReady
             ? pricingStatusText()
             : !currentUser
             ? 'กรุณาเข้าสู่ระบบสมาชิกก่อนยืนยันการจอง'
@@ -1185,21 +1280,19 @@ function restoreButtonStates() {
                 ? 'ระบบกำลังตรวจสอบเลนว่าง'
                 : !latestAvailability?.available
                     ? 'เลือกวันและเวลาให้ระบบตรวจเลนว่างก่อน'
-                    : currentHold
-                        ? 'ยืนยันการจองแล้ว'
-                        : '';
+                    : '';
     }
     if (confirmBtn) {
         const paymentStatus = String(currentHold?.payment_status || '').toUpperCase();
         const bookingStatus = String(currentHold?.booking_status || currentHold?.status || '').toUpperCase();
         const paymentRequired = currentHold?.payment_required !== false;
         confirmBtn.textContent = bookingStatus === 'CONFIRMED'
-            ? 'ดูใบยืนยัน'
+            ? bookingText('ดูใบยืนยัน', 'View confirmation')
             : paymentStatus === 'PENDING'
-                ? 'เปิดหน้าชำระเงิน'
+                ? bookingText('เปิดหน้าชำระเงิน', 'Open payment')
                 : paymentRequired
-                    ? 'ชำระเงิน'
-                    : 'ยืนยันการจอง';
+                    ? bookingText('ชำระเงิน', 'Pay')
+                    : bookingText('ยืนยันการจอง', 'Confirm booking');
         if (busyAction === 'confirm') {
             confirmBtn.textContent = bookingText('กำลังเปิด Beam...', 'Opening Beam...');
             confirmBtn.classList.add('is-loading');
@@ -1218,8 +1311,9 @@ function restoreButtonStates() {
             || paymentStatus === 'PAID_COUNTER'
             || paymentStatus === 'REFUNDED';
         confirmBtn.setAttribute('aria-disabled', confirmBtn.disabled ? 'true' : 'false');
-        confirmBtn.title = !currentHold ? 'กรุณากดยืนยันการจองก่อนชำระเงิน' : '';
+        confirmBtn.title = !currentHold ? bookingText('กรุณากดยืนยันการจองก่อนชำระเงิน', 'Confirm the booking before payment.') : '';
     }
+    syncHoldConfirmationModal();
     renderArcheryLoyaltyPanel();
 }
 
@@ -1272,6 +1366,7 @@ function shouldAutoCheckAvailability() {
         $('archery-booking-form')
         && selectedDate()
         && selectedStartTime()
+        && isBookingStartFuture()
         && packageMinutes()
         && partySize()
         && pricingSettingsReady
@@ -1299,18 +1394,57 @@ function fillTimeOptions() {
     const select = $('archery-start');
     if (!select) return;
     const selected = select.value;
+    const bookingDate = selectedDate();
+    const now = new Date();
     const duration = packageMinutes();
     const lastStart = (20 * 60) - duration;
     select.innerHTML = '';
+    select.disabled = false;
     for (let minute = 10 * 60; minute <= lastStart; minute += 60) {
+        const value = timeLabel(minute);
+        if (!isBookingStartFuture(bookingDate, value, now)) continue;
         const opt = document.createElement('option');
-        opt.value = timeLabel(minute);
-        opt.textContent = displayTime(timeLabel(minute));
+        opt.value = value;
+        opt.textContent = displayTime(value);
         select.appendChild(opt);
     }
     if (selected && Array.from(select.options).some(opt => opt.value === selected)) {
         select.value = selected;
+    } else if (select.options.length) {
+        select.value = select.options[0].value;
+    } else {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = bookingDate < todayISO()
+            ? bookingText('เลือกวันที่ใหม่', 'Choose another date')
+            : bookingText('ไม่มีเวลาเหลือวันนี้', 'No times left today');
+        select.appendChild(opt);
+        select.value = '';
+        select.disabled = true;
     }
+}
+
+function repairPastStartTime({ scheduleCheck = false } = {}) {
+    const message = futureTimeErrorMessage();
+    latestAvailability = null;
+    renderSuggestions([]);
+    fillTimeOptions();
+    renderDraftSummary();
+    restoreButtonStates();
+    if (scheduleCheck && isBookingStartFuture()) {
+        setStatus(
+            'archery-status',
+            bookingText(
+                'เวลาเดิมผ่านไปแล้ว กำลังตรวจสอบเวลาใหม่...',
+                'The previous time has passed. Checking the next available time...'
+            ),
+            'loading'
+        );
+        scheduleAvailabilityRefresh({ immediate: true });
+        return true;
+    }
+    setStatus('archery-status', message, 'error');
+    return false;
 }
 
 function selectionPayload() {
@@ -1408,20 +1542,26 @@ function renderDraftSummary() {
 function renderSuggestions(times = []) {
     const el = $('archery-suggestions');
     if (!el) return;
-    if (!Array.isArray(times) || !times.length) {
+    const futureTimes = (Array.isArray(times) ? times : []).filter(time => isBookingStartFuture(selectedDate(), time));
+    if (!futureTimes.length) {
         el.innerHTML = '';
         return;
     }
     el.innerHTML = `
         <p>เวลาที่แนะนำ</p>
         <div class="archery-suggestion-row">
-            ${times.map(time => `<button type="button" data-start-time="${escapeHTML(time)}">${escapeHTML(displayTime(time))}</button>`).join('')}
+            ${futureTimes.map(time => `<button type="button" data-start-time="${escapeHTML(time)}">${escapeHTML(displayTime(time))}</button>`).join('')}
         </div>
     `;
     el.querySelectorAll('button[data-start-time]').forEach(button => {
         button.addEventListener('click', () => {
+            const nextTime = button.getAttribute('data-start-time') || '';
+            if (!isBookingStartFuture(selectedDate(), nextTime)) {
+                repairPastStartTime({ scheduleCheck: true });
+                return;
+            }
             const select = $('archery-start');
-            if (select) select.value = button.getAttribute('data-start-time') || select.value;
+            if (select) select.value = nextTime || select.value;
             resetAvailabilityState();
             resetHoldState();
             scheduleAvailabilityRefresh({ immediate: true });
@@ -1788,6 +1928,7 @@ function readStoredHold() {
 }
 
 function resetHoldState() {
+    closeHoldConfirmationModal({ resetExpired: false, returnFocus: false });
     currentHold = null;
     holdIdempotencyKey = '';
     beamPaymentIdempotencyKey = '';
@@ -1835,6 +1976,7 @@ function renderCountdown() {
         holdTimer = null;
         stopPaymentPolling();
         setStatus('archery-confirm-status', userMessage({ code: 'HOLD_EXPIRED' }), 'error');
+        syncHoldConfirmationModal();
         restoreButtonStates();
     }
 }
@@ -2006,17 +2148,21 @@ function renderHoldSummary(hold) {
         if (discount > 0) rows.push([`Promo ${promoCode || ''}`.trim(), '-' + money(discount)]);
         if (loyaltyDiscount > 0) {
             if (discount > 0) rows.push(['After promo', money(totalBeforeLoyalty)]);
-            rows.push([`${redeemedPoints} points`, '-' + money(loyaltyDiscount)]);
+            rows.push([`${pointsText(redeemedPoints)} Eden Points`, '-' + money(loyaltyDiscount)]);
         }
         rows.push(['Total', money(total)]);
     } else {
         rows.push(['Total', money(total)]);
     }
     rows.push(['Payment', hold.payment_status || 'UNPAID']);
-    el.innerHTML = summaryRows(rows);
+    const summaryHTML = summaryRows(rows);
+    el.innerHTML = summaryHTML;
+    const modalSummary = $('archery-hold-modal-summary');
+    if (modalSummary) modalSummary.innerHTML = summaryHTML;
     const promoInput = $('archery-promo-code-input');
     if (promoInput && promoCode) promoInput.value = promoCode;
     startCountdown();
+    syncHoldConfirmationModal();
     renderArcheryLoyaltyPanel();
 }
 
@@ -2049,6 +2195,10 @@ async function fillMemberState(user) {
 async function refreshAvailability(event) {
     if (event) event.preventDefault();
     if (!shouldAutoCheckAvailability()) {
+        if ($('archery-booking-form') && pricingSettingsReady && selectedDate() && !isBookingStartFuture()) {
+            repairPastStartTime({ scheduleCheck: true });
+            return;
+        }
         restoreButtonStates();
         return;
     }
@@ -2088,6 +2238,15 @@ async function refreshAvailability(event) {
 async function createHold(event) {
     event.preventDefault();
     if (busyAction) return;
+    if (currentHold?.booking_id) {
+        if (isHoldExpired(currentHold)) {
+            resetHoldState();
+            setStatus('archery-status', userMessage({ code: 'HOLD_EXPIRED' }), 'error');
+            return;
+        }
+        openHoldConfirmationModal({ focusPay: true });
+        return;
+    }
     if (!currentUser) {
         setStatus('archery-status', 'กรุณาเข้าสู่ระบบสมาชิกก่อนจอง', 'error');
         window.location.href = '/login?next=' + encodeURIComponent('/archery/booking');
@@ -2096,6 +2255,10 @@ async function createHold(event) {
     if (!pricingSettingsReady) {
         setStatus('archery-status', pricingStatusText(), 'error');
         restoreButtonStates();
+        return;
+    }
+    if (!isBookingStartFuture()) {
+        repairPastStartTime({ scheduleCheck: true });
         return;
     }
     if (!latestAvailability?.available) {
@@ -2154,6 +2317,7 @@ async function createHold(event) {
                     'ยังไม่เปิด Beam จนกว่าจองแต้มสำเร็จ',
                     'Beam will not open until points are reserved.'
                 ), 'error');
+                openHoldConfirmationModal();
                 return;
             }
         }
@@ -2172,6 +2336,7 @@ async function createHold(event) {
             `กดชำระเงินเพื่อเปิด Beam ยอดชำระ ${money(currentHold.amount_total)}`,
             `Pay to open Beam. Amount ${money(currentHold.amount_total)}.`
         ));
+        openHoldConfirmationModal({ focusPay: true });
     } catch (error) {
         currentHold = null;
         latestAvailability = null;
@@ -2194,6 +2359,7 @@ async function startBeamPayment() {
         restoreButtonStates();
         return;
     }
+    openHoldConfirmationModal();
     if (String(currentHold.booking_status || currentHold.status || '').toUpperCase() === 'CONFIRMED') {
         finishConfirmedPayment({
             booking_status: currentHold.booking_status,
@@ -2281,16 +2447,29 @@ function initBookingPage() {
         const el = $(id);
         if (!el) return;
         el.addEventListener('change', () => {
-            if (id === 'archery-package') fillTimeOptions();
-            if (id === 'archery-party-size') renderParticipantOptions();
             resetAvailabilityState();
             resetHoldState();
+            if (id === 'archery-date' || id === 'archery-package') fillTimeOptions();
+            if (id === 'archery-party-size') renderParticipantOptions();
             renderDraftSummary();
+            if (!isBookingStartFuture()) {
+                setStatus('archery-status', futureTimeErrorMessage(), 'error');
+                restoreButtonStates();
+                return;
+            }
             scheduleAvailabilityRefresh();
         });
     });
     form.addEventListener('submit', createHold);
     $('archery-confirm-btn')?.addEventListener('click', startBeamPayment);
+    document.querySelectorAll('[data-archery-hold-modal-close]').forEach(button => {
+        button.addEventListener('click', () => closeHoldConfirmationModal());
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && holdConfirmationModalOpen && !busyAction) {
+            closeHoldConfirmationModal();
+        }
+    });
     $('archery-promo-apply-btn')?.addEventListener('click', applyArcheryPromoCode);
     $('archery-loyalty-quote-btn')?.addEventListener('click', quoteArcheryLoyaltyRedemption);
     $('archery-loyalty-reserve-btn')?.addEventListener('click', event => {

@@ -8,7 +8,7 @@
     <meta name="description" content="Choose a date, time, and package for Eden Archery booking.">
     <link rel="canonical" href="https://edencafe.co/archery/booking-en">
     <link rel="stylesheet" href="/style.css?v=mobile-ux-20260619">
-    <link rel="stylesheet" href="/archery.css?v=archery-points-ux-20260701-1">
+    <link rel="stylesheet" href="/archery.css?v=archery-hold-modal-20260701-1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -136,48 +136,68 @@
                     </form>
 
                     <aside class="archery-panel" id="archery-hold-panel">
-                        <h2 style="text-align:left; margin-bottom: 18px;">Summary</h2>
-                        <ul class="archery-summary-list" id="archery-hold-summary">
-                            <li><span>Status</span><strong>No time selected yet</strong></li>
-                        </ul>
-                        <div class="archery-promo-code">
-                            <label class="archery-promo-label" for="archery-promo-code-input">
-                                <span class="archery-promo-kicker">Promo code</span>
-                                <span>Apply before confirming your booking.</span>
-                            </label>
-                            <div class="archery-promo-control">
-                                <span class="archery-promo-icon" aria-hidden="true">%</span>
-                                <input class="archery-promo-input" type="text" id="archery-promo-code-input" placeholder="EDEN10" autocomplete="off">
-                                <button type="button" class="btn btn-outline archery-promo-apply" id="archery-promo-apply-btn">Apply</button>
+                        <div class="archery-summary-content">
+                            <h2 style="text-align:left; margin-bottom: 18px;">Summary</h2>
+                            <ul class="archery-summary-list" id="archery-hold-summary">
+                                <li><span>Status</span><strong>No time selected yet</strong></li>
+                            </ul>
+                            <div class="archery-promo-code">
+                                <label class="archery-promo-label" for="archery-promo-code-input">
+                                    <span class="archery-promo-kicker">Promo code</span>
+                                    <span>Apply before confirming your booking.</span>
+                                </label>
+                                <div class="archery-promo-control">
+                                    <span class="archery-promo-icon" aria-hidden="true">%</span>
+                                    <input class="archery-promo-input" type="text" id="archery-promo-code-input" placeholder="Enter promo code here" autocomplete="off">
+                                    <button type="button" class="btn btn-outline archery-promo-apply" id="archery-promo-apply-btn">Apply</button>
+                                </div>
+                                <p class="archery-status archery-promo-message" id="archery-promo-message" aria-live="polite"></p>
                             </div>
-                            <p class="archery-status archery-promo-message" id="archery-promo-message" aria-live="polite"></p>
+                            <div class="archery-loyalty-code" id="archery-loyalty-panel">
+                                <label class="archery-promo-label" for="archery-loyalty-points">
+                                    <span class="archery-promo-kicker">Eden Points</span>
+                                    <span id="archery-loyalty-helper">Sign in to view and use Eden Points.</span>
+                                </label>
+                                <div class="archery-loyalty-balance" id="archery-loyalty-balance"></div>
+                                <div class="archery-loyalty-control">
+                                    <span class="archery-promo-icon" aria-hidden="true">P</span>
+                                    <input class="archery-loyalty-input" type="number" id="archery-loyalty-points" min="0" step="1" inputmode="numeric" placeholder="0" autocomplete="off">
+                                    <button type="button" class="btn btn-outline archery-loyalty-quote" id="archery-loyalty-quote-btn">Quote</button>
+                                    <button type="button" class="btn archery-loyalty-reserve" id="archery-loyalty-reserve-btn" hidden disabled>Reserve</button>
+                                </div>
+                                <div class="archery-loyalty-quick-actions" id="archery-loyalty-quick-actions" aria-label="Eden Points quick actions">
+                                    <button type="button" data-loyalty-quick="25">25%</button>
+                                    <button type="button" data-loyalty-quick="50">50%</button>
+                                    <button type="button" data-loyalty-quick="max">Max</button>
+                                </div>
+                                <p class="archery-status archery-loyalty-message" id="archery-loyalty-message" aria-live="polite"></p>
+                            </div>
                         </div>
-                        <div class="archery-loyalty-code" id="archery-loyalty-panel">
-                            <label class="archery-promo-label" for="archery-loyalty-points">
-                                <span class="archery-promo-kicker">Eden Points</span>
-                                <span id="archery-loyalty-helper">Sign in to view and use Eden Points.</span>
-                            </label>
-                            <div class="archery-loyalty-balance" id="archery-loyalty-balance"></div>
-                            <div class="archery-loyalty-control">
-                                <span class="archery-promo-icon" aria-hidden="true">P</span>
-                                <input class="archery-loyalty-input" type="number" id="archery-loyalty-points" min="0" step="1" inputmode="numeric" placeholder="0" autocomplete="off">
-                                <button type="button" class="btn btn-outline archery-loyalty-quote" id="archery-loyalty-quote-btn">Quote</button>
-                                <button type="button" class="btn archery-loyalty-reserve" id="archery-loyalty-reserve-btn" hidden disabled>Reserve</button>
-                            </div>
-                            <div class="archery-loyalty-quick-actions" id="archery-loyalty-quick-actions" aria-label="Eden Points quick actions">
-                                <button type="button" data-loyalty-quick="25">25%</button>
-                                <button type="button" data-loyalty-quick="50">50%</button>
-                                <button type="button" data-loyalty-quick="max">Max</button>
-                            </div>
-                            <p class="archery-status archery-loyalty-message" id="archery-loyalty-message" aria-live="polite"></p>
-                        </div>
-                        <p class="archery-status" id="archery-countdown" aria-live="polite"></p>
-                        <p class="archery-status" id="archery-confirm-status" aria-live="polite"></p>
                         <div class="archery-summary-actions">
                             <button class="btn btn-outline" id="archery-hold-btn" type="submit" form="archery-booking-form" disabled>Confirm booking</button>
-                            <button class="btn" id="archery-confirm-btn" type="button" disabled>Pay</button>
                         </div>
                     </aside>
+                    <div class="archery-hold-modal" id="archery-hold-modal" role="dialog" aria-modal="true" aria-labelledby="archery-hold-modal-title" hidden>
+                        <button class="archery-hold-modal__backdrop" type="button" data-archery-hold-modal-close aria-label="Close transaction summary"></button>
+                        <section class="archery-hold-modal__panel" role="document">
+                            <div class="archery-hold-modal__header">
+                                <div>
+                                    <span class="archery-hold-modal__eyebrow">Booking hold</span>
+                                    <h2 id="archery-hold-modal-title">Transaction summary</h2>
+                                </div>
+                                <button class="archery-hold-modal__close" type="button" data-archery-hold-modal-close aria-label="Close">Close</button>
+                            </div>
+                            <ul class="archery-summary-list archery-hold-modal__summary" id="archery-hold-modal-summary">
+                                <li><span>Status</span><strong>Waiting for booking confirmation</strong></li>
+                            </ul>
+                            <p class="archery-status archery-hold-modal__countdown" id="archery-countdown" aria-live="polite"></p>
+                            <p class="archery-status archery-hold-modal__status" id="archery-confirm-status" aria-live="polite"></p>
+                            <div class="archery-hold-modal__actions">
+                                <button class="btn btn-outline" id="archery-hold-modal-close" type="button" data-archery-hold-modal-close>Back to edit</button>
+                                <button class="btn" id="archery-confirm-btn" type="button" disabled>Pay</button>
+                            </div>
+                        </section>
+                    </div>
                 </div>
             </div>
         </section>
@@ -283,7 +303,7 @@
     </script>
     <script type="module" src="/js/footer-settings.js?v=business-1"></script>
     <script type="module" src="/js/auth.js?v=promo-auth-validate-20260629"></script>
-    <script type="module" src="/js/archery.js?v=archery-points-ux-20260701-1"></script>
+    <script type="module" src="/js/archery.js?v=archery-future-time-20260701-1"></script>
     <script src="/js/cart.js?v=mobile-cart-20260619"></script>
 </body>
 </html>

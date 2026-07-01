@@ -90,6 +90,14 @@
     align-items: start;
 }
 
+#archery-hold-panel {
+    align-self: start;
+}
+
+.archery-summary-content {
+    min-height: 0;
+}
+
 .archery-form-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -498,6 +506,9 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
     margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid #edf2ed;
+    background: #fff;
 }
 
 .archery-summary-actions .btn {
@@ -506,6 +517,10 @@
     justify-content: center;
     min-height: 48px;
     text-align: center;
+}
+
+.archery-summary-actions .btn:only-child {
+    grid-column: 1 / -1;
 }
 
 .archery-summary-actions .btn:disabled,
@@ -587,6 +602,114 @@
 
 .archery-summary-list span {
     color: #66756c;
+}
+
+.archery-hold-modal[hidden] {
+    display: none !important;
+}
+
+.archery-hold-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+}
+
+.archery-hold-modal__backdrop {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    background: rgba(8, 24, 15, 0.54);
+    cursor: pointer;
+}
+
+.archery-hold-modal__panel {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    gap: 16px;
+    width: min(92vw, 680px);
+    max-height: calc(100vh - 48px);
+    overflow: auto;
+    border: 1px solid #dce9de;
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 24px 80px rgba(7, 35, 20, 0.28);
+    padding: 22px;
+}
+
+.archery-hold-modal__header {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    align-items: flex-start;
+}
+
+.archery-hold-modal__header h2 {
+    margin: 0;
+    color: #123a26;
+    font-size: clamp(1.8rem, 4vw, 2.6rem);
+}
+
+.archery-hold-modal__eyebrow {
+    color: #66766e;
+    display: block;
+    font-size: 0.82rem;
+    font-weight: 800;
+    letter-spacing: 0;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+}
+
+.archery-hold-modal__close {
+    border: 1px solid #dce9de;
+    border-radius: 8px;
+    background: #f8fcf8;
+    color: #123a26;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.84rem;
+    font-weight: 800;
+    min-height: 36px;
+    padding: 6px 12px;
+}
+
+.archery-hold-modal__summary {
+    border: 1px solid #edf2ed;
+    border-radius: 8px;
+    background: #fbfdfb;
+    padding: 14px;
+}
+
+.archery-hold-modal__countdown,
+.archery-hold-modal__status {
+    margin: 0;
+}
+
+.archery-hold-modal__actions {
+    position: sticky;
+    bottom: -22px;
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr);
+    gap: 12px;
+    margin: 2px -22px -22px;
+    padding: 14px 22px 22px;
+    border-top: 1px solid #edf2ed;
+    background: #fff;
+    box-shadow: 0 -14px 30px rgba(18, 58, 38, 0.08);
+}
+
+.archery-hold-modal__actions .btn {
+    align-items: center;
+    display: inline-flex;
+    justify-content: center;
+    min-height: 50px;
+}
+
+body.archery-hold-modal-open {
+    overflow: hidden;
 }
 
 .archery-promo-code,
@@ -1327,9 +1450,50 @@
     }
 }
 
+@media (min-width: 981px) {
+    #archery-hold-panel {
+        position: sticky;
+        top: 92px;
+        display: flex;
+        flex-direction: column;
+        max-height: calc(100vh - 112px);
+        overflow: hidden;
+    }
+
+    .archery-summary-content {
+        overflow-y: auto;
+        padding-right: 6px;
+    }
+
+    .archery-summary-actions {
+        flex: 0 0 auto;
+        margin: 14px -20px -20px;
+        padding: 14px 20px 20px;
+        box-shadow: 0 -12px 24px rgba(18, 58, 38, 0.06);
+    }
+}
+
 @media (max-width: 640px) {
     .archery-hero {
         min-height: 72vh;
+    }
+
+    .archery-hold-modal {
+        align-items: end;
+        padding: 0;
+    }
+
+    .archery-hold-modal__panel {
+        width: 100%;
+        max-height: 92vh;
+        border-radius: 8px 8px 0 0;
+        padding: 18px;
+    }
+
+    .archery-hold-modal__actions {
+        bottom: -18px;
+        margin: 0 -18px -18px;
+        padding: 12px 18px 18px;
     }
 
     .archery-form-grid,
