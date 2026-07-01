@@ -205,6 +205,10 @@ async function readArcheryBooking(transaction, db, branchId, bookingId) {
 
 async function requireArcheryLoyaltyActor(transaction, db, actor, branchId, booking, staffSessionId = '') {
   const memberId = bookingMemberId(booking);
+  if (actor?.uid === memberId) {
+    requireMember(actor, memberId);
+    return memberId;
+  }
   if (isStaffActor(actor)) {
     requireRoles(actor, ['OWNER', 'MANAGER', 'ARCHERY_STAFF', 'CASHIER'], branchId);
     await requireStaffSession(transaction, db, actor, branchId, staffSessionId);

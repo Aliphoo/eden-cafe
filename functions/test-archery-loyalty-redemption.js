@@ -233,6 +233,37 @@ async function testReserveAdjustsBookingPayable() {
   assert.equal(db.data('member_summaries/member-1').reservedPoints, 70);
 }
 
+async function testOwnerCanReserveOwnBookingWithoutStaffSession() {
+  const db = seedDb();
+  const result = await db.runTransaction(transaction => archeryLoyalty.reserveArcheryLoyaltyForBookingInTransaction(transaction, db, {
+    branch_id: 'main',
+    booking_id: 'booking-1',
+    redeemed_points: 60,
+    idempotency_key: 'booking-1-owner-own-loyalty-60',
+  }, {
+    actor: { uid: 'member-1', role: 'OWNER', email: 'owner@example.test' },
+  }));
+  assert.equal(result.loyalty_status, 'reserved');
+  assert.equal(result.redeemed_points, 60);
+  assert.equal(db.data('bookings/booking-1').loyalty_status, 'reserved');
+}
+
+async function testOwnerNeedsStaffSessionWhenReservingForAnotherMember() {
+  const db = seedDb();
+  await assert.rejects(
+    () => db.runTransaction(transaction => archeryLoyalty.reserveArcheryLoyaltyForBookingInTransaction(transaction, db, {
+      branch_id: 'main',
+      booking_id: 'booking-1',
+      redeemed_points: 60,
+      idempotency_key: 'booking-1-owner-other-loyalty-60',
+    }, {
+      actor: { uid: 'owner-1', role: 'OWNER', email: 'owner@example.test' },
+    })),
+    error => error.code === 'STAFF_SESSION_REQUIRED'
+  );
+  assert.equal(db.data('bookings/booking-1').loyalty_status, undefined);
+}
+
 async function testCommitReservedBookingPoints() {
   const db = seedDb();
   const reservation = await reserveBookingPoints(db, 60);
@@ -271,6 +302,8 @@ async function testReleaseReservedBookingPoints() {
 
 async function run() {
   await testReserveAdjustsBookingPayable();
+  await testOwnerCanReserveOwnBookingWithoutStaffSession();
+  await testOwnerNeedsStaffSessionWhenReservingForAnotherMember();
   await testCommitReservedBookingPoints();
   await testReleaseReservedBookingPoints();
   console.log('archery loyalty redemption tests passed');
