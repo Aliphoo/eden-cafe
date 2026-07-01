@@ -16,7 +16,7 @@
     <link rel="canonical" href="https://edencafe.co/en">
     <meta name="keywords" content="Eden Cafe, Chiang Rai cafe, Nang Lae cafe, specialty coffee Chiang Rai, nature cafe Thailand">
 
-    <link rel="stylesheet" href="style.css?v=promo-popup-1">
+    <link rel="stylesheet" href="style.css?v=gallery-carousel-5">
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -188,8 +188,24 @@
                     <p data-index-setting="about-body">Eden Cafe was born out of a passion for the art of coffee brewing and supporting Thai farmers. We carefully select coffee beans from the best high-altitude farms in Thailand, roasted with special techniques to achieve a unique flavor. Our minimalist, nature-inspired design offers a true sanctuary for relaxation.</p>
                     <p class="about-subtitle" data-index-about="hero-subtitle">A nature cafe in Nang Lae, Chiang Rai, sharing Thai coffee through highland beans, careful roasting, and a calm space close to nature.</p>
                 </div>
-                <figure class="about-visual">
-                    <img data-index-about-image src="/Hero/Hero.webp" alt="Nature setting at Eden Cafe Chiang Rai with Thai specialty coffee" loading="lazy" decoding="async">
+                <figure class="gallery-carousel" data-gallery-carousel role="region" aria-roledescription="carousel" aria-label="Eden Cafe atmosphere gallery">
+                    <div class="gallery-carousel-viewport" data-gallery-viewport tabindex="0" aria-label="Browse Eden Cafe atmosphere images">
+                        <div class="gallery-carousel-track" data-gallery-track></div>
+                    </div>
+                    <div class="gallery-carousel-controls" aria-label="Gallery controls">
+                        <button class="gallery-carousel-button" type="button" data-gallery-prev aria-label="Previous image">
+                            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                                <path d="M15 18l-6-6 6-6"></path>
+                            </svg>
+                        </button>
+                        <div class="gallery-carousel-dots" data-gallery-dots aria-label="Choose image"></div>
+                        <button class="gallery-carousel-button" type="button" data-gallery-next aria-label="Next image">
+                            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                                <path d="M9 18l6-6-6-6"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <figcaption class="gallery-carousel-status" data-gallery-status aria-live="polite" aria-atomic="true"></figcaption>
                 </figure>
                 <div class="about-quick-facts" data-index-about="quick-facts">
                     <article class="about-fact"><span>Location</span><strong>Nang Lae, Mueang Chiang Rai</strong></article>
@@ -511,7 +527,8 @@
     </script>
     <script type="module" src="js/auth.js?v=phase5-1"></script>
     <script type="module" src="js/home-featured-products.js?v=phase4-1"></script>
-    <script type="module" src="js/index-settings.js?v=promo-popup-1"></script>
+    <script type="module" src="js/gallery-carousel.js?v=index-gallery-admin-20260701"></script>
+    <script type="module" src="js/index-settings.js?v=index-gallery-admin-20260701"></script>
     <!-- Cookie Consent Banner -->
     <div id="cookie-consent"
         style="display: none; position: fixed; bottom: 20px; left: 20px; right: 20px; max-width: 600px; margin: 0 auto; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); padding: 20px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); z-index: 9999; border: 1px solid rgba(0,0,0,0.05); text-align: left;">
@@ -550,7 +567,6 @@
 <script type="module" src="js/counter.js?v=5"></script>
 </body>
 </html>
-
 
 
 
