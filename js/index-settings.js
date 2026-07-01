@@ -299,11 +299,11 @@ function renderAboutSeo(aboutSeo = FALLBACK_INDEX.aboutSeo, lang = 'Th') {
     const subtitle = aboutText(aboutSeo.hero, 'subtitle', lang);
     setText('[data-index-about="hero-subtitle"]', subtitle);
 
-    const image = document.querySelector('[data-index-about-image]');
-    if (image) {
+    document.querySelectorAll('[data-index-about-image]').forEach(image => {
+        const galleryAlt = image.dataset[`galleryAlt${lang}`] || image.dataset.galleryAlt;
         image.src = aboutSeo.hero.imageUrl;
-        image.alt = aboutText(aboutSeo.hero, 'imageAlt', lang);
-    }
+        image.alt = galleryAlt || aboutText(aboutSeo.hero, 'imageAlt', lang);
+    });
 
     const quickFacts = document.querySelector('[data-index-about="quick-facts"]');
     if (quickFacts) {
