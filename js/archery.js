@@ -1821,8 +1821,16 @@ function resetAvailabilityState() {
 function sanitizeHoldResponse(hold = {}) {
     const pricing = calculateDraftPricing();
     const breakdown = hold.amount_breakdown || {};
+    const promoApplications = Array.isArray(hold.promoApplications)
+        ? hold.promoApplications
+        : Array.isArray(hold.promo_applications)
+            ? hold.promo_applications
+            : [];
+    const promoApplicationDiscount = promoApplications.reduce((sum, application = {}) => (
+        sum + firstFiniteNumber(application.discountAmount, application.discount_amount, application.discount, 0)
+    ), 0);
     const amountTotal = firstFiniteNumber(hold.amount_total, hold.totalAmount, breakdown.total, pricing.amountTotal);
-    const discount = firstFiniteNumber(hold.discount_total, hold.discount, breakdown.discount, 0);
+    const discount = firstFiniteNumber(hold.discount_total, hold.discount, breakdown.discount, promoApplicationDiscount, 0);
     const loyaltyDiscount = firstFiniteNumber(
         hold.loyalty_discount,
         hold.loyaltyDiscount,
@@ -1851,11 +1859,6 @@ function sanitizeHoldResponse(hold = {}) {
         breakdown.subtotal,
         totalBeforeLoyalty + discount
     );
-    const promoApplications = Array.isArray(hold.promoApplications)
-        ? hold.promoApplications
-        : Array.isArray(hold.promo_applications)
-            ? hold.promo_applications
-            : [];
     const promotionLineAllocations = Array.isArray(hold.promotionLineAllocations)
         ? hold.promotionLineAllocations
         : Array.isArray(hold.promotion_line_allocations)
@@ -2142,10 +2145,27 @@ function renderHoldSummary(hold) {
     if (!el || !hold) return;
     const duration = normalizeDuration(hold.duration_minutes);
     const breakdown = hold.amount_breakdown || {};
+    const promoApplications = Array.isArray(hold.promoApplications)
+        ? hold.promoApplications
+        : Array.isArray(hold.promo_applications)
+            ? hold.promo_applications
+            : [];
+    const promoApplicationDiscount = promoApplications.reduce((sum, application = {}) => (
+        sum + firstFiniteNumber(application.discountAmount, application.discount_amount, application.discount, 0)
+    ), 0);
     const total = firstFiniteNumber(hold.amount_total, hold.totalAmount, breakdown.total, packagePrice(duration));
-    const discount = firstFiniteNumber(hold.discount_total, hold.discount, breakdown.discount, 0);
+    const discount = firstFiniteNumber(hold.discount_total, hold.discount, breakdown.discount, promoApplicationDiscount, 0);
     const loyaltyDiscount = firstFiniteNumber(hold.loyalty_discount, hold.loyaltyDiscount, breakdown.loyalty_discount, 0);
-    const redeemedPoints = integerPointsValue(hold.redeemed_points || hold.redeemedPoints);
+    const redeemedPoints = integerPointsValue(
+        hold.redeemed_points
+        ?? hold.redeemedPoints
+        ?? hold.loyalty?.redeemedPoints
+        ?? hold.loyalty?.redeemed_points
+    );
+    const selectedQuote = archeryLoyaltySelectedQuote();
+    const pendingPoints = redeemedPoints
+        || integerPointsValue(selectedQuote?.redeemedPoints)
+        || archeryLoyaltyInputPoints();
     const totalBeforeLoyalty = firstFiniteNumber(
         hold.total_before_loyalty,
         hold.totalBeforeLoyalty,
@@ -2161,7 +2181,13 @@ function renderHoldSummary(hold) {
         breakdown.subtotal,
         totalBeforeLoyalty + discount
     );
-    const promoCode = normalizePromoCode(hold.promo_code || hold.promoCode);
+    const promoCode = normalizePromoCode(
+        hold.promo_code
+        || hold.promoCode
+        || promoApplications[0]?.code
+        || promoApplications[0]?.promoCode
+        || promoApplications[0]?.promo_code
+    );
     const staffCount = firstFiniteNumber(hold.staff_count, hold.staffCount, breakdown.staff_count, 0);
     const coachTotal = firstFiniteNumber(hold.coach_amount, breakdown.coach, 0);
     const laneNumbers = Array.isArray(hold.assigned_lane_numbers) && hold.assigned_lane_numbers.length
@@ -2181,17 +2207,14 @@ function renderHoldSummary(hold) {
         ['Staff', `${staffCount} people / ${money(coachTotal)}`],
         ['Equipment / person', `${optionDisplayLabel({ id: hold.equipment_option_id, label: hold.equipment_label })} / ${money(breakdown.equipment_per_person || 0)}`]
     ];
-    if (discount > 0 || loyaltyDiscount > 0) {
-        rows.push(['Subtotal', money(subtotal)]);
-        if (discount > 0) rows.push([`Promo ${promoCode || ''}`.trim(), '-' + money(discount)]);
-        if (loyaltyDiscount > 0) {
-            if (discount > 0) rows.push(['After promo', money(totalBeforeLoyalty)]);
-            rows.push([`${pointsText(redeemedPoints)} Eden Points`, '-' + money(loyaltyDiscount)]);
-        }
-        rows.push(['Total', money(total)]);
-    } else {
-        rows.push(['Total', money(total)]);
-    }
+    rows.push(['Subtotal', money(subtotal)]);
+    rows.push([`Promo ${promoCode || ''}`.trim(), discount > 0 ? '-' + money(discount) : (promoCode ? money(0) : '-')]);
+    rows.push(['After promo', money(totalBeforeLoyalty)]);
+    rows.push([
+        pendingPoints > 0 ? `${pointsText(pendingPoints)} Eden Points` : 'Eden Points',
+        loyaltyDiscount > 0 ? '-' + money(loyaltyDiscount) : (pendingPoints > 0 ? bookingText('ยังไม่จองแต้ม', 'Not reserved') : '-')
+    ]);
+    rows.push(['Total payable', money(total)]);
     rows.push(['Payment', hold.payment_status || 'UNPAID']);
     const summaryHTML = summaryRows(rows);
     el.innerHTML = summaryHTML;
