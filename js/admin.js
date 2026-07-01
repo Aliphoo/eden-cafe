@@ -333,6 +333,7 @@ const ADMIN_TAB_PERMISSIONS = {
     faqs: 'faqs',
     promptpay: 'promptpay',
     'business-settings': 'business',
+    'header-menu-settings': 'business',
     'index-settings': 'index',
     'promo-popup-settings': 'promotions',
     'marketing-settings': 'marketing',
@@ -1400,6 +1401,9 @@ function initAdminTab(tabId, options = {}) {
         case 'business-settings':
             if (typeof window.loadBusinessSettings === 'function') window.loadBusinessSettings();
             break;
+        case 'header-menu-settings':
+            if (typeof window.loadHeaderMenuSettings === 'function') window.loadHeaderMenuSettings();
+            break;
         case 'index-settings':
             if (typeof window.loadIndexSettings === 'function') window.loadIndexSettings();
             break;
@@ -1571,6 +1575,9 @@ window.refreshAdminSection = async (tabId, button = null) => {
                 break;
             case 'business-settings':
                 if (typeof window.loadBusinessSettings === 'function') await window.loadBusinessSettings();
+                break;
+            case 'header-menu-settings':
+                if (typeof window.loadHeaderMenuSettings === 'function') await window.loadHeaderMenuSettings();
                 break;
             case 'index-settings':
                 if (typeof window.loadIndexSettings === 'function') await window.loadIndexSettings();
@@ -12825,6 +12832,470 @@ businessSettingsForm?.addEventListener('submit', async (event) => {
         }
     }
 });
+
+// ==========================================
+// Header Menu Settings Management Logic
+// ==========================================
+
+const HEADER_NAV_SETTINGS_REF = () => doc(db, 'site_settings', 'header_nav');
+const HEADER_MENU_ALLOWED_IDS = ['home', 'about', 'menu', 'shop', 'booking', 'archery', 'blog', 'faq'];
+const HEADER_MENU_ALLOWED_CHILD_IDS = ['room', 'table'];
+const DEFAULT_HEADER_NAV_CONFIG = {
+    schemaVersion: 1,
+    items: [
+        { id: 'home', type: 'link', labelTh: 'หน้าแรก', labelEn: 'Home', hrefTh: '/#home', hrefEn: '/en#home', visible: true, order: 1 },
+        { id: 'about', type: 'link', labelTh: 'เกี่ยวกับเรา', labelEn: 'About', hrefTh: '/#about', hrefEn: '/en#about', visible: true, order: 2 },
+        { id: 'menu', type: 'link', labelTh: 'เมนู', labelEn: 'Menu', hrefTh: '/menu', hrefEn: '/menu-en', visible: true, order: 3 },
+        { id: 'shop', type: 'link', labelTh: 'ร้านค้า', labelEn: 'Shop', hrefTh: '/shop', hrefEn: '/shop-en', visible: true, order: 4 },
+        {
+            id: 'booking',
+            type: 'dropdown',
+            labelTh: 'ระบบจอง',
+            labelEn: 'Booking',
+            hrefTh: '/booking',
+            hrefEn: '/booking-en',
+            visible: true,
+            order: 5,
+            children: [
+                { id: 'room', labelTh: 'ห้องประชุม', labelEn: 'Meeting Room', hrefTh: '/booking?type=room', hrefEn: '/booking-en?type=room', visible: true, order: 1 },
+                { id: 'table', labelTh: 'โต๊ะ', labelEn: 'Table', hrefTh: '/booking?type=table', hrefEn: '/booking-en?type=table', visible: true, order: 2 }
+            ]
+        },
+        { id: 'archery', type: 'link', labelTh: 'ยิงธนู', labelEn: 'Archery', hrefTh: '/archery/', hrefEn: '/archery-en', visible: true, order: 6 },
+        { id: 'blog', type: 'link', labelTh: 'บทความ (Blog)', labelEn: 'Blog', hrefTh: '/blog', hrefEn: '/blog-en', visible: true, order: 7 },
+        { id: 'faq', type: 'link', labelTh: 'คำถามที่พบบ่อย', labelEn: 'FAQ', hrefTh: '/faq', hrefEn: '/en#faq', visible: true, order: 8 }
+    ]
+};
+const HEADER_MENU_DEFAULTS_BY_ID = Object.fromEntries(DEFAULT_HEADER_NAV_CONFIG.items.map(item => [item.id, item]));
+const HEADER_MENU_CHILD_DEFAULTS_BY_ID = Object.fromEntries((HEADER_MENU_DEFAULTS_BY_ID.booking.children || []).map(item => [item.id, item]));
+let headerMenuSettingsBound = false;
+let headerMenuDragId = '';
+let headerMenuPreviewLang = 'th';
+let headerMenuSettingsState = cloneHeaderMenuConfig(DEFAULT_HEADER_NAV_CONFIG);
+
+function cloneHeaderMenuConfig(config = DEFAULT_HEADER_NAV_CONFIG) {
+    return JSON.parse(JSON.stringify(config));
+}
+
+function cleanHeaderMenuText(value, fallback = '', maxLength = 80) {
+    const text = String(value ?? '').trim().replace(/[<>]/g, '');
+    return (text || fallback).slice(0, maxLength);
+}
+
+function safeHeaderMenuHref(value, fallback = '') {
+    const href = String(value ?? '').trim();
+    const safePattern = /^(\/(?!\/)[A-Za-z0-9._~%/?#&=+-]*|#[A-Za-z0-9_-]+)$/;
+    if (!href || href.length > 180) return fallback;
+    if (/[\s"'<>\\]/.test(href)) return fallback;
+    if (/javascript:/i.test(href)) return fallback;
+    return safePattern.test(href) ? href : fallback;
+}
+
+function normalizeHeaderMenuChild(raw = {}, fallback = HEADER_MENU_CHILD_DEFAULTS_BY_ID.room, order = 1) {
+    const id = HEADER_MENU_ALLOWED_CHILD_IDS.includes(raw.id) ? raw.id : fallback.id;
+    const base = HEADER_MENU_CHILD_DEFAULTS_BY_ID[id] || fallback;
+    return {
+        id,
+        labelTh: cleanHeaderMenuText(raw.labelTh, base.labelTh, 64),
+        labelEn: cleanHeaderMenuText(raw.labelEn, base.labelEn, 64),
+        hrefTh: safeHeaderMenuHref(raw.hrefTh, base.hrefTh),
+        hrefEn: safeHeaderMenuHref(raw.hrefEn, base.hrefEn),
+        visible: raw.visible !== false,
+        order
+    };
+}
+
+function normalizeHeaderMenuChildren(children = []) {
+    const rows = Array.isArray(children) ? children : [];
+    const sorted = rows
+        .map((item, index) => ({ item, index }))
+        .sort((a, b) => (Number(a.item?.order) || a.index + 1) - (Number(b.item?.order) || b.index + 1));
+    const normalized = [];
+    const used = new Set();
+
+    sorted.forEach(({ item }) => {
+        if (!HEADER_MENU_ALLOWED_CHILD_IDS.includes(item?.id) || used.has(item.id)) return;
+        used.add(item.id);
+        normalized.push(normalizeHeaderMenuChild(item, HEADER_MENU_CHILD_DEFAULTS_BY_ID[item.id], normalized.length + 1));
+    });
+
+    HEADER_MENU_ALLOWED_CHILD_IDS.forEach(id => {
+        if (!used.has(id)) normalized.push(normalizeHeaderMenuChild(HEADER_MENU_CHILD_DEFAULTS_BY_ID[id], HEADER_MENU_CHILD_DEFAULTS_BY_ID[id], normalized.length + 1));
+    });
+
+    return normalized.map((item, index) => ({ ...item, order: index + 1 }));
+}
+
+function normalizeHeaderMenuItem(raw = {}, fallback = HEADER_MENU_DEFAULTS_BY_ID.home, order = 1) {
+    const id = HEADER_MENU_ALLOWED_IDS.includes(raw.id) ? raw.id : fallback.id;
+    const base = HEADER_MENU_DEFAULTS_BY_ID[id] || fallback;
+    const item = {
+        id,
+        type: id === 'booking' ? 'dropdown' : 'link',
+        labelTh: cleanHeaderMenuText(raw.labelTh, base.labelTh, 64),
+        labelEn: cleanHeaderMenuText(raw.labelEn, base.labelEn, 64),
+        hrefTh: safeHeaderMenuHref(raw.hrefTh, base.hrefTh),
+        hrefEn: safeHeaderMenuHref(raw.hrefEn, base.hrefEn),
+        visible: raw.visible !== false,
+        order
+    };
+    if (id === 'booking') {
+        item.children = normalizeHeaderMenuChildren(raw.children || base.children);
+    }
+    return item;
+}
+
+function normalizeHeaderMenuSettings(data = {}) {
+    const rows = Array.isArray(data.items) ? data.items : DEFAULT_HEADER_NAV_CONFIG.items;
+    const sorted = rows
+        .map((item, index) => ({ item, index }))
+        .sort((a, b) => (Number(a.item?.order) || a.index + 1) - (Number(b.item?.order) || b.index + 1));
+    const normalized = [];
+    const used = new Set();
+
+    sorted.forEach(({ item }) => {
+        if (!HEADER_MENU_ALLOWED_IDS.includes(item?.id) || used.has(item.id)) return;
+        used.add(item.id);
+        normalized.push(normalizeHeaderMenuItem(item, HEADER_MENU_DEFAULTS_BY_ID[item.id], normalized.length + 1));
+    });
+
+    HEADER_MENU_ALLOWED_IDS.forEach(id => {
+        if (!used.has(id)) normalized.push(normalizeHeaderMenuItem(HEADER_MENU_DEFAULTS_BY_ID[id], HEADER_MENU_DEFAULTS_BY_ID[id], normalized.length + 1));
+    });
+
+    return {
+        schemaVersion: 1,
+        items: normalized.map((item, index) => ({ ...item, order: index + 1 }))
+    };
+}
+
+function setHeaderMenuStatus(message = '', tone = '') {
+    const status = document.getElementById('header-menu-settings-status');
+    if (!status) return;
+    status.textContent = message;
+    status.className = 'index-settings-status' + (tone ? ' ' + tone : '');
+}
+
+function headerMenuInputValue(row, field, fallback = '') {
+    return row.querySelector(`[data-header-menu-field="${field}"]`)?.value ?? fallback;
+}
+
+function headerMenuStateFromDOM() {
+    const list = document.getElementById('header-menu-list');
+    if (!list) return normalizeHeaderMenuSettings(headerMenuSettingsState);
+
+    const items = Array.from(list.querySelectorAll('[data-header-menu-item]')).map((row, index) => {
+        const id = row.dataset.navId;
+        const previous = headerMenuSettingsState.items.find(item => item.id === id) || HEADER_MENU_DEFAULTS_BY_ID[id];
+        const item = normalizeHeaderMenuItem({
+            id,
+            labelTh: headerMenuInputValue(row, 'labelTh', previous?.labelTh),
+            labelEn: headerMenuInputValue(row, 'labelEn', previous?.labelEn),
+            hrefTh: headerMenuInputValue(row, 'hrefTh', previous?.hrefTh),
+            hrefEn: headerMenuInputValue(row, 'hrefEn', previous?.hrefEn),
+            visible: row.querySelector('[data-header-menu-field="visible"]')?.checked === true,
+            children: previous?.children || []
+        }, previous, index + 1);
+
+        if (id === 'booking') {
+            item.children = Array.from(row.querySelectorAll('[data-header-menu-child]')).map((childRow, childIndex) => {
+                const childId = childRow.dataset.childId;
+                const childPrevious = previous?.children?.find(child => child.id === childId) || HEADER_MENU_CHILD_DEFAULTS_BY_ID[childId];
+                return normalizeHeaderMenuChild({
+                    id: childId,
+                    labelTh: childRow.querySelector('[data-header-menu-child-field="labelTh"]')?.value ?? childPrevious?.labelTh,
+                    labelEn: childRow.querySelector('[data-header-menu-child-field="labelEn"]')?.value ?? childPrevious?.labelEn,
+                    hrefTh: childRow.querySelector('[data-header-menu-child-field="hrefTh"]')?.value ?? childPrevious?.hrefTh,
+                    hrefEn: childRow.querySelector('[data-header-menu-child-field="hrefEn"]')?.value ?? childPrevious?.hrefEn,
+                    visible: childRow.querySelector('[data-header-menu-child-field="visible"]')?.checked === true
+                }, childPrevious, childIndex + 1);
+            });
+        }
+
+        return item;
+    });
+
+    headerMenuSettingsState = normalizeHeaderMenuSettings({ items });
+    return headerMenuSettingsState;
+}
+
+function renderHeaderMenuPreview() {
+    const preview = document.getElementById('header-menu-preview');
+    if (!preview) return;
+    const state = normalizeHeaderMenuSettings(headerMenuSettingsState);
+    const labelKey = headerMenuPreviewLang === 'en' ? 'labelEn' : 'labelTh';
+    const childLabelKey = labelKey;
+    const html = state.items.map(item => {
+        const children = item.id === 'booking'
+            ? (item.children || [])
+                .map(child => child.visible ? escapeHTML(child[childLabelKey]) : '')
+                .filter(Boolean)
+                .join(' / ')
+            : '';
+        const suffix = children ? ` (${children})` : '';
+        return `<span class="${item.visible ? '' : 'is-hidden'}">${escapeHTML(item[labelKey])}${escapeHTML(suffix)}</span>`;
+    }).join('');
+    preview.innerHTML = html || '<div class="header-menu-empty">No menu items</div>';
+}
+
+function renderHeaderMenuSettings() {
+    const list = document.getElementById('header-menu-list');
+    if (!list) return;
+    const state = normalizeHeaderMenuSettings(headerMenuSettingsState);
+    headerMenuSettingsState = state;
+
+    list.innerHTML = state.items.map((item, index) => {
+        const childHtml = item.id === 'booking'
+            ? `<div class="header-menu-children">
+                ${(item.children || []).map(child => `
+                    <div class="header-menu-child" data-header-menu-child data-child-id="${escapeHTML(child.id)}">
+                        <div>
+                            <strong>${escapeHTML(child.id)}</strong>
+                            <label class="header-menu-visible">
+                                <input type="checkbox" data-header-menu-child-field="visible" ${child.visible ? 'checked' : ''}>
+                                Visible
+                            </label>
+                        </div>
+                        <div class="header-menu-child-fields">
+                            <label>Label TH
+                                <input type="text" maxlength="64" data-header-menu-child-field="labelTh" value="${escapeHTML(child.labelTh)}">
+                            </label>
+                            <label>Label EN
+                                <input type="text" maxlength="64" data-header-menu-child-field="labelEn" value="${escapeHTML(child.labelEn)}">
+                            </label>
+                            <label>Href TH
+                                <input type="text" maxlength="180" data-header-menu-child-field="hrefTh" value="${escapeHTML(child.hrefTh)}">
+                            </label>
+                            <label>Href EN
+                                <input type="text" maxlength="180" data-header-menu-child-field="hrefEn" value="${escapeHTML(child.hrefEn)}">
+                            </label>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>`
+            : '';
+
+        return `
+            <div class="header-menu-row" draggable="true" data-header-menu-item data-nav-id="${escapeHTML(item.id)}">
+                <button type="button" class="header-menu-handle" title="Drag" aria-label="Drag ${escapeHTML(item.id)}">::</button>
+                <div class="header-menu-title">
+                    <span>${index + 1}. ${escapeHTML(item.id)}</span>
+                    <label class="header-menu-visible">
+                        <input type="checkbox" data-header-menu-field="visible" ${item.visible ? 'checked' : ''}>
+                        Visible
+                    </label>
+                    <small>${escapeHTML(item.type)}</small>
+                </div>
+                <div class="header-menu-fields">
+                    <label>Label TH
+                        <input type="text" maxlength="64" data-header-menu-field="labelTh" value="${escapeHTML(item.labelTh)}">
+                    </label>
+                    <label>Label EN
+                        <input type="text" maxlength="64" data-header-menu-field="labelEn" value="${escapeHTML(item.labelEn)}">
+                    </label>
+                    <label>Href TH
+                        <input type="text" maxlength="180" data-header-menu-field="hrefTh" value="${escapeHTML(item.hrefTh)}">
+                    </label>
+                    <label>Href EN
+                        <input type="text" maxlength="180" data-header-menu-field="hrefEn" value="${escapeHTML(item.hrefEn)}">
+                    </label>
+                </div>
+                <div class="header-menu-row-actions" aria-label="Move ${escapeHTML(item.id)}">
+                    <button type="button" data-header-menu-move="first" title="First">Top</button>
+                    <button type="button" data-header-menu-move="up" title="Up">Up</button>
+                    <button type="button" data-header-menu-move="down" title="Down">Dn</button>
+                    <button type="button" data-header-menu-move="last" title="Last">End</button>
+                </div>
+                ${childHtml}
+            </div>
+        `;
+    }).join('');
+
+    renderHeaderMenuPreview();
+}
+
+function moveHeaderMenuItem(id, action) {
+    const state = headerMenuStateFromDOM();
+    const items = [...state.items];
+    const index = items.findIndex(item => item.id === id);
+    if (index < 0) return;
+
+    const [item] = items.splice(index, 1);
+    let nextIndex = index;
+    if (action === 'first') nextIndex = 0;
+    if (action === 'up') nextIndex = Math.max(0, index - 1);
+    if (action === 'down') nextIndex = Math.min(items.length, index + 1);
+    if (action === 'last') nextIndex = items.length;
+    items.splice(nextIndex, 0, item);
+    headerMenuSettingsState = normalizeHeaderMenuSettings({ items });
+    renderHeaderMenuSettings();
+}
+
+function headerMenuPayloadFromForm() {
+    const state = headerMenuStateFromDOM();
+    if (!state.items.some(item => item.visible)) {
+        throw new Error('At least one top-level menu item must be visible.');
+    }
+    return {
+        schemaVersion: 1,
+        items: state.items.map((item, index) => {
+            const normalized = normalizeHeaderMenuItem(item, HEADER_MENU_DEFAULTS_BY_ID[item.id], index + 1);
+            if (normalized.id === 'booking') normalized.children = normalizeHeaderMenuChildren(normalized.children);
+            return normalized;
+        }),
+        updatedAt: serverTimestamp(),
+        updatedBy: auth.currentUser?.uid || '',
+        updatedByEmail: auth.currentUser?.email || ''
+    };
+}
+
+function clearHeaderNavPublicCache() {
+    try {
+        window.sessionStorage?.removeItem('eden-public-cache:header-nav-v1');
+    } catch (_) {
+        // Public cache cleanup is best effort.
+    }
+}
+
+function bindHeaderMenuSettingsControls() {
+    if (headerMenuSettingsBound) return;
+    headerMenuSettingsBound = true;
+    const form = document.getElementById('headerMenuSettingsForm');
+    const list = document.getElementById('header-menu-list');
+
+    form?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (!canAdmin('business')) {
+            setHeaderMenuStatus('This account cannot edit Header Menu.', 'error');
+            return;
+        }
+
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const originalText = submitBtn?.textContent || '';
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Saving...';
+        }
+
+        try {
+            const payload = headerMenuPayloadFromForm();
+            await setDoc(HEADER_NAV_SETTINGS_REF(), payload);
+            clearHeaderNavPublicCache();
+            setHeaderMenuStatus('Header Menu saved to site_settings/header_nav.', '');
+        } catch (error) {
+            console.error('Unable to save header menu settings:', error);
+            setHeaderMenuStatus(error.message || safeAdminError('Save Header Menu failed'), 'error');
+        } finally {
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalText;
+            }
+        }
+    });
+
+    form?.addEventListener('click', (event) => {
+        const langBtn = event.target.closest('[data-header-menu-lang]');
+        if (langBtn) {
+            headerMenuPreviewLang = langBtn.dataset.headerMenuLang === 'en' ? 'en' : 'th';
+            form.querySelectorAll('[data-header-menu-lang]').forEach(btn => btn.classList.toggle('active', btn === langBtn));
+            headerMenuStateFromDOM();
+            renderHeaderMenuPreview();
+            return;
+        }
+
+        const actionBtn = event.target.closest('[data-header-menu-action]');
+        if (actionBtn?.dataset.headerMenuAction === 'reset') {
+            headerMenuSettingsState = cloneHeaderMenuConfig(DEFAULT_HEADER_NAV_CONFIG);
+            renderHeaderMenuSettings();
+            setHeaderMenuStatus('Default menu is shown. Save to publish it.', 'warning');
+            return;
+        }
+        if (actionBtn?.dataset.headerMenuAction === 'reload') {
+            window.loadHeaderMenuSettings();
+            return;
+        }
+
+        const moveBtn = event.target.closest('[data-header-menu-move]');
+        if (moveBtn) {
+            const row = moveBtn.closest('[data-header-menu-item]');
+            moveHeaderMenuItem(row?.dataset.navId, moveBtn.dataset.headerMenuMove);
+        }
+    });
+
+    form?.addEventListener('input', () => {
+        headerMenuStateFromDOM();
+        renderHeaderMenuPreview();
+    });
+    form?.addEventListener('change', () => {
+        headerMenuStateFromDOM();
+        renderHeaderMenuPreview();
+    });
+
+    list?.addEventListener('dragstart', (event) => {
+        const row = event.target.closest('[data-header-menu-item]');
+        if (!row) return;
+        headerMenuStateFromDOM();
+        headerMenuDragId = row.dataset.navId;
+        row.classList.add('dragging');
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', headerMenuDragId);
+    });
+
+    list?.addEventListener('dragover', (event) => {
+        if (!headerMenuDragId) return;
+        const row = event.target.closest('[data-header-menu-item]');
+        if (!row || row.dataset.navId === headerMenuDragId) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+    });
+
+    list?.addEventListener('drop', (event) => {
+        const targetRow = event.target.closest('[data-header-menu-item]');
+        if (!headerMenuDragId || !targetRow) return;
+        event.preventDefault();
+        const state = headerMenuStateFromDOM();
+        const items = [...state.items];
+        const fromIndex = items.findIndex(item => item.id === headerMenuDragId);
+        let toIndex = items.findIndex(item => item.id === targetRow.dataset.navId);
+        if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+        const rect = targetRow.getBoundingClientRect();
+        if (event.clientY > rect.top + rect.height / 2) toIndex += 1;
+        const [item] = items.splice(fromIndex, 1);
+        if (fromIndex < toIndex) toIndex -= 1;
+        items.splice(toIndex, 0, item);
+        headerMenuSettingsState = normalizeHeaderMenuSettings({ items });
+        headerMenuDragId = '';
+        renderHeaderMenuSettings();
+    });
+
+    list?.addEventListener('dragend', () => {
+        headerMenuDragId = '';
+        list.querySelectorAll('.dragging').forEach(row => row.classList.remove('dragging'));
+    });
+}
+
+window.loadHeaderMenuSettings = async function() {
+    bindHeaderMenuSettingsControls();
+    setHeaderMenuStatus('Loading Header Menu...');
+    try {
+        const snap = await getDoc(HEADER_NAV_SETTINGS_REF());
+        headerMenuSettingsState = snap.exists()
+            ? normalizeHeaderMenuSettings(snap.data())
+            : cloneHeaderMenuConfig(DEFAULT_HEADER_NAV_CONFIG);
+        renderHeaderMenuSettings();
+        setHeaderMenuStatus(
+            snap.exists()
+                ? 'Loaded from site_settings/header_nav.'
+                : 'No header_nav doc yet. Default menu is shown.',
+            snap.exists() ? '' : 'warning'
+        );
+    } catch (error) {
+        console.error('Unable to load header menu settings:', error);
+        headerMenuSettingsState = cloneHeaderMenuConfig(DEFAULT_HEADER_NAV_CONFIG);
+        renderHeaderMenuSettings();
+        setHeaderMenuStatus('Unable to load Header Menu. Default menu is shown.', 'error');
+    }
+};
 
 // ==========================================
 // Index Settings Management Logic

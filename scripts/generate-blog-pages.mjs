@@ -434,6 +434,7 @@ ${renderHeader('blog')}
 </main>
 ${renderFooter()}
 ${renderMobileNavScript()}
+<script type="module" src="/js/header-nav.js?v=header-menu-settings-20260701"></script>
 <script type="module" src="/js/blog.js?v=cms-4"></script>
 <script type="module" src="/js/footer-settings.js?v=business-1"></script>
 <script type="module" src="/js/marketing-consent.js?v=1"></script>
@@ -661,6 +662,7 @@ ${renderHeader('blog')}
 </main>
 ${renderFooter()}
 ${renderMobileNavScript()}
+<script type="module" src="/js/header-nav.js?v=header-menu-settings-20260701"></script>
 <script type="module" src="/js/blog.js?v=cms-4"></script>
 <script type="module" src="/js/footer-settings.js?v=business-1"></script>
 <script type="module" src="/js/marketing-consent.js?v=1"></script>
@@ -777,6 +779,7 @@ ${renderHeader('blog')}
 </main>
 ${renderFooter()}
 ${renderMobileNavScript()}
+<script type="module" src="/js/header-nav.js?v=header-menu-settings-20260701"></script>
 <script type="module" src="/js/blog.js?v=cms-4"></script>
 <script type="module" src="/js/footer-settings.js?v=business-1"></script>
 <script type="module" src="/js/marketing-consent.js?v=1"></script>

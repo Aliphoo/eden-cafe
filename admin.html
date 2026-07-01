@@ -719,6 +719,34 @@
         .footer-preview-social a:hover { background: rgba(255,255,255,0.4); }
         .footer-settings-full { grid-column: 1 / -1; }
         @media (max-width: 900px) { .footer-settings-grid { grid-template-columns: 1fr; } .footer-preview-grid { grid-template-columns: 1fr; } }
+        .header-menu-admin-shell { display: grid; gap: 18px; }
+        .header-menu-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; }
+        .header-menu-lang-tabs { display: inline-flex; gap: 6px; padding: 5px; border: 1px solid #dfe8df; border-radius: 10px; background: #fff; }
+        .header-menu-lang-tabs button { border: 0; border-radius: 8px; background: transparent; color: #4d5f55; cursor: pointer; font-weight: 800; padding: 8px 14px; }
+        .header-menu-lang-tabs button.active { background: var(--accent-color); color: #fff; }
+        .header-menu-preview { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; min-height: 58px; border: 1px solid #dfe8df; border-radius: 12px; padding: 12px; background: #fff; }
+        .header-menu-preview span { display: inline-flex; align-items: center; min-height: 34px; border: 1px solid #dce8df; border-radius: 999px; padding: 7px 12px; color: #123528; background: #f8fcf9; font-weight: 800; }
+        .header-menu-preview span.is-hidden { color: #8a948d; background: #f4f5f4; text-decoration: line-through; }
+        .header-menu-list { display: grid; gap: 12px; }
+        .header-menu-row { display: grid; grid-template-columns: 44px minmax(132px, 0.5fr) minmax(0, 2fr) auto; gap: 12px; align-items: start; border: 1px solid #dfe8df; border-radius: 12px; background: #fff; padding: 14px; box-shadow: 0 8px 22px rgba(26, 147, 69, 0.05); }
+        .header-menu-row.dragging { opacity: 0.54; border-style: dashed; }
+        .header-menu-handle { width: 40px; height: 40px; border: 1px solid #d7e8dc; border-radius: 8px; background: #f5fbf7; color: #0b4a30; cursor: grab; font-weight: 900; }
+        .header-menu-title { display: grid; gap: 8px; color: #173f2a; font-weight: 900; }
+        .header-menu-title small { color: #66746c; font-weight: 700; }
+        .header-menu-visible { display: inline-flex; align-items: center; gap: 8px; color: #34443b; font-weight: 800; }
+        .header-menu-visible input { width: 18px; height: 18px; accent-color: var(--accent-color); }
+        .header-menu-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+        .header-menu-fields label, .header-menu-child-fields label { display: grid; gap: 5px; color: #4d5f55; font-size: 0.82rem; font-weight: 800; }
+        .header-menu-fields input, .header-menu-child-fields input { width: 100%; min-width: 0; border: 1px solid #d7e5d7; border-radius: 8px; padding: 9px 10px; font: inherit; background: #fff; color: #1d2d22; }
+        .header-menu-row-actions { display: grid; grid-template-columns: repeat(2, 38px); gap: 7px; justify-content: end; }
+        .header-menu-row-actions button { min-width: 38px; min-height: 36px; border: 1px solid #d7e8dc; border-radius: 8px; background: #f5fbf7; color: #0b4a30; cursor: pointer; font-weight: 900; }
+        .header-menu-children { grid-column: 3 / 5; display: grid; gap: 10px; border-top: 1px dashed #dce8df; padding-top: 12px; }
+        .header-menu-child { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; align-items: center; }
+        .header-menu-child strong { color: #173f2a; }
+        .header-menu-child-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+        .header-menu-empty { border: 1px dashed #cfe3d4; border-radius: 12px; padding: 18px; color: #66746c; background: #fbfff8; text-align: center; }
+        @media (max-width: 1100px) { .header-menu-row { grid-template-columns: 44px minmax(150px, 0.7fr) minmax(0, 1.5fr); } .header-menu-row-actions { grid-column: 2 / 4; display: flex; flex-wrap: wrap; justify-content: flex-start; } .header-menu-children { grid-column: 2 / 4; } .header-menu-child-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 720px) { .header-menu-row, .header-menu-child { grid-template-columns: 1fr; } .header-menu-handle { width: 100%; } .header-menu-fields, .header-menu-child-fields { grid-template-columns: 1fr; } .header-menu-row-actions, .header-menu-children { grid-column: 1; } }
         .index-settings-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 0.75fr); gap: 24px; align-items: start; }
         .index-settings-card { background: #fbfff8; border: 1px solid #e0eadc; border-radius: 16px; padding: 22px 24px; }
         .index-settings-card h3 { font-size: 1.1rem; color: var(--primary-color); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid #edf3ed; }
@@ -927,6 +955,7 @@
             <li onclick="switchTab('faqs', this)">❓ คำถามที่พบบ่อย (FAQ)</li>
             <li onclick="switchTab('promptpay', this)">&#128184; &#x0E08;&#x0E31;&#x0E14;&#x0E01;&#x0E32;&#x0E23;&#x0E1E;&#x0E23;&#x0E49;&#x0E2D;&#x0E21;&#x0E40;&#x0E1E;&#x0E22;&#x0E4C; (PromptPay)</li>
             <li onclick="switchTab('business-settings', this)">Business Info</li>
+            <li onclick="switchTab('header-menu-settings', this)">Header Menu</li>
             <li data-title="จัดการ Index" onclick="switchTab('index-settings', this)">จัดการ Index</li>
             <li onclick="switchTab('promo-popup-settings', this)">Promotional Popup</li>
             <li onclick="switchTab('footer-settings', this)">🦶 จัดการ Footer</li>
@@ -3357,6 +3386,48 @@
                         <button type="button" class="btn-action" style="background:#789; padding: 10px 24px;" onclick="loadBusinessSettings()">Cancel / Reload</button>
                         <button type="button" class="btn-action btn-view" style="padding: 10px 24px;" onclick="migrateBusinessSettingsFromFooter()">Import Footer Data</button>
                         <button type="submit" class="btn-submit" style="width: auto; padding: 10px 32px; background: var(--accent-color);">Save Business Info</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Header Menu Settings Section -->
+        <div id="header-menu-settings" class="content-section">
+            <div class="section-container">
+                <div class="section-header">
+                    <div>
+                        <h2>Header Menu</h2>
+                        <p style="color:#667; margin-top:4px;">จัดการลำดับเมนูหลักของเว็บไซต์ทุกหน้า ทั้งภาษาไทยและภาษาอังกฤษ</p>
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button class="btn-action btn-view" type="button" onclick="loadHeaderMenuSettings()">Load Current Settings</button>
+                    </div>
+                </div>
+
+                <form id="headerMenuSettingsForm">
+                    <div class="header-menu-admin-shell">
+                        <div class="footer-settings-card">
+                            <div class="header-menu-toolbar">
+                                <h3 style="margin:0; padding:0; border:0;">Menu Preview</h3>
+                                <div class="header-menu-lang-tabs" aria-label="Header menu preview language">
+                                    <button type="button" class="active" data-header-menu-lang="th">TH</button>
+                                    <button type="button" data-header-menu-lang="en">EN</button>
+                                </div>
+                            </div>
+                            <div class="header-menu-preview" id="header-menu-preview" aria-label="Header menu preview"></div>
+                        </div>
+
+                        <div class="footer-settings-card">
+                            <h3>Menu Items</h3>
+                            <div class="header-menu-list" id="header-menu-list"></div>
+                        </div>
+
+                        <p class="index-settings-status" id="header-menu-settings-status"></p>
+                        <div class="index-settings-actions">
+                            <button type="button" class="btn-action" style="background:#789; padding: 10px 24px;" data-header-menu-action="reload">Cancel / Reload</button>
+                            <button type="button" class="btn-action btn-view" style="padding: 10px 24px;" data-header-menu-action="reset">Reset Default</button>
+                            <button type="submit" class="btn-submit" style="width: auto; padding: 10px 32px; background: var(--accent-color);">Save Header Menu</button>
+                        </div>
                     </div>
                 </form>
             </div>

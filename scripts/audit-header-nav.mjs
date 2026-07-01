@@ -7,6 +7,7 @@ const EXCLUDED_DIRS = new Set(['.git', 'node_modules', 'eden-pos-apk']);
 
 const TH_LABELS = ['หน้าแรก', 'เกี่ยวกับเรา', 'เมนู', 'ร้านค้า', 'ระบบจอง', 'ยิงธนู', 'บทความ (Blog)', 'คำถามที่พบบ่อย'];
 const EN_LABELS = ['Home', 'About', 'Menu', 'Shop', 'Booking', 'Archery', 'Blog', 'FAQ'];
+const HEADER_NAV_SCRIPT = '/js/header-nav.js';
 
 const TH_HREFS = {
     'เมนู': '/menu',
@@ -140,6 +141,10 @@ function validateNav(relPath, html) {
 
     checked.push(relPath);
 
+    if (!html.includes(HEADER_NAV_SCRIPT)) {
+        addIssue(relPath, 'missing public header nav hydrator script');
+    }
+
     if (labels.join(' | ') !== expectedLabels.join(' | ')) {
         addIssue(relPath, `nav labels/order mismatch: ${labels.join(' | ')}`);
     }
@@ -198,6 +203,9 @@ if (!existsSync(generatorPath)) {
     }
     if (/<li><a href="\/archery\/booking">ยิงธนู<\/a><\/li>/.test(generator)) {
         addIssue('scripts/generate-blog-pages.mjs', 'blog generator still places Archery in booking dropdown');
+    }
+    if (!generator.includes(HEADER_NAV_SCRIPT)) {
+        addIssue('scripts/generate-blog-pages.mjs', 'blog generator is missing public header nav hydrator script');
     }
 }
 

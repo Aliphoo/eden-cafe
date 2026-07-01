@@ -77,6 +77,70 @@ service cloud.firestore {
     function isShortString(value, maxLength) {
       return value is string && value.size() > 0 && value.size() <= maxLength;
     }
+    function isInternalHeaderHref(value) {
+      return value is string
+        && value.size() > 0
+        && value.size() <= 180
+        && !value.matches('^//.*')
+        && (
+          value.matches('^/[A-Za-z0-9._~%/?#&=+-]*$')
+          || value.matches('^#[A-Za-z0-9_-]+$')
+        );
+    }
+    function isValidHeaderNavChild(child) {
+      return child is map
+        && child.keys().hasOnly(['id', 'labelTh', 'labelEn', 'hrefTh', 'hrefEn', 'visible', 'order'])
+        && child.id in ['room', 'table']
+        && isShortString(child.labelTh, 64)
+        && isShortString(child.labelEn, 64)
+        && isInternalHeaderHref(child.hrefTh)
+        && isInternalHeaderHref(child.hrefEn)
+        && child.visible is bool
+        && child.order is int
+        && child.order >= 1
+        && child.order <= 4;
+    }
+    function isValidHeaderNavChildren(children) {
+      return children is list
+        && children.size() == 2
+        && isValidHeaderNavChild(children[0])
+        && isValidHeaderNavChild(children[1]);
+    }
+    function isValidHeaderNavItem(item) {
+      return item is map
+        && item.keys().hasOnly(['id', 'type', 'labelTh', 'labelEn', 'hrefTh', 'hrefEn', 'visible', 'order', 'children'])
+        && item.id in ['home', 'about', 'menu', 'shop', 'booking', 'archery', 'blog', 'faq']
+        && item.type in ['link', 'dropdown']
+        && isShortString(item.labelTh, 64)
+        && isShortString(item.labelEn, 64)
+        && isInternalHeaderHref(item.hrefTh)
+        && isInternalHeaderHref(item.hrefEn)
+        && item.visible is bool
+        && item.order is int
+        && item.order >= 1
+        && item.order <= 20
+        && (
+          (!item.keys().hasAny(['children']) && item.id != 'booking')
+          || (item.id == 'booking' && item.type == 'dropdown' && isValidHeaderNavChildren(item.children))
+        );
+    }
+    function isValidHeaderNavSettings() {
+      return request.resource.data.keys().hasOnly(['schemaVersion', 'items', 'updatedAt', 'updatedBy', 'updatedByEmail'])
+        && request.resource.data.schemaVersion == 1
+        && request.resource.data.items is list
+        && request.resource.data.items.size() == 8
+        && isValidHeaderNavItem(request.resource.data.items[0])
+        && isValidHeaderNavItem(request.resource.data.items[1])
+        && isValidHeaderNavItem(request.resource.data.items[2])
+        && isValidHeaderNavItem(request.resource.data.items[3])
+        && isValidHeaderNavItem(request.resource.data.items[4])
+        && isValidHeaderNavItem(request.resource.data.items[5])
+        && isValidHeaderNavItem(request.resource.data.items[6])
+        && isValidHeaderNavItem(request.resource.data.items[7])
+        && request.resource.data.updatedAt == request.time
+        && (!request.resource.data.keys().hasAny(['updatedBy']) || request.resource.data.updatedBy == request.auth.uid)
+        && (!request.resource.data.keys().hasAny(['updatedByEmail']) || request.resource.data.updatedByEmail is string);
+    }
     function isValidOptionalLoyaltyOrderFields() {
       return (!request.resource.data.keys().hasAny(['normalDiscount']) || (request.resource.data.normalDiscount is number && request.resource.data.normalDiscount >= 0 && request.resource.data.normalDiscount <= 1000000))
         && (!request.resource.data.keys().hasAny(['loyaltyDiscount']) || (request.resource.data.loyaltyDiscount is number && request.resource.data.loyaltyDiscount >= 0 && request.resource.data.loyaltyDiscount <= 1000000))
@@ -709,6 +773,7 @@ service cloud.firestore {
       allow read: if true;
       allow write: if (docId == 'footer' && hasAdminPermission('footer'))
         || (docId == 'business' && hasAdminPermission('business'))
+        || (docId == 'header_nav' && hasAdminPermission('business') && isValidHeaderNavSettings())
         || (docId == 'index' && hasAdminPermission('index'))
         || (docId == 'promo_popup' && hasAdminPermission('promotions'))
         || (docId == 'promptpay' && hasAdminPermission('promptpay'))
