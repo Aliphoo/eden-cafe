@@ -5431,6 +5431,13 @@ const ARCHERY_BRANCH_FALLBACK = 'BKK_MAIN';
 const ARCHERY_PAID_STATUSES = new Set(['PAID_ONLINE', 'PAID_COUNTER', 'PAID', 'REFUNDED']);
 const ARCHERY_PENDING_PAYMENT_STATUSES = new Set(['PENDING', 'UNPAID', 'PAID_PENDING_REVIEW', 'REVIEW_REQUIRED']);
 const ARCHERY_CLOSED_STATUSES = new Set(['CANCELLED', 'COMPLETED', 'NO_SHOW', 'EXPIRED']);
+const ARCHERY_STAFF_SESSION_ID_KEY = 'eden_archery_staff_session_id';
+const ARCHERY_STAFF_SESSION_EXPIRES_KEY = 'eden_archery_staff_session_expires_at';
+const ARCHERY_STAFF_SESSION_UID_KEY = 'eden_archery_staff_session_uid';
+const ARCHERY_STAFF_SESSION_BRANCH_KEY = 'eden_archery_staff_session_branch_id';
+const ARCHERY_STAFF_SESSION_LEGACY_ID_KEY = 'eden_staff_session_id';
+const ARCHERY_STAFF_SESSION_LEGACY_EXPIRES_KEY = 'eden_staff_session_expires_at';
+const ARCHERY_STAFF_SESSION_EXPIRY_SKEW_MS = 2 * 60 * 1000;
 const ARCHERY_AUDIT_ACTIONS = new Set([
     'createWalkInArcheryBooking',
     'adminCheckInBooking',
@@ -5865,18 +5872,135 @@ function archerySetStatus(message, tone = '') {
     status.className = 'archery-status' + (tone ? ' ' + tone : '');
 }
 
+let archeryStaffSessionPromise = null;
+
+function archerySessionStorageGet(key = '') {
+    try {
+        return sessionStorage.getItem(key) || localStorage.getItem(key) || '';
+    } catch (error) {
+        console.warn('Unable to read staff session storage:', error);
+        return '';
+    }
+}
+
+function archerySessionStorageSet(key = '', value = '') {
+    if (!key || !value) return;
+    try {
+        sessionStorage.setItem(key, value);
+    } catch (error) {
+        console.warn('Unable to store staff session:', error);
+    }
+}
+
+function archerySessionStorageRemove(key = '') {
+    if (!key) return;
+    try {
+        sessionStorage.removeItem(key);
+        localStorage.removeItem(key);
+    } catch (error) {
+        console.warn('Unable to clear staff session storage:', error);
+    }
+}
+
 function archeryStaffSessionId() {
     const access = currentAdminAccess || {};
-    const keys = ['eden_archery_staff_session_id', 'eden_staff_session_id'];
+    const keys = [ARCHERY_STAFF_SESSION_ID_KEY, ARCHERY_STAFF_SESSION_LEGACY_ID_KEY];
     for (const key of keys) {
-        try {
-            const value = sessionStorage.getItem(key) || localStorage.getItem(key);
-            if (value) return value;
-        } catch (error) {
-            console.warn('Unable to read staff session storage:', error);
-        }
+        const value = archerySessionStorageGet(key);
+        if (value) return value;
     }
     return access.staff_session_id || access.staffSessionId || '';
+}
+
+function archeryStaffSessionExpiresAt() {
+    const access = currentAdminAccess || {};
+    const keys = [ARCHERY_STAFF_SESSION_EXPIRES_KEY, ARCHERY_STAFF_SESSION_LEGACY_EXPIRES_KEY];
+    for (const key of keys) {
+        const value = archerySessionStorageGet(key);
+        if (value) return value;
+    }
+    return access.staff_session_expires_at || access.staffSessionExpiresAt || '';
+}
+
+function archeryStaffSessionFresh(expiresAt = '') {
+    const expiresMs = Date.parse(expiresAt);
+    return Number.isFinite(expiresMs) && expiresMs > Date.now() + ARCHERY_STAFF_SESSION_EXPIRY_SKEW_MS;
+}
+
+function archeryCachedStaffSession() {
+    const sessionId = archeryStaffSessionId();
+    const expiresAt = archeryStaffSessionExpiresAt();
+    const currentUid = auth.currentUser?.uid || currentAdminAccess?.uid || '';
+    const currentBranchId = archeryBranchId();
+    const cachedUid = archerySessionStorageGet(ARCHERY_STAFF_SESSION_UID_KEY);
+    const cachedBranchId = archerySessionStorageGet(ARCHERY_STAFF_SESSION_BRANCH_KEY);
+    if (!sessionId || !archeryStaffSessionFresh(expiresAt)) return null;
+    if (currentUid && cachedUid !== currentUid) return null;
+    if (currentBranchId && cachedBranchId !== currentBranchId) return null;
+    return { sessionId, expiresAt };
+}
+
+function rememberArcheryStaffSession(result = {}) {
+    const sessionId = String(result.staff_session_id || result.staffSessionId || '').trim();
+    const expiresAt = String(result.expires_at || result.expiresAt || '').trim();
+    if (!sessionId || !archeryStaffSessionFresh(expiresAt)) {
+        const error = new Error('Unable to start Archery staff session');
+        error.code = 'STAFF_SESSION_REQUIRED';
+        throw error;
+    }
+    const branchId = String(result.branch_id || result.branchId || archeryBranchId()).trim();
+    const uid = auth.currentUser?.uid || currentAdminAccess?.uid || '';
+    archerySessionStorageSet(ARCHERY_STAFF_SESSION_ID_KEY, sessionId);
+    archerySessionStorageSet(ARCHERY_STAFF_SESSION_EXPIRES_KEY, expiresAt);
+    archerySessionStorageSet(ARCHERY_STAFF_SESSION_UID_KEY, uid);
+    archerySessionStorageSet(ARCHERY_STAFF_SESSION_BRANCH_KEY, branchId);
+    if (currentAdminAccess) {
+        currentAdminAccess.staff_session_id = sessionId;
+        currentAdminAccess.staffSessionId = sessionId;
+        currentAdminAccess.staff_session_expires_at = expiresAt;
+        currentAdminAccess.staffSessionExpiresAt = expiresAt;
+    }
+    return sessionId;
+}
+
+function clearArcheryStaffSession() {
+    [
+        ARCHERY_STAFF_SESSION_ID_KEY,
+        ARCHERY_STAFF_SESSION_EXPIRES_KEY,
+        ARCHERY_STAFF_SESSION_UID_KEY,
+        ARCHERY_STAFF_SESSION_BRANCH_KEY,
+        ARCHERY_STAFF_SESSION_LEGACY_ID_KEY,
+        ARCHERY_STAFF_SESSION_LEGACY_EXPIRES_KEY
+    ].forEach(archerySessionStorageRemove);
+    if (currentAdminAccess) {
+        currentAdminAccess.staff_session_id = '';
+        currentAdminAccess.staffSessionId = '';
+        currentAdminAccess.staff_session_expires_at = '';
+        currentAdminAccess.staffSessionExpiresAt = '';
+    }
+}
+
+async function ensureArcheryStaffSession(options = {}) {
+    const force = options.force === true;
+    if (!force) {
+        const cached = archeryCachedStaffSession();
+        if (cached) return cached.sessionId;
+        if (archeryStaffSessionPromise) return archeryStaffSessionPromise;
+    }
+
+    archeryStaffSessionPromise = (async () => {
+        if (force) clearArcheryStaffSession();
+        const result = await callAdminFunction('startArcheryStaffSession', {
+            branch_id: archeryBranchId()
+        });
+        return rememberArcheryStaffSession(result);
+    })();
+
+    try {
+        return await archeryStaffSessionPromise;
+    } finally {
+        archeryStaffSessionPromise = null;
+    }
 }
 
 function archeryIdempotencyKey(action, bookingId = '') {
@@ -5898,6 +6022,28 @@ function archeryMutationPayload(action, bookingId = '', extra = {}) {
         ...(bookingId ? { booking_id: bookingId } : {}),
         ...extra
     };
+}
+
+function isStaffSessionError(error = {}) {
+    return String(error.code || error.error || '').toUpperCase() === 'STAFF_SESSION_REQUIRED';
+}
+
+async function callArcheryMutationFunction(functionName, bookingId = '', extra = {}) {
+    const staffSessionId = await ensureArcheryStaffSession();
+    const payload = archeryMutationPayload(functionName, bookingId, {
+        ...extra,
+        staff_session_id: staffSessionId
+    });
+    try {
+        return await callAdminFunction(functionName, payload);
+    } catch (error) {
+        if (!isStaffSessionError(error)) throw error;
+        const retryStaffSessionId = await ensureArcheryStaffSession({ force: true });
+        return callAdminFunction(functionName, {
+            ...payload,
+            staff_session_id: retryStaffSessionId
+        });
+    }
 }
 
 function archeryResourceIdFromLaneNumber(value) {
@@ -6306,7 +6452,7 @@ async function submitArcheryActionModal(event) {
     archerySetActionModalStatus('Saving...');
     try {
         const actionExtra = typeof config.extra === 'function' ? config.extra(bookingId) : {};
-        await callAdminFunction(config.functionName, archeryMutationPayload(config.functionName, bookingId, actionExtra));
+        await callArcheryMutationFunction(config.functionName, bookingId, actionExtra);
         window.closeArcheryActionModal();
         refreshArcheryAdmin();
     } catch (error) {
@@ -6965,7 +7111,7 @@ async function createArcheryWalkInFromAdmin(event) {
     try {
         const duration = Number(document.getElementById('archery-admin-package')?.value || 60) || 60;
         const preview = adminArcheryPricePreview();
-        const result = await callAdminFunction('createWalkInArcheryBooking', archeryMutationPayload('createWalkInArcheryBooking', '', {
+        const result = await callArcheryMutationFunction('createWalkInArcheryBooking', '', {
             member_id: document.getElementById('archery-admin-member-id')?.value.trim() || '',
             customer_name: document.getElementById('archery-admin-customer-name')?.value.trim() || '',
             customer_phone: document.getElementById('archery-admin-customer-phone')?.value.trim() || '',
@@ -6978,7 +7124,7 @@ async function createArcheryWalkInFromAdmin(event) {
             equipment_option_id: preview.equipment?.id || '',
             payment_status: 'UNPAID',
             note: document.getElementById('archery-admin-note')?.value.trim() || ''
-        }));
+        });
         archerySetStatus('Created booking ' + (result.booking_id || '') + ' / ' + (result.assigned_lane_numbers?.length ? result.assigned_lane_numbers.map(number => `Lane ${number}`).join(', ') : archeryResourceLabel(result.assigned_resource_id)), 'success');
         event.target.reset();
         document.getElementById('archery-admin-date').value = adminTodayISO();
