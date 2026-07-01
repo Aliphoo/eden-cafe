@@ -13076,8 +13076,8 @@ function renderHeaderMenuSettings() {
             : '';
 
         return `
-            <div class="header-menu-row" draggable="true" data-header-menu-item data-nav-id="${escapeHTML(item.id)}">
-                <button type="button" class="header-menu-handle" title="Drag" aria-label="Drag ${escapeHTML(item.id)}">::</button>
+            <div class="header-menu-row" data-header-menu-item data-nav-id="${escapeHTML(item.id)}">
+                <button type="button" class="header-menu-handle" draggable="true" data-header-menu-drag-handle title="Drag" aria-label="Drag ${escapeHTML(item.id)}">::</button>
                 <div class="header-menu-title">
                     <span>${index + 1}. ${escapeHTML(item.id)}</span>
                     <label class="header-menu-visible">
@@ -13111,24 +13111,72 @@ function renderHeaderMenuSettings() {
         `;
     }).join('');
 
+    bindHeaderMenuRenderedRowControls();
     renderHeaderMenuPreview();
+}
+
+function reorderHeaderMenuItems(items = [], fromIndex = -1, insertIndex = -1) {
+    if (fromIndex < 0 || fromIndex >= items.length) return items;
+    const next = [...items];
+    const [item] = next.splice(fromIndex, 1);
+    const clampedIndex = Math.max(0, Math.min(insertIndex, next.length));
+    next.splice(clampedIndex, 0, item);
+    return next.map((row, index) => ({ ...row, order: index + 1 }));
 }
 
 function moveHeaderMenuItem(id, action) {
     const state = headerMenuStateFromDOM();
     const items = [...state.items];
     const index = items.findIndex(item => item.id === id);
-    if (index < 0) return;
+    if (index < 0) return false;
 
-    const [item] = items.splice(index, 1);
-    let nextIndex = index;
-    if (action === 'first') nextIndex = 0;
-    if (action === 'up') nextIndex = Math.max(0, index - 1);
-    if (action === 'down') nextIndex = Math.min(items.length, index + 1);
-    if (action === 'last') nextIndex = items.length;
-    items.splice(nextIndex, 0, item);
-    headerMenuSettingsState = normalizeHeaderMenuSettings({ items });
+    let insertIndex = index;
+    if (action === 'first') insertIndex = 0;
+    if (action === 'up') insertIndex = Math.max(0, index - 1);
+    if (action === 'down') insertIndex = Math.min(items.length - 1, index + 1);
+    if (action === 'last') insertIndex = items.length - 1;
+    if (insertIndex === index) return false;
+
+    headerMenuSettingsState = normalizeHeaderMenuSettings({ items: reorderHeaderMenuItems(items, index, insertIndex) });
     renderHeaderMenuSettings();
+    setHeaderMenuStatus('Menu order updated. Save to publish it.', 'warning');
+    return true;
+}
+
+function clearHeaderMenuDragState() {
+    const list = document.getElementById('header-menu-list');
+    headerMenuDragId = '';
+    list?.querySelectorAll('.dragging').forEach(row => row.classList.remove('dragging'));
+}
+
+function bindHeaderMenuRenderedRowControls() {
+    const list = document.getElementById('header-menu-list');
+    if (!list) return;
+
+    list.querySelectorAll('[data-header-menu-move]').forEach(button => {
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const row = button.closest('[data-header-menu-item]');
+            moveHeaderMenuItem(row?.dataset.navId, button.getAttribute('data-header-menu-move'));
+        });
+    });
+
+    list.querySelectorAll('[data-header-menu-drag-handle]').forEach(handle => {
+        handle.addEventListener('keydown', (event) => {
+            const keyActions = {
+                ArrowUp: 'up',
+                ArrowDown: 'down',
+                Home: 'first',
+                End: 'last'
+            };
+            const action = keyActions[event.key];
+            if (!action) return;
+            event.preventDefault();
+            const row = handle.closest('[data-header-menu-item]');
+            moveHeaderMenuItem(row?.dataset.navId, action);
+        });
+    });
 }
 
 function headerMenuPayloadFromForm() {
@@ -13159,9 +13207,10 @@ function clearHeaderNavPublicCache() {
 
 function bindHeaderMenuSettingsControls() {
     if (headerMenuSettingsBound) return;
-    headerMenuSettingsBound = true;
     const form = document.getElementById('headerMenuSettingsForm');
     const list = document.getElementById('header-menu-list');
+    if (!form || !list) return;
+    headerMenuSettingsBound = true;
 
     form?.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -13232,13 +13281,16 @@ function bindHeaderMenuSettingsControls() {
     });
 
     list?.addEventListener('dragstart', (event) => {
-        const row = event.target.closest('[data-header-menu-item]');
+        const handle = event.target.closest('[data-header-menu-drag-handle]');
+        const row = handle?.closest('[data-header-menu-item]');
         if (!row) return;
         headerMenuStateFromDOM();
         headerMenuDragId = row.dataset.navId;
         row.classList.add('dragging');
-        event.dataTransfer.effectAllowed = 'move';
-        event.dataTransfer.setData('text/plain', headerMenuDragId);
+        if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', headerMenuDragId);
+        }
     });
 
     list?.addEventListener('dragover', (event) => {
@@ -13256,21 +13308,19 @@ function bindHeaderMenuSettingsControls() {
         const state = headerMenuStateFromDOM();
         const items = [...state.items];
         const fromIndex = items.findIndex(item => item.id === headerMenuDragId);
-        let toIndex = items.findIndex(item => item.id === targetRow.dataset.navId);
-        if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+        let insertIndex = items.findIndex(item => item.id === targetRow.dataset.navId);
+        if (fromIndex < 0 || insertIndex < 0 || fromIndex === insertIndex) return;
         const rect = targetRow.getBoundingClientRect();
-        if (event.clientY > rect.top + rect.height / 2) toIndex += 1;
-        const [item] = items.splice(fromIndex, 1);
-        if (fromIndex < toIndex) toIndex -= 1;
-        items.splice(toIndex, 0, item);
-        headerMenuSettingsState = normalizeHeaderMenuSettings({ items });
-        headerMenuDragId = '';
+        if (event.clientY > rect.top + rect.height / 2) insertIndex += 1;
+        if (fromIndex < insertIndex) insertIndex -= 1;
+        headerMenuSettingsState = normalizeHeaderMenuSettings({ items: reorderHeaderMenuItems(items, fromIndex, insertIndex) });
+        clearHeaderMenuDragState();
         renderHeaderMenuSettings();
+        setHeaderMenuStatus('Menu order updated. Save to publish it.', 'warning');
     });
 
     list?.addEventListener('dragend', () => {
-        headerMenuDragId = '';
-        list.querySelectorAll('.dragging').forEach(row => row.classList.remove('dragging'));
+        clearHeaderMenuDragState();
     });
 }
 
