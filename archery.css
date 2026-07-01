@@ -637,6 +637,35 @@
     grid-template-columns: 36px minmax(72px, 1fr) auto auto;
 }
 
+.archery-loyalty-balance {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.archery-loyalty-balance div {
+    background: #ffffff;
+    border: 1px solid #dce9de;
+    border-radius: 8px;
+    display: grid;
+    gap: 2px;
+    min-height: 58px;
+    padding: 10px;
+}
+
+.archery-loyalty-balance span {
+    color: #66766b;
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.archery-loyalty-balance strong {
+    color: #123a26;
+    font-size: 0.98rem;
+    line-height: 1.25;
+}
+
 .archery-promo-control:focus-within,
 .archery-loyalty-control:focus-within {
     background: #ffffff;
@@ -701,6 +730,38 @@
 .archery-loyalty-message:not(:empty) {
     font-size: 0.9rem;
     line-height: 1.45;
+}
+
+.archery-loyalty-reserve[hidden] {
+    display: none !important;
+}
+
+.archery-loyalty-quick-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.archery-loyalty-quick-actions button {
+    background: #ffffff;
+    border: 1px solid #cbdccd;
+    border-radius: 8px;
+    color: #123a26;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.84rem;
+    font-weight: 800;
+    min-height: 34px;
+    padding: 0 12px;
+}
+
+.archery-loyalty-quick-actions button:disabled,
+.archery-loyalty-quick-actions button[aria-disabled="true"],
+.archery-loyalty-input:disabled,
+.archery-loyalty-quote:disabled,
+.archery-loyalty-reserve:disabled {
+    cursor: not-allowed;
+    opacity: .62;
 }
 
 .archery-promo-apply:hover {
@@ -1301,6 +1362,14 @@
     .archery-promo-control,
     .archery-loyalty-control {
         grid-template-columns: 36px minmax(0, 1fr);
+    }
+
+    .archery-loyalty-balance {
+        grid-template-columns: 1fr;
+    }
+
+    .archery-loyalty-quick-actions button {
+        flex: 1 1 84px;
     }
 
     .archery-promo-apply,
