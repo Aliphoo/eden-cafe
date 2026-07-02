@@ -4,7 +4,7 @@ import { getMemberTier, getTierBenefits, normalizeTierRules } from './membership
 import { renderSkeleton } from './ui-skeleton.js';
 import { runAdminFileOperationFlow, runAdminImageUploadFlow } from './admin-upload-modal.js';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, serverTimestamp, writeBatch, runTransaction, limit, startAfter } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { collection, getDocs, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, getDoc, getDocFromServer, serverTimestamp, writeBatch, runTransaction, limit, startAfter } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const ADMIN_IMAGE_MAX_FILE_SIZE = 8 * 1024 * 1024;
 const ADMIN_IMAGE_MAX_EDGE = 1800;
@@ -12838,8 +12838,13 @@ businessSettingsForm?.addEventListener('submit', async (event) => {
 // ==========================================
 
 const HEADER_NAV_SETTINGS_REF = () => doc(db, 'site_settings', 'header_nav');
+const HEADER_MENU_DIAGNOSTIC_VERSION = 'header-menu-diagnostic-20260702-local';
+const HEADER_MENU_DIAGNOSTIC_PATH = 'site_settings/header_nav';
 const HEADER_MENU_ALLOWED_IDS = ['home', 'about', 'menu', 'shop', 'booking', 'archery', 'blog', 'faq'];
 const HEADER_MENU_ALLOWED_CHILD_IDS = ['room', 'table'];
+const HEADER_MENU_PAYLOAD_KEYS = ['schemaVersion', 'items', 'updatedAt', 'updatedBy', 'updatedByEmail'];
+const HEADER_MENU_ITEM_KEYS = ['id', 'type', 'labelTh', 'labelEn', 'hrefTh', 'hrefEn', 'visible', 'order', 'children'];
+const HEADER_MENU_CHILD_KEYS = ['id', 'labelTh', 'labelEn', 'hrefTh', 'hrefEn', 'visible', 'order'];
 const DEFAULT_HEADER_NAV_CONFIG = {
     schemaVersion: 1,
     items: [
@@ -12872,6 +12877,247 @@ let headerMenuSettingsBound = false;
 let headerMenuDragId = '';
 let headerMenuPreviewLang = 'th';
 let headerMenuSettingsState = cloneHeaderMenuConfig(DEFAULT_HEADER_NAV_CONFIG);
+
+function headerMenuDiagnosticsEnabled() {
+    try {
+        const params = new URLSearchParams(window.location.search || '');
+        if (params.get('headerMenuDebug') === '1') return true;
+        if (window.localStorage?.getItem('edenHeaderMenuDebug') === '1') return true;
+        const host = window.location.hostname || '';
+        return window.location.protocol === 'file:' || ['localhost', '127.0.0.1', '::1'].includes(host);
+    } catch (_) {
+        return false;
+    }
+}
+
+function maskHeaderMenuDiagnosticValue(value = '') {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    if (text.includes('@')) {
+        const [name = '', domain = ''] = text.split('@');
+        const visibleName = name.length <= 2 ? name.slice(0, 1) : name.slice(0, 2);
+        const visibleDomain = domain.length <= 4 ? domain.slice(0, 1) : domain.slice(0, 3);
+        return `${visibleName}***@${visibleDomain}***`;
+    }
+    if (text.length <= 8) return `${text.slice(0, 2)}...`;
+    return `${text.slice(0, 6)}...${text.slice(-4)}`;
+}
+
+function hasHeaderMenuOwnKey(value, key) {
+    return !!value && Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function headerMenuAccessDiagnostic() {
+    const access = currentAdminAccess || {};
+    const rawPermissions = access.rawPermissions && typeof access.rawPermissions === 'object' ? access.rawPermissions : {};
+    return {
+        authUid: maskHeaderMenuDiagnosticValue(auth.currentUser?.uid || ''),
+        authEmail: maskHeaderMenuDiagnosticValue(auth.currentUser?.email || ''),
+        accessUid: maskHeaderMenuDiagnosticValue(access.uid || ''),
+        accessEmail: maskHeaderMenuDiagnosticValue(access.email || ''),
+        role: access.role || '',
+        status: access.status || '',
+        source: access.source || '',
+        rawPermissions: {
+            hasBusiness: hasHeaderMenuOwnKey(rawPermissions, 'business'),
+            business: hasHeaderMenuOwnKey(rawPermissions, 'business') ? rawPermissions.business === true : null
+        },
+        effectivePermissions: {
+            business: access.permissions?.business === true
+        },
+        canBusiness: canAdmin('business')
+    };
+}
+
+function headerMenuDiagnosticItemSummary(item = {}) {
+    return {
+        id: item.id || '',
+        type: item.type || '',
+        order: item.order,
+        visible: item.visible === true,
+        hrefTh: item.hrefTh || '',
+        hrefEn: item.hrefEn || '',
+        children: Array.isArray(item.children)
+            ? item.children.map(child => ({
+                id: child.id || '',
+                order: child.order,
+                visible: child.visible === true,
+                hrefTh: child.hrefTh || '',
+                hrefEn: child.hrefEn || ''
+            }))
+            : undefined
+    };
+}
+
+function headerMenuDiagnosticPayloadSummary(payload = {}) {
+    return {
+        schemaVersion: payload.schemaVersion,
+        itemCount: Array.isArray(payload.items) ? payload.items.length : null,
+        updatedBy: maskHeaderMenuDiagnosticValue(payload.updatedBy || ''),
+        updatedByMatchesAuth: !!auth.currentUser?.uid && payload.updatedBy === auth.currentUser.uid,
+        updatedByEmail: maskHeaderMenuDiagnosticValue(payload.updatedByEmail || ''),
+        items: Array.isArray(payload.items) ? payload.items.map(headerMenuDiagnosticItemSummary) : []
+    };
+}
+
+function headerMenuDiagnosticError(error = {}) {
+    return {
+        path: HEADER_MENU_DIAGNOSTIC_PATH,
+        code: error.code || '',
+        name: error.name || '',
+        message: error.message || String(error || ''),
+        validationIssues: Array.isArray(error.headerMenuValidationIssues) ? error.headerMenuValidationIssues : undefined
+    };
+}
+
+function headerMenuDiagnosticLog(eventName = 'event', details = {}) {
+    if (!headerMenuDiagnosticsEnabled()) return;
+    const payload = {
+        version: HEADER_MENU_DIAGNOSTIC_VERSION,
+        path: HEADER_MENU_DIAGNOSTIC_PATH,
+        event: eventName,
+        access: headerMenuAccessDiagnostic(),
+        ...details
+    };
+    try {
+        console.groupCollapsed(`[Header Menu Diagnostic] ${eventName} ${HEADER_MENU_DIAGNOSTIC_VERSION}`);
+        console.log(payload);
+        console.groupEnd();
+    } catch (_) {
+        console.log('[Header Menu Diagnostic]', payload);
+    }
+}
+
+function headerMenuDiagnosticStatus(message = '') {
+    return headerMenuDiagnosticsEnabled()
+        ? `${message} Diagnostic ${HEADER_MENU_DIAGNOSTIC_VERSION}.`
+        : message;
+}
+
+function headerMenuRuleShortString(value, maxLength) {
+    return typeof value === 'string' && value.length > 0 && value.length <= maxLength;
+}
+
+function headerMenuRuleHrefOk(value) {
+    return typeof value === 'string'
+        && value.length > 0
+        && value.length <= 180
+        && !value.startsWith('//')
+        && (/^\/[A-Za-z0-9._~%/?#&=+-]*$/.test(value) || /^#[A-Za-z0-9_-]+$/.test(value));
+}
+
+function headerMenuRuleKeyIssues(value = {}, allowedKeys = [], path = '') {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [`${path}: must be a map/object`];
+    return Object.keys(value)
+        .filter(key => !allowedKeys.includes(key))
+        .map(key => `${path}.${key}: unexpected field`);
+}
+
+function validateHeaderMenuRuleChild(child = {}, path = '') {
+    const issues = headerMenuRuleKeyIssues(child, HEADER_MENU_CHILD_KEYS, path);
+    if (!HEADER_MENU_ALLOWED_CHILD_IDS.includes(child.id)) issues.push(`${path}.id: unsupported child id "${child.id || ''}"`);
+    if (!headerMenuRuleShortString(child.labelTh, 64)) issues.push(`${path}.labelTh: must be 1-64 chars`);
+    if (!headerMenuRuleShortString(child.labelEn, 64)) issues.push(`${path}.labelEn: must be 1-64 chars`);
+    if (!headerMenuRuleHrefOk(child.hrefTh)) issues.push(`${path}.hrefTh: invalid internal href`);
+    if (!headerMenuRuleHrefOk(child.hrefEn)) issues.push(`${path}.hrefEn: invalid internal href`);
+    if (typeof child.visible !== 'boolean') issues.push(`${path}.visible: must be boolean`);
+    if (typeof child.order !== 'number' || !Number.isFinite(child.order) || child.order < 1 || child.order > 4) {
+        issues.push(`${path}.order: must be number 1-4`);
+    }
+    return issues;
+}
+
+function validateHeaderMenuRuleItem(item = {}, path = '') {
+    const issues = headerMenuRuleKeyIssues(item, HEADER_MENU_ITEM_KEYS, path);
+    if (!HEADER_MENU_ALLOWED_IDS.includes(item.id)) issues.push(`${path}.id: unsupported id "${item.id || ''}"`);
+    if (!['link', 'dropdown'].includes(item.type)) issues.push(`${path}.type: must be link/dropdown`);
+    if (!headerMenuRuleShortString(item.labelTh, 64)) issues.push(`${path}.labelTh: must be 1-64 chars`);
+    if (!headerMenuRuleShortString(item.labelEn, 64)) issues.push(`${path}.labelEn: must be 1-64 chars`);
+    if (!headerMenuRuleHrefOk(item.hrefTh)) issues.push(`${path}.hrefTh: invalid internal href`);
+    if (!headerMenuRuleHrefOk(item.hrefEn)) issues.push(`${path}.hrefEn: invalid internal href`);
+    if (typeof item.visible !== 'boolean') issues.push(`${path}.visible: must be boolean`);
+    if (typeof item.order !== 'number' || !Number.isFinite(item.order) || item.order < 1 || item.order > 20) {
+        issues.push(`${path}.order: must be number 1-20`);
+    }
+    if (item.id === 'booking') {
+        if (item.type !== 'dropdown') issues.push(`${path}.type: booking must be dropdown`);
+        if (!Array.isArray(item.children) || item.children.length !== 2) {
+            issues.push(`${path}.children: booking must have exactly 2 children`);
+        } else {
+            item.children.forEach((child, index) => {
+                issues.push(...validateHeaderMenuRuleChild(child, `${path}.children[${index}]`));
+            });
+        }
+    } else if (hasHeaderMenuOwnKey(item, 'children')) {
+        issues.push(`${path}.children: only booking may include children`);
+    }
+    return issues;
+}
+
+function validateHeaderMenuPayloadForRules(payload = {}) {
+    const issues = headerMenuRuleKeyIssues(payload, HEADER_MENU_PAYLOAD_KEYS, 'payload');
+    const authUid = auth.currentUser?.uid || '';
+    if (!authUid) issues.push('auth.uid: missing current Firebase user');
+    if (!canAdmin('business')) issues.push('permission.business: canAdmin("business") is false');
+    if (payload.schemaVersion !== 1) issues.push('payload.schemaVersion: must be 1');
+    if (!Array.isArray(payload.items) || payload.items.length !== 8) {
+        issues.push('payload.items: must contain exactly 8 items');
+    } else {
+        payload.items.forEach((item, index) => {
+            issues.push(...validateHeaderMenuRuleItem(item, `payload.items[${index}]`));
+        });
+    }
+    if (!hasHeaderMenuOwnKey(payload, 'updatedAt')) issues.push('payload.updatedAt: missing serverTimestamp sentinel');
+    if (hasHeaderMenuOwnKey(payload, 'updatedBy') && payload.updatedBy !== authUid) {
+        issues.push('payload.updatedBy: must equal request.auth.uid');
+    }
+    if (hasHeaderMenuOwnKey(payload, 'updatedByEmail') && (typeof payload.updatedByEmail !== 'string' || payload.updatedByEmail.length > 160)) {
+        issues.push('payload.updatedByEmail: must be string <= 160 chars');
+    }
+    return issues;
+}
+
+function headerMenuReadbackSummary(data = {}) {
+    const normalized = normalizeHeaderMenuSettings(data);
+    return {
+        itemCount: normalized.items.length,
+        items: normalized.items.map(headerMenuDiagnosticItemSummary)
+    };
+}
+
+function compareHeaderMenuReadback(payload = {}, readbackData = {}) {
+    const expected = headerMenuReadbackSummary(payload);
+    const actual = headerMenuReadbackSummary(readbackData);
+    return {
+        matches: JSON.stringify(expected.items) === JSON.stringify(actual.items),
+        expected,
+        actual
+    };
+}
+
+window.dumpHeaderMenuDiagnostic = function() {
+    try {
+        const payload = headerMenuPayloadFromForm();
+        const result = {
+            version: HEADER_MENU_DIAGNOSTIC_VERSION,
+            path: HEADER_MENU_DIAGNOSTIC_PATH,
+            access: headerMenuAccessDiagnostic(),
+            payload: headerMenuDiagnosticPayloadSummary(payload),
+            validationIssues: validateHeaderMenuPayloadForRules(payload)
+        };
+        headerMenuDiagnosticLog('manual:dump', result);
+        return result;
+    } catch (error) {
+        const result = {
+            version: HEADER_MENU_DIAGNOSTIC_VERSION,
+            path: HEADER_MENU_DIAGNOSTIC_PATH,
+            access: headerMenuAccessDiagnostic(),
+            error: headerMenuDiagnosticError(error)
+        };
+        headerMenuDiagnosticLog('manual:dump:error', result);
+        return result;
+    }
+};
 
 function cloneHeaderMenuConfig(config = DEFAULT_HEADER_NAV_CONFIG) {
     return JSON.parse(JSON.stringify(config));
@@ -13137,7 +13383,16 @@ function moveHeaderMenuItem(id, action) {
     if (action === 'last') insertIndex = items.length - 1;
     if (insertIndex === index) return false;
 
-    headerMenuSettingsState = normalizeHeaderMenuSettings({ items: reorderHeaderMenuItems(items, index, insertIndex) });
+    const reordered = reorderHeaderMenuItems(items, index, insertIndex);
+    headerMenuDiagnosticLog('move', {
+        id,
+        action,
+        fromIndex: index,
+        insertIndex,
+        before: items.map(item => ({ id: item.id, order: item.order })),
+        after: reordered.map(item => ({ id: item.id, order: item.order }))
+    });
+    headerMenuSettingsState = normalizeHeaderMenuSettings({ items: reordered });
     renderHeaderMenuSettings();
     setHeaderMenuStatus('Menu order updated. Save to publish it.', 'warning');
     return true;
@@ -13214,7 +13469,14 @@ function bindHeaderMenuSettingsControls() {
 
     form?.addEventListener('submit', async (event) => {
         event.preventDefault();
+        headerMenuDiagnosticLog('save:submit', {
+            location: window.location.href,
+            scriptMarker: HEADER_MENU_DIAGNOSTIC_VERSION
+        });
         if (!canAdmin('business')) {
+            headerMenuDiagnosticLog('save:block:permission', {
+                reason: 'canAdmin("business") returned false'
+            });
             setHeaderMenuStatus('This account cannot edit Header Menu.', 'error');
             return;
         }
@@ -13228,11 +13490,48 @@ function bindHeaderMenuSettingsControls() {
 
         try {
             const payload = headerMenuPayloadFromForm();
+            const validationIssues = validateHeaderMenuPayloadForRules(payload);
+            headerMenuDiagnosticLog('save:payload', {
+                payload: headerMenuDiagnosticPayloadSummary(payload),
+                validationIssues
+            });
+            if (validationIssues.length) {
+                const validationError = new Error(`Header Menu payload validation failed: ${validationIssues.slice(0, 3).join('; ')}`);
+                validationError.headerMenuValidationIssues = validationIssues;
+                throw validationError;
+            }
             await setDoc(HEADER_NAV_SETTINGS_REF(), payload);
             clearHeaderNavPublicCache();
-            setHeaderMenuStatus('Header Menu saved to site_settings/header_nav.', '');
+            let readbackSnap;
+            try {
+                readbackSnap = await getDocFromServer(HEADER_NAV_SETTINGS_REF());
+            } catch (readbackError) {
+                headerMenuDiagnosticLog('save:readback-server-error', {
+                    error: headerMenuDiagnosticError(readbackError)
+                });
+                readbackSnap = await getDoc(HEADER_NAV_SETTINGS_REF());
+            }
+            const readbackData = readbackSnap.exists() ? readbackSnap.data() : {};
+            const comparison = compareHeaderMenuReadback(payload, readbackData);
+            headerMenuDiagnosticLog('save:readback', {
+                readback: {
+                    exists: readbackSnap.exists(),
+                    fromCache: readbackSnap.metadata?.fromCache === true,
+                    hasPendingWrites: readbackSnap.metadata?.hasPendingWrites === true
+                },
+                comparison
+            });
+            setHeaderMenuStatus(
+                comparison.matches
+                    ? headerMenuDiagnosticStatus('Header Menu saved to site_settings/header_nav. Readback verified.')
+                    : headerMenuDiagnosticStatus('Header Menu saved, but readback differs. See console diagnostic.'),
+                comparison.matches ? '' : 'warning'
+            );
         } catch (error) {
             console.error('Unable to save header menu settings:', error);
+            headerMenuDiagnosticLog('save:error', {
+                error: headerMenuDiagnosticError(error)
+            });
             setHeaderMenuStatus(error.message || safeAdminError('Save Header Menu failed'), 'error');
         } finally {
             if (submitBtn) {
@@ -13313,7 +13612,16 @@ function bindHeaderMenuSettingsControls() {
         const rect = targetRow.getBoundingClientRect();
         if (event.clientY > rect.top + rect.height / 2) insertIndex += 1;
         if (fromIndex < insertIndex) insertIndex -= 1;
-        headerMenuSettingsState = normalizeHeaderMenuSettings({ items: reorderHeaderMenuItems(items, fromIndex, insertIndex) });
+        const reordered = reorderHeaderMenuItems(items, fromIndex, insertIndex);
+        headerMenuDiagnosticLog('drag:drop', {
+            dragId: headerMenuDragId,
+            targetId: targetRow.dataset.navId,
+            fromIndex,
+            insertIndex,
+            before: items.map(item => ({ id: item.id, order: item.order })),
+            after: reordered.map(item => ({ id: item.id, order: item.order }))
+        });
+        headerMenuSettingsState = normalizeHeaderMenuSettings({ items: reordered });
         clearHeaderMenuDragState();
         renderHeaderMenuSettings();
         setHeaderMenuStatus('Menu order updated. Save to publish it.', 'warning');
@@ -13326,24 +13634,36 @@ function bindHeaderMenuSettingsControls() {
 
 window.loadHeaderMenuSettings = async function() {
     bindHeaderMenuSettingsControls();
-    setHeaderMenuStatus('Loading Header Menu...');
+    setHeaderMenuStatus(headerMenuDiagnosticStatus('Loading Header Menu...'));
+    headerMenuDiagnosticLog('load:start', {
+        location: window.location.href,
+        scriptMarker: HEADER_MENU_DIAGNOSTIC_VERSION
+    });
     try {
         const snap = await getDoc(HEADER_NAV_SETTINGS_REF());
         headerMenuSettingsState = snap.exists()
             ? normalizeHeaderMenuSettings(snap.data())
             : cloneHeaderMenuConfig(DEFAULT_HEADER_NAV_CONFIG);
         renderHeaderMenuSettings();
+        headerMenuDiagnosticLog('load:success', {
+            source: snap.exists() ? HEADER_MENU_DIAGNOSTIC_PATH : 'default-config',
+            fromCache: snap.metadata?.fromCache === true,
+            state: headerMenuReadbackSummary(headerMenuSettingsState)
+        });
         setHeaderMenuStatus(
-            snap.exists()
+            headerMenuDiagnosticStatus(snap.exists()
                 ? 'Loaded from site_settings/header_nav.'
-                : 'No header_nav doc yet. Default menu is shown.',
+                : 'No header_nav doc yet. Default menu is shown.'),
             snap.exists() ? '' : 'warning'
         );
     } catch (error) {
         console.error('Unable to load header menu settings:', error);
+        headerMenuDiagnosticLog('load:error', {
+            error: headerMenuDiagnosticError(error)
+        });
         headerMenuSettingsState = cloneHeaderMenuConfig(DEFAULT_HEADER_NAV_CONFIG);
         renderHeaderMenuSettings();
-        setHeaderMenuStatus('Unable to load Header Menu. Default menu is shown.', 'error');
+        setHeaderMenuStatus(headerMenuDiagnosticStatus('Unable to load Header Menu. Default menu is shown.'), 'error');
     }
 };
 
